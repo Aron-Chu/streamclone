@@ -1,0 +1,56 @@
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+      metadata:
+        condition: service_healthy
+      video:
+        condition: service_healthy
+      chat:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+      emote:
+        condition: service_healthy
+
+  video:
+    environment:
+      HLS_PUBLIC_BASE: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
+
+  chat:
+    environment:
+      FRONTEND_ORIGIN: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
+      AUTH_COOKIE_SAMESITE: lax
+
+  emote:
+    environment:
+      CDN_PUBLIC_BASE: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}/emotes
+
+  frontend:
+    environment:
+      VITE_METADATA_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
+      VITE_VIDEO_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
+      VITE_EMOTE_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
+      VITE_ANALYTICS_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
+      VITE_CHAT_HTTP: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
+      VITE_CHAT_WS: wss://${APP_DOMAIN:?Set APP_DOMAIN in .env}/v1/ws
+      VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}
+
+volumes:
+  caddy-data:
+  caddy-config:

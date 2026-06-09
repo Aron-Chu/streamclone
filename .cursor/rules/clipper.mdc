@@ -1,0 +1,16 @@
+---
+description: Live clipper boundaries and job pipeline
+globs: clipper/**/*,frontend/src/components/ClipStudio.tsx,frontend/src/components/Analytics.tsx
+alwaysApply: false
+---
+
+# Clipper
+
+Read `.kiro/steering/clipper.md` and `memories/repo/live-clipper-ast-graph.md`.
+
+- Worker/API in `clipper/` — do not mutate `cmd/chat`, `cmd/video`, `cmd/metadata` for clip creation/rendering.
+- UI: `ClipStudio.tsx` (`/studio/:jobId`) and Analytics clip tabs are API clients only.
+- Jobs: SQLite queue, single worker, stale in-progress reclaim after `CLIPPER_STALE_JOB_SECONDS`.
+- Resume from `raw_path` / `twitch_clip_url` — do not recreate Twitch clips on worker restart.
+- Secrets stay in env; never log tokens or auth headers.
+- Tests: `make clipper-test`. Auth scope needs `clips:edit` — `make twitch-local-auth`.

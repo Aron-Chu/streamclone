@@ -1,0 +1,59 @@
+{
+	email {$ACME_EMAIL:}
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	@chat {
+		path /v1/auth* /v1/me /v1/logout /v1/followed /v1/ws
+	}
+	reverse_proxy @chat chat:8080
+
+	@video {
+		path /v1/stream /v1/stream/*
+	}
+	reverse_proxy @video video:8080
+
+	@emote {
+		path /v1/channels/*/emotes /v1/channels/*/emotes/* /v1/emotes* /v1/sets* /v1/seed*
+	}
+	reverse_proxy @emote emote:8080
+
+	@emote_assets {
+		path /emotes/*
+	}
+	reverse_proxy @emote_assets minio:9000
+
+	@analytics {
+		path /v1/analytics /v1/analytics/*
+	}
+	reverse_proxy @analytics analytics:8080 {
+		transport http {
+			read_timeout 15m
+			write_timeout 15m
+		}
+	}
+
+	@hls {
+		path /live/*
+	}
+	reverse_proxy @hls mediamtx:8888 {
+		header_up Authorization "Bearer streamclone-local-hls-cdn"
+	}
+
+	@clipper {
+		path /v1/clipper /v1/clipper/*
+	}
+	route @clipper {
+		uri replace /v1/clipper /v1
+		reverse_proxy clipper:8095
+	}
+
+	@metadata {
+		path /v1/*
+	}
+	reverse_proxy @metadata metadata:8080
+
+	reverse_proxy frontend:80
+}

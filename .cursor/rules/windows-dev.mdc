@@ -1,0 +1,14 @@
+---
+description: Windows localhost, Docker, and WSL dev pitfalls
+globs: deploy/**,Makefile,.env*,scripts/**
+alwaysApply: false
+---
+
+# Windows dev
+
+Read `.kiro/steering/windows-dev.md`.
+
+- Browser and probes use `http://localhost:8090`, not raw service ports.
+- Stale data on localhost often means `wslrelay` — run `wsl --shutdown` then recreate compose stack.
+- Codegraph venv is WSL/Linux — use `make codegraph` or `scripts/codegraph-mcp.ps1`.
+- After `.env` token changes: `--force-recreate` affected containers (clipper, chat, metadata).

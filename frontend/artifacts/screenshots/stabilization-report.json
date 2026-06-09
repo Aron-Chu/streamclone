@@ -1,0 +1,47 @@
+{
+  "desktop": {
+    "tab_About": 1,
+    "tab_Stats": 2,
+    "tab_Clips": 1,
+    "tab_LSF": 1,
+    "tab_Diagnostics": 1,
+    "tab_Emotes": 1,
+    "qualityControls": 1,
+    "fitFill": 0,
+    "video": {
+      "objectFit": "contain",
+      "video": {
+        "x": 256,
+        "y": 64,
+        "width": 784,
+        "height": 441
+      },
+      "parent": {
+        "width": 784,
+        "height": 441
+      },
+      "wrapper": {
+        "width": 784,
+        "height": 441
+      },
+      "videoAspect": 1.778,
+      "wrapperAspect": 1.778
+    }
+  },
+  "mobile": {
+    "tabs": 6,
+    "video": {
+      "objectFit": "contain",
+      "video": {
+        "width": 390,
+        "height": 219.375
+      },
+      "parent": {
+        "width": 390,
+        "height": 219.375
+      },
+      "videoAspect": 1.778
+    }
+  },
+  "errors": []
+}

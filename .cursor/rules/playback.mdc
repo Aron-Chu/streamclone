@@ -1,0 +1,14 @@
+---
+description: HLS playback, MediaMTX sessions, and video orchestrator
+globs: internal/video/**,deploy/mediamtx.yml,deploy/Caddyfile*,frontend/src/playback.ts,frontend/src/components/Channel.tsx,frontend/src/components/Directory.tsx
+alwaysApply: false
+---
+
+# Playback / HLS
+
+Read `.kiro/steering/playback.md`.
+
+- Browser HLS goes through **`http://localhost:8090/live/...`** (Caddy → MediaMTX).
+- MediaMTX 1.18+ needs `hlsCDNSecret` in `mediamtx.yml` **and** matching `Authorization: Bearer` on Caddy `@hls` routes — otherwise `main_stream.m3u8` returns 401 on HTTP localhost.
+- Do not point the UI at raw `:8888` unless intentionally bypassing the proxy.
+- Verify: start stream, then `curl -w "%{http_code}" http://localhost:8090/live/{channel}/main_stream.m3u8`.

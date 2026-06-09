@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": "powershell -ExecutionPolicy Bypass -NoProfile -File scripts/cursor-hook.ps1 -Hook codegraph-stale-hint.py"
+      },
+      {
+        "command": "powershell -ExecutionPolicy Bypass -NoProfile -File scripts/cursor-hook.ps1 -Hook compose-config-check.py",
+        "matcher": "deploy/"
+      }
+    ],
+    "stop": [
+      {
+        "command": "powershell -ExecutionPolicy Bypass -NoProfile -File scripts/cursor-hook.ps1 -Hook domain-test-hint.py",
+        "loop_limit": 1
+      }
+    ]
+  }
+}

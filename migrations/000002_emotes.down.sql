@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS processing_jobs;
+DROP TABLE IF EXISTS channels;
+DROP TABLE IF EXISTS emote_set_items;
+DROP TABLE IF EXISTS emote_sets;
+DROP TABLE IF EXISTS emotes;

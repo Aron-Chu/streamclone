@@ -1,0 +1,82 @@
+groups:
+  - name: streamclone.rules
+    rules:
+      - alert: StreamcloneServiceDown
+        expr: up{job=~"streamclone-(metadata|video|chat|emote)"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} metrics target is down"
+
+      - alert: StreamcloneReadinessProbeFailing
+        expr: probe_success{job="streamclone-readiness"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} readiness probe is failing"
+
+      - alert: StreamStartFailuresHigh
+        expr: sum(rate(stream_start_failures_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stream start failures are above the expected baseline"
+
+      - alert: HLSReadinessFailing
+        expr: rate(hls_readiness_failures_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Local HLS readiness checks are failing"
+
+      - alert: UpstreamErrorsHigh
+        expr: sum(rate(upstream_requests_total{result="error"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Upstream request errors are elevated"
+
+      - alert: ChatDeliveryStalled
+        expr: rate(chat_messages_in_total[5m]) > 0 and rate(chat_messages_out_total[5m]) == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Chat is ingesting messages but not delivering them"
+
+      - alert: CacheMissOrStaleSpike
+        expr: sum(rate(cache_requests_total{result=~"miss|stale"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cache misses or stale fallbacks are spiking"
+
+      - alert: AssetJobFailures
+        expr: rate(asset_jobs_total{state="failed"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Emote asset jobs are failing"
+
+      - alert: ContainerRestarted
+        expr: changes(container_start_time_seconds{name=~".*streamclone.*"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.name }} restarted"
+
+      - alert: HostDiskAlmostFull
+        expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} < 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host disk has less than 10 percent free space"

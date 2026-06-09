@@ -1,0 +1,47 @@
+services:
+  local-proxy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+    volumes:
+      - ./Caddyfile.local-tunnel:/etc/caddy/Caddyfile:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+      metadata:
+        condition: service_healthy
+      video:
+        condition: service_healthy
+      chat:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+      emote:
+        condition: service_healthy
+      clipper:
+        condition: service_started
+
+  video:
+    environment:
+      HLS_PUBLIC_BASE: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN to your HTTPS tunnel URL}
+
+  chat:
+    environment:
+      FRONTEND_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN to your HTTPS tunnel URL}
+      AUTH_COOKIE_SAMESITE: lax
+
+  emote:
+    environment:
+      CDN_PUBLIC_BASE: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN to your HTTPS tunnel URL}/emotes
+
+  frontend:
+    environment:
+      VITE_METADATA_URL: auto
+      VITE_VIDEO_URL: auto
+      VITE_EMOTE_URL: auto
+      VITE_ANALYTICS_URL: auto
+      VITE_CHAT_HTTP: auto
+      VITE_CHAT_WS: auto
+      VITE_CLIPPER_URL: auto
+      VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}

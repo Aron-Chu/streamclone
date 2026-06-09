@@ -1,0 +1,14 @@
+---
+description: Streamclone agent entry — read AGENTS.md and domain steering first
+alwaysApply: true
+---
+
+# Agent workflow
+
+1. Open `AGENTS.md` and load **one** domain steering file from the task router table.
+2. Use MCP before broad search:
+   - **`streamclone-codegraph`**: `get_ast_chunk`, `get_blast_radius`, `get_call_chain`, `search_symbols`
+   - **`streamclone-stack`**: `stack_health`, `stack_ports`, `playback_probe` (runtime at `:8090`)
+   - **`streamclone-data`**: `emote_jobs`, `redis_channel_emotes` (local Postgres/Redis)
+3. Local stack URL: `http://localhost:8090`. Windows localhost issues → `.kiro/steering/windows-dev.md`. HLS 401 → `.kiro/steering/playback.md`.
+4. Prefer narrow tests; avoid pasting full API JSON into responses.

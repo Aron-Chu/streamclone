@@ -1,0 +1,45 @@
+{
+  "desktop": {
+    "tab_About": 1,
+    "tab_Stats": 1,
+    "tab_Clips": 1,
+    "tab_LSF": 1,
+    "tab_Diagnostics": 1,
+    "tab_Emotes": 1,
+    "duplicateConnectWithTwitch": 0,
+    "headerLogin": 1,
+    "chatPassiveLoginNote": 1,
+    "video": {
+      "objectFit": "contain",
+      "video": {
+        "width": 784,
+        "height": 441
+      },
+      "parent": {
+        "width": 784,
+        "height": 441
+      },
+      "videoAspect": 1.778,
+      "parentAspect": 1.778
+    }
+  },
+  "mobile": {
+    "tabs": 6,
+    "duplicateConnectWithTwitch": 0,
+    "chatPassiveLoginNote": 1,
+    "video": {
+      "objectFit": "contain",
+      "video": {
+        "width": 390,
+        "height": 219.375
+      },
+      "parent": {
+        "width": 390,
+        "height": 219.375
+      },
+      "videoAspect": 1.778,
+      "parentAspect": 1.778
+    }
+  },
+  "errors": []
+}

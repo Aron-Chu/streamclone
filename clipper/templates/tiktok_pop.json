@@ -1,0 +1,17 @@
+{
+  "id": "tiktok_pop",
+  "name": "TikTok Pop",
+  "description": "Karaoke-style yellow captions with 2 words per line",
+  "format_preset": "tiktok",
+  "caption": {
+    "preset": "karaoke_pop",
+    "max_words_per_line": 2,
+    "position": "bottom"
+  },
+  "video": {
+    "layout": "blur_bg_center"
+  },
+  "audio": {
+    "noise_reduce": "light"
+  }
+}
