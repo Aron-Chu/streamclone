@@ -107,7 +107,7 @@ if ($Profile -in @('clipper', 'full')) {
 
 Write-Host ''
 if ($errors -gt 0) {
-    Write-Host "validate-env: FAILED — $errors error(s), $warnings warning(s)"
+    Write-Host "validate-env: FAILED - $errors error(s), $warnings warning(s)"
     exit 1
 }
-Write-Host "validate-env: OK — $warnings warning(s)"
+Write-Host "validate-env: OK - $warnings warning(s)"
