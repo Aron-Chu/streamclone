@@ -13,12 +13,15 @@ import {
   getClipperJobs,
   getClipperFinalVideoUrl,
   describeClipperFailure,
+  describeClipperJobState,
   getSyncStatus,
   startHistoricalSync,
   getStreamGameSegments,
   type SyncPhase,
   type SyncStatus,
+  type SyncChatProgress,
   getTwitchDayClips,
+  getClipperTwitchStatus,
   triggerClipperManual,
   type AnalyticsStream,
   type AnalyticsStreamDetail,
@@ -28,6 +31,14 @@ import {
   type ClipperJob,
   type GameSegment,
 } from '../api'
+
+import { CHART_THEME, hexToRgba, legendDotStyle } from './analytics/chartTheme'
+import {
+  emoteCountForProvider,
+  emoteProviderLabel,
+  emoteProviderTone,
+  parseEmoteKey,
+} from '../emoteUtils'
 
 function getEmoteImageUrl(emote: { provider?: string; id?: string; imageUrl?: string }) {
   if (emote.imageUrl) return emote.imageUrl
@@ -110,7 +121,7 @@ function SourcePills({ sources }: { sources?: SourceStatus[] }) {
 
 function StatCard({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="rounded border border-white/10 bg-white/[0.045] p-3">
+    <div className="rounded border border-white/10 bg-white/[0.035] p-3">
       <div className="text-[11px] font-black uppercase text-zinc-500">{label}</div>
       <div className={`mt-1 truncate text-xl font-black ${tone || 'text-white'}`}>{value}</div>
     </div>
@@ -125,38 +136,182 @@ function viewerValue(point: AnalyticsMinuteRollup) {
   return point.viewerLatest || point.viewerAvg || point.viewerMax || 0
 }
 
+function analyzeViewerCoverage(rollups: AnalyticsMinuteRollup[]) {
+  const indexed = rollups
+    .map((point, idx) => ({ idx, value: !point.missing ? viewerValue(point) : 0 }))
+    .filter(point => point.value > 0)
+  if (indexed.length < 3) {
+    return {
+      hasViewerRollups: false,
+      hasFlatViewerLine: false,
+      hasPartialTail: false,
+      hasShortSpan: false,
+    }
+  }
+  const values = indexed.map(point => point.value)
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const hasFlatViewerLine = min === max
+  const tailCount = Math.max(4, Math.floor(indexed.length * 0.4))
+  const headCount = Math.max(4, Math.floor(indexed.length * 0.2))
+  const tailValues = values.slice(-tailCount)
+  const headValues = values.slice(0, headCount)
+  const tailFlat = tailValues.length >= 4 && Math.min(...tailValues) === Math.max(...tailValues)
+  const headVaried = headValues.length >= 4 && Math.min(...headValues) !== Math.max(...headValues)
+  const hasPartialTail = indexed.length >= 12 && tailFlat && headVaried
+  const spanMinutes = indexed[indexed.length - 1].idx - indexed[0].idx + 1
+  const hasShortSpan = rollups.length >= 10 && (spanMinutes / rollups.length) < 0.7
+  return {
+    hasViewerRollups: true,
+    hasFlatViewerLine,
+    hasPartialTail,
+    hasShortSpan,
+  }
+}
+
+function minuteEmoteTotal(point: AnalyticsMinuteRollup) {
+  const total = point.totalEmoteCount ?? 0
+  if (total > 0) return total
+  if (!point.emotes) return 0
+  return Object.values(point.emotes).reduce((sum, count) => sum + count, 0)
+}
+
+function computeStreamBaselines(rollups: AnalyticsMinuteRollup[]) {
+  const data = rollups.filter(point => !point.missing && rollupHasMinuteData(point))
+  if (!data.length) return { chat: 1, emotes: 1, viewers: 1 }
+  return {
+    chat: data.reduce((sum, point) => sum + (point.chatCount ?? 0), 0) / data.length || 1,
+    emotes: data.reduce((sum, point) => sum + minuteEmoteTotal(point), 0) / data.length || 1,
+    viewers: data.reduce((sum, point) => sum + viewerValue(point), 0) / data.length || 1,
+  }
+}
+
+type MomentReason =
+  | 'viewer_spike'
+  | 'chat_spike'
+  | 'emote_spike'
+  | 'seventv_spike'
+  | 'twitch_emote_spike'
+  | 'ffz_spike'
+  | 'manual'
+
+function momentReasonLabel(reason: MomentReason): string {
+  switch (reason) {
+    case 'viewer_spike': return 'Viewer spike'
+    case 'chat_spike': return 'Chat spike'
+    case 'seventv_spike': return '7TV emote spike'
+    case 'twitch_emote_spike': return 'Twitch emote spike'
+    case 'ffz_spike': return 'FFZ emote spike'
+    case 'emote_spike': return 'Emote spike'
+    default: return 'Moment'
+  }
+}
+
+function detectPickReason(
+  rollup: AnalyticsMinuteRollup,
+  baselines: { chat: number; emotes: number; viewers: number },
+  catalog?: AnalyticsTopEmote[],
+): MomentReason {
+  const chatMult = (rollup.chatCount ?? 0) / baselines.chat
+  const emoteMult = minuteEmoteTotal(rollup) / baselines.emotes
+  const viewerMult = viewerValue(rollup) / baselines.viewers
+  if (chatMult >= 2 && chatMult >= emoteMult) return 'chat_spike'
+  if (emoteMult >= 2) {
+    const top = topEmotesFromRollup(rollup, 1, catalog)[0]
+    if (top?.provider === 'seventv') return 'seventv_spike'
+    if (top?.provider === 'twitch') return 'twitch_emote_spike'
+    if (top?.provider === 'ffz') return 'ffz_spike'
+    return 'emote_spike'
+  }
+  if (viewerMult >= 1.5) return 'viewer_spike'
+  return 'manual'
+}
+
+function computeMomentScore(
+  rollup: AnalyticsMinuteRollup,
+  baselines: { chat: number; emotes: number; viewers: number },
+  rollups?: AnalyticsMinuteRollup[],
+): number {
+  const chatNorm = Math.min(1, (rollup.chatCount ?? 0) / Math.max(baselines.chat * 2, 1))
+  const emoteNorm = Math.min(1, minuteEmoteTotal(rollup) / Math.max(baselines.emotes * 2, 1))
+  const viewerNorm = Math.min(1, viewerValue(rollup) / Math.max(baselines.viewers * 1.5, 1))
+
+  const topEmotes = topEmotesFromRollup(rollup, 3)
+  const emoteTotal = Math.max(1, minuteEmoteTotal(rollup))
+  const keywordNorm = topEmotes.length > 0
+    ? Math.min(1, topEmotes[0].count / (emoteTotal * 0.4))
+    : 0
+
+  let noveltyNorm = 0.5
+  if (rollups?.length) {
+    const idx = rollups.findIndex(point => point.minuteTs === rollup.minuteTs)
+    if (idx > 0) {
+      const prior = rollups.slice(Math.max(0, idx - 5), idx).filter(point => !point.missing)
+      if (prior.length > 0) {
+        const priorChat = prior.reduce((sum, point) => sum + (point.chatCount ?? 0), 0) / prior.length
+        const delta = (rollup.chatCount ?? 0) - priorChat
+        noveltyNorm = Math.min(1, Math.max(0, delta / Math.max(baselines.chat, 1)))
+      }
+    }
+  }
+
+  const weighted =
+    chatNorm * 0.35 +
+    emoteNorm * 0.25 +
+    viewerNorm * 0.15 +
+    keywordNorm * 0.15 +
+    noveltyNorm * 0.10
+  return weighted * 10
+}
+
+type RollupEmoteHit = {
+  key: string
+  name: string
+  provider?: string
+  count: number
+  image_url?: string
+}
+
+function topEmotesFromRollup(
+  rollup: AnalyticsMinuteRollup,
+  limit = 5,
+  catalog?: AnalyticsTopEmote[],
+): RollupEmoteHit[] {
+  if (!rollup.emotes) return []
+  const byKey = new Map(catalog?.map(item => [item.key, item]) ?? [])
+  const byName = new Map(catalog?.map(item => [item.name.toLowerCase(), item]) ?? [])
+  return Object.entries(rollup.emotes)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([key, count]) => {
+      const parsed = parseEmoteKey(key)
+      const match = byKey.get(key) ?? byName.get(parsed.name.toLowerCase())
+      return {
+        key,
+        name: match?.name ?? parsed.name,
+        provider: match?.provider ?? (parsed.provider !== 'unknown' ? parsed.provider : undefined),
+        count,
+        image_url: match ? getEmoteImageUrl(match) : (parsed.id ? `/emotes/${parsed.id}/1x.webp` : undefined),
+      }
+    })
+}
+
+function peakEmoteCount(rollup: AnalyticsMinuteRollup): number {
+  if (!rollup.emotes) return 0
+  return Math.max(0, ...Object.values(rollup.emotes))
+}
+
 function rollupHasMinuteData(point: AnalyticsMinuteRollup) {
   return !point.missing && (
     (point.viewerSamples ?? 0) > 0
+    || viewerValue(point) > 0
     || (point.chatCount ?? 0) > 0
-    || (point.seventvEmoteCount ?? 0) > 0
+    || minuteEmoteTotal(point) > 0
   )
 }
 
-const SYNC_PHASE_ORDER: SyncPhase[] = [
-  'starting',
-  'scraping_tracker',
-  'parsing_tracker',
-  'resolving_vod',
-  'fetching_comments',
-  'writing_rollups',
-  'completed',
-]
-
-const SYNC_PHASE_LABELS: Record<SyncPhase, string> = {
-  starting: 'Starting sync',
-  scraping_tracker: 'Scraping TwitchTracker',
-  parsing_tracker: 'Parsing viewer chart',
-  resolving_vod: 'Resolving Twitch VOD',
-  fetching_comments: 'Fetching VOD chat',
-  writing_rollups: 'Writing minute rollups',
-  completed: 'Completed',
-  failed: 'Failed',
-}
-
-function syncPhaseIndex(phase: SyncPhase) {
-  const idx = SYNC_PHASE_ORDER.indexOf(phase)
-  return idx < 0 ? 0 : idx
+function rollupsHaveViewerData(rollups: AnalyticsMinuteRollup[]) {
+  return rollups.some(point => !point.missing && viewerValue(point) > 0)
 }
 
 function formatElapsed(startedAt?: string) {
@@ -169,65 +324,482 @@ function formatElapsed(startedAt?: string) {
   return `${min}m ${sec % 60}s`
 }
 
-function SyncProgressPanel({ status }: { status: SyncStatus | null }) {
-  if (!status) return null
-  const activeIdx = status.phase === 'failed' ? -1 : syncPhaseIndex(status.phase)
-  const visiblePhases = status.viewersOnly
-    ? SYNC_PHASE_ORDER.filter(p => p !== 'fetching_comments')
-    : SYNC_PHASE_ORDER.filter(p => p !== 'completed')
+function formatVodClock(sec?: number) {
+  if (sec == null || sec < 0) return '0s'
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`
+  if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`
+  return `${s}s`
+}
 
+function chatTimelineProgress(chat?: SyncChatProgress) {
+  const total = chat?.vodDurationSec ?? 0
+  if (total <= 0) return null
+  const timeline = Math.max(0, chat?.timelineSec ?? 0)
+  const pct = Math.min(100, Math.round((timeline / total) * 100))
+  return { pct, timeline, total }
+}
+
+function chatTimelineEta(chat?: SyncChatProgress, startedAt?: string) {
+  const progress = chatTimelineProgress(chat)
+  if (!progress || progress.timeline <= 0 || !startedAt) return ''
+  if (progress.pct >= 95 || chat?.indexPhase === 'tokenizing' || chat?.indexPhase === 'writing') return ''
+  const elapsedMs = Math.max(1, Date.now() - Date.parse(startedAt))
+  const rate = progress.timeline / elapsedMs
+  if (rate <= 0) return ''
+  const remainingSec = Math.max(0, progress.total - progress.timeline)
+  const remainingMin = Math.ceil((remainingSec / rate) / 60_000)
+  return remainingMin > 0 ? `~${remainingMin} min remaining` : ''
+}
+
+function chatIndexProgress(chat?: SyncChatProgress, rollupsWritten = 0) {
+  const expected = chat?.rollupsExpected ?? 0
+  if (expected <= 0) return null
+  const written = Math.max(0, rollupsWritten)
+  const pct = Math.min(100, Math.round((written / expected) * 100))
+  return { pct, written, expected }
+}
+
+function syncIndexPhaseDetail(chat?: SyncChatProgress, rollupsWritten = 0) {
+  switch (chat?.indexPhase) {
+    case 'tokenizing':
+      return 'Tokenizing emotes…'
+    case 'writing': {
+      const index = chatIndexProgress(chat, rollupsWritten)
+      return index ? `Writing ${index.written}/${index.expected} chat minutes` : 'Writing chat minutes…'
+    }
+    case 'done':
+      return 'Chat indexed'
+    default:
+      return ''
+  }
+}
+
+function shouldRefetchChartDuringSync(status: SyncStatus | null, viewersOnly: boolean) {
+  if (!status) return false
+  if (viewersOnly) {
+    return status.viewerStatus === 'ok' || (status.rollupsWritten ?? 0) > 0
+  }
+  if (status.viewerStatus === 'ok') {
+    return true
+  }
+  if ((status.rollupsWritten ?? 0) > 0) {
+    return ['parsing_tracker', 'resolving_vod', 'fetching_comments', 'writing_rollups'].includes(status.phase)
+  }
+  if ((status.chat?.segmentsDone ?? 0) > 0 || (status.chat?.commentsFetched ?? 0) > 0) {
+    return status.phase === 'fetching_comments'
+  }
+  return false
+}
+
+function syncPollChartCallbacks(
+  refetchChart: () => void,
+  viewersOnly: boolean,
+) {
+  let lastRefetchKey = ''
+  return {
+    onPhase: (phase: SyncPhase) => {
+      if (['parsing_tracker', 'resolving_vod', 'fetching_comments', 'writing_rollups', 'completed'].includes(phase)) {
+        refetchChart()
+      }
+    },
+    onProgress: (status: SyncStatus) => {
+      if (!shouldRefetchChartDuringSync(status, viewersOnly)) return
+      const key = `${status.phase}:${status.rollupsWritten ?? 0}:${status.viewerStatus ?? ''}:${status.chat?.timelineSec ?? 0}:${status.chat?.indexPhase ?? ''}`
+      if (key === lastRefetchKey) return
+      lastRefetchKey = key
+      refetchChart()
+    },
+  }
+}
+
+type SegmentCellState = 'done' | 'active' | 'queued' | 'retry'
+
+function segmentGridBuckets(
+  total: number,
+  done: number,
+  active: boolean,
+  throttled: boolean,
+  maxBuckets = 48,
+): SegmentCellState[] {
+  if (total <= 0) return []
+  const buckets = Math.min(total, maxBuckets)
+  const segsPerBucket = total / buckets
+  return Array.from({ length: buckets }, (_, i) => {
+    const bucketStart = Math.floor(i * segsPerBucket)
+    const bucketEnd = Math.floor((i + 1) * segsPerBucket)
+    if (bucketEnd <= done) return 'done'
+    if (bucketStart <= done && done < bucketEnd) {
+      if (throttled) return 'retry'
+      if (active) return 'active'
+    }
+    return 'queued'
+  })
+}
+
+function syncOverallEta(status: SyncStatus, chatTimeline: ReturnType<typeof chatTimelineProgress>) {
+  const chatEta = chatTimelineEta(status.chat, status.startedAt)
+  if (chatEta) return chatEta
+  if (status.chat?.indexPhase === 'tokenizing') return 'Indexing emotes…'
+  if (status.chat?.indexPhase === 'writing') return 'Writing rollups…'
+  if (chatTimeline && chatTimeline.pct < 100 && status.chat?.active) return ''
+  return ''
+}
+
+function SyncStepIcon({ state }: { state: 'done' | 'active' | 'pending' }) {
+  if (state === 'done') {
+    return (
+      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
+        <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" aria-hidden>
+          <path d="M2.5 6l2.5 2.5 4.5-4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+    )
+  }
+  if (state === 'active') {
+    return (
+      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-violet-500/25 border-t-violet-400" />
+      </span>
+    )
+  }
   return (
-    <div className="mt-4 w-full max-w-md rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-left">
-      <div className="flex items-center justify-between gap-3 text-[11px] font-black uppercase tracking-wide text-zinc-400">
-        <span>Sync progress</span>
-        <span>{formatElapsed(status.startedAt)}</span>
-      </div>
-      <ul className="mt-3 space-y-2">
-        {visiblePhases.map((phase, idx) => {
-          const done = status.phase === 'completed' || idx < activeIdx
-          const active = idx === activeIdx && status.phase !== 'failed' && status.phase !== 'completed'
-          let detail = ''
-          if (active && phase === 'fetching_comments') {
-            if ((status.commentsFetched ?? 0) > 0) {
-              detail = `${status.commentsFetched!.toLocaleString()} comments`
-            } else if (status.message) {
-              detail = status.message
-            }
-          } else if (active && phase === 'writing_rollups' && (status.rollupsWritten ?? 0) > 0) {
-            detail = `${status.rollupsWritten} minutes`
-          } else if (active && status.message) {
-            detail = status.message
-          }
-          return (
-            <li key={phase} className="flex items-start gap-2 text-xs">
-              <span className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${
-                done ? 'bg-emerald-500/20 text-emerald-200' : active ? 'bg-violet-500/25 text-violet-100' : 'bg-white/5 text-zinc-600'
-              }`}>
-                {done ? '✓' : active ? '…' : ''}
-              </span>
-              <div className="min-w-0">
-                <div className={`font-bold ${active ? 'text-violet-100' : done ? 'text-zinc-300' : 'text-zinc-500'}`}>
-                  {SYNC_PHASE_LABELS[phase]}
-                </div>
-                {detail ? <div className="truncate text-[11px] font-semibold text-zinc-500">{detail}</div> : null}
-              </div>
-            </li>
-          )
-        })}
-      </ul>
-      {status.phase === 'failed' && status.error ? (
-        <div className="mt-3 text-xs font-bold text-red-400">{status.error}</div>
+    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-dashed border-zinc-600/80 text-[9px] text-zinc-600">
+      ○
+    </span>
+  )
+}
+
+function SyncProgressBar({
+  pct,
+  tone,
+  pending = false,
+}: {
+  pct: number
+  tone: 'green' | 'violet' | 'amber' | 'muted'
+  pending?: boolean
+}) {
+  const fillClass = {
+    green: 'bg-emerald-500',
+    violet: 'bg-violet-500',
+    amber: 'bg-amber-400',
+    muted: 'bg-zinc-600',
+  }[tone]
+  return (
+    <div className={`mt-2 h-1.5 overflow-hidden rounded-full ${pending ? 'border border-dashed border-zinc-700/80 bg-zinc-900/40' : 'bg-white/[0.07]'}`}>
+      {!pending ? (
+        <div
+          className={`h-full rounded-full transition-[width] duration-500 ${fillClass}`}
+          style={{ width: `${Math.max(pct > 0 ? 2 : 0, Math.min(100, pct))}%` }}
+        />
       ) : null}
     </div>
   )
 }
 
-async function pollSyncUntilDone(streamId: string, onUpdate: (status: SyncStatus | null) => void) {
+function SegmentGridLegend() {
+  const items: Array<{ tone: string; label: string }> = [
+    { tone: 'bg-emerald-500/80', label: 'Done' },
+    { tone: 'bg-violet-500/80', label: 'Active' },
+    { tone: 'bg-zinc-600/50', label: 'Queued' },
+    { tone: 'bg-red-500/70', label: 'Retry' },
+  ]
+  return (
+    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[9px] font-semibold text-zinc-500">
+      {items.map(item => (
+        <span key={item.label} className="inline-flex items-center gap-1">
+          <span className={`inline-block h-2 w-2 rounded-sm ${item.tone}`} />
+          {item.label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function SyncProgressPanel({ status, chartChatMinutes = 0 }: { status: SyncStatus | null; chartChatMinutes?: number }) {
+  if (!status) return null
+  if (status.stale && status.phase !== 'completed' && status.phase !== 'failed') {
+    return (
+      <div className="w-full rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-left">
+        <div className="text-xs font-black uppercase tracking-wide text-amber-200">Sync interrupted</div>
+        <div className="mt-1 text-[11px] font-semibold text-amber-100/90">
+          The analytics service restarted or lost the sync worker. Click sync again to retry.
+        </div>
+        {status.error ? <div className="mt-2 text-xs font-bold text-red-300">{status.error}</div> : null}
+      </div>
+    )
+  }
+
+  const chatTimeline = chatTimelineProgress(status.chat)
+  const chatIndex = chatIndexProgress(status.chat, status.rollupsWritten ?? 0)
+  const indexPhase = status.chat?.indexPhase
+  const isIndexing = indexPhase === 'tokenizing' || indexPhase === 'writing'
+  const viewersChartReady = status.viewerStatus === 'ok' || (status.rollupsWritten ?? 0) > 0
+  const segmentTotal = status.chat?.segmentsTotal ?? 0
+  const segmentDone = status.chat?.segmentsDone ?? 0
+  const chatFetchActive = Boolean(status.chat?.active || status.phase === 'fetching_comments')
+  const chatFetchDone = !status.viewersOnly && (indexPhase === 'tokenizing' || indexPhase === 'writing' || indexPhase === 'done' || status.phase === 'writing_rollups' || status.phase === 'completed')
+  const chatFetchPct = segmentTotal > 1
+    ? Math.round((segmentDone / segmentTotal) * 100)
+    : (chatTimeline?.pct ?? 0)
+  const overallEta = syncOverallEta(status, chatTimeline)
+
+  const viewerStepState: 'done' | 'active' | 'pending' = viewersChartReady
+    ? 'done'
+    : (['scraping_tracker', 'parsing_tracker'].includes(status.phase) ? 'active' : 'pending')
+  const viewerPct = viewersChartReady
+    ? 100
+    : status.phase === 'scraping_tracker'
+      ? 35
+      : status.phase === 'parsing_tracker'
+        ? 70
+        : 0
+
+  const chatStepState: 'done' | 'active' | 'pending' = chatFetchDone
+    ? 'done'
+    : chatFetchActive
+      ? 'active'
+      : 'pending'
+
+  const rollupStepState: 'done' | 'active' | 'pending' = indexPhase === 'done' || status.phase === 'completed'
+    ? 'done'
+    : isIndexing
+      ? 'active'
+      : 'pending'
+  const rollupPct = chatIndex?.pct ?? (indexPhase === 'tokenizing' ? 12 : 0)
+
+  const segmentCells = segmentTotal > 1
+    ? segmentGridBuckets(segmentTotal, segmentDone, Boolean(status.chat?.active), Boolean(status.chat?.throttled))
+    : []
+  const showLiveBanner = viewersChartReady && (chatFetchActive || isIndexing)
+
+  return (
+    <div className="w-full rounded-xl border border-white/10 bg-[#111118]/90 px-4 py-4 text-left shadow-lg shadow-black/20">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-400">
+            <svg className="h-3.5 w-3.5 animate-spin" style={{ animationDuration: '2.5s' }} viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <path d="M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </span>
+          <div>
+            <div className="text-[11px] font-black uppercase tracking-[0.14em] text-zinc-300">Sync progress</div>
+            <div className="text-[10px] font-semibold text-zinc-500">Historical VOD indexing</div>
+          </div>
+        </div>
+        <div className="text-right text-[10px] font-semibold text-zinc-500">
+          <div>Elapsed {formatElapsed(status.startedAt)}</div>
+          {overallEta ? <div className="text-violet-300/90">{overallEta}</div> : null}
+        </div>
+      </div>
+
+      {showLiveBanner ? (
+        <div className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-semibold leading-snug text-cyan-100">
+          Viewer data is live. VOD chat and emotes are still being indexed.
+        </div>
+      ) : null}
+
+      {status.chat?.throttled ? (
+        <div className="mt-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-[11px] font-semibold text-red-200">
+          Twitch rate limit — GQL fetch is backing off before retrying segments.
+        </div>
+      ) : null}
+
+      <div className="mt-4 space-y-4">
+        {/* Viewers */}
+        <section>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <SyncStepIcon state={viewerStepState} />
+              <div>
+                <div className="text-[11px] font-bold text-zinc-200">Viewers (TwitchTracker)</div>
+                <div className="text-[10px] font-semibold text-zinc-500">
+                  {viewersChartReady ? 'Viewer chart is live' : status.tracker?.message || 'Scraping viewer timeline'}
+                </div>
+              </div>
+            </div>
+            <span className={`text-[11px] font-black tabular-nums ${viewerStepState === 'done' ? 'text-emerald-400' : 'text-zinc-400'}`}>
+              {viewerStepState === 'done' ? '100%' : viewerStepState === 'active' ? `${viewerPct}%` : 'Pending'}
+            </span>
+          </div>
+          <SyncProgressBar pct={viewerPct} tone="green" pending={viewerStepState === 'pending'} />
+        </section>
+
+        {/* VOD Chat Fetch */}
+        {!status.viewersOnly ? (
+          <section>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <SyncStepIcon state={chatStepState} />
+                <div>
+                  <div className="text-[11px] font-bold text-zinc-200">VOD Chat Fetch (Twitch GQL)</div>
+                  <div className="text-[10px] font-semibold text-zinc-500">
+                    {chatFetchDone
+                      ? 'All comments fetched'
+                      : status.chat?.throttled
+                        ? 'Waiting on rate limit'
+                        : `${(status.chat?.commentsFetched ?? 0).toLocaleString()} comments indexed`}
+                  </div>
+                </div>
+              </div>
+              <span className={`text-[11px] font-black tabular-nums ${chatStepState === 'done' ? 'text-emerald-400' : 'text-violet-300'}`}>
+                {chatStepState === 'pending' ? 'Pending' : `${chatFetchPct}%`}
+              </span>
+            </div>
+            <SyncProgressBar pct={chatFetchPct} tone="violet" pending={chatStepState === 'pending'} />
+
+            {chatStepState !== 'pending' && chatTimeline ? (
+              <div className="mt-2.5 space-y-1 text-[10px] font-semibold text-zinc-500">
+                <div>
+                  <span className="text-zinc-400">Timeline coverage:</span>{' '}
+                  {chatTimeline.pct}% · {formatVodClock(chatTimeline.timeline)} / {formatVodClock(chatTimeline.total)}
+                </div>
+                {segmentTotal > 1 ? (
+                  <div>
+                    <span className="text-zinc-400">Segments completed:</span>{' '}
+                    {segmentDone.toLocaleString()} / {segmentTotal.toLocaleString()}
+                  </div>
+                ) : null}
+                {((status.chat?.commentsFetched ?? 0) > 0 || (status.chat?.gqlPages ?? 0) > 0) ? (
+                  <div>
+                    <span className="text-zinc-400">Comments / pages:</span>{' '}
+                    {(status.chat?.commentsFetched ?? 0).toLocaleString()} comments
+                    {(status.chat?.gqlPages ?? 0) > 0 ? ` · ${(status.chat?.gqlPages ?? 0).toLocaleString()} GQL pages` : ''}
+                  </div>
+                ) : null}
+                {(status.chat?.concurrency ?? 0) > 1 ? (
+                  <div>
+                    <span className="text-zinc-400">Parallelism:</span> {status.chat?.concurrency} workers
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {segmentCells.length > 1 ? (
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-wide text-zinc-600">
+                  <span>0h</span>
+                  {chatTimeline ? <span>{formatVodClock(chatTimeline.total)}</span> : null}
+                </div>
+                <div className="mt-1 grid gap-0.5" style={{ gridTemplateColumns: `repeat(${segmentCells.length}, minmax(0, 1fr))` }}>
+                  {segmentCells.map((cell, i) => (
+                    <div
+                      key={`seg-cell-${i}`}
+                      className={`h-3 rounded-sm transition-colors duration-300 ${
+                        cell === 'done'
+                          ? 'bg-emerald-500/85'
+                          : cell === 'active'
+                            ? 'bg-violet-500/90 animate-pulse'
+                            : cell === 'retry'
+                              ? 'bg-red-500/80'
+                              : 'bg-zinc-700/45'
+                      }`}
+                    />
+                  ))}
+                </div>
+                <SegmentGridLegend />
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {/* Rollups & Emotes */}
+        {!status.viewersOnly ? (
+          <section>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <SyncStepIcon state={rollupStepState} />
+                <div>
+                  <div className="text-[11px] font-bold text-zinc-200">Rollups &amp; Emotes</div>
+                  <div className="text-[10px] font-semibold text-zinc-500">
+                    {rollupStepState === 'done'
+                      ? 'Minute rollups saved'
+                      : rollupStepState === 'active'
+                        ? syncIndexPhaseDetail(status.chat, status.rollupsWritten ?? 0) || 'Indexing chat and emotes'
+                        : 'Minute rollups and emote tokenization'}
+                  </div>
+                </div>
+              </div>
+              <span className={`text-[11px] font-black tabular-nums ${
+                rollupStepState === 'done' ? 'text-emerald-400' : rollupStepState === 'active' ? 'text-amber-300' : 'text-zinc-500'
+              }`}>
+                {rollupStepState === 'pending' ? 'Pending' : rollupStepState === 'done' ? '100%' : `${rollupPct}%`}
+              </span>
+            </div>
+            <SyncProgressBar pct={rollupPct} tone="amber" pending={rollupStepState === 'pending'} />
+            {rollupStepState === 'pending' ? (
+              <div className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-zinc-600">
+                <span aria-hidden>⏱</span>
+                Starts after chat fetch completes
+              </div>
+            ) : null}
+            {rollupStepState === 'active' && chartChatMinutes > 0 ? (
+              <div className="mt-2 text-[10px] font-semibold text-cyan-400/90">
+                {chartChatMinutes.toLocaleString()} chat minutes visible on chart
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+      </div>
+
+      {status.phase === 'failed' && status.error ? (
+        <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300">
+          {status.error}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+async function pollSyncUntilDone(
+  streamId: string,
+  onUpdate: (status: SyncStatus | null) => void,
+  opts?: { onPhase?: (phase: SyncPhase) => void; onProgress?: (status: SyncStatus) => void },
+) {
   const terminal: SyncPhase[] = ['completed', 'failed']
+  let lastPhase: SyncPhase | null = null
+  let lastRollupsWritten = -1
+  let lastGood: SyncStatus | null = null
+  let consecutiveFailures = 0
   for (;;) {
-    const status = await getSyncStatus(streamId)
+    let status: SyncStatus | null = null
+    try {
+      status = await getSyncStatus(streamId)
+      consecutiveFailures = 0
+    } catch {
+      consecutiveFailures++
+      const message = consecutiveFailures <= 2
+        ? 'Reconnecting to sync status…'
+        : consecutiveFailures <= 5
+          ? 'Sync status temporarily unavailable — retrying…'
+          : 'Sync status unavailable — still retrying…'
+      if (lastGood) {
+        onUpdate({ ...lastGood, message })
+      } else {
+        onUpdate(null)
+      }
+      if (consecutiveFailures > 10) {
+        return lastGood
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      continue
+    }
+    if (status) {
+      lastGood = status
+    }
     onUpdate(status)
-    if (!status || terminal.includes(status.phase)) {
+    if (status && (status.rollupsWritten ?? 0) !== lastRollupsWritten) {
+      lastRollupsWritten = status.rollupsWritten ?? 0
+      opts?.onProgress?.(status)
+    }
+    if (status && status.phase !== lastPhase) {
+      lastPhase = status.phase
+      opts?.onPhase?.(status.phase)
+    }
+    if (!status || terminal.includes(status.phase) || status.stale) {
       return status
     }
     await new Promise(resolve => setTimeout(resolve, 2000))
@@ -252,56 +824,6 @@ function normalizeGameSegments(games: GameSegment[], rollupCount: number): GameS
   })
 }
 
-type ChatBarPoint = {
-  index: number
-  value: number
-  x: number
-  barWidth: number
-}
-
-function decimateChatBars(
-  rollups: AnalyticsMinuteRollup[],
-  values: Array<number | null>,
-  width: number,
-  padLeft: number,
-  padRight: number,
-  maxBars = 200,
-): ChatBarPoint[] {
-  const n = rollups.length
-  if (n === 0) return []
-  const plotWidth = width - padLeft - padRight
-  if (n <= 300) {
-    return values.map((val, index) => {
-      if (val === null || val === undefined) return null
-      const x = n === 1 ? padLeft : padLeft + (index / (n - 1)) * plotWidth
-      const barWidth = Math.max(1.5, plotWidth / n - 1)
-      return { index, value: val, x, barWidth }
-    }).filter((point): point is ChatBarPoint => point !== null)
-  }
-  const bucketCount = Math.min(maxBars, n)
-  const bucketSize = Math.ceil(n / bucketCount)
-  const out: ChatBarPoint[] = []
-  for (let bucket = 0; bucket < bucketCount; bucket++) {
-    const start = bucket * bucketSize
-    const end = Math.min(n, start + bucketSize)
-    let sum = 0
-    let count = 0
-    for (let i = start; i < end; i++) {
-      const val = values[i]
-      if (val !== null && val !== undefined) {
-        sum += val
-        count++
-      }
-    }
-    if (count === 0) continue
-    const index = Math.min(n - 1, start + Math.floor(bucketSize / 2))
-    const x = n === 1 ? padLeft : padLeft + (index / (n - 1)) * plotWidth
-    const barWidth = Math.max(1.5, (plotWidth / bucketCount) - 1)
-    out.push({ index, value: sum / count, x, barWidth })
-  }
-  return out
-}
-
 function rollupsForChart(rollups: AnalyticsMinuteRollup[], isLive: boolean) {
   if (!rollups.length) return rollups
   const dataIndices = rollups
@@ -315,32 +837,6 @@ function rollupsForChart(rollups: AnalyticsMinuteRollup[], isLive: boolean) {
   const start = Math.max(0, first - pad)
   const end = Math.min(rollups.length, last + pad + 1)
   return rollups.slice(start, end)
-}
-
-function smoothSeries(values: Array<number | null>, windowSize = 5): Array<number | null> {
-  const n = values.length
-  if (n === 0) return []
-  const result: Array<number | null> = []
-  const half = Math.floor(windowSize / 2)
-  for (let i = 0; i < n; i++) {
-    if (values[i] === null) {
-      result.push(null)
-      continue
-    }
-    let sum = 0
-    let count = 0
-    const start = Math.max(0, i - half)
-    const end = Math.min(n, i + half + 1)
-    for (let j = start; j < end; j++) {
-      const val = values[j]
-      if (val !== null) {
-        sum += val
-        count++
-      }
-    }
-    result.push(count > 0 ? sum / count : 0)
-  }
-  return result
 }
 
 function buildSeries(
@@ -359,25 +855,44 @@ function buildSeries(
   })
   const chat = rollups.map(point => point.missing ? null : point.chatCount)
   
-  // Calculate 7TV maximum from raw values to maintain legend accuracy, then smooth for rendering
-  const seventvRaw = rollups.map(point => point.missing ? null : point.seventvEmoteCount)
-  const seventvMax = seriesMax(seventvRaw)
-  const seventvSmoothed = smoothSeries(seventvRaw, 5)
+  // Raw per-minute emote counts (no smoothing — preserves spikes).
+  const emotesRaw = rollups.map(point => point.missing ? null : minuteEmoteTotal(point))
+  const emotesMax = seriesMax(emotesRaw)
 
   const viewersMax = seriesMax(viewers)
   const out: Series[] = [
     { key: 'viewers', label: 'Viewers', color: '#22d3ee', values: viewers, max: viewersMax > 0 ? viewersMax : Math.max(0, peakViewersFallback) },
     { key: 'chat', label: 'Chat/min', color: '#a78bfa', values: chat, max: seriesMax(chat) },
-    { key: 'seventv', label: '7TV/min', color: '#34d399', values: seventvSmoothed, max: seventvMax },
+    { key: 'emotes', label: 'Emotes/min', color: '#34d399', values: emotesRaw, max: emotesMax },
   ]
-  const palette = ['#f59e0b', '#fb7185', '#60a5fa', '#f472b6', '#facc15']
+  const palette = [...CHART_THEME.perEmotePalette]
   Array.from(selected).slice(0, 5).forEach((key, index) => {
     const rawValues = rollups.map(point => point.missing ? null : point.emotes?.[key] ?? 0)
     const maxVal = seriesMax(rawValues)
-    const smoothedValues = smoothSeries(rawValues, 5)
-    out.push({ key, label: emoteLabel(key), color: palette[index % palette.length], values: smoothedValues, max: maxVal, dashed: true })
+    out.push({ key, label: emoteLabel(key), color: palette[index % palette.length], values: rawValues, max: maxVal, dashed: true })
   })
   return out
+}
+
+type ViewerAxis = { min: number; max: number; mode: 'peak' | 'fit' }
+
+function viewerScaleBounds(
+  values: Array<number | null>,
+  streamPeak: number,
+  fitToVisible: boolean,
+): ViewerAxis {
+  const visible = values.filter((v): v is number => v !== null && v > 0)
+  const visibleMax = visible.length > 0 ? Math.max(...visible) : 0
+  const visibleMin = visible.length > 0 ? Math.min(...visible) : 0
+  const peakMax = Math.max(1, streamPeak, visibleMax)
+  if (!fitToVisible || visibleMax <= 0) {
+    return { min: 0, max: peakMax, mode: fitToVisible ? 'fit' : 'peak' }
+  }
+  const span = Math.max(0, visibleMax - visibleMin)
+  const pad = span > 0 ? span * 0.08 : visibleMax * 0.04
+  const fitMin = Math.max(0, Math.floor(visibleMin - pad))
+  const fitMax = Math.max(fitMin + 1, Math.ceil(visibleMax + pad))
+  return { min: fitMin, max: fitMax, mode: 'fit' }
 }
 
 function emoteLabel(key: string) {
@@ -386,19 +901,50 @@ function emoteLabel(key: string) {
   return key
 }
 
-const SECONDARY_PLOT_FRACTION = 0.36
+const ACTIVITY_ZONE_FRACTION = 0.36
+const ACTIVITY_ZONE_GAP = 8
+const ACTIVITY_CHAT_LINE_FRACTION = 0.42
+const ACTIVITY_EMOTE_BARS_FRACTION = 0.58
+const CHART_VIEWBOX_HEIGHT = 400
 
-function plotBand(
+type PlotZone = 'viewer' | 'activity-chat' | 'activity-emote'
+
+function plotBandForZone(
   height: number,
   padTop: number,
   padBottom: number,
-  plotFraction = 1,
+  zone: PlotZone,
 ) {
   const fullPlotHeight = height - padTop - padBottom
-  const bandHeight = fullPlotHeight * plotFraction
-  const bandBottom = height - padBottom
-  const bandTop = bandBottom - bandHeight
-  return { bandTop, bandBottom, bandHeight }
+  const activityHeight = fullPlotHeight * ACTIVITY_ZONE_FRACTION
+  const viewerHeight = fullPlotHeight - activityHeight - ACTIVITY_ZONE_GAP
+  const activityTop = height - padBottom - activityHeight
+  const chatSplit = activityTop + activityHeight * ACTIVITY_CHAT_LINE_FRACTION
+
+  switch (zone) {
+    case 'viewer':
+      return { bandTop: padTop, bandBottom: padTop + viewerHeight, bandHeight: viewerHeight, activityTop, activityHeight, chatSplit }
+    case 'activity-chat':
+      return {
+        bandTop: activityTop,
+        bandBottom: chatSplit,
+        bandHeight: activityHeight * ACTIVITY_CHAT_LINE_FRACTION,
+        activityTop,
+        activityHeight,
+        chatSplit,
+      }
+    case 'activity-emote':
+      return {
+        bandTop: chatSplit,
+        bandBottom: height - padBottom,
+        bandHeight: activityHeight * ACTIVITY_EMOTE_BARS_FRACTION,
+        activityTop,
+        activityHeight,
+        chatSplit,
+      }
+    default:
+      return { bandTop: padTop, bandBottom: height - padBottom, bandHeight: fullPlotHeight, activityTop, activityHeight, chatSplit }
+  }
 }
 
 function plotY(
@@ -407,11 +953,179 @@ function plotY(
   height: number,
   padTop: number,
   padBottom: number,
-  plotFraction = 1,
+  zone: PlotZone = 'viewer',
+  rangeMin = 0,
 ) {
-  const { bandTop, bandBottom, bandHeight } = plotBand(height, padTop, padBottom, plotFraction)
-  const y = bandBottom - (Math.max(0, value) / max) * bandHeight
+  const { bandTop, bandBottom, bandHeight } = plotBandForZone(height, padTop, padBottom, zone)
+  const span = Math.max(1, max - rangeMin)
+  const y = bandBottom - ((Math.max(rangeMin, value) - rangeMin) / span) * bandHeight
   return Math.max(bandTop, Math.min(bandBottom, y))
+}
+
+type ActivityAxis = { min: number; max: number; mode: 'peak' | 'fit' }
+
+function activityAxisBounds(series: Series[], fitToVisible = true): ActivityAxis {
+  const visible: number[] = []
+  for (const item of series) {
+    if (item.key === 'chat') continue
+    for (const value of item.values) {
+      if (value !== null && value > 0) visible.push(value)
+    }
+  }
+  if (visible.length === 0) return { min: 0, max: 1, mode: fitToVisible ? 'fit' : 'peak' }
+  const visibleMin = Math.min(...visible)
+  const visibleMax = Math.max(...visible)
+  const peakMax = Math.max(1, visibleMax)
+  if (!fitToVisible) {
+    return { min: 0, max: Math.ceil(peakMax * 1.06), mode: 'peak' }
+  }
+  const span = Math.max(0, visibleMax - visibleMin)
+  const pad = span > 0 ? span * 0.05 : Math.max(1, visibleMax * 0.08)
+  const fitMin = span > 0 ? Math.max(0, Math.floor(visibleMin - pad)) : 0
+  const fitMax = Math.max(fitMin + 1, Math.ceil(visibleMax + pad))
+  return { min: fitMin, max: fitMax, mode: 'fit' }
+}
+
+function emoteSpikeIndices(values: Array<number | null>, minFraction = 0.32, maxSpikes = 0) {
+  if (maxSpikes <= 0) return []
+  const positives = values.filter((v): v is number => v !== null && v > 0)
+  if (positives.length === 0) return []
+  const max = Math.max(...positives)
+  const sorted = [...positives].sort((a, b) => a - b)
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0
+  const threshold = Math.max(max * minFraction, median * 1.35, 1)
+  const spikes: number[] = []
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i]
+    if (value === null || value < threshold) continue
+    const prev = i > 0 ? (values[i - 1] ?? 0) : 0
+    const next = i < values.length - 1 ? (values[i + 1] ?? 0) : 0
+    if (value >= prev && value >= next) spikes.push(i)
+  }
+  if (spikes.length <= maxSpikes) return spikes
+  return spikes
+    .sort((a, b) => (values[b] ?? 0) - (values[a] ?? 0))
+    .slice(0, maxSpikes)
+    .sort((a, b) => a - b)
+}
+
+function smoothDisplayValues(values: Array<number | null>, window = 3): Array<number | null> {
+  if (window <= 1 || values.length < 3) return values
+  const radius = Math.floor(window / 2)
+  return values.map((value, index) => {
+    if (value === null) return null
+    let sum = 0
+    let count = 0
+    for (let offset = -radius; offset <= radius; offset++) {
+      const sample = values[index + offset]
+      if (sample === null || sample === undefined) continue
+      sum += sample
+      count += 1
+    }
+    return count > 0 ? sum / count : value
+  })
+}
+
+function activityBarsMaxForLength(length: number, plotWidthPx = 876, pxPerBar = 1.05) {
+  if (length <= 0) return 0
+  const target = Math.floor(plotWidthPx / pxPerBar)
+  return Math.min(length, Math.max(target, 64))
+}
+
+type ActivityBarRect = {
+  key: string
+  x: number
+  y: number
+  width: number
+  height: number
+  hasValue: boolean
+  isSpike?: boolean
+}
+
+function activityBarRects(
+  values: Array<number | null>,
+  max: number,
+  rangeMin: number,
+  zone: PlotZone,
+  width: number,
+  height: number,
+  padLeft: number,
+  padRight: number,
+  padTop: number,
+  padBottom: number,
+  density: { pxPerBar: number; minWidth: number; maxWidth: number },
+  spikeThreshold = 0,
+): ActivityBarRect[] {
+  const n = values.length
+  if (n === 0) return []
+  const plotWidth = width - padLeft - padRight
+  const barSeries = chatBarsForChart(values, activityBarsMaxForLength(n, plotWidth, density.pxPerBar))
+  const barCount = barSeries.length
+  const slotWidth = barCount <= 1 ? plotWidth : plotWidth / Math.max(1, barCount - 1)
+  const barWidth = Math.min(density.maxWidth, Math.max(density.minWidth, slotWidth * 0.98))
+  const { bandBottom } = plotBandForZone(height, padTop, padBottom, zone)
+
+  return barSeries.map(({ index, value }, barIdx) => {
+    const cx = barCount === 1
+      ? padLeft
+      : padLeft + (barIdx / Math.max(1, barCount - 1)) * plotWidth
+    const cy = plotY(value, max, height, padTop, padBottom, zone, rangeMin)
+    const barHeight = value > 0 ? Math.max(1, bandBottom - cy) : 1
+    const y = value > 0 ? cy : bandBottom - 1
+    return {
+      key: `bar-${index}-${barIdx}`,
+      x: cx - barWidth / 2,
+      y,
+      width: barWidth,
+      height: barHeight,
+      hasValue: value > 0,
+      isSpike: spikeThreshold > 0 && value > spikeThreshold,
+    }
+  })
+}
+
+function chatBarsForChart(values: Array<number | null>, maxBars = 360) {
+  const n = values.length
+  if (n === 0) return [] as Array<{ index: number; value: number }>
+  if (n <= maxBars) {
+    return values.map((value, index) => ({ index, value: value ?? 0 }))
+  }
+  const bucketSize = n / maxBars
+  const bars: Array<{ index: number; value: number }> = []
+  for (let bucket = 0; bucket < maxBars; bucket++) {
+    const start = Math.floor(bucket * bucketSize)
+    const end = Math.min(n, Math.floor((bucket + 1) * bucketSize))
+    if (end <= start) continue
+    let peak = 0
+    for (let i = start; i < end; i++) {
+      const value = values[i] ?? 0
+      if (value > peak) peak = value
+    }
+    const centerIndex = Math.min(n - 1, Math.floor((start + end - 1) / 2))
+    bars.push({ index: centerIndex, value: peak })
+  }
+  return bars
+}
+
+function findEstimatedViewerTailStart(values: Array<number | null>) {
+  const n = values.length
+  if (n < 12) return -1
+  const startSearch = Math.floor(n * 0.12)
+  for (let i = startSearch; i < n - 8; i++) {
+    const value = values[i]
+    if (value === null || value <= 0) continue
+    let flat = true
+    for (let j = i + 1; j < Math.min(n, i + 10); j++) {
+      if (values[j] !== value) {
+        flat = false
+        break
+      }
+    }
+    if (!flat) continue
+    const head = values.slice(startSearch, i).filter((point): point is number => point !== null && point > 0)
+    if (head.length >= 3 && Math.min(...head) !== Math.max(...head)) return i
+  }
+  return -1
 }
 
 function linePath(
@@ -424,26 +1138,27 @@ function linePath(
   padTop: number,
   padBottom: number,
   linear = false,
-  plotFraction = 1,
+  zone: PlotZone = 'viewer',
+  rangeMin = 0,
 ) {
   const n = values.length
   if (!n) return ''
-  const { bandTop, bandBottom } = plotBand(height, padTop, padBottom, plotFraction)
+  const { bandTop, bandBottom } = plotBandForZone(height, padTop, padBottom, zone)
 
   const points: Array<{ x: number; y: number } | null> = values.map((value, index) => {
     if (value === null) return null
     const x = n === 1 ? padLeft : padLeft + (index / (n - 1)) * (width - padLeft - padRight)
-    const y = plotY(value, max, height, padTop, padBottom, plotFraction)
+    const y = plotY(value, max, height, padTop, padBottom, zone, rangeMin)
     return { x, y }
   })
 
   let path = ''
   let segment: Array<{ x: number; y: number }> = []
 
-  const drawSegment = (seg: Array<{ x: number; y: number }>, linear = false) => {
+  const drawSegment = (seg: Array<{ x: number; y: number }>, linearSeg = false) => {
     if (seg.length === 0) return ''
     if (seg.length === 1) return `M${seg[0].x.toFixed(1)} ${seg[0].y.toFixed(1)}`
-    if (seg.length === 2 || linear) {
+    if (seg.length === 2 || linearSeg) {
       let d = `M${seg[0].x.toFixed(1)} ${seg[0].y.toFixed(1)}`
       for (let i = 1; i < seg.length; i++) {
         d += ` L${seg[i].x.toFixed(1)} ${seg[i].y.toFixed(1)}`
@@ -502,30 +1217,6 @@ function linePath(
   return path
 }
 
-function gapPath(
-  values: Array<number | null>,
-  max: number,
-  width: number,
-  height: number,
-  padLeft: number,
-  padRight: number,
-  padTop: number,
-  padBottom: number,
-  plotFraction = 1,
-) {
-  const n = values.length
-  let d = ''
-  for (let i = 1; i < n - 1; i++) {
-    if (values[i] !== null || values[i - 1] === null || values[i + 1] === null) continue
-    const x1 = padLeft + ((i - 1) / (n - 1)) * (width - padLeft - padRight)
-    const y1 = plotY(values[i - 1] ?? 0, max, height, padTop, padBottom, plotFraction)
-    const x2 = padLeft + ((i + 1) / (n - 1)) * (width - padLeft - padRight)
-    const y2 = plotY(values[i + 1] ?? 0, max, height, padTop, padBottom, plotFraction)
-    d += `M${x1.toFixed(1)} ${y1.toFixed(1)} L${x2.toFixed(1)} ${y2.toFixed(1)} `
-  }
-  return d.trim()
-}
-
 function areaPath(
   values: Array<number | null>,
   max: number,
@@ -535,16 +1226,17 @@ function areaPath(
   padRight: number,
   padTop: number,
   padBottom: number,
-  plotFraction = 1,
+  zone: PlotZone = 'viewer',
+  rangeMin = 0,
 ) {
   const n = values.length
   if (!n) return ''
-  const { bandTop, bandBottom } = plotBand(height, padTop, padBottom, plotFraction)
+  const { bandTop, bandBottom } = plotBandForZone(height, padTop, padBottom, zone)
 
   const points: Array<{ x: number; y: number } | null> = values.map((value, index) => {
     if (value === null) return null
     const x = n === 1 ? padLeft : padLeft + (index / (n - 1)) * (width - padLeft - padRight)
-    const y = plotY(value, max, height, padTop, padBottom, plotFraction)
+    const y = plotY(value, max, height, padTop, padBottom, zone, rangeMin)
     return { x, y }
   })
 
@@ -553,7 +1245,7 @@ function areaPath(
 
   const drawAreaSegment = (seg: Array<{ x: number; y: number }>) => {
     if (seg.length === 0) return ''
-    const bottomY = height - padBottom
+    const bottomY = bandBottom
     
     let d = `M${seg[0].x.toFixed(1)} ${bottomY.toFixed(1)}`
     d += ` L${seg[0].x.toFixed(1)} ${seg[0].y.toFixed(1)}`
@@ -611,10 +1303,6 @@ function areaPath(
   return path
 }
 
-function plotFractionForSeries(item: Series, expandedScale: boolean) {
-  return expandedScale && item.key !== 'viewers' ? SECONDARY_PLOT_FRACTION : 1
-}
-
 function AnalyticsChart({
   detail,
   selectedEmotes,
@@ -653,29 +1341,42 @@ function AnalyticsChart({
   notInAnalyticsDb?: boolean;
 }) {
   const [hover, setHover] = useState<number | null>(null)
-  const [expandedScale, setExpandedScale] = useState(false)
-  const [showDots, setShowDots] = useState(true)
+  const [expandedScale, setExpandedScale] = useState(true)
+  const [showDots, setShowDots] = useState(false)
+  const [showSpikes, setShowSpikes] = useState(false)
   const allRollups = detail?.rollups ?? []
   const rollups = useMemo(() => rollupsForChart(allRollups, isLive), [allRollups, isLive])
   const peakViewersFallback = detail?.stream?.peakViewers ?? 0
   const avgViewersFallback = detail?.stream?.avgViewers ?? 0
   const hasSyncedChat = rollups.some(point => !point.missing && (point.chatCount ?? 0) > 0)
-  const hasViewerRollups = rollups.some(point => !point.missing && viewerValue(point) > 0)
-  const hasFlatViewerLine = useMemo(() => {
-    const values = rollups.filter(point => !point.missing).map(viewerValue).filter(value => value > 0)
-    if (values.length < 10) return false
-    return Math.min(...values) === Math.max(...values)
-  }, [rollups])
+  const viewerCoverage = useMemo(() => analyzeViewerCoverage(rollups), [rollups])
+  const hasViewerRollups = viewerCoverage.hasViewerRollups
+  const hasFlatViewerLine = viewerCoverage.hasFlatViewerLine
   const useViewerFallback = !isLive
     && !hasSyncedChat
     && rollups.every(point => point.missing || viewerValue(point) === 0)
-  const needsViewerResync = !isLive && hasSyncedChat && (!hasViewerRollups || hasFlatViewerLine)
+  const needsViewerResync = !isLive && hasSyncedChat && (
+    !hasViewerRollups
+    || hasFlatViewerLine
+    || viewerCoverage.hasPartialTail
+    || viewerCoverage.hasShortSpan
+  )
   const hasChartData = useMemo(
     () => allRollups.some(rollupHasMinuteData),
     [allRollups],
   )
+  const hasViewerChartData = useMemo(
+    () => rollupsHaveViewerData(allRollups),
+    [allRollups],
+  )
+  const canRenderChart = hasChartData || hasViewerChartData
+  const chartChatMinutes = useMemo(
+    () => rollups.filter(point => !point.missing && (point.chatCount ?? 0) > 0).length,
+    [rollups],
+  )
+  const partialChatCoverage = !isLive && !syncing && Boolean(detail?.chatCoverage?.partial)
   const width = 1000
-  const height = 360
+  const height = CHART_VIEWBOX_HEIGHT
   const padLeft = 90
   const padRight = 34
   const padTop = 34
@@ -685,57 +1386,223 @@ function AnalyticsChart({
     () => buildSeries(rollups, selectedEmotes, peakViewersFallback, avgViewersFallback, useViewerFallback),
     [rollups, selectedEmotes, peakViewersFallback, avgViewersFallback, useViewerFallback],
   )
-  const chatSeries = useMemo(() => series.find(s => s.key === 'chat'), [series])
-  const lineSeries = useMemo(() => series.filter(s => s.key !== 'chat'), [series])
-  const chatBars = useMemo(
-    () => chatSeries
-      ? decimateChatBars(rollups, chatSeries.values, width, padLeft, padRight)
-      : [],
-    [chatSeries, rollups, width, padLeft, padRight],
+  const viewersItem = useMemo(() => series.find(s => s.key === 'viewers'), [series])
+  const chatItem = useMemo(() => series.find(s => s.key === 'chat'), [series])
+  const emotesItem = useMemo(() => series.find(s => s.key === 'emotes'), [series])
+  const perEmoteSeries = useMemo(() => series.filter(s => s.dashed), [series])
+  const activityAxisSeries = useMemo(
+    () => series.filter(s => s.key !== 'viewers' && s.key !== 'chat'),
+    [series],
   )
-  const chartScaleMax = useMemo(() => {
-    const viewersItem = series.find(s => s.key === 'viewers')
-    const overlayMax = Math.max(
-      1,
-      chatSeries?.max ?? 0,
-      ...lineSeries.filter(s => s.key !== 'viewers').map(s => s.max),
-    )
-    const hasViewerSignal = (viewersItem?.max ?? 0) > 0 || peakViewersFallback > 0
-    return hasViewerSignal
-      ? Math.max(1, viewersItem?.max ?? 0, peakViewersFallback)
-      : overlayMax
-  }, [series, chatSeries, lineSeries, peakViewersFallback])
-  const scaleForSeries = useCallback((item: Series) => (
-    expandedScale ? Math.max(1, item.max) : chartScaleMax
-  ), [expandedScale, chartScaleMax])
-  const viewerAreaPathD = useMemo(() => {
-    const viewersItem = series.find(s => s.key === 'viewers')
-    if (!viewersItem) return ''
-    return areaPath(
-      viewersItem.values,
-      scaleForSeries(viewersItem),
+  const activityAxis = useMemo(
+    () => activityAxisBounds(activityAxisSeries, expandedScale),
+    [activityAxisSeries, expandedScale],
+  )
+  const activityScaleMax = activityAxis.max
+  const activityScaleMin = activityAxis.min
+  const activityLayout = useMemo(
+    () => plotBandForZone(height, padTop, padBottom, 'viewer'),
+    [height, padTop, padBottom],
+  )
+  const emoteBandMaxY = useMemo(
+    () => plotY(activityAxis.max, activityAxis.max, height, padTop, padBottom, 'activity-emote', activityAxis.min),
+    [activityAxis, height, padTop, padBottom],
+  )
+  const viewerAxis = useMemo(
+    () => viewerScaleBounds(viewersItem?.values ?? [], peakViewersFallback, expandedScale),
+    [viewersItem, peakViewersFallback, expandedScale],
+  )
+  const viewerPeakAxis = useMemo(
+    () => viewerScaleBounds(viewersItem?.values ?? [], peakViewersFallback, false),
+    [viewersItem, peakViewersFallback],
+  )
+  const scaleForSeries = useCallback((item: Series) => {
+    if (item.key === 'viewers') {
+      return viewerAxis.max
+    }
+    if (item.key === 'chat') {
+      return Math.max(1, chatItem?.max ?? item.max)
+    }
+    return activityAxis.max
+  }, [viewerAxis.max, chatItem, activityAxis.max])
+  const chatBandMaxY = useMemo(() => {
+    if (!chatItem) return 0
+    const chatMax = Math.max(1, chatItem.max)
+    return plotY(chatMax, chatMax, height, padTop, padBottom, 'activity-chat')
+  }, [chatItem, height, padTop, padBottom])
+  const emotesDisplayValues = useMemo(
+    () => (emotesItem ? smoothDisplayValues(emotesItem.values, expandedScale ? 3 : 5) : []),
+    [emotesItem, expandedScale],
+  )
+  const chatDisplayValues = useMemo(
+    () => (chatItem ? smoothDisplayValues(chatItem.values, expandedScale ? 3 : 5) : []),
+    [chatItem, expandedScale],
+  )
+  const emoteBarRects = useMemo(() => {
+    if (!emotesItem) return []
+    const spikeThreshold = activityAxis.max * 0.72
+    return activityBarRects(
+      emotesItem.values,
+      activityAxis.max,
+      activityAxis.min,
+      'activity-emote',
       width,
       height,
       padLeft,
       padRight,
       padTop,
       padBottom,
+      { pxPerBar: 1.05, minWidth: 1, maxWidth: 3 },
+      spikeThreshold,
     )
-  }, [series, scaleForSeries, width, height, padLeft, padRight, padTop, padBottom])
-  const lineSeriesPaths = useMemo(() => lineSeries.map(item => {
-    const seriesMax = scaleForSeries(item)
-    const plotFraction = plotFractionForSeries(item, expandedScale)
+  }, [emotesItem, activityAxis, width, height, padLeft, padRight, padTop, padBottom])
+  const emoteGuidePathD = useMemo(() => {
+    if (!emotesItem) return ''
+    return linePath(
+      emotesDisplayValues,
+      activityAxis.max,
+      width,
+      height,
+      padLeft,
+      padRight,
+      padTop,
+      padBottom,
+      true,
+      'activity-emote',
+      activityAxis.min,
+    )
+  }, [emotesItem, emotesDisplayValues, activityAxis, width, height, padLeft, padRight, padTop, padBottom])
+  const chatLinePathD = useMemo(() => {
+    if (!chatItem) return ''
+    const chatMax = scaleForSeries(chatItem)
+    return linePath(
+      chatDisplayValues,
+      chatMax,
+      width,
+      height,
+      padLeft,
+      padRight,
+      padTop,
+      padBottom,
+      true,
+      'activity-chat',
+      0,
+    )
+  }, [chatItem, chatDisplayValues, scaleForSeries, width, height, padLeft, padRight, padTop, padBottom])
+  const chatWhisperBarRects = useMemo(() => {
+    if (!chatItem) return []
+    const chatMax = scaleForSeries(chatItem)
+    return activityBarRects(
+      chatItem.values,
+      chatMax,
+      0,
+      'activity-chat',
+      width,
+      height,
+      padLeft,
+      padRight,
+      padTop,
+      padBottom,
+      { pxPerBar: 1.35, minWidth: 1, maxWidth: 2 },
+    )
+  }, [chatItem, scaleForSeries, width, height, padLeft, padRight, padTop, padBottom])
+  const emoteSpikeIdxs = useMemo(() => {
+    if (!showSpikes || !emotesItem) return []
+    return emoteSpikeIndices(emotesDisplayValues, 0.3, 28)
+  }, [showSpikes, emotesItem, emotesDisplayValues])
+  const chatSpikeIdxs = useMemo(() => {
+    if (!showSpikes || !chatItem) return []
+    return emoteSpikeIndices(chatDisplayValues, 0.38, 12)
+  }, [showSpikes, chatItem, chatDisplayValues])
+  const syncChatFrontierIdx = useMemo(() => {
+    if (!syncing || !rollups.length) return -1
+    let last = -1
+    rollups.forEach((point, idx) => {
+      if (!point.missing && (point.chatCount ?? 0) > 0) last = idx
+    })
+    return last
+  }, [syncing, rollups])
+  const syncChatFrontierX = useMemo(() => {
+    if (syncChatFrontierIdx < 0 || rollups.length === 0) return null
+    const n = rollups.length
+    return n === 1 ? padLeft : padLeft + (syncChatFrontierIdx / (n - 1)) * (width - padLeft - padRight)
+  }, [syncChatFrontierIdx, rollups.length, padLeft, padRight, width])
+  const syncOverlayBand = useMemo(() => {
+    const viewerBand = plotBandForZone(height, padTop, padBottom, 'viewer')
     return {
-      key: item.key,
-      item,
-      seriesMax,
-      plotFraction,
-      gapPathD: gapPath(item.values, seriesMax, width, height, padLeft, padRight, padTop, padBottom, plotFraction),
-      linePathD: linePath(item.values, seriesMax, width, height, padLeft, padRight, padTop, padBottom, item.key !== 'viewers', plotFraction),
+      bandTop: viewerBand.activityTop,
+      bandBottom: height - padBottom,
+      bandHeight: viewerBand.activityHeight,
     }
-  }), [lineSeries, scaleForSeries, expandedScale, width, height, padLeft, padRight, padTop, padBottom])
+  }, [height, padTop, padBottom])
+  const perEmoteOverlays = useMemo(() => perEmoteSeries.map(item => ({
+    key: item.key,
+    color: item.color,
+    areaPathD: areaPath(
+      item.values,
+      activityAxis.max,
+      width,
+      height,
+      padLeft,
+      padRight,
+      padTop,
+      padBottom,
+      'viewer',
+      activityAxis.min,
+    ),
+    linePathD: showSpikes
+      ? linePath(
+        item.values,
+        activityAxis.max,
+        width,
+        height,
+        padLeft,
+        padRight,
+        padTop,
+        padBottom,
+        true,
+        'viewer',
+        activityAxis.min,
+      )
+      : '',
+  })), [perEmoteSeries, activityAxis, width, height, padLeft, padRight, padTop, padBottom, showSpikes])
+  const viewerAreaPathD = useMemo(() => {
+    if (!viewersItem) return ''
+    return areaPath(
+      viewersItem.values,
+      viewerAxis.max,
+      width,
+      height,
+      padLeft,
+      padRight,
+      padTop,
+      padBottom,
+      'viewer',
+      viewerAxis.min,
+    )
+  }, [viewersItem, viewerAxis, width, height, padLeft, padRight, padTop, padBottom])
+  const viewerTailStart = useMemo(() => {
+    if (!needsViewerResync || !viewersItem) return -1
+    return findEstimatedViewerTailStart(viewersItem.values)
+  }, [needsViewerResync, viewersItem])
+  const viewerLineSegments = useMemo(() => {
+    if (!viewersItem) return []
+    if (viewerTailStart <= 0) {
+      return [{ values: viewersItem.values, estimated: false }]
+    }
+    return [
+      {
+        values: viewersItem.values.map((value, index) => (index < viewerTailStart ? value : null)),
+        estimated: false,
+      },
+      {
+        values: viewersItem.values.map((value, index) => (index >= viewerTailStart - 1 ? value : null)),
+        estimated: true,
+      },
+    ]
+  }, [viewersItem, viewerTailStart])
   const hasChatData = useMemo(
-    () => rollups.some(point => (point.chatCount ?? 0) > 0 || (point.seventvEmoteCount ?? 0) > 0),
+    () => rollups.some(point => (point.chatCount ?? 0) > 0 || minuteEmoteTotal(point) > 0),
     [rollups],
   )
   const chartGames = normalizeGameSegments(games, rollups.length)
@@ -748,7 +1615,23 @@ function AnalyticsChart({
     )
   }
  
-  if (!hasChartData) {
+  if (!canRenderChart && (detail?.state === 'syncing' || syncing)) {
+    return (
+      <div className="grid min-h-80 place-items-center rounded border border-white/10 bg-[#0d0d12]/50 backdrop-blur-md px-4 text-center">
+        <div>
+          <div className="text-base font-black text-zinc-100">Syncing chart data…</div>
+          <div className="mt-1 text-sm font-semibold text-zinc-500 max-w-md">
+            Viewer minutes appear as soon as TwitchTracker finishes. Chat and emotes fill in segment by segment.
+          </div>
+          {syncing ? <SyncProgressPanel status={syncStatus} chartChatMinutes={chartChatMinutes} /> : null}
+          {syncNotice ? <div className="mt-2 text-xs font-bold text-amber-300">{syncNotice}</div> : null}
+          {syncError ? <div className="mt-2 text-xs font-bold text-red-400">{syncError}</div> : null}
+        </div>
+      </div>
+    )
+  }
+
+  if (!canRenderChart) {
     const isTwitchTracker = detail?.sources?.some(s => s.source === 'twitchtracker')
     const canShowSync = canSync || detail?.state === 'historical' || isTwitchTracker
     return (
@@ -774,7 +1657,7 @@ function AnalyticsChart({
               >
                 {syncing ? 'Sync in progress…' : 'Sync Historical Data'}
               </button>
-              {syncing ? <SyncProgressPanel status={syncStatus} /> : null}
+              {syncing ? <SyncProgressPanel status={syncStatus} chartChatMinutes={chartChatMinutes} /> : null}
               {syncNotice && <div className="mt-2 text-xs font-bold text-amber-300">{syncNotice}</div>}
               {syncError && <div className="mt-2 text-xs font-bold text-red-400">{syncError}</div>}
             </div>
@@ -784,28 +1667,19 @@ function AnalyticsChart({
     )
   }
 
-  const viewersItem = series.find(s => s.key === 'viewers')
-  const viewerValues = viewersItem?.values.filter((v): v is number => v !== null && v > 0) ?? []
+  const viewersItemForRender = viewersItem
+  const viewerValues = viewersItemForRender?.values.filter((v): v is number => v !== null && v > 0) ?? []
   const avgViewers = viewerValues.length > 0
     ? Math.round(viewerValues.reduce((a, b) => a + b, 0) / viewerValues.length)
     : (detail?.stream?.avgViewers ?? 0)
-  const hasViewerSignal = (viewersItem?.max ?? 0) > 0 || peakViewersFallback > 0
-  const overlayMax = Math.max(
-    1,
-    chatSeries?.max ?? 0,
-    ...lineSeries.filter(s => s.key !== 'viewers').map(s => s.max),
-  )
-  const viewersScaleMax = hasViewerSignal
-    ? Math.max(1, viewersItem?.max ?? 0, peakViewersFallback)
-    : overlayMax
-  const scaleForLineSeries = (item: Series) => (
-    expandedScale ? Math.max(1, item.max) : viewersScaleMax
-  )
-
+  const activeViewerAxis = viewersItemForRender ? viewerAxis : viewerPeakAxis
+  const viewerScale = activeViewerAxis.max
+  const viewerScaleMin = activeViewerAxis.min
+  const viewerScaleSpan = Math.max(1, viewerScale - viewerScaleMin)
   const yMax = padTop
-  const viewerScale = viewersItem ? scaleForLineSeries(viewersItem) : viewersScaleMax
-  const yAvg = height - padBottom - (avgViewers / viewerScale) * (height - padTop - padBottom)
-  const showAvgLabel = (yAvg - yMax) > 22 && (height - padBottom - yAvg) > 22
+  const viewerBand = plotBandForZone(height, padTop, padBottom, 'viewer')
+  const yAvg = viewerBand.bandBottom - ((avgViewers - viewerScaleMin) / viewerScaleSpan) * viewerBand.bandHeight
+  const showAvgLabel = (yAvg - yMax) > 22 && (viewerBand.bandBottom - yAvg) > 22
 
   const hoverIndex = hover === null ? rollups.length - 1 : hover
   const hoverPoint = rollups[hoverIndex]
@@ -815,10 +1689,17 @@ function AnalyticsChart({
     <div className="rounded border border-white/10 bg-[#0d0d12] p-3">
       {needsViewerResync ? (
         <div className="mb-3 rounded border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-100">
-          Viewer timeline missing from this sync. Click <span className="font-black">Re-sync viewers</span> to pull the TwitchTracker viewer chart (fast — chat/7TV stay as-is).
+          Viewer timeline is incomplete for this sync. Click <span className="font-black">Re-sync viewers</span> to pull the TwitchTracker viewer chart (fast — chat/7TV stay as-is).
         </div>
       ) : null}
-      {syncing ? <div className="mb-3"><SyncProgressPanel status={syncStatus} /></div> : null}
+      {partialChatCoverage ? (
+        <div className="mb-3 rounded border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-100">
+          Chat only covers the first {formatVodClock((detail?.chatCoverage?.chatSpanMinutes ?? 0) * 60)} of this{' '}
+          {formatVodClock((detail?.chatCoverage?.streamSpanMinutes ?? 0) * 60)} stream
+          {detail?.vodId ? ` (VOD ${detail.vodId})` : ''}. Twitch may still be processing the archive — re-sync later.
+        </div>
+      ) : null}
+      {syncing ? <div className="mb-3"><SyncProgressPanel status={syncStatus} chartChatMinutes={chartChatMinutes} /></div> : null}
       {syncNotice ? (
         <div className="mb-3 rounded border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-200">{syncNotice}</div>
       ) : null}
@@ -835,18 +1716,25 @@ function AnalyticsChart({
               imageUrl = getEmoteImageUrl({ provider: parts[0], id: parts[1] })
             }
             return (
-              <span key={item.key} className="flex items-center gap-1.5 rounded border border-white/10 bg-white/[0.05] px-2 py-1 text-[11px] font-black uppercase text-zinc-300">
-                <span className="inline-block h-2 w-2 rounded-full" style={{ background: item.color }} />
+              <span key={item.key} className="flex items-center gap-1.5 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] font-black uppercase text-zinc-400">
+                <span className="inline-block h-2 w-2 rounded-full" style={legendDotStyle(item.color)} />
                 {imageUrl && (
                   <img src={imageUrl} alt={item.label} className="h-3.5 w-3.5 object-contain inline-block align-middle" loading="lazy" />
                 )}
-                <span>{item.label} max {count(item.max)}</span>
+                <span>
+                  {item.label} max {count(item.max)}
+                  {syncing && item.key === 'chat' && (item.max ?? 0) <= 0 ? ' · syncing' : ''}
+                  {syncing && item.key === 'emotes' && (item.max ?? 0) <= 0 ? ' · syncing' : ''}
+                  {item.dashed && activityScaleMax > activityScaleMin && item.max > 0
+                    ? ` · ${Math.round(((item.max - activityScaleMin) / (activityScaleMax - activityScaleMin)) * 100)}% peak`
+                    : ''}
+                </span>
               </span>
             )
           })}
         </div>
         <div className="flex items-center gap-3">
-          <div className="text-xs font-bold text-zinc-500">{clock(hoverPoint?.minuteTs)} · viewers {count(hoverPoint ? viewerValue(hoverPoint) : null)} · chat {count(hoverPoint?.chatCount)} · 7TV {count(hoverPoint?.seventvEmoteCount)}</div>
+          <div className="text-xs font-bold text-zinc-500">{clock(hoverPoint?.minuteTs)} · viewers {count(hoverPoint ? viewerValue(hoverPoint) : null)} · chat {count(hoverPoint?.chatCount)} · emotes {count(hoverPoint ? minuteEmoteTotal(hoverPoint) : null)}</div>
           {canSync && (!hasChatData || needsViewerResync) ? (
             <button
               type="button"
@@ -869,19 +1757,29 @@ function AnalyticsChart({
             </button>
             <button
               type="button"
+              onClick={() => setShowSpikes(v => !v)}
+              title={showSpikes ? 'Hide spike markers' : 'Show spike markers'}
+              className={`rounded border px-2 py-1 text-[10px] font-black uppercase transition ${showSpikes ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200' : 'border-white/10 bg-white/[0.04] text-zinc-500 hover:text-zinc-300'}`}
+            >
+              Spikes
+            </button>
+            <button
+              type="button"
               onClick={() => setShowDots(v => !v)}
-              title={showDots ? 'Hide data points' : 'Show data points'}
+              title={showDots ? 'Hide viewer dots' : 'Show viewer dots'}
               className={`rounded border px-2 py-1 text-[10px] font-black uppercase transition ${showDots ? 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200' : 'border-white/10 bg-white/[0.04] text-zinc-500 hover:text-zinc-300'}`}
             >
-              ●
+              Dots
             </button>
             <button
               type="button"
               onClick={() => setExpandedScale(v => !v)}
-              title={expandedScale ? 'Shared viewer Y-axis (7TV/emotes in lower band)' : 'Normalize viewers to full height; 7TV stays in lower band'}
+              title={expandedScale
+                ? `Fit: viewers ${count(viewerAxis.min)}–${count(viewerAxis.max)}, emotes ${count(activityScaleMin)}–${count(activityScaleMax)}. Click for peak scale.`
+                : `Peak: viewers 0–${count(viewerPeakAxis.max)}, emotes 0–${count(activityScaleMax)}. Click to zoom into visible min–max.`}
               className={`rounded border px-2 py-1 text-[10px] font-black uppercase transition ${expandedScale ? 'border-violet-400/30 bg-violet-400/10 text-violet-200' : 'border-white/10 bg-white/[0.04] text-zinc-500 hover:text-zinc-300'}`}
             >
-              {expandedScale ? 'Shared' : 'Expand'}
+              {expandedScale ? 'Fit' : 'Peak'}
             </button>
           </div>
         </div>
@@ -889,12 +1787,12 @@ function AnalyticsChart({
       <div className="overflow-hidden rounded">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-[300px] w-full cursor-crosshair select-none"
+        className="h-[min(420px,52vh)] min-h-[320px] w-full cursor-crosshair select-none"
       >
         <defs>
           <linearGradient id="viewerAreaGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#22d3ee" stopOpacity="0" />
+            <stop offset="0%" stopColor={CHART_THEME.viewer.color} stopOpacity={CHART_THEME.viewer.fillTop} />
+            <stop offset="100%" stopColor={CHART_THEME.viewer.color} stopOpacity={CHART_THEME.viewer.fillBottom} />
           </linearGradient>
           <clipPath id="analyticsPlotClip">
             <rect x={padLeft} y={padTop} width={width - padLeft - padRight} height={height - padTop - padBottom} />
@@ -902,9 +1800,9 @@ function AnalyticsChart({
         </defs>
 
         {/* Horizontal guide lines */}
-        <line x1={padLeft} x2={width - padRight} y1={padTop} y2={padTop} stroke="rgba(34, 211, 238, 0.15)" strokeWidth="1" strokeDasharray="4 4" />
+        <line x1={padLeft} x2={width - padRight} y1={padTop} y2={padTop} stroke={hexToRgba(CHART_THEME.viewer.color, CHART_THEME.viewer.guide)} strokeWidth="1" strokeDasharray="4 4" />
         {showAvgLabel && (
-          <line x1={padLeft} x2={width - padRight} y1={yAvg} y2={yAvg} stroke="rgba(34, 211, 238, 0.15)" strokeWidth="1" strokeDasharray="4 4" />
+          <line x1={padLeft} x2={width - padRight} y1={yAvg} y2={yAvg} stroke={hexToRgba(CHART_THEME.viewer.color, CHART_THEME.viewer.guide)} strokeWidth="1" strokeDasharray="4 4" />
         )}
         <line x1={padLeft} x2={width - padRight} y1={height - padBottom} y2={height - padBottom} stroke="rgba(255,255,255,.08)" strokeWidth="1" />
 
@@ -912,7 +1810,7 @@ function AnalyticsChart({
         <g>
           {/* MAX Label */}
           <text x={padLeft - 12} y={padTop - 4} textAnchor="end" className="fill-cyan-400 text-[10px] font-black uppercase">MAX</text>
-          <text x={padLeft - 12} y={padTop + 10} textAnchor="end" className="fill-cyan-400 text-sm font-black">{count(viewersScaleMax)}</text>
+          <text x={padLeft - 12} y={padTop + 10} textAnchor="end" className="fill-cyan-400 text-sm font-black">{count(viewerScale)}</text>
 
           {/* AVG Label */}
           {showAvgLabel && (
@@ -921,29 +1819,42 @@ function AnalyticsChart({
               <text x={padLeft - 12} y={yAvg + 10} textAnchor="end" className="fill-cyan-400/80 text-sm font-black">{count(avgViewers)}</text>
             </>
           )}
+          {viewerScaleMin > 0 && (
+            <>
+              <text x={padLeft - 12} y={viewerBand.bandBottom - 14} textAnchor="end" className="fill-cyan-400/70 text-[10px] font-black uppercase">MIN</text>
+              <text x={padLeft - 12} y={viewerBand.bandBottom} textAnchor="end" className="fill-cyan-400/70 text-sm font-black">{count(viewerScaleMin)}</text>
+            </>
+          )}
         </g>
 
         <g clipPath="url(#analyticsPlotClip)">
-        {/* Draw chat count as a bar chart at the bottom, scaled to 35% of the chart height */}
-        {chatSeries && chatBars.map(bar => {
-          const barHeight = (bar.value / Math.max(1, chatSeries.max)) * (height - padTop - padBottom) * 0.35
-          const y = height - padBottom - barHeight
-          const isSpike = bar.value > chatSeries.max * 0.85
-          const color = isSpike ? '#f87171' : '#38bdf8'
-          return (
-            <rect
-              key={bar.index}
-              x={bar.x - bar.barWidth / 2}
-              y={y}
-              width={bar.barWidth}
-              height={barHeight}
-              fill={color}
-              opacity={0.8}
-            />
-          )
-        })}
+        {/* Activity strip background */}
+        <rect
+          x={padLeft}
+          y={activityLayout.activityTop}
+          width={width - padLeft - padRight}
+          height={activityLayout.activityHeight}
+          fill="rgba(255,255,255,0.025)"
+        />
+        <line
+          x1={padLeft}
+          x2={width - padRight}
+          y1={activityLayout.activityTop}
+          y2={activityLayout.activityTop}
+          stroke="rgba(255,255,255,0.1)"
+          strokeWidth="1"
+        />
+        <line
+          x1={padLeft}
+          x2={width - padRight}
+          y1={activityLayout.chatSplit}
+          y2={activityLayout.chatSplit}
+          stroke="rgba(255,255,255,0.06)"
+          strokeWidth="1"
+          strokeDasharray="3 4"
+        />
 
-        {/* Draw area fill for viewers */}
+        {/* Viewer area fill */}
         {viewerAreaPathD ? (
           <path
             d={viewerAreaPathD}
@@ -951,37 +1862,287 @@ function AnalyticsChart({
           />
         ) : null}
 
-        {/* Draw line series (viewers, emotes) over the full height */}
-        {lineSeriesPaths.map(({ key, item, seriesMax, plotFraction, gapPathD, linePathD }) => (
-            <g key={key}>
-              <path d={gapPathD} fill="none" stroke={item.color} strokeDasharray="8 9" strokeLinecap="round" strokeWidth="2" opacity=".4" />
-              <path d={linePathD} fill="none" stroke={item.color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={item.dashed ? 2 : 3} strokeDasharray={item.dashed ? '5 8' : undefined} />
-              {/* Data point dots */}
-              {showDots && item.values.map((val, idx) => {
-                if (val === null) return null
-                const n = rollups.length
-                const cx = n === 1 ? padLeft : padLeft + (idx / (n - 1)) * (width - padLeft - padRight)
-                const cy = plotY(val, seriesMax, height, padTop, padBottom, plotFraction)
-                // Only show dots at reasonable intervals to avoid clutter
-                const step = Math.max(1, Math.floor(n / 60))
-                if (idx % step !== 0 && idx !== n - 1 && idx !== 0) return null
-                return (
-                  <circle
-                    key={idx}
-                    cx={cx}
-                    cy={cy}
-                    r={hover === idx ? 5 : 3}
-                    fill={item.color}
-                    stroke="#0d0d12"
-                    strokeWidth="1.5"
-                    opacity={hover === idx ? 1 : 0.7}
-                    className="transition-all duration-100"
-                  />
-                )
-              })}
-            </g>
+        {/* Per-emote overlays in viewer zone */}
+        {perEmoteOverlays.map(overlay => (
+          <g key={overlay.key}>
+            {overlay.areaPathD ? (
+              <path
+                d={overlay.areaPathD}
+                fill={overlay.color}
+                opacity={CHART_THEME.emoteOverlay}
+              />
+            ) : null}
+            {overlay.linePathD ? (
+              <path
+                d={overlay.linePathD}
+                fill="none"
+                stroke={overlay.color}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1"
+                strokeDasharray="4 4"
+                opacity={0.45}
+              />
+            ) : null}
+          </g>
         ))}
+
+        {/* Viewer line (split when tail is estimated/incomplete) */}
+        {viewersItem && viewerLineSegments.map((segment, segmentIndex) => {
+          const pathD = linePath(segment.values, viewerAxis.max, width, height, padLeft, padRight, padTop, padBottom, false, 'viewer', viewerAxis.min)
+          if (!pathD) return null
+          return (
+            <path
+              key={`viewer-${segmentIndex}`}
+              d={pathD}
+              fill="none"
+              stroke={CHART_THEME.viewer.color}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={segment.estimated ? 2 : 2.5}
+              strokeDasharray={segment.estimated ? '7 6' : undefined}
+              opacity={segment.estimated ? 0.4 : CHART_THEME.viewer.line}
+            />
+          )
+        })}
+
+        {/* Emote max guide */}
+        <line
+          x1={padLeft}
+          x2={width - padRight}
+          y1={emoteBandMaxY}
+          y2={emoteBandMaxY}
+          stroke={hexToRgba(CHART_THEME.emote.color, CHART_THEME.emote.guide)}
+          strokeWidth="1"
+          strokeDasharray="4 5"
+        />
+
+        {/* Dense emote bar histogram */}
+        {emoteBarRects.map(bar => (
+          <rect
+            key={bar.key}
+            x={bar.x}
+            y={bar.y}
+            width={bar.width}
+            height={bar.height}
+            rx={0}
+            fill={bar.isSpike ? CHART_THEME.spike.color : CHART_THEME.emote.color}
+            opacity={
+              bar.isSpike
+                ? CHART_THEME.emote.barSpike
+                : bar.hasValue
+                  ? CHART_THEME.emote.bar
+                  : CHART_THEME.emote.barBaseline
+            }
+          />
+        ))}
+
+        {/* Optional thin emote peak guide */}
+        {emoteGuidePathD ? (
+          <path
+            d={emoteGuidePathD}
+            fill="none"
+            stroke={CHART_THEME.emote.color}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1"
+            opacity={CHART_THEME.emote.line}
+          />
+        ) : null}
+
+        {/* Chat whisper bars behind line */}
+        {chatWhisperBarRects.map(bar => (
+          <rect
+            key={bar.key}
+            x={bar.x}
+            y={bar.y}
+            width={bar.width}
+            height={bar.height}
+            rx={0}
+            fill={CHART_THEME.chat.color}
+            opacity={bar.hasValue ? CHART_THEME.chat.whisperBar : CHART_THEME.chat.whisperBar * 0.6}
+          />
+        ))}
+
+        {/* Chat max guide */}
+        {chatItem ? (
+          <line
+            x1={padLeft}
+            x2={width - padRight}
+            y1={chatBandMaxY}
+            y2={chatBandMaxY}
+            stroke={hexToRgba(CHART_THEME.chat.color, CHART_THEME.chat.guide)}
+            strokeWidth="1"
+            strokeDasharray="4 5"
+          />
+        ) : null}
+
+        {/* Chat line */}
+        {chatLinePathD ? (
+          <path
+            d={chatLinePathD}
+            fill="none"
+            stroke={CHART_THEME.chat.line}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.5"
+            opacity={CHART_THEME.chat.lineOpacity}
+          />
+        ) : null}
+
+        {syncing && syncChatFrontierX != null ? (
+          <>
+            <rect
+              x={syncChatFrontierX}
+              y={syncOverlayBand.bandTop}
+              width={Math.max(0, width - padRight - syncChatFrontierX)}
+              height={syncOverlayBand.bandHeight}
+              fill="rgba(9,9,11,0.35)"
+            />
+            <line
+              x1={syncChatFrontierX}
+              x2={syncChatFrontierX}
+              y1={syncOverlayBand.bandTop}
+              y2={syncOverlayBand.bandBottom}
+              stroke="rgba(34,211,238,0.85)"
+              strokeWidth="1.5"
+              strokeDasharray="4 3"
+              className="animate-pulse"
+            />
+          </>
+        ) : null}
+
+        {/* Emote spike markers */}
+        {emoteSpikeIdxs.map(idx => {
+          const value = emotesDisplayValues[idx]
+          if (value === null || value <= 0) return null
+          const n = rollups.length
+          const cx = n === 1 ? padLeft : padLeft + (idx / (n - 1)) * (width - padLeft - padRight)
+          const cy = plotY(value, activityAxis.max, height, padTop, padBottom, 'activity-emote', activityAxis.min)
+          return (
+            <circle
+              key={`emote-spike-${idx}`}
+              cx={cx}
+              cy={cy}
+              r={CHART_THEME.spike.dotRadius}
+              fill={CHART_THEME.spike.color}
+              stroke={CHART_THEME.background}
+              strokeWidth="1"
+              opacity={CHART_THEME.spike.opacity}
+            />
+          )
+        })}
+
+        {/* Chat spike markers */}
+        {chatSpikeIdxs.map(idx => {
+          const value = chatDisplayValues[idx]
+          if (value === null || value <= 0 || !chatItem) return null
+          const n = rollups.length
+          const chatMax = scaleForSeries(chatItem)
+          const cx = n === 1 ? padLeft : padLeft + (idx / (n - 1)) * (width - padLeft - padRight)
+          const cy = plotY(value, chatMax, height, padTop, padBottom, 'activity-chat', 0)
+          return (
+            <circle
+              key={`chat-spike-${idx}`}
+              cx={cx}
+              cy={cy}
+              r={CHART_THEME.spike.dotRadius}
+              fill={CHART_THEME.spike.color}
+              stroke={CHART_THEME.background}
+              strokeWidth="1"
+              opacity={CHART_THEME.spike.opacity}
+            />
+          )
+        })}
+
+        {/* Viewer data point dots */}
+        {showDots && viewersItem && viewersItem.values.map((val, idx) => {
+          if (val === null) return null
+          const n = rollups.length
+          const cx = n === 1 ? padLeft : padLeft + (idx / (n - 1)) * (width - padLeft - padRight)
+          const cy = plotY(val, viewerAxis.max, height, padTop, padBottom, 'viewer', viewerAxis.min)
+          const step = Math.max(1, Math.floor(n / 60))
+          if (idx % step !== 0 && idx !== n - 1 && idx !== 0) return null
+          const estimated = viewerTailStart > 0 && idx >= viewerTailStart
+          return (
+            <circle
+              key={`viewer-dot-${idx}`}
+              cx={cx}
+              cy={cy}
+              r={hover === idx ? 5 : 3}
+              fill={CHART_THEME.viewer.color}
+              stroke={CHART_THEME.background}
+              strokeWidth="1.5"
+              opacity={hover === idx ? CHART_THEME.viewer.line : estimated ? 0.35 : CHART_THEME.viewer.dot}
+              className="transition-all duration-100"
+            />
+          )
+        })}
         </g>
+
+        {syncing ? (
+          <>
+            <text
+              x={width - padRight + 2}
+              y={padTop + 12}
+              textAnchor="start"
+              className="fill-cyan-300/90 text-[8px] font-black uppercase"
+            >
+              Viewers
+            </text>
+            <text
+              x={width - padRight + 2}
+              y={activityLayout.activityTop + activityLayout.activityHeight * 0.21}
+              textAnchor="start"
+              className="fill-violet-300/80 text-[8px] font-black uppercase"
+            >
+              Chat (syncing)
+            </text>
+            <text
+              x={width - padRight + 2}
+              y={activityLayout.activityTop + activityLayout.activityHeight * 0.71}
+              textAnchor="start"
+              className="fill-emerald-300/70 text-[8px] font-black uppercase"
+            >
+              Emotes (syncing)
+            </text>
+          </>
+        ) : (
+          <>
+            <text
+              x={width - padRight + 2}
+              y={emoteBandMaxY - 3}
+              textAnchor="start"
+              className="fill-emerald-300/80 text-[8px] font-black uppercase"
+            >
+              {expandedScale ? 'Emote max' : 'Emote peak'} {count(activityScaleMax)}
+            </text>
+            {chatItem ? (
+              <text
+                x={width - padRight + 2}
+                y={chatBandMaxY - 3}
+                textAnchor="start"
+                className="fill-violet-300/80 text-[8px] font-black uppercase"
+              >
+                Chat max {count(scaleForSeries(chatItem))}
+              </text>
+            ) : null}
+            <text
+              x={width - padRight + 2}
+              y={activityLayout.activityTop + activityLayout.activityHeight * 0.71}
+              className="fill-emerald-400/50 text-[8px] font-black uppercase"
+            >
+              Emotes
+            </text>
+            <text
+              x={width - padRight + 2}
+              y={activityLayout.activityTop + activityLayout.activityHeight * 0.21}
+              className="fill-violet-400/50 text-[8px] font-black uppercase"
+            >
+              Chat
+            </text>
+          </>
+        )}
 
         {/* Draw X-axis ticks and time labels */}
         {(() => {
@@ -1107,7 +2268,7 @@ function AnalyticsChart({
         />
       </svg>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap gap-1.5">
         {(detail?.topEmotes ?? []).slice(0, 16).map(emote => {
           const imageUrl = getEmoteImageUrl(emote)
           return (
@@ -1115,7 +2276,7 @@ function AnalyticsChart({
               key={emote.key}
               type="button"
               onClick={() => onSelectEmote(emote.key)}
-              className={`flex items-center gap-1.5 rounded border px-2 py-1 text-[11px] font-black transition ${selectedEmotes.has(emote.key) ? 'border-amber-200/60 bg-amber-300/20 text-amber-100' : 'border-white/10 bg-white/[0.045] text-zinc-300 hover:bg-white/[0.08]'}`}
+              className={`inline-flex min-w-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-black transition ${selectedEmotes.has(emote.key) ? 'border-amber-200/60 bg-amber-300/20 text-amber-100' : 'border-white/10 bg-white/[0.045] text-zinc-300 hover:bg-white/[0.08]'}`}
             >
               {imageUrl && (
                 <img src={imageUrl} alt={emote.name} className="h-4 w-4 object-contain inline-block align-middle" loading="lazy" />
@@ -1147,6 +2308,10 @@ function StreamSidebar({
   isLiveView,
   liveState,
   onPrefetchStream,
+  onSync,
+  syncing,
+  syncedOnly,
+  onSyncedOnlyChange,
 }: {
   login: string
   streams: AnalyticsStream[]
@@ -1154,6 +2319,10 @@ function StreamSidebar({
   isLiveView: boolean
   liveState?: string
   onPrefetchStream?: (streamId: string) => void
+  onSync?: () => void
+  syncing?: boolean
+  syncedOnly?: boolean
+  onSyncedOnlyChange?: (value: boolean) => void
 }) {
   const dateCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -1164,12 +2333,28 @@ function StreamSidebar({
     return counts
   }, [streams])
 
+  const visibleStreams = useMemo(() => {
+    if (!syncedOnly) return streams
+    return streams.filter(s => (s.viewerSamples ?? 0) > 0 || (s.chatMessages ?? 0) > 0)
+  }, [streams, syncedOnly])
+
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded border border-white/10 bg-white/[0.035] xl:max-h-[calc(100vh-12rem)]">
       <div className="flex items-center justify-between border-b border-white/10 px-3 py-2.5">
         <span className="text-[11px] font-black uppercase tracking-wide text-zinc-500">Streams</span>
-        <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-black text-zinc-400">{streams.length}</span>
+        <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-black text-zinc-400">{visibleStreams.length}{syncedOnly ? `/${streams.length}` : ''}</span>
       </div>
+      {onSyncedOnlyChange ? (
+        <label className="flex cursor-pointer items-center gap-2 border-b border-white/5 px-3 py-2 text-[10px] font-semibold text-zinc-400">
+          <input
+            type="checkbox"
+            checked={Boolean(syncedOnly)}
+            onChange={e => onSyncedOnlyChange(e.target.checked)}
+            className="accent-violet-500"
+          />
+          Synced only (hide stats-only rows)
+        </label>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Link
           to={`/analytics/${encodeURIComponent(login)}`}
@@ -1189,9 +2374,13 @@ function StreamSidebar({
           <div className="px-3 py-4 text-center text-[11px] font-semibold text-zinc-500">
             No past streams indexed yet.
           </div>
+        ) : visibleStreams.length === 0 ? (
+          <div className="px-3 py-4 text-center text-[11px] font-semibold text-zinc-500">
+            No synced streams match this filter. Turn off &quot;Synced only&quot; to see stats-only sessions.
+          </div>
         ) : (
           <div className="divide-y divide-white/5">
-            {streams.map(stream => {
+            {visibleStreams.map(stream => {
               const dateSlug = getLocalDateString(stream.startedAt)
               const isUnique = dateSlug && dateCounts[dateSlug] === 1
               const targetSlug = isUnique ? dateSlug : stream.streamId
@@ -1220,12 +2409,33 @@ function StreamSidebar({
                         {stream.category}
                       </span>
                     ) : null}
-                    <span className={`rounded px-1.5 py-0.5 text-[9px] font-black uppercase ${
-                      hasMinuteData ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'
-                    }`}>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[9px] font-black uppercase ${
+                        hasMinuteData ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'
+                      }`}
+                      title={
+                        hasMinuteData
+                          ? 'Minute-level viewer, chat, and emote rollups are synced for charts.'
+                          : 'Session stats only (duration, title). Use Sync chat/emotes on the stream detail page for minute charts.'
+                      }
+                    >
                       {hasMinuteData ? 'Synced' : 'Stats only'}
                     </span>
                   </div>
+                  {!hasMinuteData && isActive && onSync ? (
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        onSync()
+                      }}
+                      disabled={syncing}
+                      className="mt-1.5 rounded border border-violet-400/30 bg-violet-500/10 px-2 py-0.5 text-[9px] font-black uppercase text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
+                    >
+                      {syncing ? 'Syncing…' : 'Sync for charts'}
+                    </button>
+                  ) : null}
                   <div className="mt-1.5 grid grid-cols-3 gap-1 text-[10px] font-bold text-zinc-500">
                     <span>{duration(stream)}</span>
                     <span>avg {count(stream.avgViewers)}</span>
@@ -1273,7 +2483,14 @@ function TopEmoteTable({ emotes, selected, onSelect }: { emotes: AnalyticsTopEmo
               )}
               <span className="truncate font-black text-white" title={emote.name}>{emote.name}</span>
             </span>
-            <span className="uppercase text-zinc-500">{emote.provider || '-'}</span>
+            <span className="flex items-center">
+              {(() => {
+                const provider = emote.provider || parseEmoteKey(emote.key).provider
+                return provider && provider !== 'unknown'
+                  ? <EmoteProviderBadge provider={provider} />
+                  : <span className="text-zinc-500">-</span>
+              })()}
+            </span>
             <span>{count(emote.count)}</span>
           </button>
         )
@@ -1293,24 +2510,156 @@ function formatVodOffset(seconds: number): string {
   return parts.join('')
 }
 
+type MomentSortMode = 'score' | 'chat' | 'emotes' | 'seventv' | 'twitch' | 'top_emote' | 'time'
+
+const MOMENT_SORT_OPTIONS: Array<{ id: MomentSortMode; label: string }> = [
+  { id: 'score', label: 'Score' },
+  { id: 'chat', label: 'Chat' },
+  { id: 'emotes', label: 'Emotes' },
+  { id: 'seventv', label: '7TV' },
+  { id: 'twitch', label: 'Twitch' },
+  { id: 'top_emote', label: 'Top emote' },
+  { id: 'time', label: 'Latest' },
+]
+
+function EmoteProviderBadge({ provider }: { provider?: string }) {
+  if (!provider) return null
+  return (
+    <span className={`rounded border px-1.5 py-0.5 text-[9px] font-black uppercase ${emoteProviderTone(provider)}`}>
+      {emoteProviderLabel(provider)}
+    </span>
+  )
+}
+
+function MomentReviewPanel({
+  rollups,
+  selectedRollup,
+  onSelectRollup,
+  topEmotesCatalog,
+}: {
+  rollups: AnalyticsMinuteRollup[]
+  selectedRollup: AnalyticsMinuteRollup | null
+  onSelectRollup: (rollup: AnalyticsMinuteRollup) => void
+  topEmotesCatalog?: AnalyticsTopEmote[]
+}) {
+  const [sortBy, setSortBy] = useState<MomentSortMode>('score')
+  const baselines = useMemo(() => computeStreamBaselines(rollups), [rollups])
+  const candidates = useMemo(() => {
+    const rows = rollups
+      .filter(point => !point.missing && rollupHasMinuteData(point))
+      .map(point => ({
+        rollup: point,
+        score: computeMomentScore(point, baselines, rollups),
+        reason: detectPickReason(point, baselines, topEmotesCatalog),
+        topEmote: topEmotesFromRollup(point, 1, topEmotesCatalog)[0],
+      }))
+    const sorted = [...rows]
+    if (sortBy === 'chat') {
+      sorted.sort((a, b) => (b.rollup.chatCount ?? 0) - (a.rollup.chatCount ?? 0))
+    } else if (sortBy === 'emotes') {
+      sorted.sort((a, b) => minuteEmoteTotal(b.rollup) - minuteEmoteTotal(a.rollup))
+    } else if (sortBy === 'seventv') {
+      sorted.sort((a, b) => emoteCountForProvider(b.rollup, 'seventv') - emoteCountForProvider(a.rollup, 'seventv'))
+    } else if (sortBy === 'twitch') {
+      sorted.sort((a, b) => emoteCountForProvider(b.rollup, 'twitch') - emoteCountForProvider(a.rollup, 'twitch'))
+    } else if (sortBy === 'top_emote') {
+      sorted.sort((a, b) => peakEmoteCount(b.rollup) - peakEmoteCount(a.rollup))
+    } else if (sortBy === 'time') {
+      sorted.sort((a, b) => b.rollup.minuteTs.localeCompare(a.rollup.minuteTs))
+    } else {
+      sorted.sort((a, b) => b.score - a.score)
+    }
+    return sorted.slice(0, 10)
+  }, [rollups, baselines, sortBy, topEmotesCatalog])
+
+  if (candidates.length < 2) return null
+
+  return (
+    <div className="rounded border border-white/10 bg-[#0d0d12] p-3">
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-[11px] font-black uppercase text-zinc-500">Top Moments</div>
+        <div className="flex flex-wrap gap-1">
+          {MOMENT_SORT_OPTIONS.map(option => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setSortBy(option.id)}
+              className={`rounded border px-2 py-0.5 text-[10px] font-black uppercase transition ${
+                sortBy === option.id
+                  ? 'border-violet-400/30 bg-violet-500/10 text-violet-200'
+                  : 'border-white/10 bg-white/[0.03] text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto">
+        {candidates.map(({ rollup, score, reason, topEmote }) => {
+          const timeStr = new Date(rollup.minuteTs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+          const active = selectedRollup?.minuteTs === rollup.minuteTs
+          return (
+            <button
+              key={rollup.minuteTs}
+              type="button"
+              onClick={() => onSelectRollup(rollup)}
+              className={`grid grid-cols-[72px_minmax(0,1fr)_auto] items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition ${
+                active ? 'border border-amber-500/20 bg-amber-500/10' : 'border border-transparent bg-white/[0.03] hover:bg-white/[0.05]'
+              }`}
+            >
+              <span className="font-bold text-zinc-200">{timeStr}</span>
+              <span className="min-w-0">
+                <span className="block truncate font-semibold text-zinc-400">{momentReasonLabel(reason)}</span>
+                {topEmote ? (
+                  <span className="mt-1 flex min-w-0 items-center gap-1.5">
+                    {topEmote.image_url ? (
+                      <img src={topEmote.image_url} alt="" className="h-4 w-4 shrink-0 object-contain" loading="lazy" />
+                    ) : null}
+                    <span className="truncate font-bold text-zinc-300">{topEmote.name}</span>
+                    <EmoteProviderBadge provider={topEmote.provider} />
+                    <span className="shrink-0 text-zinc-500">{count(topEmote.count)}</span>
+                  </span>
+                ) : null}
+              </span>
+              <span className="font-black text-amber-300/80">{score.toFixed(1)}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function SelectedMomentPanel({
   rollup,
+  rollups,
   startedAt,
   vodId,
   channel,
+  streamId,
+  topEmotesCatalog,
+  isLiveView,
+  channelLive,
 }: {
   rollup: AnalyticsMinuteRollup | null
+  rollups: AnalyticsMinuteRollup[]
   startedAt?: string
   vodId?: string
   channel: string
+  streamId?: string
+  topEmotesCatalog?: AnalyticsTopEmote[]
+  isLiveView?: boolean
+  channelLive?: boolean
 }) {
   const [clipStatus, setClipStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [clipError, setClipError] = useState('')
   const [createdJobId, setCreatedJobId] = useState<string | null>(null)
+  const baselines = useMemo(() => computeStreamBaselines(rollups), [rollups])
 
   if (!rollup) {
     return (
-      <div className="rounded border border-white/10 bg-white/[0.02] p-4 text-center text-xs text-zinc-500 italic">
+      <div className="rounded border border-white/10 bg-[#0d0d12] p-4 text-center text-xs text-zinc-500 italic">
         Click on the graph above to select a moment and clip it or view the VOD.
       </div>
     )
@@ -1333,14 +2682,49 @@ function SelectedMomentPanel({
     : undefined
 
   const handleCreateClip = async () => {
+    if (!rollup) return
     setClipStatus('loading')
+    setClipError('')
     try {
-      const data = await triggerClipperManual(
-        channel,
-        `Analytics Spike (${timeStr})`,
-        60.0,
-        30.0
-      )
+      if (isLiveView && channelLive === false) {
+        setClipStatus('error')
+        setClipError('Channel is not live right now. Clip moments from the live view require an active broadcast.')
+        return
+      }
+      if (!isLiveView && !vodId) {
+        setClipStatus('error')
+        setClipError('VOD ID is not resolved for this session yet. Wait for VOD metadata or open the stream on Twitch before clipping a past moment.')
+        return
+      }
+      const authStatus = await getClipperTwitchStatus().catch(() => null)
+      if (authStatus && !authStatus.ok) {
+        setClipStatus('error')
+        setClipError(
+          authStatus.remediation
+            || describeClipperFailure({ failure_code: authStatus.failure_code })
+        )
+        return
+      }
+      const pickReason = detectPickReason(rollup, baselines, topEmotesCatalog)
+      const chatMultiplier = (rollup.chatCount ?? 0) / baselines.chat
+      const data = await triggerClipperManual(channel, {
+        title: `Analytics Spike (${timeStr})`,
+        duration: 60.0,
+        final_duration: 30.0,
+        reason: `${pickReason} at ${timeStr}`,
+        moment_context: {
+          stream_id: streamId,
+          minute_ts: rollup.minuteTs,
+          vod_offset_seconds: offsetSeconds,
+          viewer_count: viewerValue(rollup),
+          chat_per_min: rollup.chatCount ?? 0,
+          emote_per_min: minuteEmoteTotal(rollup),
+          top_emotes: topEmotesFromRollup(rollup, 5, topEmotesCatalog),
+          chat_multiplier: Math.round(chatMultiplier * 10) / 10,
+          pick_reason: pickReason,
+          moment_score: Math.round(computeMomentScore(rollup, baselines, rollups) * 10) / 10,
+        },
+      })
       setCreatedJobId(data.job_id)
       setClipStatus('success')
       window.dispatchEvent(new CustomEvent('streamclone:clip-created'))
@@ -1351,13 +2735,13 @@ function SelectedMomentPanel({
   }
 
   return (
-    <div className="rounded border border-amber-500/20 bg-[#0d0d12] p-4 relative overflow-hidden transition-all duration-300">
-      <div className="absolute left-0 right-0 top-0 h-1 bg-gradient-to-r from-amber-500/40 via-amber-400 to-amber-500/40" />
+    <div className="rounded border border-amber-500/10 bg-[#0d0d12] p-4 relative overflow-hidden transition-all duration-300">
+      <div className="absolute left-0 right-0 top-0 h-1 bg-gradient-to-r from-amber-500/25 via-amber-400/60 to-amber-500/25" />
       
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-black uppercase text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">Selected Moment</span>
+            <span className="text-xs font-black uppercase text-amber-300/80 bg-amber-500/10 px-2 py-0.5 rounded">Selected Moment</span>
             <span className="text-sm font-black text-white">{timeStr} · {dateStr}</span>
           </div>
           <div className="mt-2 flex flex-wrap gap-4 text-xs font-bold text-zinc-400">
@@ -1366,8 +2750,28 @@ function SelectedMomentPanel({
             )}
             <span>Viewers: <strong className="text-zinc-200">{count(viewerValue(rollup))}</strong></span>
             <span>Chat activity: <strong className="text-zinc-200">{rollup.chatCount}/min</strong></span>
-            <span>7TV Emotes: <strong className="text-zinc-200">{rollup.seventvEmoteCount}/min</strong></span>
+            <span>Emotes: <strong className="text-zinc-200">{minuteEmoteTotal(rollup)}/min</strong></span>
+            {(rollup.seventvEmoteCount ?? 0) > 0 ? (
+              <span>7TV: <strong className="text-emerald-300">{rollup.seventvEmoteCount}/min</strong></span>
+            ) : null}
           </div>
+          {topEmotesFromRollup(rollup, 4, topEmotesCatalog).length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {topEmotesFromRollup(rollup, 4, topEmotesCatalog).map(emote => (
+                <span
+                  key={emote.key}
+                  className="inline-flex items-center gap-1.5 rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-bold text-zinc-300"
+                >
+                  {emote.image_url ? (
+                    <img src={emote.image_url} alt="" className="h-4 w-4 object-contain" loading="lazy" />
+                  ) : null}
+                  <span>{emote.name}</span>
+                  <EmoteProviderBadge provider={emote.provider} />
+                  <span className="text-zinc-500">{count(emote.count)}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">
@@ -1422,7 +2826,7 @@ function SelectedMomentPanel({
       )}
       {clipStatus === 'success' && (
         <div className="mt-3 text-xs font-semibold text-emerald-400 rounded border border-emerald-500/10 bg-emerald-500/5 p-2.5 flex justify-between items-center">
-          <span>Clip request successfully sent.</span>
+          <span>Clip queued — open Clip Studio to edit while the source downloads (~30–90s).</span>
           {createdJobId && (
             <Link to={`/studio/${createdJobId}`} className="ml-2 underline text-emerald-300 font-bold hover:text-emerald-200">
               Open in Clip Studio →
@@ -1446,6 +2850,7 @@ export default function Analytics() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
   const [activeClipsTab, setActiveClipsTab] = useState<'edits' | 'twitch'>('edits')
+  const [syncedOnlyFilter, setSyncedOnlyFilter] = useState(false)
 
   useEffect(() => {
     setSelectedRollup(null)
@@ -1506,13 +2911,16 @@ export default function Analytics() {
     const merged = local.map(item => {
       const tracker = trackerById.get(item.streamId)
       if (!tracker) return item
-      const missingViewers = item.avgViewers === 0 && item.peakViewers === 0
-      const hasTrackerViewers = tracker.avgViewers > 0 || tracker.peakViewers > 0
-      if (!missingViewers || !hasTrackerViewers) return item
+      // Helix history is authoritative for schedule metadata; local DB may have
+      // placeholder startedAt from UpsertStreamPlaceholder (time.Now()).
       return {
         ...item,
-        avgViewers: tracker.avgViewers,
-        peakViewers: tracker.peakViewers,
+        startedAt: tracker.startedAt || item.startedAt,
+        endedAt: tracker.endedAt || item.endedAt,
+        title: tracker.title || item.title,
+        category: tracker.category || item.category,
+        avgViewers: item.avgViewers > 0 ? item.avgViewers : tracker.avgViewers,
+        peakViewers: item.peakViewers > 0 ? item.peakViewers : tracker.peakViewers,
       }
     })
     const localIds = new Set(merged.map(s => s.streamId))
@@ -1562,8 +2970,9 @@ export default function Analytics() {
   const dateSlugUnresolved = useMemo(() => {
     if (!streamId || !/^\d{4}-\d{2}-\d{2}$/.test(streamId)) return false
     if (streamsQuery.isLoading || historyQuery.isLoading) return false
-    return !matchedStream
-  }, [streamId, matchedStream, streamsQuery.isLoading, historyQuery.isLoading])
+    const unresolved = !matchedStream
+    return unresolved
+  }, [streamId, matchedStream, streamsQuery.isLoading, historyQuery.isLoading, login, combinedStreams.length, historyQuery.data?.items?.length])
 
   const targetQueryStreamId = useMemo(() => {
     if (!streamId) return ''
@@ -1585,14 +2994,14 @@ export default function Analytics() {
     if (!login || !id) return
     queryClient.prefetchQuery({
       queryKey: ['analytics-detail', login, id],
-      queryFn: () => getAnalyticsStream(id),
+      queryFn: () => getAnalyticsStream(id, { channel: login }),
       staleTime: 120_000,
     })
   }, [login, queryClient])
 
   const detailQuery = useQuery({
     queryKey: ['analytics-detail', login, targetQueryStreamId],
-    queryFn: () => targetQueryStreamId ? getAnalyticsStream(targetQueryStreamId) : getAnalyticsLive(login),
+    queryFn: () => targetQueryStreamId ? getAnalyticsStream(targetQueryStreamId, { channel: login }) : getAnalyticsLive(login),
     enabled: Boolean(login && (streamId === '' || targetQueryStreamId)),
     refetchInterval: streamId ? false : 15000,
     retry: false,
@@ -1633,23 +3042,29 @@ export default function Analytics() {
     }
   }
 
-  const detailHasChartData = (data?: AnalyticsStreamDetail | null) => (
-    Boolean(data?.rollups?.some(rollupHasMinuteData))
-  )
+  const detailHasChartData = (data?: AnalyticsStreamDetail | null) => {
+    const rollups = data?.rollups ?? []
+    return rollups.some(rollupHasMinuteData) || rollupsHaveViewerData(rollups)
+  }
 
   const detailHasViewerData = (data?: AnalyticsStreamDetail | null) => {
     const rollups = data?.rollups ?? []
-    const values = rollups.filter(point => !point.missing).map(viewerValue).filter(value => value > 0)
-    if (values.length < 3) return false
-    return Math.min(...values) !== Math.max(...values)
+    const coverage = analyzeViewerCoverage(rollups)
+    return coverage.hasViewerRollups
+      && !coverage.hasFlatViewerLine
+      && !coverage.hasPartialTail
+      && !coverage.hasShortSpan
   }
 
   const viewersOnlySync = useMemo(() => {
     if (!targetQueryStreamId || streamId === '') return false
     const rollups = detailQuery.data?.rollups ?? []
-    const hasChat = rollups.some(point => (point.chatCount ?? 0) > 0 || (point.seventvEmoteCount ?? 0) > 0)
-    const values = rollups.filter(point => !point.missing).map(viewerValue).filter(value => value > 0)
-    const hasRealViewers = values.length >= 3 && Math.min(...values) !== Math.max(...values)
+    const hasChat = rollups.some(point => (point.chatCount ?? 0) > 0 || minuteEmoteTotal(point) > 0)
+    const coverage = analyzeViewerCoverage(rollups)
+    const hasRealViewers = coverage.hasViewerRollups
+      && !coverage.hasFlatViewerLine
+      && !coverage.hasPartialTail
+      && !coverage.hasShortSpan
     return hasChat && !hasRealViewers
   }, [targetQueryStreamId, streamId, detailQuery.data?.rollups])
 
@@ -1676,24 +3091,48 @@ export default function Analytics() {
     ])
   }
 
+  const refetchChartDuringSync = () => {
+    void detailQuery.refetch()
+    if (targetQueryStreamId) void gamesQuery.refetch()
+  }
+
+  useEffect(() => {
+    if (!syncing || !targetQueryStreamId) return
+    refetchChartDuringSync()
+    const timer = window.setInterval(() => {
+      refetchChartDuringSync()
+    }, 3000)
+    return () => window.clearInterval(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- poll chart rollups while Redis sync is active
+  }, [syncing, targetQueryStreamId])
+
   const handleSync = async () => {
     if (!targetQueryStreamId) return
     const viewersOnly = viewersOnlySync
+    const pollCallbacks = syncPollChartCallbacks(refetchChartDuringSync, viewersOnly)
+    const hintVodId = historyQuery.data?.items?.find(s => s.id === targetQueryStreamId)?.videoId
+      || detailQuery.data?.vodId
+      || undefined
     setSyncing(true)
     setSyncError(null)
     setSyncNotice(null)
     setSyncStatus(null)
+    refetchChartDuringSync()
     try {
-      const start = await startHistoricalSync(targetQueryStreamId, login, { viewersOnly })
+      const start = await startHistoricalSync(targetQueryStreamId, login, { viewersOnly, vodId: hintVodId })
       if (start.status) {
         setSyncStatus(start.status)
       }
       if (!start.accepted && start.status?.phase !== 'completed' && start.status?.phase !== 'failed') {
         setSyncNotice('Sync already running — showing live progress.')
       }
-      const finalStatus = await pollSyncUntilDone(targetQueryStreamId, setSyncStatus)
+      const finalStatus = await pollSyncUntilDone(targetQueryStreamId, setSyncStatus, pollCallbacks)
       if (!finalStatus) {
         setSyncError('Lost sync status — try again or use Refresh data.')
+        return
+      }
+      if (finalStatus.stale) {
+        setSyncNotice('Sync interrupted — click to retry.')
         return
       }
       if (finalStatus.phase === 'failed') {
@@ -1704,7 +3143,12 @@ export default function Analytics() {
       const loaded = await waitForSyncedDetail({ viewersOnly })
       await refreshSyncedQueries()
       if (!loaded) {
-        setSyncNotice(current => current || 'Sync finished but chart data is still loading. Click Refresh data.')
+        const hasViewers = detailHasViewerData(detailQuery.data)
+        if (!viewersOnly && hasViewers) {
+          setSyncNotice('Viewer chart synced — chat/emote minutes may still be finalizing. Use Refresh data if bands stay empty.')
+        } else {
+          setSyncNotice(current => current || 'Sync finished but chart data is still loading. Click Refresh data.')
+        }
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred during synchronization.'
@@ -1714,6 +3158,52 @@ export default function Analytics() {
     }
   }
 
+  useEffect(() => {
+    if (!targetQueryStreamId || syncing) return
+    let cancelled = false
+    void (async () => {
+      const status = await getSyncStatus(targetQueryStreamId).catch(() => null)
+      if (cancelled) return
+      const detailSyncing = detailQuery.data?.state === 'syncing'
+      const statusActive = Boolean(
+        status
+        && status.phase !== 'completed'
+        && status.phase !== 'failed'
+        && !status.stale,
+      )
+      if (!detailSyncing && !statusActive) return
+      setSyncing(true)
+      if (status) setSyncStatus(status)
+      setSyncNotice('Sync in progress — resuming live progress.')
+      const resumeViewersOnly = status?.viewersOnly ?? viewersOnlySync
+      const finalStatus = await pollSyncUntilDone(
+        targetQueryStreamId,
+        setSyncStatus,
+        syncPollChartCallbacks(refetchChartDuringSync, resumeViewersOnly),
+      )
+      if (cancelled) return
+      setSyncing(false)
+      if (!finalStatus) {
+        setSyncNotice('')
+        return
+      }
+      if (finalStatus.stale) {
+        setSyncNotice('Sync interrupted — click to retry.')
+        return
+      }
+      if (finalStatus.phase === 'failed') {
+        setSyncError(finalStatus.error || 'Sync failed.')
+        return
+      }
+      if (finalStatus.phase === 'completed') {
+        setSyncNotice(finalStatus.resultMessage || 'Sync completed.')
+        await refreshSyncedQueries()
+      }
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- resume when detail or Redis reports active sync
+  }, [targetQueryStreamId, detailQuery.data?.state])
+
   const historicalStream = useMemo(() => {
     if (!targetQueryStreamId || !historyQuery.data?.items) return undefined
     return historyQuery.data.items.find(s => s.id === targetQueryStreamId)
@@ -1722,8 +3212,9 @@ export default function Analytics() {
   const needsSync = Boolean(
     targetQueryStreamId
     && historicalStream
-    && !detailQuery.data
-    && !detailQuery.isLoading,
+    && !detailQuery.isLoading
+    && !syncing
+    && (!detailQuery.data || detailQuery.data.state === 'not_collected'),
   )
 
   const detail = useMemo(() => {
@@ -1779,7 +3270,10 @@ export default function Analytics() {
   }, [detailQuery.data, historicalStream, login])
 
   const stream = detail?.stream
-  const selectedEmotes = selected
+  const chartEmoteKeys = useMemo(() => {
+    if (selected.size > 0) return selected
+    return new Set((detail?.topEmotes ?? []).slice(0, 4).map(emote => emote.key))
+  }, [selected, detail?.topEmotes])
 
   const toggleSelected = (key: string) => {
     setSelected(current => {
@@ -1800,7 +3294,7 @@ export default function Analytics() {
               <Link to={`/c/${encodeURIComponent(login)}`} className="rounded bg-violet-400/15 px-2 py-1 text-violet-100 transition hover:bg-violet-400/25">{login}</Link>
               <span className={`rounded px-2 py-1 ${detail?.state === 'live' ? 'bg-red-500/15 text-red-100' : 'bg-white/10 text-zinc-300'}`}>{detail?.state || 'loading'}</span>
             </div>
-            <h1 className="mt-3 line-clamp-2 text-2xl font-black leading-tight text-white lg:text-4xl">{stream?.title || `${login} analytics`}</h1>
+            <h1 className="mt-3 truncate text-2xl font-black leading-tight text-white lg:text-3xl" title={stream?.title || `${login} analytics`}>{stream?.title || `${login} analytics`}</h1>
             <div className="mt-2 flex flex-wrap gap-2 text-sm font-bold text-zinc-500">
               {stream?.displayName ? <span>{stream.displayName}</span> : null}
               {stream?.category ? <span>{stream.category}</span> : null}
@@ -1826,11 +3320,11 @@ export default function Analytics() {
         </header>
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-          <StatCard label="Current" value={count(stream?.currentViewers)} tone="text-cyan-100" />
+          <StatCard label="Current" value={count(stream?.currentViewers)} tone="text-cyan-300/90" />
           <StatCard label="Average" value={count(stream?.avgViewers)} />
           <StatCard label="Peak" value={count(stream?.peakViewers)} />
-          <StatCard label="Chat" value={count(stream?.chatMessages)} tone="text-violet-100" />
-          <StatCard label="7TV Uses" value={count(stream?.seventvEmoteUses)} tone="text-emerald-100" />
+          <StatCard label="Chat" value={count(stream?.chatMessages)} tone="text-violet-300/90" />
+          <StatCard label="Emote Uses" value={count(stream?.totalEmoteUses)} tone="text-emerald-300/90" />
           <StatCard label="Duration" value={duration(stream)} />
         </section>
 
@@ -1855,12 +3349,16 @@ export default function Analytics() {
               isLiveView={!streamId}
               liveState={detail?.state}
               onPrefetchStream={prefetchStreamDetail}
+              onSync={handleSync}
+              syncing={syncing}
+              syncedOnly={syncedOnlyFilter}
+              onSyncedOnlyChange={setSyncedOnlyFilter}
             />
           </aside>
           <section className="min-w-0 space-y-4">
             <AnalyticsChart
               detail={detail}
-              selectedEmotes={selectedEmotes}
+              selectedEmotes={chartEmoteKeys}
               onSelectEmote={toggleSelected}
               selectedRollup={selectedRollup}
               onSelectRollup={setSelectedRollup}
@@ -1879,9 +3377,20 @@ export default function Analytics() {
             />
             <SelectedMomentPanel
               rollup={selectedRollup}
+              rollups={detail?.rollups ?? []}
               startedAt={stream?.startedAt}
               vodId={detail?.vodId}
               channel={login}
+              streamId={stream?.streamId || streamId}
+              topEmotesCatalog={detail?.topEmotes}
+              isLiveView={!streamId}
+              channelLive={detail?.state === 'live'}
+            />
+            <MomentReviewPanel
+              rollups={detail?.rollups ?? []}
+              selectedRollup={selectedRollup}
+              onSelectRollup={setSelectedRollup}
+              topEmotesCatalog={detail?.topEmotes}
             />
           </section>
           <aside className="space-y-4">
@@ -1920,7 +3429,7 @@ export default function Analytics() {
               )}
             </div>
 
-            <TopEmoteTable emotes={detail?.topEmotes ?? []} selected={selectedEmotes} onSelect={toggleSelected} />
+            <TopEmoteTable emotes={detail?.topEmotes ?? []} selected={chartEmoteKeys} onSelect={toggleSelected} />
           </aside>
         </div>
       </div>
@@ -1982,7 +3491,7 @@ function RecentClipsList({ login, isTab = false }: { login: string; isTab?: bool
               job.state === 'failed' ? 'bg-red-500/10 text-red-400' :
               'bg-amber-500/10 text-amber-400 animate-pulse'
             }`}>
-              {job.state}
+              {describeClipperJobState(job)}
             </span>
             <span className="text-zinc-500">{relativeTime(job.created_at)}</span>
           </div>
@@ -1998,7 +3507,7 @@ function RecentClipsList({ login, isTab = false }: { login: string; isTab?: bool
             >
               Open in Studio
             </Link>
-            {job.state === 'ready' && (
+            {job.state === 'ready' && job.artifact_available === 1 && (
               <a
                 href={getClipperFinalVideoUrl(job.id)}
                 download

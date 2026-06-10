@@ -234,12 +234,21 @@ func chunkStrings(items []string, size int) [][]string {
 	return chunks
 }
 
-func (c *HelixClient) VideoIDByStreamID(ctx context.Context, broadcasterID, streamID string) (string, error) {
+type VideoMeta struct {
+	VideoID         string
+	StreamID        string
+	Title           string
+	CreatedAt       time.Time
+	DurationSeconds int
+}
+
+func (c *HelixClient) VideoByStreamID(ctx context.Context, broadcasterID, streamID string) (VideoMeta, error) {
+	broadcasterID = NormalizeBroadcasterID(broadcasterID)
 	if !c.Enabled() || broadcasterID == "" || streamID == "" {
-		return "", nil
+		return VideoMeta{}, nil
 	}
 	cursor := ""
-	for page := 0; page < 25; page++ {
+	for page := 0; page < 50; page++ {
 		q := url.Values{}
 		q.Set("user_id", broadcasterID)
 		q.Set("type", "archive")
@@ -249,27 +258,76 @@ func (c *HelixClient) VideoIDByStreamID(ctx context.Context, broadcasterID, stre
 		}
 		var resp struct {
 			Data []struct {
-				ID       string `json:"id"`
-				StreamID string `json:"stream_id"`
+				ID           string `json:"id"`
+				StreamID     string `json:"stream_id"`
+				Title        string `json:"title"`
+				CreatedAt    string `json:"created_at"`
+				Duration     string `json:"duration"`
 			} `json:"data"`
 			Pagination struct {
 				Cursor string `json:"cursor"`
 			} `json:"pagination"`
 		}
 		if err := c.get(ctx, "/videos", q, &resp); err != nil {
-			return "", err
+			return VideoMeta{}, err
 		}
 		for _, item := range resp.Data {
-			if item.StreamID == streamID {
-				return item.ID, nil
+			if item.StreamID != streamID {
+				continue
 			}
+			meta := VideoMeta{
+				VideoID:  item.ID,
+				StreamID: item.StreamID,
+				Title:    item.Title,
+			}
+			if item.CreatedAt != "" {
+				meta.CreatedAt, _ = time.Parse(time.RFC3339, item.CreatedAt)
+			}
+			if item.Duration != "" {
+				if d, err := time.ParseDuration(item.Duration); err == nil {
+					meta.DurationSeconds = int(d.Seconds())
+				}
+			}
+			return meta, nil
 		}
 		cursor = resp.Pagination.Cursor
 		if cursor == "" || len(resp.Data) == 0 {
 			break
 		}
 	}
-	return "", nil
+	return VideoMeta{}, nil
+}
+
+func (c *HelixClient) VideoIDByStreamID(ctx context.Context, broadcasterID, streamID string) (string, error) {
+	meta, err := c.VideoByStreamID(ctx, broadcasterID, streamID)
+	if err != nil {
+		return "", err
+	}
+	return meta.VideoID, nil
+}
+
+func (c *HelixClient) VideoCreatedAt(ctx context.Context, videoID string) (time.Time, error) {
+	if !c.Enabled() || videoID == "" {
+		return time.Time{}, nil
+	}
+	q := url.Values{}
+	q.Set("id", videoID)
+	var resp struct {
+		Data []struct {
+			CreatedAt string `json:"created_at"`
+		} `json:"data"`
+	}
+	if err := c.get(ctx, "/videos", q, &resp); err != nil {
+		return time.Time{}, err
+	}
+	if len(resp.Data) == 0 || resp.Data[0].CreatedAt == "" {
+		return time.Time{}, nil
+	}
+	createdAt, err := time.Parse(time.RFC3339, resp.Data[0].CreatedAt)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse helix created_at %q: %w", resp.Data[0].CreatedAt, err)
+	}
+	return createdAt, nil
 }
 
 func (c *HelixClient) VideoDurationSeconds(ctx context.Context, videoID string) (int, error) {

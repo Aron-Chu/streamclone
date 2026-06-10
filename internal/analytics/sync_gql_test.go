@@ -1,8 +1,14 @@
 package analytics
 
 import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGQLCommentTextUsesFragmentsWhenBodyEmpty(t *testing.T) {
@@ -91,5 +97,105 @@ func TestIsGQLIntegrityErrorCaseInsensitive(t *testing.T) {
 	}
 	if !isGQLIntegrityError(resp) {
 		t.Fatal("expected case-insensitive integrity match")
+	}
+}
+
+func TestParseRetryAfterSeconds(t *testing.T) {
+	h := http.Header{}
+	h.Set("Retry-After", "2")
+	if got := parseRetryAfter(h); got != 2*time.Second {
+		t.Fatalf("expected 2s, got %v", got)
+	}
+}
+
+func TestParseRetryAfterMissing(t *testing.T) {
+	if got := parseRetryAfter(http.Header{}); got != 0 {
+		t.Fatalf("expected zero delay, got %v", got)
+	}
+}
+
+func TestGQLBackoffDelayUsesRetryAfter(t *testing.T) {
+	delay := gqlBackoffDelay(3, 1500*time.Millisecond)
+	if delay != 1500*time.Millisecond {
+		t.Fatalf("expected retry-after to win, got %v", delay)
+	}
+}
+
+func TestPostGQLVideoCommentsRetries429(t *testing.T) {
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]GQLResponse{{
+			Data: struct {
+				Video *struct {
+					Comments *struct {
+						Edges    []GQLCommentEdge `json:"edges"`
+						PageInfo struct {
+							HasNextPage bool `json:"hasNextPage"`
+						} `json:"pageInfo"`
+					} `json:"comments"`
+				} `json:"video"`
+			}{
+				Video: &struct {
+					Comments *struct {
+						Edges    []GQLCommentEdge `json:"edges"`
+						PageInfo struct {
+							HasNextPage bool `json:"hasNextPage"`
+						} `json:"pageInfo"`
+					} `json:"comments"`
+				}{
+					Comments: &struct {
+						Edges    []GQLCommentEdge `json:"edges"`
+						PageInfo struct {
+							HasNextPage bool `json:"hasNextPage"`
+						} `json:"pageInfo"`
+					}{},
+				},
+			},
+		}})
+	}))
+	defer srv.Close()
+
+	svc := &SyncService{
+		twitchGQLURL:   srv.URL,
+		twitchClientID: "test-client",
+		gqlClient:      srv.Client(),
+		log:            slog.Default(),
+	}
+	req := buildVideoCommentsGQLRequest("123", "hash", false, 0, "")
+	resp, err := svc.postGQLVideoComments(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("postGQLVideoComments: %v", err)
+	}
+	if resp.Data.Video == nil {
+		t.Fatal("expected video payload")
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestPostGQLVideoCommentsRejectsNonRetryableStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("bad request"))
+	}))
+	defer srv.Close()
+
+	svc := &SyncService{
+		twitchGQLURL:   srv.URL,
+		twitchClientID: "test-client",
+		gqlClient:      srv.Client(),
+		log:            slog.Default(),
+	}
+	_, err := svc.postGQLVideoComments(context.Background(), buildVideoCommentsGQLRequest("123", "hash", false, 0, ""), nil)
+	if err == nil || !strings.Contains(err.Error(), "400") {
+		t.Fatalf("expected status 400 error, got %v", err)
 	}
 }

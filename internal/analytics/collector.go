@@ -17,6 +17,7 @@ import (
 type StreamProvider interface {
 	StreamsByLogin(ctx context.Context, logins []string) (map[string]LiveStream, error)
 	UsersByLogin(ctx context.Context, logins []string) (map[string]UserProfile, error)
+	VideoIDByStreamID(ctx context.Context, broadcasterID, streamID string) (string, error)
 }
 
 type RollupStore interface {
@@ -26,6 +27,8 @@ type RollupStore interface {
 	PurgeOlderThan(ctx context.Context, cutoff time.Time) error
 	AddAlwaysTracked(ctx context.Context, login string) error
 	RemoveAlwaysTracked(ctx context.Context, login string) error
+	StreamByID(ctx context.Context, streamID string) (*StreamRecord, error)
+	SetStreamVodID(ctx context.Context, streamID, vodID, source string) error
 }
 
 type channelJoiner interface {
@@ -370,7 +373,9 @@ func (c *Collector) pollOnce(ctx context.Context) {
 	for _, streamID := range closeStreams {
 		if err := c.store.CloseStream(ctx, streamID, now); err != nil {
 			c.log.Warn("analytics close stream failed", "stream_id", streamID, "err", err)
+			continue
 		}
+		c.scheduleVodIDResolve(streamID)
 	}
 	c.flushCompleted(ctx, now)
 }
@@ -470,6 +475,53 @@ func (c *Collector) cleanup(ctx context.Context) {
 	cutoff := time.Now().UTC().Add(-c.retention)
 	if err := c.store.PurgeOlderThan(ctx, cutoff); err != nil {
 		c.log.Warn("analytics retention cleanup failed", "err", err)
+	}
+}
+
+func (c *Collector) scheduleVodIDResolve(streamID string) {
+	go c.resolveVodIDWithRetry(streamID)
+}
+
+func (c *Collector) resolveVodIDWithRetry(streamID string) {
+	delays := []time.Duration{0, 30 * time.Second, 2 * time.Minute, 5 * time.Minute}
+	for attempt, delay := range delays {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		ctx := context.Background()
+		rec, err := c.store.StreamByID(ctx, streamID)
+		if err != nil {
+			c.log.Warn("vod resolve skipped; stream record missing", "stream_id", streamID, "err", err)
+			return
+		}
+		if rec == nil {
+			return
+		}
+		if strings.TrimSpace(rec.VodID) != "" {
+			return
+		}
+		broadcasterID := strings.TrimSpace(rec.BroadcasterID)
+		if broadcasterID == "" {
+			c.log.Debug("vod resolve skipped; broadcaster_id missing", "stream_id", streamID)
+			return
+		}
+		vodID, err := c.helix.VideoIDByStreamID(ctx, broadcasterID, streamID)
+		if err != nil {
+			c.log.Warn("helix vod resolve on stream close failed", "stream_id", streamID, "attempt", attempt+1, "err", err)
+			continue
+		}
+		if vodID == "" {
+			if attempt == len(delays)-1 {
+				c.log.Info("vod not published yet after stream close", "stream_id", streamID)
+			}
+			continue
+		}
+		if err := c.store.SetStreamVodID(ctx, streamID, vodID, "helix_stream_match"); err != nil {
+			c.log.Warn("failed to persist vod_id on stream close", "stream_id", streamID, "err", err)
+			return
+		}
+		c.log.Info("persisted vod_id on stream close", "stream_id", streamID, "vod_id", vodID, "attempt", attempt+1)
+		return
 	}
 }
 

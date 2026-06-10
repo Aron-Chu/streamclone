@@ -104,12 +104,16 @@ func TestSlimRollupsForChartOmitsEmotes(t *testing.T) {
 		ChatCount:         5,
 		Emotes:            map[string]int{"seventv:1:KEKW": 2},
 	}}
-	out := slimRollupsForChart(in)
+	out := slimRollupsForChart(in, []string{"seventv:1:KEKW"})
 	if len(out) != 1 {
 		t.Fatalf("expected 1 rollup, got %d", len(out))
 	}
-	if out[0].Emotes != nil {
-		t.Fatalf("expected emotes omitted from sparse response")
+	if out[0].Emotes == nil || out[0].Emotes["seventv:1:KEKW"] != 2 {
+		t.Fatalf("expected top emote key preserved in sparse response, got %+v", out[0].Emotes)
+	}
+	outNoKeys := slimRollupsForChart(in, nil)
+	if outNoKeys[0].Emotes != nil {
+		t.Fatalf("expected emotes omitted when no keys provided")
 	}
 	if out[0].ChatCount != 5 {
 		t.Fatalf("expected chat count preserved, got %d", out[0].ChatCount)

@@ -1,6 +1,9 @@
 package analytics
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestSyncPhaseIsTerminal(t *testing.T) {
 	if SyncPhaseFetchingComments.IsTerminal() {
@@ -11,6 +14,42 @@ func TestSyncPhaseIsTerminal(t *testing.T) {
 	}
 	if !SyncPhaseFailed.IsTerminal() {
 		t.Fatal("failed should be terminal")
+	}
+}
+
+func TestSyncStatusIsStale(t *testing.T) {
+	now := time.Now().UTC()
+	active := &SyncStatus{
+		Phase:     SyncPhaseFetchingComments,
+		UpdatedAt: now.Add(-30 * time.Second),
+	}
+	if syncStatusIsStale(active) {
+		t.Fatal("recent status should not be stale")
+	}
+	stale := &SyncStatus{
+		Phase:     SyncPhaseResolvingVOD,
+		UpdatedAt: now.Add(-2 * time.Minute),
+	}
+	if !syncStatusIsStale(stale) {
+		t.Fatal("old non-terminal status should be stale")
+	}
+	if syncStatusIsStale(&SyncStatus{Phase: SyncPhaseCompleted, UpdatedAt: now.Add(-2 * time.Minute)}) {
+		t.Fatal("completed should not be stale")
+	}
+}
+
+func TestSyncStatusCacheThrottlesFlush(t *testing.T) {
+	cache := &syncStatusCache{}
+	cache.put(SyncStatus{StreamID: "1"})
+	if !cache.shouldFlush("1", false) {
+		t.Fatal("first flush should be allowed")
+	}
+	cache.markFlushed("1")
+	if cache.shouldFlush("1", false) {
+		t.Fatal("immediate second flush should be throttled")
+	}
+	if !cache.shouldFlush("1", true) {
+		t.Fatal("forced flush should always run")
 	}
 }
 

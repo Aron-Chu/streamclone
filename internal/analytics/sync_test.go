@@ -133,24 +133,44 @@ func TestBuildGameSegmentsEqualSplit(t *testing.T) {
 	}
 }
 
-func TestHasRealViewerChart(t *testing.T) {
-	if hasRealViewerChart(nil) {
+func TestHasCompleteViewerChart(t *testing.T) {
+	if hasCompleteViewerChart(nil, 3600) {
 		t.Fatal("expected nil points to be rejected")
 	}
 	flat := []parsedViewerPoint{
 		{OffsetSeconds: 0, Viewers: 69800},
 		{OffsetSeconds: 3600, Viewers: 69800},
 	}
-	if hasRealViewerChart(flat) {
+	if hasCompleteViewerChart(flat, 3600) {
 		t.Fatal("expected flat peak-only synthesis to be rejected")
 	}
-	varied := []parsedViewerPoint{
+	partialTail := []parsedViewerPoint{
 		{OffsetSeconds: 0, Viewers: 1000},
 		{OffsetSeconds: 600, Viewers: 5000},
 		{OffsetSeconds: 1200, Viewers: 3000},
+		{OffsetSeconds: 1800, Viewers: 2900},
+		{OffsetSeconds: 2400, Viewers: 2800},
+		{OffsetSeconds: 3000, Viewers: 2800},
 	}
-	if !hasRealViewerChart(varied) {
-		t.Fatal("expected varied chart to be accepted")
+	if hasCompleteViewerChart(partialTail, 8*3600) {
+		t.Fatal("expected spike+short-tail chart to be rejected as incomplete")
+	}
+	fullLength := []parsedViewerPoint{
+		{OffsetSeconds: 0, Viewers: 1200},
+		{OffsetSeconds: 300, Viewers: 1500},
+		{OffsetSeconds: 600, Viewers: 1800},
+		{OffsetSeconds: 900, Viewers: 2100},
+		{OffsetSeconds: 1200, Viewers: 1900},
+		{OffsetSeconds: 1500, Viewers: 2200},
+		{OffsetSeconds: 1800, Viewers: 2600},
+		{OffsetSeconds: 2100, Viewers: 2400},
+		{OffsetSeconds: 2400, Viewers: 2300},
+		{OffsetSeconds: 2700, Viewers: 2500},
+		{OffsetSeconds: 3000, Viewers: 2800},
+		{OffsetSeconds: 3300, Viewers: 2600},
+	}
+	if !hasCompleteViewerChart(fullLength, 3600) {
+		t.Fatal("expected full-length varied chart to be accepted")
 	}
 }
 

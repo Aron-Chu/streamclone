@@ -29,36 +29,95 @@ type SyncService struct {
 	enricher       *enrich.Enricher
 	helix          *HelixClient
 	emoteURL       string
-	firecrawlURL   string
-	firecrawlKey   string
+	scraperURL   string
+	scraperKey   string
 	twitchGQLURL   string
 	twitchClientID string
 	userAgent           string
 	client              *http.Client
 	gqlClient           *http.Client
-	vodGQLPageDelay     time.Duration
+	vodGQLPageDelay        time.Duration
+	vodGQLConcurrency      int
+	vodGQLConcurrencyMin   int
+	vodGQLConcurrencyMax   int
+	vodGQLSegmentSeconds          int
+	vodGQLDenseSegmentSeconds     int
+	vodGQLHotSegmentPageThreshold int
+	vodGQLIncrementalDB           bool
 	trackerScrapeTimeoutMS int
+	passTTMaxAge           bool
+	ttMaxAgeMSDefault      int
+	ttDirectHTTPEnabled    bool
+	ttDirectHTTPTimeoutMS  int
+	directHTTP             directHTTPTelemetry
+	syncStatusCache        syncStatusCache
 	log                 *slog.Logger
 	rdb                 *redis.Client
 }
+
+var errTrackerAccessProtected = errors.New("tracker access protected")
 
 func NewSyncService(
 	store *Store,
 	enricher *enrich.Enricher,
 	helix *HelixClient,
 	emoteURL string,
-	firecrawlURL string,
-	firecrawlKey string,
+	scraperURL string,
+	scraperKey string,
 	twitchGQLURL string,
 	twitchClientID string,
 	userAgent string,
 	logger *slog.Logger,
 	rdb *redis.Client,
 	vodGQLPageDelay time.Duration,
+	vodGQLConcurrency int,
+	vodGQLConcurrencyMin int,
+	vodGQLConcurrencyMax int,
+	vodGQLSegmentSeconds int,
+	vodGQLDenseSegmentSeconds int,
+	vodGQLHotSegmentPageThreshold int,
+	vodGQLIncrementalDB bool,
 	trackerScrapeTimeoutMS int,
+	passTTMaxAge bool,
+	ttMaxAgeMSDefault int,
+	ttDirectHTTPEnabled bool,
+	ttDirectHTTPTimeoutMS int,
 ) *SyncService {
 	if trackerScrapeTimeoutMS <= 0 {
-		trackerScrapeTimeoutMS = 60000
+		trackerScrapeTimeoutMS = 120000
+	}
+	if vodGQLConcurrency <= 0 {
+		vodGQLConcurrency = 1
+	}
+	if vodGQLConcurrencyMin <= 0 {
+		vodGQLConcurrencyMin = 1
+	}
+	if vodGQLConcurrencyMax <= 0 {
+		vodGQLConcurrencyMax = vodGQLConcurrency
+	}
+	if vodGQLConcurrencyMax > 8 {
+		vodGQLConcurrencyMax = 8
+	}
+	if vodGQLConcurrencyMin > vodGQLConcurrencyMax {
+		vodGQLConcurrencyMin = vodGQLConcurrencyMax
+	}
+	if vodGQLConcurrency > vodGQLConcurrencyMax {
+		vodGQLConcurrency = vodGQLConcurrencyMax
+	}
+	if vodGQLConcurrency < vodGQLConcurrencyMin {
+		vodGQLConcurrency = vodGQLConcurrencyMin
+	}
+	if vodGQLSegmentSeconds <= 0 {
+		vodGQLSegmentSeconds = 600
+	}
+	if vodGQLDenseSegmentSeconds <= 0 {
+		vodGQLDenseSegmentSeconds = vodGQLSegmentDenseVOD
+	}
+	if vodGQLHotSegmentPageThreshold <= 0 {
+		vodGQLHotSegmentPageThreshold = 50
+	}
+	if ttDirectHTTPTimeoutMS <= 0 {
+		ttDirectHTTPTimeoutMS = 1200
 	}
 	gqlTransport := &http.Transport{
 		MaxIdleConns:        32,
@@ -70,18 +129,31 @@ func NewSyncService(
 		enricher:       enricher,
 		helix:          helix,
 		emoteURL:       strings.TrimRight(emoteURL, "/"),
-		firecrawlURL:   firecrawlURL,
-		firecrawlKey:   firecrawlKey,
+		scraperURL:   scraperURL,
+		scraperKey:   scraperKey,
 		twitchGQLURL:   twitchGQLURL,
 		twitchClientID: twitchClientID,
 		userAgent:      userAgent,
-		client:         &http.Client{Timeout: 90 * time.Second},
+		client: &http.Client{
+			Timeout: time.Duration(trackerScrapeTimeoutMS)*time.Millisecond + 45*time.Second,
+		},
 		gqlClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: gqlTransport,
 		},
 		vodGQLPageDelay:        vodGQLPageDelay,
+		vodGQLConcurrency:      vodGQLConcurrency,
+		vodGQLConcurrencyMin:   vodGQLConcurrencyMin,
+		vodGQLConcurrencyMax:   vodGQLConcurrencyMax,
+		vodGQLSegmentSeconds:          vodGQLSegmentSeconds,
+		vodGQLDenseSegmentSeconds:     vodGQLDenseSegmentSeconds,
+		vodGQLHotSegmentPageThreshold: vodGQLHotSegmentPageThreshold,
+		vodGQLIncrementalDB:           vodGQLIncrementalDB,
 		trackerScrapeTimeoutMS: trackerScrapeTimeoutMS,
+		passTTMaxAge:           passTTMaxAge,
+		ttMaxAgeMSDefault:      ttMaxAgeMSDefault,
+		ttDirectHTTPEnabled:    ttDirectHTTPEnabled,
+		ttDirectHTTPTimeoutMS:  ttDirectHTTPTimeoutMS,
 		log:                    logger.With("service", "sync"),
 		rdb:                    rdb,
 	}
@@ -105,7 +177,8 @@ type GQLRequest struct {
 type GQLCommentEdge struct {
 	Cursor string `json:"cursor"`
 	Node   struct {
-		ContentOffsetSeconds int `json:"contentOffsetSeconds"`
+		ID                   string `json:"id"`
+		ContentOffsetSeconds int    `json:"contentOffsetSeconds"`
 		Message              struct {
 			Body      string `json:"body"`
 			Fragments []struct {
@@ -131,7 +204,7 @@ type GQLResponse struct {
 	} `json:"errors"`
 }
 
-func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string, channelOpt string, viewersOnly bool) (string, error) {
+func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string, channelOpt string, viewersOnly bool, forceChat bool, hintVodID string) (string, error) {
 	s.log.Info("starting historical stream sync", "stream_id", streamID, "channel_opt", channelOpt, "viewers_only", viewersOnly)
 	s.setSyncPhase(ctx, streamID, SyncPhaseStarting, "Loading stream metadata", nil)
 
@@ -159,51 +232,212 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 	}
 
 	broadcasterID := ""
-	if hasStreamRecord && stream != nil && stream.BroadcasterID != "" {
-		broadcasterID = stream.BroadcasterID
+	if hasStreamRecord && stream != nil {
+		if s.helix != nil {
+			broadcasterID = s.helix.ResolveBroadcasterID(ctx, login, stream.BroadcasterID)
+		} else {
+			broadcasterID = NormalizeBroadcasterID(stream.BroadcasterID)
+		}
 	}
-	if broadcasterID == "" && s.helix != nil && s.helix.Enabled() && login != "" {
-		profiles, helixErr := s.helix.UsersByLogin(ctx, []string{login})
-		if helixErr != nil {
-			s.log.Warn("helix user lookup failed", "login", login, "err", helixErr)
-		} else if profile, ok := profiles[login]; ok {
-			broadcasterID = profile.ID
+	if broadcasterID == "" && login != "" && s.helix != nil {
+		broadcasterID = s.helix.ResolveBroadcasterID(ctx, login, "")
+		if broadcasterID == "" {
+			s.log.Warn("helix user lookup failed or returned empty", "login", login, "stream_id", streamID)
 		}
 	}
 
-	skipTracker := !viewersOnly && hasStreamRecord && stream != nil && stream.ViewerSamples > 0
-	cachedVodID := ""
-	if hasStreamRecord && stream != nil {
+	cachedVodID := strings.TrimSpace(hintVodID)
+	if cachedVodID == "" && hasStreamRecord && stream != nil {
 		cachedVodID = strings.TrimSpace(stream.VodID)
+	}
+	if strings.TrimSpace(hintVodID) != "" {
+		if err := s.store.SetStreamVodID(ctx, streamID, cachedVodID, "client_hint"); err != nil {
+			s.log.Warn("failed to persist hinted vod_id", "stream_id", streamID, "err", err)
+		}
+	}
+
+	if broadcasterID != "" {
+		_, dbErr := s.store.db.Exec(ctx, `
+			UPDATE analytics_streams
+			SET broadcaster_id = $2, updated_at = now()
+			WHERE stream_id = $1 AND COALESCE(broadcaster_id, '') IN ('', 'pending')`,
+			streamID, broadcasterID,
+		)
+		if dbErr != nil {
+			s.log.Warn("failed to persist broadcaster_id before sync", "stream_id", streamID, "err", dbErr)
+		}
+	}
+
+	if !hasStreamRecord && login != "" {
+		if broadcasterID != "" && s.helix != nil && s.helix.Enabled() {
+			if meta, metaErr := s.helix.VideoByStreamID(ctx, broadcasterID, streamID); metaErr != nil {
+				s.log.Warn("helix video metadata lookup failed", "stream_id", streamID, "err", metaErr)
+			} else {
+				if !meta.CreatedAt.IsZero() {
+					startedAt = meta.CreatedAt
+				}
+				if strings.TrimSpace(meta.Title) != "" {
+					title = strings.TrimSpace(meta.Title)
+				}
+				if cachedVodID == "" && strings.TrimSpace(meta.VideoID) != "" {
+					cachedVodID = strings.TrimSpace(meta.VideoID)
+				}
+			}
+		}
+		if err := s.store.UpsertStreamPlaceholder(ctx, streamID, broadcasterID, login, title, startedAt); err != nil {
+			s.log.Warn("failed to upsert placeholder stream record", "stream_id", streamID, "err", err)
+		} else {
+			s.log.Info("upserted placeholder stream record for sync", "stream_id", streamID, "login", login)
+		}
+	}
+
+	skipTracker := !viewersOnly && hasStreamRecord && stream != nil && s.shouldSkipTracker(ctx, stream)
+	viewerStatus := "pending"
+	if skipTracker {
+		viewerStatus = "skipped"
+	}
+
+	var helixVodID string
+	var helixResolveMS int64
+	var helixWG sync.WaitGroup
+	if cachedVodID == "" && broadcasterID != "" && s.helix != nil && s.helix.Enabled() {
+		helixWG.Add(1)
+		go func() {
+			defer helixWG.Done()
+			start := time.Now()
+			resolved, helixErr := s.helix.VideoIDByStreamID(ctx, broadcasterID, streamID)
+			helixResolveMS = time.Since(start).Milliseconds()
+			if helixErr != nil {
+				s.log.Warn("helix vod lookup failed (parallel)", "stream_id", streamID, "err", helixErr, "duration_ms", helixResolveMS)
+			} else if resolved != "" {
+				helixVodID = resolved
+				s.log.Info("resolved VOD ID via Helix (parallel)", "vod_id", resolved, "duration_ms", helixResolveMS)
+			}
+		}()
 	}
 
 	commentsMap := make(map[int][]string) // offset minutes -> comments text
+	chatCache := newChatRollupCache()
 	var commentsErr error
+	var gqlFetchMS int64
+	var rollupStartMu sync.RWMutex
+	sharedRollupStart := time.Time{}
+	if !startedAt.IsZero() {
+		sharedRollupStart = startedAt.UTC().Truncate(time.Minute)
+	}
+	rollupStartFn := func() time.Time {
+		rollupStartMu.RLock()
+		defer rollupStartMu.RUnlock()
+		return sharedRollupStart
+	}
+	setSharedRollupStart := func(ts time.Time) {
+		if ts.IsZero() {
+			return
+		}
+		rollupStartMu.Lock()
+		sharedRollupStart = ts.UTC().Truncate(time.Minute)
+		rollupStartMu.Unlock()
+	}
+	resolveChatAlignSec := func(vodID string) int {
+		streamStart := sharedRollupStart
+		if streamStart.IsZero() && !startedAt.IsZero() {
+			streamStart = startedAt.UTC().Truncate(time.Minute)
+		}
+		if streamStart.IsZero() || vodID == "" || s.helix == nil || !s.helix.Enabled() {
+			return 0
+		}
+		var vodCreated time.Time
+		if broadcasterID != "" {
+			if meta, err := s.helix.VideoByStreamID(ctx, broadcasterID, streamID); err == nil && !meta.CreatedAt.IsZero() {
+				vodCreated = meta.CreatedAt
+			}
+		}
+		if vodCreated.IsZero() {
+			if createdAt, err := s.helix.VideoCreatedAt(ctx, vodID); err == nil {
+				vodCreated = createdAt
+			}
+		}
+		return vodChatAlignSeconds(streamStart, vodCreated)
+	}
+
 	var commentsWG sync.WaitGroup
-	if !viewersOnly && cachedVodID != "" {
+	var commentsFetchStarted bool
+	startVODCommentsFetch := func(vod string) {
+		if viewersOnly || vod == "" || commentsFetchStarted {
+			return
+		}
+		if !forceChat && hasStreamRecord && stream != nil && s.shouldSkipVODChat(ctx, stream, vod) {
+			s.log.Info("skipping VOD chat GQL fetch; chat coverage already complete",
+				"stream_id", streamID,
+				"vod_id", vod,
+				"chat_messages", stream.ChatMessages,
+			)
+			return
+		}
+		commentsFetchStarted = true
 		commentsWG.Add(1)
 		go func() {
 			defer commentsWG.Done()
-			s.setSyncPhase(ctx, streamID, SyncPhaseFetchingComments, "Fetching VOD chat (parallel)", nil)
-			commentsErr = s.fetchVODComments(ctx, streamID, cachedVodID, commentsMap)
+			s.setSyncPhase(ctx, streamID, SyncPhaseFetchingComments, "Fetching VOD chat via Twitch GQL", nil)
+			start := time.Now()
+			chatAlignSec := resolveChatAlignSec(vod)
+			commentsErr = s.fetchVODComments(ctx, streamID, login, vod, commentsMap, s.vodDurationSeconds(ctx, vod), chatAlignSec, rollupStartFn, chatCache)
+			gqlFetchMS = time.Since(start).Milliseconds()
+			s.log.Info("sync phase complete", "stream_id", streamID, "phase", "gql_fetch", "duration_ms", gqlFetchMS, "chat_align_sec", chatAlignSec)
 		}()
 	}
 
 	var html string
 	var tracker trackerStreamData
+	var trackerScrapeMS int64
 
 	if viewersOnly || !skipTracker {
-		// 2. Scrape TwitchTracker via local scraper / Firecrawl
+		// 2. Scrape TwitchTracker via local browser scraper
 		trackerURL := fmt.Sprintf("https://twitchtracker.com/%s/streams/%s", login, streamID)
 		s.log.Info("scraping TwitchTracker", "url", trackerURL)
-		s.setSyncPhase(ctx, streamID, SyncPhaseScrapingTracker, "Scraping TwitchTracker page", nil)
+		s.setSyncPhase(ctx, streamID, SyncPhaseScrapingTracker, "Scraping TwitchTracker page", func(st *SyncStatus) {
+			st.Tracker = &SyncTrackerProgress{
+				Active:  true,
+				URL:     trackerURL,
+				Message: "Browser scrape for viewer chart (meta#ecs)",
+			}
+		})
 
-		html, err = s.scrapeTwitchTracker(ctx, trackerURL)
+		trackerStart := time.Now()
+		html, err = s.scrapeTwitchTracker(ctx, trackerURL, stream, viewersOnly)
+		trackerScrapeMS = time.Since(trackerStart).Milliseconds()
+		s.updateTrackerProgress(ctx, streamID, func(tp *SyncTrackerProgress) {
+			tp.Active = false
+			if err != nil {
+				tp.Message = "TwitchTracker scrape failed"
+			} else {
+				tp.Message = "TwitchTracker page loaded"
+			}
+		})
+		s.log.Info("sync phase complete", "stream_id", streamID, "phase", "tracker_scrape", "duration_ms", trackerScrapeMS)
 		if err != nil {
-			commentsWG.Wait()
-			return "", fmt.Errorf("failed to scrape TwitchTracker: %w", err)
+			if viewersOnly {
+				commentsWG.Wait()
+				helixWG.Wait()
+				if errors.Is(err, errTrackerAccessProtected) {
+					return "", fmt.Errorf("tracker access protected (cloudflare challenge/block) — warm scraper profile and retry: %w", err)
+				}
+				return "", fmt.Errorf("failed to scrape TwitchTracker: %w", err)
+			}
+			viewerStatus = "failed"
+			s.log.Warn("TwitchTracker scrape failed; continuing chat sync", "stream_id", streamID, "err", err)
+			s.setSyncPhase(ctx, streamID, SyncPhaseScrapingTracker, "TwitchTracker failed — continuing chat sync", func(st *SyncStatus) {
+				st.ViewerStatus = viewerStatus
+				if st.Tracker == nil {
+					st.Tracker = &SyncTrackerProgress{}
+				}
+				st.Tracker.Message = "Viewer chart unavailable — chat sync continues"
+			})
+		} else {
+			viewerStatus = "ok"
 		}
 	} else {
+		viewerStatus = "skipped"
 		s.log.Info("skipping TwitchTracker scrape; viewer timeline already synced", "stream_id", streamID)
 		s.setSyncPhase(ctx, streamID, SyncPhaseScrapingTracker, "Skipping TwitchTracker (viewers already synced)", nil)
 		s.setSyncPhase(ctx, streamID, SyncPhaseParsingTracker, "Loading viewer rollups from database", nil)
@@ -215,6 +449,12 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		if startedAt.IsZero() && hasStreamRecord && stream != nil {
 			startedAt = stream.StartedAt
 		}
+		if !tracker.ChartStartedAt.IsZero() {
+			setSharedRollupStart(tracker.ChartStartedAt)
+		} else if !startedAt.IsZero() {
+			setSharedRollupStart(startedAt)
+		}
+		startVODCommentsFetch(cachedVodID)
 	}
 
 	// Parse stream metadata if this is a new stream record
@@ -254,23 +494,31 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 
 	// 3. Parse TwitchTracker HTML (when scraped)
 	if html != "" {
-		s.setSyncPhase(ctx, streamID, SyncPhaseParsingTracker, "Parsing viewer chart and stream stats", nil)
+		s.setSyncPhase(ctx, streamID, SyncPhaseParsingTracker, "Parsing viewer chart and stream stats", func(st *SyncStatus) {
+			if st.Tracker == nil {
+				st.Tracker = &SyncTrackerProgress{}
+			}
+			st.Tracker.Message = "Parsing meta#ecs viewer chart"
+		})
 		tracker, err = s.parseTwitchTrackerHTML(html, startedAt)
 		if err != nil {
 			s.log.Warn("twitchtracker parse partially failed or missing elements", "err", err)
 		}
+		if !tracker.ChartStartedAt.IsZero() {
+			setSharedRollupStart(tracker.ChartStartedAt)
+		} else if !startedAt.IsZero() {
+			setSharedRollupStart(startedAt)
+		}
+		startVODCommentsFetch(cachedVodID)
 	}
 	durationMinutes := tracker.DurationMinutes
 	peakViewers := tracker.PeakViewers
 	gameSegments := tracker.Games
 	viewerPoints := tracker.ViewerPoints
-	if !hasRealViewerChart(viewerPoints) {
-		s.log.Warn("twitchtracker viewer chart missing or unusable; skipping viewer rollups",
-			"stream_id", streamID,
-			"points", len(viewerPoints),
-			"peak", peakViewers,
-		)
-		viewerPoints = nil
+	if html != "" {
+		if fromHTML := parseTrackerDurationMinutesFromHTML(html); fromHTML > durationMinutes {
+			durationMinutes = fromHTML
+		}
 	}
 
 	if category == "" {
@@ -306,27 +554,59 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 	if durationSeconds <= 0 {
 		durationSeconds = 60
 	}
+	if !hasCompleteViewerChart(viewerPoints, durationSeconds) {
+		s.log.Warn("viewer chart incomplete",
+			"stream_id", streamID,
+			"last_offset_sec", lastViewerOffsetSeconds(viewerPoints),
+			"duration_sec", durationSeconds,
+			"point_count", len(viewerPoints),
+			"has_ecs", strings.Contains(html, `id="ecs"`),
+			"has_injected_chart", strings.Contains(html, `id="streamclone-viewer-chart"`),
+		)
+		viewerPoints = nil
+	}
 
-	// 4. Resolve VOD id and fetch comments
-	s.setSyncPhase(ctx, streamID, SyncPhaseResolvingVOD, "Resolving Twitch VOD ID", nil)
+	rollupStartEarly := startedAt.UTC().Truncate(time.Minute)
+	if !tracker.ChartStartedAt.IsZero() {
+		rollupStartEarly = tracker.ChartStartedAt.UTC().Truncate(time.Minute)
+	}
+	if len(viewerPoints) > 0 && !viewersOnly && !skipTracker {
+		s.persistEarlyViewerChart(ctx, streamID, rollupStartEarly, durationSeconds, peakViewers, tracker.AvgViewers, viewerPoints, gameSegments)
+	}
+
+	// 4. Resolve VOD id (DB cache → Helix → TwitchTracker HTML)
+	s.setSyncPhase(ctx, streamID, SyncPhaseResolvingVOD, "Resolving Twitch VOD ID", func(st *SyncStatus) {
+		if cachedVodID != "" {
+			st.Message = fmt.Sprintf("VOD ID cached: %s", cachedVodID)
+		} else {
+			st.Message = "Looking up VOD via Helix / TwitchTracker"
+		}
+	})
+	vodResolveStart := time.Now()
 	vodID := cachedVodID
-	if vodID == "" && html != "" {
-		vodID = s.extractVodID(html)
-		if vodID != "" {
-			s.log.Info("extracted VOD ID from TwitchTracker HTML", "vod_id", vodID)
-		}
-	}
-	if vodID == "" && s.helix != nil && s.helix.Enabled() && broadcasterID != "" {
-		resolved, helixErr := s.helix.VideoIDByStreamID(ctx, broadcasterID, streamID)
-		if helixErr != nil {
-			s.log.Warn("helix vod lookup failed", "stream_id", streamID, "err", helixErr)
-		} else if resolved != "" {
-			vodID = resolved
-			s.log.Info("resolved VOD ID via Helix", "vod_id", vodID)
-		}
-	}
+	vodSource := ""
 	if vodID != "" {
-		if err := s.store.SetStreamVodID(ctx, streamID, vodID); err != nil {
+		vodSource = "db_cache"
+	} else {
+		helixWG.Wait()
+		if helixVodID != "" {
+			vodID = helixVodID
+			vodSource = "helix_stream_match"
+		} else if html != "" {
+			vodID = s.extractVodID(html)
+			if vodID != "" {
+				vodSource = "tracker_html"
+				s.log.Info("extracted VOD ID from TwitchTracker HTML", "vod_id", vodID)
+			}
+		}
+	}
+	vodResolveMS := helixResolveMS
+	if vodResolveMS == 0 {
+		vodResolveMS = time.Since(vodResolveStart).Milliseconds()
+	}
+	s.log.Info("sync phase complete", "stream_id", streamID, "phase", "vod_resolve", "duration_ms", vodResolveMS, "vod_id", vodID, "vod_source", vodSource)
+	if vodID != "" {
+		if err := s.store.SetStreamVodID(ctx, streamID, vodID, vodSource); err != nil {
 			s.log.Warn("failed to persist vod_id", "stream_id", streamID, "err", err)
 		}
 	}
@@ -349,6 +629,8 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 	if viewersOnly {
 		s.log.Info("viewers-only sync; skipping VOD comment fetch", "stream_id", streamID)
 	} else if cachedVodID != "" {
+		startVODCommentsFetch(cachedVodID)
+		s.setSyncPhase(ctx, streamID, SyncPhaseFetchingComments, "Waiting for VOD chat workers to finish", nil)
 		commentsWG.Wait()
 		if commentsErr != nil {
 			s.log.Warn("failed to fetch VOD comments (parallel)", "err", commentsErr)
@@ -356,32 +638,81 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 	} else if vodID != "" {
 		s.log.Info("fetching comments from Twitch GQL for VOD", "vod_id", vodID)
 		s.setSyncPhase(ctx, streamID, SyncPhaseFetchingComments, "Fetching VOD chat comments", nil)
-		if err := s.fetchVODComments(ctx, streamID, vodID, commentsMap); err != nil {
+		gqlStart := time.Now()
+		chatAlignSec := resolveChatAlignSec(vodID)
+		if err := s.fetchVODComments(ctx, streamID, login, vodID, commentsMap, s.vodDurationSeconds(ctx, vodID), chatAlignSec, rollupStartFn, chatCache); err != nil {
 			s.log.Warn("failed to fetch VOD comments (it may have been deleted)", "err", err)
 		}
+		gqlFetchMS = time.Since(gqlStart).Milliseconds()
+		s.log.Info("sync phase complete", "stream_id", streamID, "phase", "gql_fetch", "duration_ms", gqlFetchMS)
 	} else {
 		commentsWG.Wait()
-		s.log.Warn("no VOD ID found; skipping chat comments sync", "stream_id", streamID, "broadcaster_id", broadcasterID)
+		reason := "Helix archive lookup returned no VOD for this stream ID"
+		if NormalizeBroadcasterID(broadcasterID) == "" {
+			reason = "broadcaster ID missing — check TWITCH_OAUTH_CLIENT_ID/SECRET on analytics service"
+		} else if s.helix == nil || !s.helix.Enabled() {
+			reason = "analytics Helix client not configured"
+		}
+		s.log.Warn("no VOD ID found; skipping chat comments sync",
+			"stream_id", streamID,
+			"broadcaster_id", broadcasterID,
+			"reason", reason,
+		)
 	}
 
+	helixVodDurationSec := 0
 	if !viewersOnly && vodID != "" && s.helix != nil && s.helix.Enabled() {
 		vodDuration, helixErr := s.helix.VideoDurationSeconds(ctx, vodID)
 		if helixErr != nil {
 			s.log.Warn("helix vod duration lookup failed", "vod_id", vodID, "err", helixErr)
-		} else if vodDuration > durationSeconds {
-			s.log.Info("using helix vod duration for rollups",
-				"vod_id", vodID,
-				"tracker_seconds", durationSeconds,
-				"vod_seconds", vodDuration,
-			)
-			durationSeconds = vodDuration
+		} else {
+			helixVodDurationSec = vodDuration
+			if vodDuration > 0 && durationSeconds > 0 && vodDuration < durationSeconds/2 {
+				s.log.Warn("vod shorter than stream — chat coverage may be partial",
+					"stream_id", streamID,
+					"vod_id", vodID,
+					"vod_duration_sec", vodDuration,
+					"tracker_duration_sec", durationSeconds,
+				)
+			}
+			if vodDuration > durationSeconds {
+				s.log.Info("using helix vod duration for rollups",
+					"vod_id", vodID,
+					"tracker_seconds", durationSeconds,
+					"vod_seconds", vodDuration,
+				)
+				durationSeconds = vodDuration
+				if len(viewerPoints) > 0 && !hasCompleteViewerChart(viewerPoints, durationSeconds) {
+					s.log.Warn("viewer chart shorter than helix vod duration; dropping sparse viewer timeline",
+						"stream_id", streamID,
+						"last_offset_sec", lastViewerOffsetSeconds(viewerPoints),
+						"duration_sec", durationSeconds,
+						"point_count", len(viewerPoints),
+					)
+					viewerPoints = nil
+				}
+			}
 		}
+	}
+
+	if !viewersOnly && commentsFetchStarted {
+		rollupsExpected := countChatMinutesInMap(commentsMap)
+		s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
+			cp.Active = false
+			cp.IndexPhase = "tokenizing"
+			cp.StreamDurationSec = durationSeconds
+			cp.RollupsExpected = rollupsExpected
+			if helixVodDurationSec > 0 {
+				cp.VodDurationSec = helixVodDurationSec
+			}
+		}, true)
 	}
 	// 5. Combine and build minute-by-minute rollups
 	rollupStart := startedAt.UTC().Truncate(time.Minute)
 	if !tracker.ChartStartedAt.IsZero() {
 		rollupStart = tracker.ChartStartedAt.UTC().Truncate(time.Minute)
 	}
+	setSharedRollupStart(rollupStart)
 	endTS := rollupStart.Add(time.Duration(durationSeconds) * time.Second)
 	if !endTS.After(rollupStart) {
 		s.log.Warn("sync clamped non-positive stream duration", "stream_id", streamID, "duration_seconds", durationSeconds)
@@ -394,80 +725,91 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 	}
 
 	var rollups []MinuteRollup
+	var tokenizeMS int64
 	if skipTracker && !viewersOnly {
 		rollups = nil
 	} else {
-	rollups = make([]MinuteRollup, 0, totalMinutes+1)
-
-	// Create a fast lookup for viewer counts by minute offset
-	viewerLookup := make(map[int]int)
-	for _, pt := range viewerPoints {
-		minOffset := pt.OffsetSeconds / 60
-		viewerLookup[minOffset] = pt.Viewers
-	}
-
-	for m := 0; m <= totalMinutes; m++ {
-		minuteTS := rollupStart.Add(time.Duration(m) * time.Minute)
-		
-		// Interpolate viewer count if not explicitly mapped
-		viewerVal := 0
-		if val, ok := viewerLookup[m]; ok {
-			viewerVal = val
-		} else {
-			// Linear interpolation from nearest neighbors
-			viewerVal = s.interpolateViewerCount(m, viewerPoints)
-		}
-
-		// Process comments in this minute bucket
-		chatCount := 0
-		totalEmoteCount := 0
-		seventvEmoteCount := 0
-		emotesMap := make(map[string]int)
-
-		if comments, ok := commentsMap[m]; ok {
-			chatCount = len(comments)
-			for _, comment := range comments {
-				fragments := s.enricher.Tokenize(login, comment)
-				for _, frag := range fragments {
-					if frag.T == "emote" {
-						totalEmoteCount++
-						if frag.Provider == "seventv" {
-							seventvEmoteCount++
-						}
-						// Emote key is provider:id:name
-						key := fmt.Sprintf("%s:%s:%s", frag.Provider, frag.ID, frag.C)
-						emotesMap[key]++
-					}
-				}
+	if !viewersOnly {
+		s.setSyncPhase(ctx, streamID, SyncPhaseWritingRollups, "Tokenizing chat and emotes", func(st *SyncStatus) {
+			if st.Chat != nil {
+				st.Chat.IndexPhase = "tokenizing"
+				st.Chat.StreamDurationSec = durationSeconds
 			}
-		}
-
-		rollups = append(rollups, MinuteRollup{
-			MinuteTS:          minuteTS,
-			ViewerAvg:         viewerVal,
-			ViewerMax:         viewerVal,
-			ViewerLatest:      viewerVal,
-			ViewerSamples:     1,
-			ChatCount:         chatCount,
-			TotalEmoteCount:   totalEmoteCount,
-			SevenTVEmoteCount: seventvEmoteCount,
-			Emotes:            emotesMap,
 		})
 	}
+	tokenizeStart := time.Now()
+	var cacheFn func(int) (CachedMinuteRollup, bool)
+	if chatCache != nil {
+		cacheFn = func(minute int) (CachedMinuteRollup, bool) {
+			r, ok := chatCache.get(minute)
+			if !ok {
+				return CachedMinuteRollup{}, false
+			}
+			return CachedMinuteRollup{
+				ChatCount:         r.ChatCount,
+				TotalEmoteCount:   r.TotalEmoteCount,
+				SevenTVEmoteCount: r.SevenTVEmoteCount,
+				Emotes:            r.Emotes,
+			}, true
+		}
+	}
+	rollups = BuildMinuteRollupsFromCommentsCached(
+		login,
+		s.enricher,
+		commentsMap,
+		toRollupViewerPoints(viewerPoints),
+		rollupStart,
+		durationSeconds,
+		cacheFn,
+	)
+	tokenizeMS = time.Since(tokenizeStart).Milliseconds()
+	s.log.Info("sync phase complete", "stream_id", streamID, "phase", "tokenize", "duration_ms", tokenizeMS)
+	}
+
+	chatRollupsWritten := 0
+	for _, rollup := range rollups {
+		if rollup.ChatCount > 0 || rollup.SevenTVEmoteCount > 0 {
+			chatRollupsWritten++
+		}
 	}
 
 	// 6. Save data to database
 	s.log.Info("saving historical rollups and game segments to database", "rollups_count", len(rollups), "segments_count", len(gameSegments))
 
+	rollupWriteStart := time.Now()
+	chatMinutesExpected := countChatMinutesInMap(commentsMap)
+	if !viewersOnly {
+		s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
+			cp.IndexPhase = "writing"
+			cp.RollupsExpected = chatMinutesExpected
+			cp.StreamDurationSec = durationSeconds
+		}, true)
+	}
 	if skipTracker && !viewersOnly {
-		s.setSyncPhase(ctx, streamID, SyncPhaseWritingRollups, "Writing chat rollups to database", nil)
-		err = s.writeChatRollupsOnly(ctx, streamID, login, rollupStart, commentsMap)
+		s.setSyncPhase(ctx, streamID, SyncPhaseWritingRollups, fmt.Sprintf("Writing %d chat minutes", chatMinutesExpected), func(st *SyncStatus) {
+			if st.Chat != nil {
+				st.Chat.IndexPhase = "writing"
+			}
+		})
+		err = s.writeChatRollupsOnly(ctx, streamID, login, rollupStart, commentsMap, chatCache)
 		if err != nil {
 			return "", fmt.Errorf("failed to save chat rollups to DB: %w", err)
 		}
 	} else {
-		s.setSyncPhase(ctx, streamID, SyncPhaseWritingRollups, "Writing minute rollups to database", func(st *SyncStatus) {
-			st.RollupsWritten = len(rollups)
+		writeMsg := "Writing minute rollups to database"
+		if !viewersOnly && chatMinutesExpected > 0 {
+			writeMsg = fmt.Sprintf("Writing %d chat minutes", chatMinutesExpected)
+		}
+		s.setSyncPhase(ctx, streamID, SyncPhaseWritingRollups, writeMsg, func(st *SyncStatus) {
+			if !viewersOnly {
+				st.RollupsWritten = 0
+				if st.Chat != nil {
+					st.Chat.IndexPhase = "writing"
+					st.Chat.RollupsExpected = chatMinutesExpected
+				}
+			} else {
+				st.RollupsWritten = len(rollups)
+			}
 		})
 		if viewersOnly {
 			err = s.store.BulkPatchViewerRollups(ctx, streamID, rollups)
@@ -502,6 +844,26 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		}
 	}
 
+	rollupWriteMS := time.Since(rollupWriteStart).Milliseconds()
+	s.log.Info("sync phase complete", "stream_id", streamID, "phase", "rollup_write", "duration_ms", rollupWriteMS)
+	s.setSyncPhase(ctx, streamID, SyncPhaseWritingRollups, "Rollups saved", func(st *SyncStatus) {
+		st.ViewerStatus = viewerStatus
+		if !viewersOnly && chatRollupsWritten > 0 {
+			st.RollupsWritten = chatRollupsWritten
+		}
+		if st.Chat != nil {
+			st.Chat.IndexPhase = "done"
+			st.Chat.Active = false
+		}
+		st.Timing = &SyncPhaseTiming{
+			TrackerScrapeMS: trackerScrapeMS,
+			VodResolveMS:    vodResolveMS,
+			GQLFetchMS:      gqlFetchMS,
+			TokenizeMS:      tokenizeMS,
+			RollupWriteMS:   rollupWriteMS,
+		}
+	})
+
 	chatComments := 0
 	for _, comments := range commentsMap {
 		chatComments += len(comments)
@@ -509,7 +871,7 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 	msg := "Stream synced successfully"
 	if viewersOnly {
 		if len(viewerPoints) == 0 {
-			msg = "Chat/7TV unchanged — TwitchTracker viewer chart blocked (no minute-level viewers). Try again later or use cloud Firecrawl."
+			msg = "Chat/7TV unchanged — TwitchTracker viewer chart blocked (no minute-level viewers). Try again later or check streamclone-scraper logs."
 		} else {
 			msg = "Viewer timeline synced from TwitchTracker (chat/7TV unchanged)"
 		}
@@ -519,16 +881,53 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		} else if chatComments == 0 {
 			msg = "Stream synced (chat unavailable). Viewer chart blocked by TwitchTracker."
 		} else {
-			msg = "Chat/emotes synced. Viewer chart blocked by TwitchTracker — use Re-sync viewers when scrape works."
+			msg = "Chat/emotes synced. Viewer chart incomplete — Re-sync viewers."
 		}
 	} else if vodID == "" {
-		msg = "Stream synced (viewers only — VOD not found, chat/7TV skipped)"
+		if NormalizeBroadcasterID(broadcasterID) == "" {
+			msg = "Stream synced (viewers only — VOD chat skipped: broadcaster ID missing; re-sync after Helix credentials are set)"
+		} else {
+			msg = "Stream synced (viewers only — VOD not found in Helix/TwitchTracker; chat/7TV skipped)"
+		}
 	} else if chatComments == 0 {
 		msg = "Stream synced (viewers only — VOD comments unavailable)"
 	}
 	if skipTracker && !viewersOnly && chatComments > 0 {
 		msg = fmt.Sprintf("Chat/emotes synced (%s comments); viewer timeline unchanged", strconv.Itoa(chatComments))
 	}
+	coverageRollups := rollups
+	if len(coverageRollups) == 0 && !viewersOnly && chatComments > 0 {
+		if persisted, loadErr := s.store.RollupsByStream(ctx, streamID); loadErr == nil {
+			coverageRollups = persisted
+		}
+	}
+	if !viewersOnly && chatComments > 0 && len(coverageRollups) > 0 {
+		streamForCoverage := stream
+		if updated, loadErr := s.store.StreamByID(ctx, streamID); loadErr == nil {
+			streamForCoverage = updated
+		} else if streamForCoverage != nil {
+			copy := *streamForCoverage
+			streamForCoverage = &copy
+			streamForCoverage.EndedAt = &endTS
+		}
+		summary := chatCoverageSummary(coverageRollups, streamForCoverage, helixVodDurationSec)
+		s.log.Info("chat coverage after sync",
+			"stream_id", streamID,
+			"vod_id", vodID,
+			"vod_duration_sec", helixVodDurationSec,
+			"tracker_duration_sec", durationSeconds,
+			"chat_span_minutes", summary.ChatSpanMinutes,
+			"coverage_pct", summary.CoveragePct,
+			"partial", summary.Partial,
+		)
+		if summary.Partial {
+			msg = formatPartialChatCoverageMessage(vodID, summary)
+		}
+	}
+	s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
+		cp.Active = false
+		cp.IndexPhase = "done"
+	}, true)
 	s.log.Info("historical stream sync completed successfully", "stream_id", streamID, "chat_comments", chatComments, "vod_id", vodID)
 	return msg, nil
 }
@@ -579,8 +978,8 @@ func chartMaxViewers(points []parsedViewerPoint) int {
 	return max
 }
 
-// hasRealViewerChart rejects peak-only / flat fallbacks (need varied minute-level samples).
-func hasRealViewerChart(points []parsedViewerPoint) bool {
+// hasCompleteViewerChart rejects peak-only/flat charts and partial tails.
+func hasCompleteViewerChart(points []parsedViewerPoint, durationSeconds int) bool {
 	if len(points) < 3 {
 		return false
 	}
@@ -593,7 +992,40 @@ func hasRealViewerChart(points []parsedViewerPoint) bool {
 			maxV = pt.Viewers
 		}
 	}
-	return maxV > minV
+	if maxV <= minV {
+		return false
+	}
+	if durationSeconds <= 0 {
+		return true
+	}
+	lastOffset := lastViewerOffsetSeconds(points)
+	if lastOffset < (durationSeconds*85)/100 {
+		return false
+	}
+	if durationSeconds > 30*60 {
+		durationMinutes := (durationSeconds + 59) / 60
+		minPoints := durationMinutes / 5
+		if minPoints < 10 {
+			minPoints = 10
+		}
+		if len(points) < minPoints {
+			// SVG-injected charts sample ~40 points across the full timeline.
+			if lastOffset < (durationSeconds*85)/100 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func lastViewerOffsetSeconds(points []parsedViewerPoint) int {
+	lastOffset := 0
+	for _, pt := range points {
+		if pt.OffsetSeconds > lastOffset {
+			lastOffset = pt.OffsetSeconds
+		}
+	}
+	return lastOffset
 }
 
 func buildGameSegments(games []scrapedGame, totalDurationSeconds int) []GameSegment {
@@ -659,7 +1091,11 @@ func (s *SyncService) scrapeTwitchTrackerDirect(ctx context.Context, pageURL str
 	if s.userAgent != "" {
 		req.Header.Set("User-Agent", s.userAgent)
 	}
-	resp, err := s.client.Do(req)
+	client := s.client
+	if s.ttDirectHTTPTimeoutMS > 0 {
+		client = &http.Client{Timeout: time.Duration(s.ttDirectHTTPTimeoutMS) * time.Millisecond}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -681,58 +1117,66 @@ func (s *SyncService) scrapeTwitchTrackerDirect(ctx context.Context, pageURL str
 	return htmlBody, nil
 }
 
-func formatFirecrawlConnectError(err error, firecrawlURL string) string {
+func formatScraperConnectError(err error, scraperURL string) string {
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 	if strings.Contains(lower, "connection refused") || strings.Contains(lower, "no such host") || strings.Contains(lower, "actively refused") {
 		return fmt.Sprintf(
-			"%s — scraper at %s is not reachable. Set FIRECRAWL_API_URL to https://api.firecrawl.dev/v2/scrape with a FIRECRAWL_API_KEY from https://firecrawl.dev, or run a self-hosted Firecrawl instance (default port 3002) and point FIRECRAWL_API_URL at it",
+			"%s — scraper service unreachable at %s. Ensure streamclone-scraper is running (docker compose ps scraper), on the same compose network, and SCRAPER_API_URL=http://scraper:8000/v2/scrape inside containers",
 			msg,
-			firecrawlURL,
+			scraperURL,
 		)
 	}
 	return msg
 }
 
-func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string) (string, error) {
-	if htmlBody, err := s.scrapeTwitchTrackerDirect(ctx, url); err == nil {
-		s.log.Info("fetched TwitchTracker page via direct HTTP", "url", url)
-		return htmlBody, nil
-	} else {
-		s.log.Info("direct TwitchTracker fetch unavailable, trying Firecrawl", "url", url, "err", err)
+func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string, stream *StreamRecord, viewersOnly bool) (string, error) {
+	if s.ttDirectHTTPEnabled && s.directHTTP.allowed() {
+		if htmlBody, err := s.scrapeTwitchTrackerDirect(ctx, url); err == nil {
+			s.directHTTP.record(true)
+			s.log.Info("fetched TwitchTracker page via direct HTTP", "url", url)
+			return htmlBody, nil
+		} else {
+			s.directHTTP.record(false)
+			s.log.Info("direct TwitchTracker fetch unavailable, trying browser scraper", "url", url, "err", err)
+		}
+	} else if s.ttDirectHTTPEnabled && !s.directHTTP.allowed() {
+		s.log.Debug("direct TwitchTracker fetch temporarily disabled due to low success rate", "url", url)
 	}
 
-	if s.firecrawlKey == "" {
-		return "", fmt.Errorf("missing FIRECRAWL_API_KEY — TwitchTracker blocks direct scraping; add a key from https://firecrawl.dev or run self-hosted Firecrawl")
+	if s.scraperKey == "" {
+		return "", fmt.Errorf("missing SCRAPER_API_KEY — TwitchTracker blocks direct scraping; set SCRAPER_API_KEY=local-dev-key in .env for the local scraper")
 	}
 
+	maxAge := s.trackerScrapeMaxAgeMS(stream, viewersOnly)
 	reqBody, err := json.Marshal(map[string]any{
 		"url":             url,
 		"formats":         []string{"rawHtml"},
 		"onlyMainContent": false,
 		"useProxy":        false, // datacenter proxies are Cloudflare-blocked on TwitchTracker
 		"timeout":         s.trackerScrapeTimeoutMS,
+		"maxAge":          maxAge,
 	})
 	if err != nil {
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.firecrawlURL, bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.scraperURL, bytes.NewReader(reqBody))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.firecrawlKey)
+	req.Header.Set("Authorization", "Bearer "+s.scraperKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to scrape TwitchTracker: %s", formatFirecrawlConnectError(err, s.firecrawlURL))
+		return "", fmt.Errorf("failed to scrape TwitchTracker: %s", formatScraperConnectError(err, s.scraperURL))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("firecrawl API returned status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("scraper API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var fcResp struct {
@@ -740,6 +1184,12 @@ func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string) (stri
 		Data    struct {
 			HTML    string `json:"html"`
 			RawHTML string `json:"rawHtml"`
+			Validation struct {
+				CloudflareState string `json:"cloudflareState"`
+			} `json:"validation"`
+			Protection struct {
+				State string `json:"state"`
+			} `json:"protection"`
 		} `json:"data"`
 		Error string `json:"error"`
 	}
@@ -749,7 +1199,17 @@ func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string) (stri
 	}
 
 	if !fcResp.Success {
-		return "", fmt.Errorf("firecrawl scrape failed: %s", fcResp.Error)
+		if strings.EqualFold(fcResp.Error, "access_protected") {
+			state := fcResp.Data.Protection.State
+			if state == "" {
+				state = fcResp.Data.Validation.CloudflareState
+			}
+			if state == "" {
+				state = "unknown_protection"
+			}
+			return "", fmt.Errorf("%w: %s", errTrackerAccessProtected, state)
+		}
+		return "", fmt.Errorf("scraper scrape failed: %s", fcResp.Error)
 	}
 
 	htmlBody := fcResp.Data.RawHTML
@@ -757,7 +1217,7 @@ func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string) (stri
 		htmlBody = fcResp.Data.HTML
 	}
 	if htmlBody == "" {
-		return "", fmt.Errorf("firecrawl scrape returned empty html")
+		return "", fmt.Errorf("scraper scrape returned empty html")
 	}
 	return htmlBody, nil
 }
@@ -1095,6 +1555,30 @@ func parseStreamcloneViewerChartJSON(html string, durationMinutes, peakViewers i
 	return points
 }
 
+func parseTrackerDurationMinutesFromHTML(html string) int {
+	reHM := regexp.MustCompile(`(?is)g-x-s-value">\s*(\d+)\s*<small>h</small>\s*(\d+)\s*<small>m</small>\s*</div>\s*<div class="g-x-s-label[^"]*">Stream duration</div>`)
+	if m := reHM.FindStringSubmatch(html); len(m) > 2 {
+		hours, _ := strconv.Atoi(m[1])
+		mins, _ := strconv.Atoi(m[2])
+		if total := hours*60 + mins; total > 0 {
+			return total
+		}
+	}
+	reDuration := regexp.MustCompile(`(?i)to-time-lg">(\d+)</div>\s*<div class="g-x-s-label[^>]*>Stream duration</div>`)
+	if durMatch := reDuration.FindStringSubmatch(html); len(durMatch) > 1 {
+		if v, _ := strconv.Atoi(durMatch[1]); v > 0 {
+			return v
+		}
+	}
+	reDurationNew := regexp.MustCompile(`(?i)g-x-s-value">\s*([\d,]+)\s*</div>\s*<div class="g-x-s-label[^"]*">Stream duration</div>`)
+	if durMatch := reDurationNew.FindStringSubmatch(html); len(durMatch) > 1 {
+		if v, _ := strconv.Atoi(strings.ReplaceAll(durMatch[1], ",", "")); v > 0 {
+			return v
+		}
+	}
+	return 0
+}
+
 func peakViewersFromHTML(html string) int {
 	rePeakNew := regexp.MustCompile(`(?i)g-x-s-value">\s*([\d,]+)\s*</div>\s*<div class="g-x-s-label[^"]*">Peak viewers</div>`)
 	if peakMatch := rePeakNew.FindStringSubmatch(html); len(peakMatch) > 1 {
@@ -1114,31 +1598,32 @@ func (s *SyncService) parseTwitchTrackerHTML(html string, startedAt time.Time) (
 	// 1. Try to parse meta#ecs metadata
 	{
 		if parsed, err := s.parseTwitchTrackerMetadata(html, startedAt); err == nil && (len(parsed.ViewerPoints) > 0 || parsed.DurationMinutes > 0 || parsed.PeakViewers > 0) {
-			s.log.Info("successfully parsed stream data from meta#ecs block",
+			durSec := parsed.DurationMinutes * 60
+			if durSec <= 0 && len(parsed.ViewerPoints) > 0 {
+				durSec = lastViewerOffsetSeconds(parsed.ViewerPoints)
+			}
+			if len(parsed.ViewerPoints) >= 3 && hasCompleteViewerChart(parsed.ViewerPoints, durSec) {
+				s.log.Info("successfully parsed stream data from meta#ecs block",
+					"duration_minutes", parsed.DurationMinutes,
+					"peak_viewers", parsed.PeakViewers,
+					"avg_viewers", parsed.AvgViewers,
+					"games_count", len(parsed.Games),
+					"points_count", len(parsed.ViewerPoints),
+				)
+				return parsed, nil
+			}
+			s.log.Warn("meta#ecs present but viewer chart incomplete; falling back to HTML/injected chart",
 				"duration_minutes", parsed.DurationMinutes,
-				"peak_viewers", parsed.PeakViewers,
-				"avg_viewers", parsed.AvgViewers,
-				"games_count", len(parsed.Games),
-				"points_count", len(parsed.ViewerPoints),
+				"point_count", len(parsed.ViewerPoints),
+				"last_offset_sec", lastViewerOffsetSeconds(parsed.ViewerPoints),
 			)
-			return parsed, nil
 		} else if err != nil {
 			s.log.Warn("failed to parse meta#ecs block, falling back to HTML scraping", "err", err)
 		}
 	}
 
-	// 1. Parse Duration (legacy to-time-lg and newer g-x-s-value blocks)
-	durationMinutes := 0
-	reDuration := regexp.MustCompile(`(?i)to-time-lg">(\d+)</div>\s*<div class="g-x-s-label[^>]*>Stream duration</div>`)
-	if durMatch := reDuration.FindStringSubmatch(html); len(durMatch) > 1 {
-		durationMinutes, _ = strconv.Atoi(durMatch[1])
-	}
-	if durationMinutes == 0 {
-		reDurationNew := regexp.MustCompile(`(?i)g-x-s-value">\s*([\d,]+)\s*</div>\s*<div class="g-x-s-label[^"]*">Stream duration</div>`)
-		if durMatch := reDurationNew.FindStringSubmatch(html); len(durMatch) > 1 {
-			durationMinutes, _ = strconv.Atoi(strings.ReplaceAll(durMatch[1], ",", ""))
-		}
-	}
+	// 1. Parse Duration (h/m blocks, legacy to-time-lg, newer g-x-s-value)
+	durationMinutes := parseTrackerDurationMinutesFromHTML(html)
 
 	// 2. Parse Peak Viewers (legacy to-number and newer g-x-s-value blocks)
 	peakViewers := 0
@@ -1204,7 +1689,7 @@ func (s *SyncService) parseTwitchTrackerHTML(html string, startedAt time.Time) (
 		}
 	}
 
-	if injected := parseStreamcloneViewerChartJSON(html, durationMinutes, peakViewers); len(injected) >= 3 && hasRealViewerChart(injected) {
+	if injected := parseStreamcloneViewerChartJSON(html, durationMinutes, peakViewers); len(injected) >= 3 && hasCompleteViewerChart(injected, durationMinutes*60) {
 		s.log.Info("parsed viewer chart from injected SVG sample JSON", "points", len(injected))
 		out.ViewerPoints = injected
 	}
@@ -1333,35 +1818,109 @@ func parsePathPoints(path string, durationSeconds int, peakViewers int) []parsed
 }
 
 func (s *SyncService) interpolateViewerCount(minute int, points []parsedViewerPoint) int {
-	if len(points) == 0 {
-		return 0
-	}
-	targetSec := minute * 60
+	return InterpolateViewerCount(minute, toRollupViewerPoints(points))
+}
 
-	// If offset is before the first point, return first point
-	if targetSec <= points[0].OffsetSeconds {
-		return points[0].Viewers
+func (s *SyncService) buildViewerMinuteRollups(rollupStart time.Time, durationSeconds int, viewerPoints []parsedViewerPoint) []MinuteRollup {
+	totalMinutes := durationSeconds / 60
+	if totalMinutes <= 0 {
+		totalMinutes = 1
 	}
-	// If offset is after the last point, return last point
-	if targetSec >= points[len(points)-1].OffsetSeconds {
-		return points[len(points)-1].Viewers
+	viewerLookup := make(map[int]int, len(viewerPoints))
+	for _, pt := range viewerPoints {
+		viewerLookup[pt.OffsetSeconds/60] = pt.Viewers
 	}
+	rollups := make([]MinuteRollup, 0, totalMinutes+1)
+	for m := 0; m <= totalMinutes; m++ {
+		viewerVal := 0
+		if val, ok := viewerLookup[m]; ok {
+			viewerVal = val
+		} else {
+			viewerVal = s.interpolateViewerCount(m, viewerPoints)
+		}
+		if viewerVal <= 0 {
+			continue
+		}
+		rollups = append(rollups, MinuteRollup{
+			MinuteTS:      rollupStart.Add(time.Duration(m) * time.Minute),
+			ViewerAvg:     viewerVal,
+			ViewerMax:     viewerVal,
+			ViewerLatest:  viewerVal,
+			ViewerSamples: 1,
+		})
+	}
+	return rollups
+}
 
-	// Find enclosing interval
-	for i := 0; i < len(points)-1; i++ {
-		p1 := points[i]
-		p2 := points[i+1]
-		if targetSec >= p1.OffsetSeconds && targetSec <= p2.OffsetSeconds {
-			span := p2.OffsetSeconds - p1.OffsetSeconds
-			if span == 0 {
-				return p1.Viewers
-			}
-			pct := float64(targetSec-p1.OffsetSeconds) / float64(span)
-			return p1.Viewers + int(pct*float64(p2.Viewers-p1.Viewers))
+func (s *SyncService) persistEarlyViewerChart(
+	ctx context.Context,
+	streamID string,
+	rollupStart time.Time,
+	durationSeconds int,
+	peakViewers int,
+	avgViewers int,
+	viewerPoints []parsedViewerPoint,
+	gameSegments []scrapedGame,
+) {
+	rollups := s.buildViewerMinuteRollups(rollupStart, durationSeconds, viewerPoints)
+	if len(rollups) == 0 {
+		return
+	}
+	writeStart := time.Now()
+	if err := s.store.BulkPatchViewerRollups(ctx, streamID, rollups); err != nil {
+		s.log.Warn("early viewer rollup write failed", "stream_id", streamID, "err", err)
+		return
+	}
+	segments := buildGameSegments(gameSegments, durationSeconds)
+	for i := range segments {
+		segments[i].StreamID = streamID
+	}
+	if len(segments) > 0 {
+		if err := s.store.SaveGameSegments(ctx, streamID, segments); err != nil {
+			s.log.Warn("early game segment write failed", "stream_id", streamID, "err", err)
 		}
 	}
+	endTS := rollupStart.Add(time.Duration(durationSeconds) * time.Second)
+	if !endTS.After(rollupStart) {
+		endTS = rollupStart.Add(time.Minute)
+	}
+	if _, err := s.store.db.Exec(ctx, `
+		UPDATE analytics_streams
+		SET ended_at = $2,
+		    peak_viewers = GREATEST(peak_viewers, $3::int),
+		    avg_viewers = CASE WHEN $4::int > 0 THEN GREATEST(avg_viewers, $4::int) ELSE avg_viewers END,
+		    updated_at = now()
+		WHERE stream_id = $1
+	`, streamID, endTS, peakViewers, avgViewers); err != nil {
+		s.log.Warn("early stream metadata update failed", "stream_id", streamID, "err", err)
+	}
+	s.log.Info("sync phase complete",
+		"stream_id", streamID,
+		"phase", "early_viewer_write",
+		"duration_ms", time.Since(writeStart).Milliseconds(),
+		"rollup_minutes", len(rollups),
+	)
+	s.setSyncPhase(ctx, streamID, SyncPhaseParsingTracker, "Viewer chart saved — chat indexing continues", func(st *SyncStatus) {
+		st.ViewerStatus = "ok"
+		st.RollupsWritten = len(rollups)
+		if st.Tracker == nil {
+			st.Tracker = &SyncTrackerProgress{}
+		}
+		st.Tracker.Active = false
+		st.Tracker.Message = "Viewer chart available in UI"
+	})
+}
 
-	return 0
+type emoteEnsureResponse struct {
+	State     string `json:"state"`
+	Count     int    `json:"count"`
+	Pending   int    `json:"pending"`
+	Providers []struct {
+		Provider string `json:"provider"`
+		State    string `json:"state"`
+		Count    int    `json:"count"`
+		Error    string `json:"error"`
+	} `json:"providers"`
 }
 
 func (s *SyncService) preloadChannelEmotes(ctx context.Context, login, broadcasterID string) {
@@ -1370,29 +1929,66 @@ func (s *SyncService) preloadChannelEmotes(ctx context.Context, login, broadcast
 	}
 	body, err := json.Marshal(map[string]any{
 		"twitch_id": broadcasterID,
-		"providers": []string{"seventv", "twitch"},
+		"providers": []string{"seventv", "twitch", "ffz"},
 	})
 	if err != nil {
 		return
 	}
 	url := fmt.Sprintf("%s/v1/channels/%s/emotes/ensure", s.emoteURL, login)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return
+	deadline := time.Now().Add(2 * time.Minute)
+	var last emoteEnsureResponse
+	for attempt := 0; attempt < 60 && time.Now().Before(deadline); attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := s.client.Do(req)
+		if err != nil {
+			s.log.Warn("emote ensure request failed", "login", login, "err", err)
+			return
+		}
+		respBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			s.log.Warn("emote ensure read failed", "login", login, "err", readErr)
+			return
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			s.log.Warn("emote ensure returned non-success status", "login", login, "status", resp.StatusCode)
+			return
+		}
+		last = emoteEnsureResponse{}
+		_ = json.Unmarshal(respBody, &last)
+		if last.State == "ready" && last.Count > 0 {
+			s.enricher.Invalidate(login)
+			s.log.Info("preloaded channel emotes for historical sync", "login", login, "count", last.Count)
+			return
+		}
+		if last.State == "failed" || (last.State == "ready" && last.Count == 0 && last.Pending == 0) {
+			break
+		}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.client.Do(req)
-	if err != nil {
-		s.log.Warn("emote ensure request failed", "login", login, "err", err)
-		return
+	var providerErrors []string
+	for _, p := range last.Providers {
+		if p.Error != "" {
+			providerErrors = append(providerErrors, p.Provider+": "+p.Error)
+		}
 	}
-	resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		s.log.Warn("emote ensure returned non-success status", "login", login, "status", resp.StatusCode)
-		return
-	}
-	s.enricher.Invalidate(login)
-	s.log.Info("preloaded channel emotes for historical sync", "login", login)
+	s.log.Warn("emote dictionary not ready before chat tokenize",
+		"login", login,
+		"state", last.State,
+		"count", last.Count,
+		"pending", last.Pending,
+		"provider_errors", providerErrors,
+	)
 }
 
 func (s *SyncService) extractVodID(html string) string {
@@ -1506,6 +2102,8 @@ func (s *SyncService) trackerDataFromDB(ctx context.Context, stream *StreamRecor
 	}, nil
 }
 
+const syncChatRollupTopEmotes = 50
+
 func buildChatMinuteRollup(login string, enricher *enrich.Enricher, comments []string) (chatCount, totalEmoteCount, seventvEmoteCount int, emotes map[string]int) {
 	emotes = make(map[string]int)
 	chatCount = len(comments)
@@ -1523,13 +2121,116 @@ func buildChatMinuteRollup(login string, enricher *enrich.Enricher, comments []s
 			emotes[key]++
 		}
 	}
+	emotes = topNMap(emotes, syncChatRollupTopEmotes)
 	return chatCount, totalEmoteCount, seventvEmoteCount, emotes
 }
 
-func (s *SyncService) writeChatRollupsOnly(ctx context.Context, streamID, login string, rollupStart time.Time, commentsMap map[int][]string) error {
+type chatRollupCache struct {
+	mu       sync.RWMutex
+	byMinute map[int]MinuteRollup
+}
+
+func newChatRollupCache() *chatRollupCache {
+	return &chatRollupCache{byMinute: make(map[int]MinuteRollup)}
+}
+
+func (c *chatRollupCache) store(rollupStart time.Time, rollups []MinuteRollup) {
+	if c == nil || rollupStart.IsZero() {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, rollup := range rollups {
+		offset := int(rollup.MinuteTS.Sub(rollupStart).Minutes())
+		c.byMinute[offset] = rollup
+	}
+}
+
+func (c *chatRollupCache) get(minute int) (MinuteRollup, bool) {
+	if c == nil {
+		return MinuteRollup{}, false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	rollup, ok := c.byMinute[minute]
+	return rollup, ok
+}
+
+func (c *chatRollupCache) has(minute int) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	_, ok := c.byMinute[minute]
+	return ok
+}
+
+func (s *SyncService) patchChatRollupsForSegment(
+	ctx context.Context,
+	streamID, login string,
+	rollupStartFn func() time.Time,
+	commentsMap map[int][]string,
+	seg gqlSegmentProgress,
+	chatAlignSec int,
+	cache *chatRollupCache,
+) error {
+	if rollupStartFn == nil || login == "" {
+		return nil
+	}
+	rollupStart := rollupStartFn()
+	if rollupStart.IsZero() {
+		return nil
+	}
+	startMinute, endMinute := segmentAlignedMinuteBounds(seg, chatAlignSec)
+	rollups := make([]MinuteRollup, 0, endMinute-startMinute+1)
+	for minute := startMinute; minute <= endMinute; minute++ {
+		comments, ok := commentsMap[minute]
+		if !ok || len(comments) == 0 {
+			continue
+		}
+		chatCount, totalEmoteCount, seventvEmoteCount, emotes := buildChatMinuteRollup(login, s.enricher, comments)
+		rollups = append(rollups, MinuteRollup{
+			MinuteTS:          rollupStart.Add(time.Duration(minute) * time.Minute),
+			ChatCount:         chatCount,
+			TotalEmoteCount:   totalEmoteCount,
+			SevenTVEmoteCount: seventvEmoteCount,
+			Emotes:            emotes,
+		})
+	}
+	if len(rollups) == 0 {
+		return nil
+	}
+	sort.Slice(rollups, func(i, j int) bool {
+		return rollups[i].MinuteTS.Before(rollups[j].MinuteTS)
+	})
+	if cache != nil {
+		cache.store(rollupStart, rollups)
+	}
+	s.log.Info("incremental chat rollup patch",
+		"stream_id", streamID,
+		"segment_start_sec", seg.StartSec,
+		"segment_end_sec", seg.EndSec,
+		"chat_align_sec", chatAlignSec,
+		"minute_start", startMinute,
+		"minute_end", endMinute,
+		"rollup_minutes", len(rollups),
+	)
+	status := s.loadOrInitSyncStatus(ctx, streamID)
+	status.RollupsWritten += len(rollups)
+	if status.Chat != nil {
+		status.Chat.IndexPhase = "writing"
+	}
+	if err := s.saveSyncStatus(ctx, *status); err != nil {
+		s.log.Warn("failed to persist incremental rollup progress", "stream_id", streamID, "err", err)
+	}
+	return s.store.BulkPatchChatRollups(ctx, streamID, rollups)
+}
+
+func (s *SyncService) writeChatRollupsOnly(ctx context.Context, streamID, login string, rollupStart time.Time, commentsMap map[int][]string, cache *chatRollupCache) error {
 	rollups := make([]MinuteRollup, 0, len(commentsMap))
 	for minuteOffset, comments := range commentsMap {
-		if len(comments) == 0 {
+		if len(comments) == 0 || cache.has(minuteOffset) {
 			continue
 		}
 		chatCount, totalEmoteCount, seventvEmoteCount, emotes := buildChatMinuteRollup(login, s.enricher, comments)
@@ -1557,129 +2258,132 @@ func (s *SyncService) gqlHTTPClient() *http.Client {
 	return s.client
 }
 
-func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLRequest) (GQLResponse, error) {
+func parseRetryAfter(h http.Header) time.Duration {
+	raw := strings.TrimSpace(h.Get("Retry-After"))
+	if raw == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(raw); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+func gqlBackoffDelay(attempt int, retryAfter time.Duration) time.Duration {
+	if retryAfter > 0 {
+		return retryAfter
+	}
+	base := 500 * time.Millisecond
+	delay := base * time.Duration(1<<attempt)
+	const maxDelay = 30 * time.Second
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+	jitter := time.Duration(rand.Int63n(int64(delay / 4)))
+	return delay + jitter
+}
+
+const gqlVideoCommentsMaxRetries = 5
+
+func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLRequest, coord *gqlRateCoordinator) (GQLResponse, error) {
 	bodyBytes, err := json.Marshal([]GQLRequest{reqBody})
 	if err != nil {
 		return GQLResponse{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.twitchGQLURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return GQLResponse{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Client-Id", s.twitchClientID)
+	var count429, count503 int
+	for attempt := 0; attempt <= gqlVideoCommentsMaxRetries; attempt++ {
+		if coord != nil {
+			if waitErr := coord.Wait(ctx); waitErr != nil {
+				return GQLResponse{}, waitErr
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.twitchGQLURL, bytes.NewReader(bodyBytes))
+		if err != nil {
+			return GQLResponse{}, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Client-Id", s.twitchClientID)
 
-	resp, err := s.gqlHTTPClient().Do(req)
-	if err != nil {
-		return GQLResponse{}, err
-	}
-	defer resp.Body.Close()
+		resp, err := s.gqlHTTPClient().Do(req)
+		if err != nil {
+			return GQLResponse{}, err
+		}
 
-	var respBody []GQLResponse
-	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		return GQLResponse{}, err
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+			if resp.StatusCode == http.StatusTooManyRequests {
+				count429++
+			} else {
+				count503++
+			}
+			retryAfter := parseRetryAfter(resp.Header)
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if attempt >= gqlVideoCommentsMaxRetries {
+				if count429 > 0 || count503 > 0 {
+					s.log.Warn("gql video comments exhausted retries", "429_count", count429, "503_count", count503)
+				}
+				return GQLResponse{}, fmt.Errorf("gql video comments status %d after %d retries", resp.StatusCode, attempt)
+			}
+			delay := gqlBackoffDelay(attempt, retryAfter)
+			if coord != nil {
+				coord.Throttle(retryAfter, attempt)
+				coord.RecordRateLimit()
+			}
+			s.log.Warn("gql video comments throttled; backing off",
+				"status", resp.StatusCode,
+				"attempt", attempt+1,
+				"delay_ms", delay.Milliseconds(),
+			)
+			select {
+			case <-ctx.Done():
+				return GQLResponse{}, ctx.Err()
+			case <-time.After(delay):
+			}
+			continue
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			return GQLResponse{}, fmt.Errorf("gql video comments status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+
+		var respBody []GQLResponse
+		if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+			resp.Body.Close()
+			return GQLResponse{}, err
+		}
+		resp.Body.Close()
+		if len(respBody) == 0 {
+			return GQLResponse{}, fmt.Errorf("gql video comments response empty")
+		}
+		if count429 > 0 || count503 > 0 {
+			s.log.Info("gql video comments recovered after throttle", "429_count", count429, "503_count", count503)
+		}
+		if coord != nil {
+			coord.RecordSuccess()
+		}
+		return respBody[0], nil
 	}
-	if len(respBody) == 0 {
-		return GQLResponse{}, fmt.Errorf("gql video comments response empty")
-	}
-	return respBody[0], nil
+	return GQLResponse{}, fmt.Errorf("gql video comments retry loop exhausted")
 }
 
-func (s *SyncService) fetchVODComments(ctx context.Context, streamID, videoID string, commentsMap map[int][]string) error {
-	const sha256Hash = "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"
-	const maxComments = 200000
-	const progressEvery = 200
-
-	useCursor := false
-	cursorFailed := false
-	nextCursor := ""
-	contentOffsetSeconds := 0
-	commentsCount := 0
-	lastOffset := 0
-
-	reportProgress := func(force bool) {
-		if !force && (commentsCount == 0 || commentsCount%progressEvery != 0) {
-			return
-		}
-		count := commentsCount
-		s.setSyncPhase(ctx, streamID, SyncPhaseFetchingComments, fmt.Sprintf("Fetched %d comments", count), func(st *SyncStatus) {
-			st.CommentsFetched = count
-		})
+func (s *SyncService) vodDurationSeconds(ctx context.Context, videoID string) int {
+	if s.helix == nil || !s.helix.Enabled() || videoID == "" {
+		return 0
 	}
-
-	for {
-		reqBody := buildVideoCommentsGQLRequest(videoID, sha256Hash, useCursor, contentOffsetSeconds, nextCursor)
-		gqlResp, err := s.postGQLVideoComments(ctx, reqBody)
-		if err != nil {
-			return err
-		}
-		if isGQLIntegrityError(gqlResp) {
-			if useCursor {
-				s.log.Warn("GQL cursor pagination failed integrity check; falling back to offset",
-					"stream_id", streamID,
-					"offset", lastOffset+1,
-				)
-				useCursor = false
-				cursorFailed = true
-				nextCursor = ""
-				contentOffsetSeconds = lastOffset + 1
-				continue
-			}
-			return fmt.Errorf("gql video comments integrity error")
-		}
-		if len(gqlResp.Errors) > 0 {
-			return fmt.Errorf("gql video comments error: %s", gqlResp.Errors[0].Message)
-		}
-		if gqlResp.Data.Video == nil || gqlResp.Data.Video.Comments == nil {
-			break
-		}
-
-		commentsNode := gqlResp.Data.Video.Comments
-		edges := commentsNode.Edges
-		if len(edges) == 0 {
-			break
-		}
-
-		for _, edge := range edges {
-			minOffset := edge.Node.ContentOffsetSeconds / 60
-			text := gqlCommentText(edge.Node.Message)
-			if strings.TrimSpace(text) == "" {
-				continue
-			}
-			commentsMap[minOffset] = append(commentsMap[minOffset], text)
-			commentsCount++
-			lastOffset = edge.Node.ContentOffsetSeconds
-		}
-
-		reportProgress(false)
-
-		if commentsCount >= maxComments {
-			s.log.Warn("safety threshold of 200,000 comments reached; truncating comments paging")
-			break
-		}
-		if !commentsNode.PageInfo.HasNextPage {
-			break
-		}
-
-		lastEdge := edges[len(edges)-1]
-		if !cursorFailed && strings.TrimSpace(lastEdge.Cursor) != "" {
-			useCursor = true
-			nextCursor = lastEdge.Cursor
-		} else {
-			useCursor = false
-			nextCursor = ""
-			contentOffsetSeconds = lastOffset + 1
-		}
-
-		if s.vodGQLPageDelay > 0 {
-			time.Sleep(s.vodGQLPageDelay)
-		}
+	d, err := s.helix.VideoDurationSeconds(ctx, videoID)
+	if err != nil {
+		s.log.Warn("helix vod duration lookup failed", "vod_id", videoID, "err", err)
+		return 0
 	}
-
-	reportProgress(true)
-	s.log.Info("finished VOD comments paging", "total_comments", commentsCount, "cursor_mode", !cursorFailed)
-	return nil
+	return d
 }
 
 func (s *SyncService) generateMockComments(ctx context.Context, login string, streamID string, durationSeconds int, commentsMap map[int][]string) {

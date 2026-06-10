@@ -135,13 +135,49 @@ func (h *Handler) streamDetail(w http.ResponseWriter, r *http.Request) {
 	stream, err := h.store.StreamByID(r.Context(), streamID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "stream_not_found"})
+			h.writeMissingStreamDetail(w, r, streamID)
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	h.writeStreamDetail(w, r, stream, http.StatusOK)
+}
+
+func (h *Handler) writeMissingStreamDetail(w http.ResponseWriter, r *http.Request, streamID string) {
+	if h.syncService != nil {
+		if status, statusErr := h.syncService.GetSyncStatus(r.Context(), streamID); statusErr == nil && status != nil && !status.Phase.IsTerminal() {
+			writeJSON(w, http.StatusOK, StreamDetailResponse{
+				Channel:   "",
+				State:     "syncing",
+				SyncPhase: string(status.Phase),
+				Rollups:   []MinuteRollup{},
+				TopEmotes: []TopEmote{},
+				Sources:   []SourceStatus{{Source: "analytics_db", State: "syncing", Message: status.Message}},
+				UpdatedAt: time.Now().UnixMilli(),
+			})
+			return
+		}
+	}
+	channel := ""
+	if login, ok := validLogin(r.URL.Query().Get("channel")); ok {
+		channel = login
+		upsertErr := h.store.UpsertStreamPlaceholder(r.Context(), streamID, "", login, "", time.Time{})
+		if upsertErr == nil {
+			if stream, err := h.store.StreamByID(r.Context(), streamID); err == nil {
+				h.writeStreamDetail(w, r, stream, http.StatusOK)
+				return
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, StreamDetailResponse{
+		Channel:   channel,
+		State:     "not_collected",
+		Rollups:   []MinuteRollup{},
+		TopEmotes: []TopEmote{},
+		Sources:   []SourceStatus{{Source: "analytics_db", State: "unavailable", Message: "Stream not synced yet"}},
+		UpdatedAt: time.Now().UnixMilli(),
+	})
 }
 
 func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stream *StreamRecord, status int) {
@@ -155,30 +191,62 @@ func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stre
 		rollups[i] = normalizeRollup(rollups[i], 200)
 	}
 	topEmotes := TopEmotesFromRollups(rollups, 50)
+	emoteKeys := make([]string, 0, len(topEmotes))
+	for _, emote := range topEmotes {
+		emoteKeys = append(emoteKeys, emote.Key)
+	}
 	state := "historical"
 	if stream.EndedAt == nil {
 		state = "live"
 	}
-	vodID := stream.VodID
-	if vodID == "" && h.helix != nil && h.helix.Enabled() && stream.BroadcasterID != "" {
-		vodID, _ = h.helix.VideoIDByStreamID(r.Context(), stream.BroadcasterID, stream.StreamID)
+	vodID := strings.TrimSpace(stream.VodID)
+	broadcasterID := NormalizeBroadcasterID(stream.BroadcasterID)
+	if broadcasterID == "" && h.helix != nil && h.helix.Enabled() && stream.Login != "" {
+		broadcasterID = h.helix.ResolveBroadcasterID(r.Context(), stream.Login, "")
+	}
+	if vodID == "" && h.helix != nil && h.helix.Enabled() && broadcasterID != "" {
+		if resolved, _ := h.helix.VideoIDByStreamID(r.Context(), broadcasterID, stream.StreamID); resolved != "" {
+			vodID = resolved
+			_ = h.store.SetStreamVodID(r.Context(), stream.StreamID, vodID, "helix_stream_match")
+		}
 	}
 	var responseRollups []MinuteRollup
 	if sparse {
-		responseRollups = slimRollupsForChart(rollups)
+		responseRollups = slimRollupsForChart(rollups, emoteKeys)
 	} else {
 		startAt, endAt := normalizeStreamWindow(stream.StartedAt, stream.EndedAt)
 		responseRollups = fillMissingRollups(rollups, startAt, endAt)
 	}
+	vodDurationSec := 0
+	if vodID != "" && h.helix != nil && h.helix.Enabled() {
+		if d, err := h.helix.VideoDurationSeconds(r.Context(), vodID); err == nil {
+			vodDurationSec = d
+		}
+	}
+	chatCoverage := chatCoverageSummary(rollups, stream, vodDurationSec)
+
+	responseState := state
+	var syncPhase string
+	if h.syncService != nil {
+		if syncStatus, syncErr := h.syncService.GetSyncStatus(r.Context(), stream.StreamID); syncErr == nil && syncStatus != nil && !syncStatus.Phase.IsTerminal() {
+			responseState = "syncing"
+			syncPhase = string(syncStatus.Phase)
+		}
+	}
+
 	writeJSON(w, status, StreamDetailResponse{
-		Channel:   stream.Login,
-		State:     state,
-		Stream:    stream,
-		Rollups:   responseRollups,
-		TopEmotes: topEmotes,
-		Sources:   []SourceStatus{{Source: "analytics_db", State: "ready"}},
-		UpdatedAt: time.Now().UnixMilli(),
-		VodID:     vodID,
+		Channel:         stream.Login,
+		State:           responseState,
+		SyncPhase:       syncPhase,
+		Stream:          stream,
+		Rollups:         responseRollups,
+		TopEmotes:       topEmotes,
+		Sources:         []SourceStatus{{Source: "analytics_db", State: "ready"}},
+		UpdatedAt:       time.Now().UnixMilli(),
+		VodID:           vodID,
+		ChatCoveragePct: chatCoverage.CoveragePct,
+		VodDurationSec:  vodDurationSec,
+		ChatCoverage:    &chatCoverage,
 	})
 }
 
@@ -321,13 +389,34 @@ func fillMissingRollups(in []MinuteRollup, startedAt time.Time, endedAt *time.Ti
 	return out
 }
 
-func slimRollupsForChart(in []MinuteRollup) []MinuteRollup {
+func slimRollupsForChart(in []MinuteRollup, emoteKeys []string) []MinuteRollup {
 	if len(in) == 0 {
 		return in
 	}
+	keySet := make(map[string]struct{}, len(emoteKeys))
+	for _, key := range emoteKeys {
+		if key == "" {
+			continue
+		}
+		keySet[key] = struct{}{}
+	}
 	out := make([]MinuteRollup, len(in))
 	for i, item := range in {
-		item.Emotes = nil
+		if len(keySet) == 0 || len(item.Emotes) == 0 {
+			item.Emotes = nil
+		} else {
+			slim := make(map[string]int, len(keySet))
+			for key := range keySet {
+				if count, ok := item.Emotes[key]; ok && count > 0 {
+					slim[key] = count
+				}
+			}
+			if len(slim) == 0 {
+				item.Emotes = nil
+			} else {
+				item.Emotes = slim
+			}
+		}
 		out[i] = item
 	}
 	return out
@@ -349,7 +438,9 @@ func (h *Handler) syncStream(w http.ResponseWriter, r *http.Request) {
 	viewersOnly := strings.EqualFold(r.URL.Query().Get("viewers_only"), "true") ||
 		strings.EqualFold(r.URL.Query().Get("viewers_only"), "1") ||
 		strings.EqualFold(r.URL.Query().Get("mode"), "viewers")
-	accepted, status, err := h.syncService.TryStartSync(r.Context(), streamID, channelOpt, viewersOnly)
+	forceChat := strings.EqualFold(r.URL.Query().Get("force_chat"), "true") ||
+		strings.EqualFold(r.URL.Query().Get("force_chat"), "1")
+	accepted, status, err := h.syncService.TryStartSync(r.Context(), streamID, channelOpt, viewersOnly, forceChat, strings.TrimSpace(r.URL.Query().Get("vod_id")))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -370,7 +461,7 @@ func (h *Handler) syncStreamStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := h.syncService.GetSyncStatus(r.Context(), streamID)
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "sync_status_not_found"})
+			writeJSON(w, http.StatusOK, map[string]string{"phase": "idle"})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -395,4 +486,3 @@ func (h *Handler) getStreamGames(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, segments)
 }
-

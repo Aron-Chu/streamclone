@@ -175,7 +175,7 @@ func (s *Store) LatestStreamByLogin(ctx context.Context, login string) (*StreamR
 		SELECT stream_id, broadcaster_id, login, COALESCE(display_name,''), COALESCE(profile_image_url,''),
 			COALESCE(description,''), COALESCE(title,''), COALESCE(category,''), tags, COALESCE(language,''),
 			COALESCE(thumbnail_url,''), started_at, ended_at, last_seen_at, current_viewers, avg_viewers,
-			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,'')
+			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,'')
 		FROM analytics_streams
 		WHERE login=$1
 		ORDER BY ended_at IS NULL DESC, started_at DESC
@@ -195,7 +195,7 @@ func (s *Store) StreamByID(ctx context.Context, streamID string) (*StreamRecord,
 		SELECT stream_id, broadcaster_id, login, COALESCE(display_name,''), COALESCE(profile_image_url,''),
 			COALESCE(description,''), COALESCE(title,''), COALESCE(category,''), tags, COALESCE(language,''),
 			COALESCE(thumbnail_url,''), started_at, ended_at, last_seen_at, current_viewers, avg_viewers,
-			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,'')
+			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,'')
 		FROM analytics_streams
 		WHERE stream_id=$1`, streamID)
 	if err != nil {
@@ -216,7 +216,7 @@ func (s *Store) StreamsByLogin(ctx context.Context, login string, limit int) ([]
 		SELECT stream_id, broadcaster_id, login, COALESCE(display_name,''), COALESCE(profile_image_url,''),
 			COALESCE(description,''), COALESCE(title,''), COALESCE(category,''), tags, COALESCE(language,''),
 			COALESCE(thumbnail_url,''), started_at, ended_at, last_seen_at, current_viewers, avg_viewers,
-			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,'')
+			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,'')
 		FROM analytics_streams
 		WHERE login=$1
 		ORDER BY started_at DESC
@@ -265,14 +265,115 @@ func (s *Store) RollupsByStream(ctx context.Context, streamID string) ([]MinuteR
 	return out, rows.Err()
 }
 
-func (s *Store) SetStreamVodID(ctx context.Context, streamID, vodID string) error {
+func (s *Store) SetStreamVodID(ctx context.Context, streamID, vodID, source string) error {
 	if streamID == "" || vodID == "" {
 		return nil
 	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		_, err := s.db.Exec(ctx, `
+			UPDATE analytics_streams
+			SET vod_id=$2, updated_at=now()
+			WHERE stream_id=$1`, streamID, vodID)
+		return err
+	}
 	_, err := s.db.Exec(ctx, `
 		UPDATE analytics_streams
-		SET vod_id=$2, updated_at=now()
-		WHERE stream_id=$1`, streamID, vodID)
+		SET vod_id=$2, vod_source=$3, updated_at=now()
+		WHERE stream_id=$1`, streamID, vodID, source)
+	return err
+}
+
+type SyncCheckpoint struct {
+	StreamID        string
+	VideoID         string
+	Cursor          string
+	OffsetSeconds   int
+	CommentsFetched int
+	SegmentsJSON    string
+	FetchMode       string
+	UpdatedAt       time.Time
+}
+
+func (s *Store) UpsertStreamPlaceholder(ctx context.Context, streamID, broadcasterID, login, title string, startedAt time.Time) error {
+	if streamID == "" || login == "" {
+		return nil
+	}
+	if strings.TrimSpace(broadcasterID) == "" {
+		broadcasterID = "pending"
+	}
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	if title == "" {
+		title = "Syncing..."
+	}
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO analytics_streams (
+			stream_id, broadcaster_id, login, display_name, title, category, started_at, last_seen_at, tags, peak_viewers
+		)
+		VALUES ($1, $2, $3, $3, $4, 'Live', $5, $5, '[]'::jsonb, 0)
+		ON CONFLICT (stream_id) DO UPDATE SET
+			broadcaster_id = CASE
+				WHEN COALESCE(analytics_streams.broadcaster_id, '') = '' THEN EXCLUDED.broadcaster_id
+				ELSE analytics_streams.broadcaster_id
+			END,
+			updated_at = now()`,
+		streamID, broadcasterID, login, title, startedAt,
+	)
+	return err
+}
+
+func (s *Store) GetSyncCheckpoint(ctx context.Context, streamID, videoID string) (*SyncCheckpoint, error) {
+	if streamID == "" || videoID == "" {
+		return nil, nil
+	}
+	var cp SyncCheckpoint
+	err := s.db.QueryRow(ctx, `
+		SELECT stream_id, video_id, COALESCE(cursor, ''), offset_seconds, comments_fetched,
+		       COALESCE(segments_json, ''), COALESCE(fetch_mode, ''), updated_at
+		FROM analytics_sync_checkpoints
+		WHERE stream_id=$1 AND video_id=$2`, streamID, videoID).Scan(
+		&cp.StreamID, &cp.VideoID, &cp.Cursor, &cp.OffsetSeconds, &cp.CommentsFetched,
+		&cp.SegmentsJSON, &cp.FetchMode, &cp.UpdatedAt,
+	)
+	if isNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &cp, nil
+}
+
+func (s *Store) UpsertSyncCheckpoint(ctx context.Context, cp SyncCheckpoint) error {
+	if cp.StreamID == "" || cp.VideoID == "" {
+		return nil
+	}
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO analytics_sync_checkpoints (
+			stream_id, video_id, cursor, offset_seconds, comments_fetched, segments_json, fetch_mode, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+		ON CONFLICT (stream_id, video_id) DO UPDATE SET
+			cursor=EXCLUDED.cursor,
+			offset_seconds=EXCLUDED.offset_seconds,
+			comments_fetched=EXCLUDED.comments_fetched,
+			segments_json=EXCLUDED.segments_json,
+			fetch_mode=EXCLUDED.fetch_mode,
+			updated_at=now()`,
+		cp.StreamID, cp.VideoID, cp.Cursor, cp.OffsetSeconds, cp.CommentsFetched, cp.SegmentsJSON, cp.FetchMode,
+	)
+	return err
+}
+
+func (s *Store) DeleteSyncCheckpoint(ctx context.Context, streamID, videoID string) error {
+	if streamID == "" || videoID == "" {
+		return nil
+	}
+	_, err := s.db.Exec(ctx, `
+		DELETE FROM analytics_sync_checkpoints
+		WHERE stream_id=$1 AND video_id=$2`, streamID, videoID)
 	return err
 }
 
@@ -328,7 +429,7 @@ func scanStream(row streamScanner) (*StreamRecord, error) {
 		&rec.Description, &rec.Title, &rec.Category, &tagsRaw, &rec.Language, &rec.ThumbnailURL,
 		&rec.StartedAt, &endedAt, &rec.LastSeenAt, &rec.CurrentViewers, &rec.AvgViewers,
 		&rec.PeakViewers, &rec.ViewerSamples, &rec.ChatMessages, &rec.TotalEmoteUses,
-		&rec.SevenTVEmoteUses, &rec.VodID,
+		&rec.SevenTVEmoteUses, &rec.VodID, &rec.VodSource,
 	); err != nil {
 		return nil, err
 	}

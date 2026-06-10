@@ -20,6 +20,10 @@ func (f fakeProvider) UsersByLogin(context.Context, []string) (map[string]UserPr
 	return map[string]UserProfile{}, nil
 }
 
+func (f fakeProvider) VideoIDByStreamID(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 type fakeJoiner struct {
 	joined       []string
 	parted       []string
@@ -67,6 +71,14 @@ func (f *fakeStore) AddAlwaysTracked(context.Context, string) error {
 }
 
 func (f *fakeStore) RemoveAlwaysTracked(context.Context, string) error {
+	return nil
+}
+
+func (f *fakeStore) StreamByID(context.Context, string) (*StreamRecord, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) SetStreamVodID(context.Context, string, string, string) error {
 	return nil
 }
 

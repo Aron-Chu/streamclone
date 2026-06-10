@@ -40,6 +40,7 @@ type StreamRecord struct {
 	TotalEmoteUses   int64      `json:"totalEmoteUses"`
 	SevenTVEmoteUses int64      `json:"seventvEmoteUses"`
 	VodID            string     `json:"vodId,omitempty"`
+	VodSource        string     `json:"vodSource,omitempty"`
 }
 
 type MinuteRollup struct {
@@ -65,14 +66,18 @@ type TopEmote struct {
 }
 
 type StreamDetailResponse struct {
-	Channel   string         `json:"channel"`
-	State     string         `json:"state"`
-	Stream    *StreamRecord  `json:"stream,omitempty"`
-	Rollups   []MinuteRollup `json:"rollups"`
-	TopEmotes []TopEmote     `json:"topEmotes"`
-	Sources   []SourceStatus `json:"sources"`
-	UpdatedAt int64          `json:"updatedAt"`
-	VodID     string         `json:"vodId,omitempty"`
+	Channel          string                `json:"channel"`
+	State            string                `json:"state"`
+	Stream           *StreamRecord         `json:"stream,omitempty"`
+	Rollups          []MinuteRollup        `json:"rollups"`
+	TopEmotes        []TopEmote            `json:"topEmotes"`
+	Sources          []SourceStatus        `json:"sources"`
+	UpdatedAt        int64                 `json:"updatedAt"`
+	VodID            string                `json:"vodId,omitempty"`
+	SyncPhase        string                `json:"syncPhase,omitempty"`
+	ChatCoveragePct  float64               `json:"chatCoveragePct,omitempty"`
+	VodDurationSec   int                   `json:"vodDurationSec,omitempty"`
+	ChatCoverage     *ChatCoverageSummary  `json:"chatCoverage,omitempty"`
 }
 
 type StreamsResponse struct {

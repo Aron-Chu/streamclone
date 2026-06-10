@@ -1,5 +1,5 @@
 import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN } from './config'
-import type { ClipPeriod, StatsPeriod } from './settings'
+import type { ClipPeriod, PlaybackLatencyMode, StatsPeriod } from './settings'
 
 export class ApiError extends Error {
   status: number
@@ -102,15 +102,27 @@ export interface AnalyticsTopEmote {
   count: number
 }
 
+export interface ChatCoverageSummary {
+  chatSpanMinutes: number
+  streamSpanMinutes: number
+  coveragePct: number
+  partial: boolean
+  vodDurationSec?: number
+}
+
 export interface AnalyticsStreamDetail {
   channel: string
-  state: 'live' | 'historical' | 'not_collected'
+  state: 'live' | 'historical' | 'not_collected' | 'syncing'
   stream?: AnalyticsStream
   rollups: AnalyticsMinuteRollup[]
   topEmotes: AnalyticsTopEmote[]
   sources: SourceStatus[]
   updatedAt: number
   vodId?: string
+  syncPhase?: string
+  chatCoveragePct?: number
+  vodDurationSec?: number
+  chatCoverage?: ChatCoverageSummary
 }
 
 export interface AnalyticsStreamsResponse {
@@ -195,6 +207,7 @@ export interface StatsTimelinePoint {
 
 export interface StreamStat {
   id: string
+  videoId?: string
   title: string
   category?: string
   startedAt?: string
@@ -378,6 +391,7 @@ export interface StreamDiagnostics {
   stopped: boolean
   backendVersion: string
   latencyMode: string
+  liveEdge?: number
   protocol: string
   renditions?: Array<{ name: string; width?: number; height?: number; frameRate?: number; bandwidth?: number; group?: string }>
   selectedRendition?: { name: string; width?: number; height?: number; frameRate?: number; bandwidth?: number; group?: string }
@@ -389,12 +403,35 @@ export interface StreamDiagnostics {
   updatedAt: number
 }
 
+function apiErrorMessage(body: Record<string, unknown>, fallback: string): string {
+  if (typeof body.error === 'string' && body.error) return body.error
+  const detail = body.detail
+  if (typeof detail === 'string' && detail) return detail
+  if (detail && typeof detail === 'object') {
+    const nested = detail as { error?: string; message?: string }
+    if (nested.error) return nested.error
+    if (nested.message) return nested.message
+  }
+  return fallback
+}
+
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const fallback = res.statusText || `HTTP ${res.status}`
     try {
-      const body = await res.json() as { error?: string; code?: string; retryable?: boolean }
-      throw new ApiError(body.error || fallback, res.status, body.code, body.retryable)
+      const body = await res.json() as Record<string, unknown>
+      let message = apiErrorMessage(body, fallback)
+      if (res.status === 401 && message.toLowerCase().includes('unauthorized')) {
+        message = CLIPPER_TOKEN
+          ? 'Clipper rejected the webhook token. Ensure VITE_CLIPPER_TOKEN matches CLIPPER_WEBHOOK_TOKEN in .env, then recreate the frontend container.'
+          : 'Clipper webhook auth is not configured in the browser. Ensure VITE_CLIPPER_TOKEN matches CLIPPER_WEBHOOK_TOKEN in .env, then recreate the frontend container.'
+      }
+      throw new ApiError(
+        message,
+        res.status,
+        typeof body.code === 'string' ? body.code : undefined,
+        typeof body.retryable === 'boolean' ? body.retryable : undefined,
+      )
     } catch (err) {
       if (err instanceof ApiError) throw err
       throw new ApiError(fallback, res.status)
@@ -502,9 +539,14 @@ export const setAlwaysTracked = (channel: string, track: boolean): Promise<Analy
     body: JSON.stringify({ channel, track }),
   }).then(r => json<AnalyticsWatchResponse>(r))
 
-export const getAnalyticsStream = async (streamId: string, opts?: { sparse?: boolean }): Promise<AnalyticsStreamDetail | null> => {
+export const getAnalyticsStream = async (
+  streamId: string,
+  opts?: { sparse?: boolean; channel?: string },
+): Promise<AnalyticsStreamDetail | null> => {
   const sparse = opts?.sparse !== false
-  const res = await fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}?sparse=${sparse ? 'true' : 'false'}`)
+  const params = new URLSearchParams({ sparse: sparse ? 'true' : 'false' })
+  if (opts?.channel) params.set('channel', opts.channel)
+  const res = await fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}?${params}`)
   if (res.status === 404) return null
   return json<AnalyticsStreamDetail>(res)
 }
@@ -529,17 +571,56 @@ export type SyncPhase =
   | 'completed'
   | 'failed'
 
+export interface SyncPhaseTiming {
+  trackerScrapeMs?: number
+  vodResolveMs?: number
+  gqlFetchMs?: number
+  tokenizeMs?: number
+  rollupWriteMs?: number
+}
+
+export type SyncChatIndexPhase = 'fetching' | 'tokenizing' | 'writing' | 'done'
+
+export interface SyncChatProgress {
+  active?: boolean
+  vodId?: string
+  fetchMode?: 'parallel' | 'serial' | string
+  concurrency?: number
+  segmentsTotal?: number
+  segmentsDone?: number
+  commentsFetched?: number
+  timelineSec?: number
+  vodDurationSec?: number
+  streamDurationSec?: number
+  rollupsExpected?: number
+  indexPhase?: SyncChatIndexPhase | string
+  gqlPages?: number
+  throttled?: boolean
+  message?: string
+}
+
+export interface SyncTrackerProgress {
+  active?: boolean
+  url?: string
+  message?: string
+}
+
 export interface SyncStatus {
   streamId: string
   phase: SyncPhase
   message?: string
   startedAt: string
   updatedAt: string
+  stale?: boolean
   commentsFetched?: number
   rollupsWritten?: number
   resultMessage?: string
   error?: string
   viewersOnly?: boolean
+  viewerStatus?: string
+  timing?: SyncPhaseTiming
+  chat?: SyncChatProgress
+  tracker?: SyncTrackerProgress
 }
 
 export interface StartSyncResponse {
@@ -550,11 +631,12 @@ export interface StartSyncResponse {
 export const startHistoricalSync = async (
   streamId: string,
   login = '',
-  options?: { viewersOnly?: boolean },
+  options?: { viewersOnly?: boolean; vodId?: string },
 ): Promise<StartSyncResponse> => {
   const params = new URLSearchParams()
   if (login) params.set('channel', login)
   if (options?.viewersOnly) params.set('viewers_only', 'true')
+  if (options?.vodId) params.set('vod_id', options.vodId)
   const res = await fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}/sync?${params}`, { method: 'POST' })
   return json<StartSyncResponse>(res)
 }
@@ -562,7 +644,13 @@ export const startHistoricalSync = async (
 export const getSyncStatus = async (streamId: string): Promise<SyncStatus | null> => {
   const res = await fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}/sync/status`)
   if (res.status === 404) return null
-  return json<SyncStatus>(res)
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    throw new ApiError('Sync status upstream unavailable', res.status, 'upstream_unavailable', true)
+  }
+  const body: { phase?: string } & Record<string, unknown> = await json(res)
+  // Backend returns 200 { phase: "idle" } when no Redis sync key — not an active sync.
+  if (body.phase === 'idle') return null
+  return body as unknown as SyncStatus
 }
 
 /** @deprecated Use startHistoricalSync + getSyncStatus polling */
@@ -586,11 +674,11 @@ export const getTwitchDayClips = (login: string, startedAt: string, endedAt: str
 }
 
 
-export const startStream = (channel: string, quality?: string): Promise<StartResponse> =>
+export const startStream = (channel: string, quality?: string, latencyMode?: PlaybackLatencyMode): Promise<StartResponse> =>
   fetch(`${VIDEO}/v1/stream/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ channel, quality }),
+    body: JSON.stringify({ channel, quality, latency_mode: latencyMode }),
   }).then(r => json<StartResponse>(r))
 
 export const getStreamDiagnostics = (channel: string): Promise<StreamDiagnostics> =>
@@ -710,12 +798,26 @@ export const getFollowedChannels = (): Promise<FollowedChannel[]> =>
 const browserOrigin = typeof window === 'undefined' ? '' : window.location.origin
 const CLIPPER_BASE = CLIPPER === browserOrigin ? `${CLIPPER}/v1/clipper` : `${CLIPPER}/v1`
 
+export interface ClipperMomentContext {
+  stream_id?: string
+  minute_ts?: string
+  vod_offset_seconds?: number
+  viewer_count?: number
+  chat_per_min?: number
+  emote_per_min?: number
+  top_emotes?: Array<{ name: string; count: number; image_url?: string; imageUrl?: string }>
+  chat_multiplier?: number
+  pick_reason?: 'viewer_spike' | 'chat_spike' | 'emote_spike' | 'manual' | string
+  moment_score?: number
+}
+
 export interface ClipperJob {
   id: string
   channel: string
   broadcaster_id?: string
   trigger_type: string
   reason?: string
+  moment_context?: ClipperMomentContext | null
   title?: string
   requested_duration?: number
   source_duration: number
@@ -758,11 +860,22 @@ export interface CaptionWordTiming {
   end: number
 }
 
+export interface CaptionTransform {
+  x: number
+  y: number
+  rotation: number
+  scale: number
+}
+
+export type CaptionEffect = 'none' | 'pop' | 'glow' | 'bounce' | 'shake'
+
 export interface CaptionWord {
   start: number
   end: number
   text: string
   words?: CaptionWordTiming[]
+  transform?: CaptionTransform
+  effect?: CaptionEffect
 }
 
 export interface ClipperTemplate {
@@ -772,6 +885,7 @@ export interface ClipperTemplate {
   format_preset: string
   caption_preset: string
   max_words_per_line: number
+  layout?: string
   has_intro_zoom: boolean
   has_vignette: boolean
   noise_reduce: string | null
@@ -808,6 +922,17 @@ export const getClipperJobCaptions = (jobId: string): Promise<ClipperCaptionsRes
 export const getClipperTemplates = (): Promise<ClipperTemplatesResponse> =>
   fetch(`${CLIPPER_BASE}/templates`).then(r => json<ClipperTemplatesResponse>(r))
 
+export interface ClipperTwitchStatus {
+  ok: boolean
+  failure_code?: string
+  remediation?: string
+  expires_in?: number
+  has_clips_edit?: boolean
+}
+
+export const getClipperTwitchStatus = (): Promise<ClipperTwitchStatus> =>
+  fetch(`${CLIPPER_BASE}/twitch/status`).then(r => json<ClipperTwitchStatus>(r))
+
 export const updateClipperJobCaptions = (jobId: string, captions: CaptionWord[]): Promise<{ status: string }> =>
   fetch(`${CLIPPER_BASE}/jobs/${encodeURIComponent(jobId)}/captions`, {
     method: 'PUT',
@@ -815,12 +940,34 @@ export const updateClipperJobCaptions = (jobId: string, captions: CaptionWord[])
     body: JSON.stringify({ captions }),
   }).then(r => json<{ status: string }>(r))
 
-export const triggerClipperManual = (channel: string, title?: string, duration?: number, finalDuration?: number): Promise<{ status: string; job_id: string }> =>
-  fetch(`${CLIPPER_BASE}/triggers/manual`, {
+export interface ClipperManualTriggerOptions {
+  title?: string
+  duration?: number
+  final_duration?: number
+  reason?: string
+  moment_context?: ClipperMomentContext
+}
+
+export const triggerClipperManual = (
+  channel: string,
+  options?: ClipperManualTriggerOptions | string,
+  duration?: number,
+  finalDuration?: number,
+): Promise<{ status: string; job_id: string }> => {
+  const payload: Record<string, unknown> = { channel }
+  if (typeof options === 'string') {
+    payload.title = options
+    if (duration !== undefined) payload.duration = duration
+    if (finalDuration !== undefined) payload.final_duration = finalDuration
+  } else if (options) {
+    Object.assign(payload, options)
+  }
+  return fetch(`${CLIPPER_BASE}/triggers/manual`, {
     method: 'POST',
     headers: clipperHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ channel, title, duration, final_duration: finalDuration }),
+    body: JSON.stringify(payload),
   }).then(r => json<{ status: string; job_id: string }>(r))
+}
 
 export type CaptionPreset =
   | 'default'
@@ -830,6 +977,9 @@ export type CaptionPreset =
   | 'gaming'
   | 'none'
 
+export type CaptionSize = 'sm' | 'md' | 'lg'
+export type CaptionPosition = 'top' | 'center' | 'bottom'
+
 export const renderClipperJob = (
   jobId: string,
   options: {
@@ -838,6 +988,11 @@ export const renderClipperJob = (
     format_preset?: 'tiktok' | 'youtube' | 'youtube_short' | 'instagram_reel' | 'twitter'
     caption_preset?: CaptionPreset
     template_id?: string
+    caption_size?: CaptionSize
+    caption_position?: CaptionPosition
+    layout?: string
+    layout_split_ratio?: number
+    emote_map?: Record<string, string>
   }
 ): Promise<{ status: string; job_id: string }> =>
   fetch(`${CLIPPER_BASE}/jobs/${encodeURIComponent(jobId)}/render`, {
@@ -860,6 +1015,12 @@ export const transcribeClipperJob = (
     body: JSON.stringify(options),
   }).then(r => json<{ status: string; job_id: string }>(r))
 
+export const retryClipperJob = (jobId: string): Promise<{ job: ClipperJob }> =>
+  fetch(`${CLIPPER_BASE}/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: 'POST',
+    headers: clipperHeaders({ 'Content-Type': 'application/json' }),
+  }).then(r => json<{ job: ClipperJob }>(r))
+
 export function describeClipperFailure(job: Pick<ClipperJob, 'failure_code' | 'error_message'>): string {
   switch (job.failure_code) {
     case 'missing_scope':
@@ -867,14 +1028,50 @@ export function describeClipperFailure(job: Pick<ClipperJob, 'failure_code' | 'e
     case 'twitch_not_configured':
       return 'Clipper Twitch credentials are not configured. Set CLIPPER_TWITCH_CLIENT_ID and CLIPPER_TWITCH_USER_ACCESS_TOKEN in .env, then restart clipper.'
     case 'invalid_token':
-      return 'Clipper Twitch token is invalid or expired. Refresh CLIPPER_TWITCH_USER_ACCESS_TOKEN and restart clipper.'
+      return 'Clipper Twitch token is expired or revoked. Run make twitch-local-auth, approve the Twitch login, then recreate the clipper service. Restarting clipper alone does not refresh the token.'
     case 'clip_restricted':
       return 'Twitch rejected clip creation for this channel (clips may be disabled or restricted).'
+    case 'clip_not_ready':
+      return 'Twitch created the clip but it was not ready before the poll timeout. Use Retry — the worker resumes from the existing clip ID without creating a duplicate.'
     case 'offline':
-      return 'The channel was offline when clip creation was attempted.'
+      return 'The channel was offline when clip creation was attempted. Clip moments from live analytics require the broadcaster to be live; for past streams, ensure the VOD is available.'
+    case 'job_failed':
+    case 'transcribe_failed':
+    case 'render_failed':
+      return job.error_message || 'Clip processing failed. Check clipper logs, then use Retry if the Twitch clip was created.'
     default:
-      return job.error_message || 'Clip processing failed before a source video was available.'
+      if (job.error_message?.includes('source video')) {
+        return 'Source video was not ready in time — Twitch may still be processing the clip. Wait ~30–90s and click Retry; the worker resumes from twitch_clip_id or raw_path without re-creating the clip.'
+      }
+      return job.error_message || 'Clip processing failed before a source video was available. Try Retry after the Twitch clip finishes processing.'
   }
+}
+
+const CLIPPER_TERMINAL_STATES = new Set(['ready', 'failed', 'purged'])
+
+const CLIPPER_STATE_LABELS: Record<string, string> = {
+  queued: 'Queued',
+  creating_clip: 'Creating clip',
+  waiting_for_clip: 'Waiting for Twitch',
+  downloading: 'Downloading',
+  transcribing: 'Transcribing',
+  rendering: 'Rendering',
+  ready: 'Ready',
+  failed: 'Failed',
+  purged: 'Purged',
+}
+
+export function isClipperJobInProgress(job: Pick<ClipperJob, 'state'>): boolean {
+  return !CLIPPER_TERMINAL_STATES.has(job.state)
+}
+
+export function describeClipperJobState(
+  job: Pick<ClipperJob, 'state' | 'artifact_available'>,
+): string {
+  if (job.state === 'ready') {
+    return job.artifact_available === 1 ? 'Exported' : 'Studio ready'
+  }
+  return CLIPPER_STATE_LABELS[job.state] || job.state
 }
 
 export const getClipperSourceVideoUrl = (jobId: string): string =>
