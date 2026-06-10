@@ -1,19 +1,31 @@
 import type { ClipperJob } from '../../api'
-import { pickReasonLabel } from './utils'
+import { hookStrengthScore, pickReasonLabel } from './utils'
 
 export function ClipQualityCard({ job }: { job: ClipperJob }) {
   const ctx = job.moment_context
   if (!ctx && !job.reason) return null
 
   const topEmotes = ctx?.top_emotes?.slice(0, 3) ?? []
+  const hookScore = hookStrengthScore(ctx)
 
   return (
-    <div className="clip-quality-card">
-      <div className="clip-quality-card-title">Why this moment</div>
+    <div className="clip-quality-card studio-panel-card">
+      <div className="clip-quality-card-title">Moment insight</div>
       <p className="clip-quality-card-reason" title={job.reason || undefined}>
         {pickReasonLabel(ctx?.pick_reason)}
         {job.reason && ctx?.pick_reason !== job.reason ? ` · ${job.reason}` : ''}
       </p>
+      {hookScore != null && (
+        <div className="hook-strength-meter">
+          <div className="hook-strength-header">
+            <span>Hook strength</span>
+            <strong>{hookScore}/100</strong>
+          </div>
+          <div className="hook-strength-track">
+            <div className="hook-strength-fill" style={{ width: `${hookScore}%` }} />
+          </div>
+        </div>
+      )}
       <div className="clip-quality-card-stats">
         {ctx?.viewer_count != null && (
           <span><strong>{ctx.viewer_count}</strong> viewers</span>
@@ -26,9 +38,6 @@ export function ClipQualityCard({ job }: { job: ClipperJob }) {
         )}
         {ctx?.chat_multiplier != null && (
           <span><strong>{ctx.chat_multiplier.toFixed(1)}x</strong> chat vs baseline</span>
-        )}
-        {ctx?.moment_score != null && (
-          <span>Score <strong>{ctx.moment_score.toFixed(2)}</strong></span>
         )}
       </div>
       {topEmotes.length > 0 && (

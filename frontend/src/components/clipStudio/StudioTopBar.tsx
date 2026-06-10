@@ -1,8 +1,12 @@
 import { Link } from 'react-router-dom'
 import type { ClipperJob } from '../../api'
+import { formatHighlightRange, spikePositionInSource } from './utils'
 
 interface StudioTopBarProps {
   job: ClipperJob
+  trimStart: number
+  trimEnd: number
+  duration: number
   canPreviewSource: boolean
   canPreviewFinal: boolean
   sourceUrl: string
@@ -13,6 +17,9 @@ interface StudioTopBarProps {
 
 export function StudioTopBar({
   job,
+  trimStart,
+  trimEnd,
+  duration,
   canPreviewSource,
   canPreviewFinal,
   sourceUrl,
@@ -24,6 +31,8 @@ export function StudioTopBar({
   const streamTime = ctx?.minute_ts
     ? new Date(ctx.minute_ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     : null
+  const spikePos = spikePositionInSource(job, duration)
+  const showHighlight = spikePos != null
 
   return (
     <header className="studio-top-bar">
@@ -35,14 +44,27 @@ export function StudioTopBar({
           Back
         </Link>
         <div className="studio-top-bar-brand">
-          <h1>Clip Studio</h1>
-          <span className="studio-top-bar-meta">
-            {job.channel}
-            {streamTime ? ` · ${streamTime}` : ''}
-            <span className="clip-studio-job-id">#{job.id.substring(0, 8)}</span>
+          <span className="studio-channel-avatar" aria-hidden="true">
+            {job.channel.charAt(0).toUpperCase()}
           </span>
+          <div>
+            <h1>Clip Studio</h1>
+            <span className="studio-top-bar-meta">
+              {job.channel}
+              {streamTime ? ` · ${streamTime}` : ''}
+              <span className="clip-studio-job-id">#{job.id.substring(0, 8)}</span>
+            </span>
+          </div>
         </div>
       </div>
+
+      {showHighlight && (
+        <div className="studio-highlight-pill" title="Trim window around detected moment">
+          <span className="studio-highlight-pill-dot" />
+          Auto highlight · {formatHighlightRange(trimStart, trimEnd)}
+        </div>
+      )}
+
       <div className="studio-top-bar-actions">
         {canPreviewSource && (
           <a href={sourceUrl} className="clip-studio-btn-secondary" download>Source</a>

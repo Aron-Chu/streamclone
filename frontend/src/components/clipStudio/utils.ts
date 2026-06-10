@@ -1,4 +1,4 @@
-import type { ChannelEmote, ClipperJob } from '../../api'
+import type { ChannelEmote, ClipperJob, ClipperMomentContext } from '../../api'
 import { normalizeBrowserOriginUrl } from '../../config'
 
 export function formatTime(seconds: number): string {
@@ -67,4 +67,54 @@ export function pickReasonLabel(reason?: string): string {
     case 'manual': return 'Manual pick'
     default: return reason || 'Highlight moment'
   }
+}
+
+export function hookStrengthScore(ctx?: ClipperMomentContext | null): number | null {
+  if (!ctx) return null
+  let score = 50
+  if (ctx.moment_score != null) {
+    score = Math.round(Math.min(100, Math.max(0, ctx.moment_score * 25)))
+  }
+  if (ctx.chat_multiplier != null) {
+    score = Math.round(Math.min(100, score + (ctx.chat_multiplier - 1) * 12))
+  }
+  if (ctx.emote_per_min != null && ctx.emote_per_min > 0) {
+    score = Math.round(Math.min(100, score + Math.min(15, ctx.emote_per_min / 4)))
+  }
+  return Math.max(0, Math.min(100, score))
+}
+
+export function predictedReachLabel(score: number | null): 'High' | 'Medium' | 'Low' | null {
+  if (score == null) return null
+  if (score >= 75) return 'High'
+  if (score >= 45) return 'Medium'
+  return 'Low'
+}
+
+export function formatHighlightRange(start: number, end: number): string {
+  return `${formatTime(start)} – ${formatTime(end)}`
+}
+
+export function buildActivityBars(
+  duration: number,
+  captions: Array<{ start: number; end: number }>,
+  spikePos: number | null,
+  barCount = 48,
+): number[] {
+  if (duration <= 0) return Array(barCount).fill(0)
+  const bucketSize = duration / barCount
+  const bars = Array(barCount).fill(0)
+  for (const cap of captions) {
+    const startIdx = Math.max(0, Math.floor(cap.start / bucketSize))
+    const endIdx = Math.min(barCount - 1, Math.floor(cap.end / bucketSize))
+    for (let i = startIdx; i <= endIdx; i++) bars[i] += 1
+  }
+  if (spikePos != null) {
+    const spikeIdx = Math.min(barCount - 1, Math.max(0, Math.floor(spikePos / bucketSize)))
+    bars[spikeIdx] += 3
+    if (spikeIdx > 0) bars[spikeIdx - 1] += 1
+    if (spikeIdx < barCount - 1) bars[spikeIdx + 1] += 1
+  }
+  const max = Math.max(...bars, 1)
+  return bars.map(v => v / max)
 }

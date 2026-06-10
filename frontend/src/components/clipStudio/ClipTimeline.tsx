@@ -1,6 +1,7 @@
+import { useMemo } from 'react'
 import type { RefObject } from 'react'
 import type { CaptionWord, ClipperJob } from '../../api'
-import { formatTime, spikePositionInSource } from './utils'
+import { buildActivityBars, formatTime, spikePositionInSource } from './utils'
 
 interface ClipTimelineProps {
   progressRef: RefObject<HTMLDivElement | null>
@@ -19,7 +20,15 @@ interface ClipTimelineProps {
   onTogglePlay: () => void
   onTrimStartChange: (value: number) => void
   onTrimEndChange: (value: number) => void
+  onApplyTrimWindow: (window: 'setup' | 'spike' | 'payoff' | 'full') => void
 }
+
+const CHAPTER_CHIPS: { id: 'setup' | 'spike' | 'payoff' | 'full'; label: string; window: 'setup' | 'spike' | 'payoff' | 'full' }[] = [
+  { id: 'setup', label: 'Setup', window: 'setup' },
+  { id: 'spike', label: 'Spike', window: 'spike' },
+  { id: 'payoff', label: 'Payoff', window: 'payoff' },
+  { id: 'full', label: 'Full', window: 'full' },
+]
 
 export function ClipTimeline({
   progressRef,
@@ -38,12 +47,34 @@ export function ClipTimeline({
   onTogglePlay,
   onTrimStartChange,
   onTrimEndChange,
+  onApplyTrimWindow,
 }: ClipTimelineProps) {
   const trimDuration = trimEnd - trimStart
   const spikePos = spikePositionInSource(job, duration)
+  const activityBars = useMemo(
+    () => buildActivityBars(duration, captions, spikePos),
+    [duration, captions, spikePos],
+  )
+
+  const handleChapterClick = (chip: typeof CHAPTER_CHIPS[number]) => {
+    onApplyTrimWindow(chip.window)
+  }
 
   return (
     <footer className="clip-timeline">
+      <div className="timeline-chapter-row">
+        {CHAPTER_CHIPS.map(chip => (
+          <button
+            key={chip.id}
+            type="button"
+            className="timeline-chapter-chip"
+            onClick={() => handleChapterClick(chip)}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+
       <div className="timeline-trim-inputs">
         <label>
           In
@@ -64,7 +95,26 @@ export function ClipTimeline({
           />
         </label>
         <span className="timeline-duration-label">Duration: {trimDuration.toFixed(1)}s</span>
+        {previewMode === 'source' && (
+          <span className="timeline-loop-indicator" title="Source preview loops inside trim window">
+            Loop in trim
+          </span>
+        )}
       </div>
+
+      {duration > 0 && (
+        <div className="timeline-activity-row" aria-hidden="true">
+          {activityBars.map((height, idx) => (
+            <div
+              key={idx}
+              className="timeline-activity-bar"
+              style={{ height: `${Math.max(8, height * 100)}%` }}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="timeline-track-label">Captions</div>
 
       <div className="timeline-scrubber-wrapper" ref={progressRef as React.Ref<HTMLDivElement>} onClick={onScrub}>
         <div className="timeline-scrubber">

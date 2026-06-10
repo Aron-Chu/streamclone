@@ -12,7 +12,7 @@ import type {
 import type { FormatPreset, InspectorTab } from './types'
 import type { ChannelEmote } from '../../api'
 import { EmoteScrollPicker } from './EmoteScrollPicker'
-import { ClipQualityCard } from './ClipQualityCard'
+import { hookStrengthScore, predictedReachLabel } from './utils'
 
 interface ClipInspectorProps {
   activeTab: InspectorTab
@@ -59,8 +59,6 @@ interface ClipInspectorProps {
   onEmojiPickerToggle: (index: number) => void
   onInsertEmoji: (index: number, emoji: string) => void
   onInsertEmote: (index: number, emoteName: string) => void
-  onApplyDurationPreset: (seconds: number) => void
-  onApplyTrimWindow: (window: 'setup' | 'payoff' | 'full') => void
   onCopyUploadPackage: () => void
 }
 
@@ -105,7 +103,8 @@ const CAPTION_EFFECTS: { id: CaptionEffect; label: string }[] = [
 ]
 
 export function ClipInspector(props: ClipInspectorProps) {
-  const trimDuration = props.trimEnd - props.trimStart
+  const hookScore = hookStrengthScore(props.job.moment_context)
+  const reachLabel = predictedReachLabel(hookScore)
   const [templateSearch, setTemplateSearch] = useState('')
   const [templateFormatFilter, setTemplateFormatFilter] = useState<'all' | FormatPreset>('all')
 
@@ -144,7 +143,6 @@ export function ClipInspector(props: ClipInspectorProps) {
       </div>
 
       <div className="clip-inspector-body">
-        <ClipQualityCard job={props.job} />
         {props.activeTab === 'template' && (
           <>
             <div className="clip-studio-section-title">Visual templates</div>
@@ -191,24 +189,6 @@ export function ClipInspector(props: ClipInspectorProps) {
               ))}
             </div>
             )}
-            <div className="clip-studio-section-title">Format</div>
-            <div className="clip-studio-presets-grid">
-              {([
-                ['tiktok', 'TikTok 9:16'],
-                ['youtube_short', 'YT Shorts'],
-                ['instagram_reel', 'IG Reel'],
-                ['youtube', 'YouTube 16:9'],
-                ['twitter', 'X 1:1'],
-              ] as const).map(([id, label]) => (
-                <div
-                  key={id}
-                  className={`preset-card ${props.formatPreset === id ? 'active' : ''}`}
-                  onClick={() => props.onFormatPresetChange(id)}
-                >
-                  <span>{label}</span>
-                </div>
-              ))}
-            </div>
           </>
         )}
 
@@ -399,30 +379,29 @@ export function ClipInspector(props: ClipInspectorProps) {
 
         {props.activeTab === 'export' && (
           <>
-            <div className="clip-studio-section-title">Duration presets</div>
-            <div className="clip-studio-presets-grid clip-studio-presets-grid-3">
-              {[18, 30, 45].map(sec => (
-                <button
-                  key={sec}
-                  type="button"
-                  className={`preset-card ${Math.abs(trimDuration - sec) < 0.5 ? 'active' : ''}`}
-                  onClick={() => props.onApplyDurationPreset(sec)}
-                >
-                  <span>{sec}s</span>
-                </button>
-              ))}
-            </div>
+            {reachLabel && (
+              <div className={`predicted-reach-badge predicted-reach-${reachLabel.toLowerCase()}`}>
+                <span className="predicted-reach-label">Predicted reach</span>
+                <span className="predicted-reach-value">{reachLabel}</span>
+              </div>
+            )}
 
-            <div className="clip-studio-section-title">Trim windows</div>
-            <div className="clip-studio-presets-grid clip-studio-presets-grid-3">
+            <div className="clip-studio-section-title">Output format</div>
+            <div className="clip-studio-presets-grid">
               {([
-                ['setup', 'Setup'],
-                ['payoff', 'Payoff'],
-                ['full', 'Full'],
+                ['tiktok', 'TikTok 9:16'],
+                ['youtube_short', 'YT Shorts'],
+                ['instagram_reel', 'IG Reel'],
+                ['youtube', 'YouTube 16:9'],
+                ['twitter', 'X 1:1'],
               ] as const).map(([id, label]) => (
-                <button key={id} type="button" className="preset-card" onClick={() => props.onApplyTrimWindow(id)}>
+                <div
+                  key={id}
+                  className={`preset-card ${props.formatPreset === id ? 'active' : ''}`}
+                  onClick={() => props.onFormatPresetChange(id)}
+                >
                   <span>{label}</span>
-                </button>
+                </div>
               ))}
             </div>
 

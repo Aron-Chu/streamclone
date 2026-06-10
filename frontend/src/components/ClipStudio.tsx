@@ -26,6 +26,7 @@ import {
   type CaptionPosition,
 } from '../api'
 import { sortChannelEmotesByUsage } from '../emoteUtils'
+import { ClipDetailsPanel } from './clipStudio/ClipDetailsPanel'
 import { ClipInspector } from './clipStudio/ClipInspector'
 import { ClipTimeline } from './clipStudio/ClipTimeline'
 import { JobProgressOverlay } from './clipStudio/JobProgressOverlay'
@@ -74,6 +75,7 @@ export default function ClipStudio() {
   const progressRef = useRef<HTMLDivElement | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastCaptionPresetRef = useRef<CaptionPreset>('default')
 
   const dismissToast = useCallback(() => {
     setToast(prev => (prev ? { ...prev, phase: 'exiting' } : null))
@@ -428,12 +430,16 @@ export default function ClipStudio() {
     showToast('info', `Trim set to ${seconds}s window`)
   }
 
-  const applyTrimWindow = (window: 'setup' | 'payoff' | 'full') => {
+  const applyTrimWindow = (window: 'setup' | 'spike' | 'payoff' | 'full') => {
     const spike = job ? spikePositionInSource(job, duration) : null
     const anchor = spike ?? (trimStart + trimDuration / 2)
     if (window === 'setup') {
       setTrimStart(Math.max(0, anchor - 18))
       setTrimEnd(Math.min(duration || anchor, anchor))
+    } else if (window === 'spike') {
+      setTrimStart(Math.max(0, anchor - 5))
+      setTrimEnd(Math.min(duration || anchor + 5, anchor + 5))
+      seekTo(anchor)
     } else if (window === 'payoff') {
       setTrimStart(anchor)
       setTrimEnd(Math.min(duration || anchor + 18, anchor + 18))
@@ -442,6 +448,31 @@ export default function ClipStudio() {
       setTrimEnd(Math.min(duration || anchor + 15, anchor + 15))
     }
     showToast('info', `Applied ${window} trim window`)
+  }
+
+  const handleCaptionsToggle = (enabled: boolean) => {
+    if (enabled) {
+      setCaptionPreset(lastCaptionPresetRef.current === 'none' ? 'default' : lastCaptionPresetRef.current)
+    } else {
+      if (captionPreset !== 'none') lastCaptionPresetRef.current = captionPreset
+      setCaptionPreset('none')
+    }
+    setSelectedTemplateId(null)
+  }
+
+  const handleFacecamToggle = (enabled: boolean) => {
+    setLayout(enabled ? 'stacked_game_face' : 'blur_bg_center')
+  }
+
+  const handleCaptionPresetChange = (preset: CaptionPreset) => {
+    if (preset !== 'none') lastCaptionPresetRef.current = preset
+    setCaptionPreset(preset)
+    setSelectedTemplateId(null)
+  }
+
+  const handleFormatPresetChange = (preset: FormatPreset) => {
+    setFormatPreset(preset)
+    setSelectedTemplateId(null)
   }
 
   const handleCopyUploadPackage = async () => {
@@ -499,6 +530,9 @@ export default function ClipStudio() {
 
       <StudioTopBar
         job={job}
+        trimStart={trimStart}
+        trimEnd={trimEnd}
+        duration={duration}
         canPreviewSource={canPreviewSource}
         canPreviewFinal={canPreviewFinal}
         sourceUrl={getClipperSourceVideoUrl(job.id)}
@@ -508,6 +542,22 @@ export default function ClipStudio() {
       />
 
       <div className="clip-studio-workspace">
+        <ClipDetailsPanel
+          job={job}
+          trimStart={trimStart}
+          trimEnd={trimEnd}
+          trimDuration={trimDuration}
+          captionPreset={captionPreset}
+          layout={layout}
+          captionsCount={captions.length}
+          isTranscribing={isTranscribing}
+          onToggleCaptions={handleCaptionsToggle}
+          onToggleFacecamFocus={handleFacecamToggle}
+          onCenterOnSpike={() => applyTrimWindow('payoff')}
+          onApplyDurationPreset={applyDurationPreset}
+          onOpenCaptionsTab={() => setInspectorTab('captions')}
+        />
+
         <div className="clip-studio-center-panel">
           <VideoStage
             videoRef={videoRef}
@@ -531,6 +581,7 @@ export default function ClipStudio() {
             onSelectCaption={setSelectedCaptionIndex}
             onUpdateCaption={handleUpdateCaption}
             onAddCaptionAt={handleAddCaptionAt}
+            onFormatPresetChange={handleFormatPresetChange}
             onPreviewModeChange={setPreviewMode}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
@@ -565,8 +616,8 @@ export default function ClipStudio() {
           showEmojiPicker={showEmojiPicker}
           emojiTargetIndex={emojiTargetIndex}
           onApplyTemplate={applyTemplate}
-          onFormatPresetChange={preset => { setFormatPreset(preset); setSelectedTemplateId(null) }}
-          onCaptionPresetChange={preset => { setCaptionPreset(preset); setSelectedTemplateId(null) }}
+          onFormatPresetChange={handleFormatPresetChange}
+          onCaptionPresetChange={handleCaptionPresetChange}
           onCaptionSizeChange={setCaptionSize}
           onCaptionPositionChange={setCaptionPosition}
           onLayoutChange={setLayout}
@@ -588,8 +639,6 @@ export default function ClipStudio() {
           }}
           onInsertEmoji={insertEmojiIntoCaption}
           onInsertEmote={insertEmoteIntoCaption}
-          onApplyDurationPreset={applyDurationPreset}
-          onApplyTrimWindow={applyTrimWindow}
           onCopyUploadPackage={handleCopyUploadPackage}
         />
       </div>
@@ -611,6 +660,7 @@ export default function ClipStudio() {
         onTogglePlay={togglePlay}
         onTrimStartChange={setTrimStart}
         onTrimEndChange={setTrimEnd}
+        onApplyTrimWindow={applyTrimWindow}
       />
 
       <JobProgressOverlay

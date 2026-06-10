@@ -24,6 +24,7 @@ interface VideoStageProps {
   selectedCaptionIndex: number | null
   addTextMode: boolean
   onPreviewModeChange: (mode: PreviewMode) => void
+  onFormatPresetChange: (preset: FormatPreset) => void
   onTimeUpdate: () => void
   onLoadedMetadata: () => void
   onTogglePlay: () => void
@@ -33,6 +34,14 @@ interface VideoStageProps {
   onUpdateCaption: (index: number, patch: Partial<CaptionWord>) => void
   onAddCaptionAt: (x: number, y: number) => void
 }
+
+const FORMAT_OPTIONS: { id: FormatPreset; label: string; hint: string }[] = [
+  { id: 'tiktok', label: '9:16', hint: 'TikTok / Shorts' },
+  { id: 'youtube_short', label: '9:16', hint: 'YT Shorts' },
+  { id: 'instagram_reel', label: '9:16', hint: 'Reels' },
+  { id: 'youtube', label: '16:9', hint: 'YouTube' },
+  { id: 'twitter', label: '1:1', hint: 'Square' },
+]
 
 export function VideoStage({
   videoRef,
@@ -54,6 +63,7 @@ export function VideoStage({
   selectedCaptionIndex,
   addTextMode,
   onPreviewModeChange,
+  onFormatPresetChange,
   onTimeUpdate,
   onLoadedMetadata,
   onTogglePlay,
@@ -118,43 +128,60 @@ export function VideoStage({
         </button>
       </div>
 
-      <div className={`clip-studio-preview-wrapper aspect-${aspectClass} video-stage-hero`}>
-        {videoSrc ? (
-          <video
-            ref={videoRef as React.Ref<HTMLVideoElement>}
-            key={videoSrc}
-            src={videoSrc}
-            className="clip-studio-video"
-            onTimeUpdate={onTimeUpdate}
-            onLoadedMetadata={onLoadedMetadata}
-            onClick={handleVideoClick}
-            onPlay={onPlay}
-            onPause={onPause}
-          />
-        ) : (
-          <div className="clip-studio-video clip-studio-video-empty" />
-        )}
-        {renderGlobalCaptionOverlay()}
-        {showCanvasEditor && (
-          <CaptionOverlayEditor
-            captions={captions}
-            currentTime={currentTime}
-            selectedCaptionIndex={selectedCaptionIndex}
-            addTextMode={addTextMode}
-            captionPreset={captionPreset}
-            captionSize={captionSize}
-            channelEmotes={channelEmotes}
-            onSelectCaption={onSelectCaption}
-            onUpdateCaption={onUpdateCaption}
-            onAddCaptionAt={onAddCaptionAt}
-          />
-        )}
-        {sourceUnavailable && previewMode === 'source' && (
-          <div className="clip-studio-unavailable-overlay">
-            <h3>{jobState === 'failed' ? 'Clip Creation Failed' : 'Source Video Unavailable'}</h3>
-            <p>{failureMessage || 'The raw source file has expired. Re-rendering is no longer available.'}</p>
+      <div className="video-stage-stage-wrap">
+        <div className={`clip-studio-preview-wrapper aspect-${aspectClass} video-stage-hero`}>
+          {videoSrc ? (
+            <video
+              ref={videoRef as React.Ref<HTMLVideoElement>}
+              key={videoSrc}
+              src={videoSrc}
+              className="clip-studio-video"
+              onTimeUpdate={onTimeUpdate}
+              onLoadedMetadata={onLoadedMetadata}
+              onClick={handleVideoClick}
+              onPlay={onPlay}
+              onPause={onPause}
+            />
+          ) : (
+            <div className="clip-studio-video clip-studio-video-empty" />
+          )}
+          {renderGlobalCaptionOverlay()}
+          {showCanvasEditor && (
+            <CaptionOverlayEditor
+              captions={captions}
+              currentTime={currentTime}
+              selectedCaptionIndex={selectedCaptionIndex}
+              addTextMode={addTextMode}
+              captionPreset={captionPreset}
+              captionSize={captionSize}
+              channelEmotes={channelEmotes}
+              onSelectCaption={onSelectCaption}
+              onUpdateCaption={onUpdateCaption}
+              onAddCaptionAt={onAddCaptionAt}
+            />
+          )}
+          {sourceUnavailable && previewMode === 'source' && (
+            <div className="clip-studio-unavailable-overlay">
+              <h3>{jobState === 'failed' ? 'Clip Creation Failed' : 'Source Video Unavailable'}</h3>
+              <p>{failureMessage || 'The raw source file has expired. Re-rendering is no longer available.'}</p>
+            </div>
+          )}
+          <div className="video-stage-vignette" aria-hidden="true" />
+          <div className="video-stage-format-strip" aria-label="Output format">
+            {FORMAT_OPTIONS.map(opt => (
+              <button
+                key={opt.id}
+                type="button"
+                className={`format-strip-btn ${formatPreset === opt.id ? 'active' : ''}`}
+                title={opt.hint}
+                onClick={() => onFormatPresetChange(opt.id)}
+              >
+                <span className="format-strip-icon">{opt.label}</span>
+                <span className="format-strip-label">{opt.hint}</span>
+              </button>
+            ))}
           </div>
-        )}
+        </div>
       </div>
     </section>
   )
