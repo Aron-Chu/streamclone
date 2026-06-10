@@ -52,19 +52,19 @@ Historical streams, minute rollups, chat/emote counts, and optional TwitchTracke
 
 **Past streams list**
 
-<img src="docs/images/analytics-xqc-streams.png" alt="Analytics streams list" width="960" />
+<img src="docs/images/analytics-xqc-streams.png" alt="Analytics streams list with synced history" width="960" />
 
 **Stream detail with charts**
 
-<img src="docs/images/analytics-stream-detail.png" alt="Analytics stream detail" width="960" />
+<img src="docs/images/analytics-stream-detail.png" alt="Analytics stream detail with viewer chart and emote breakdown" width="960" />
 
 **Synced minute rollups**
 
-<img src="docs/images/analytics-xqc-chart.png" alt="Analytics chart" width="960" />
+<img src="docs/images/analytics-xqc-chart.png" alt="Analytics minute rollups with category segments and emote legend" width="960" />
 
 **Historical sync in progress**
 
-<img src="docs/images/analytics-xqc-sync.gif" alt="Analytics sync progress" width="960" />
+<img src="docs/images/analytics-xqc-sync.gif" alt="Analytics sync progress loading stats and charts" width="960" />
 
 ---
 
