@@ -345,9 +345,11 @@ func (c *Collector) pollOnce(ctx context.Context) {
 			if tracked.currentStreamID != "" {
 				closeStreams = append(closeStreams, tracked.currentStreamID)
 				tracked.currentStreamID = ""
-				c.mu.Unlock()
-				c.irc.Part(context.Background(), login)
-				c.mu.Lock()
+				if isAlwaysTracked {
+					c.mu.Unlock()
+					c.irc.Part(context.Background(), login)
+					c.mu.Lock()
+				}
 			}
 			if !isAlwaysTracked {
 				remove = append(remove, login)

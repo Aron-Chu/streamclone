@@ -25,6 +25,7 @@ benchmark-*.json
 cookies.txt
 *.tsbuildinfo
 .cursor/debug-*.log
+.cursor/mcp.json
 .cursor/hooks/__pycache__/
 scratch/
 weppy-project-sync/
@@ -44,6 +45,8 @@ docs/images/.sync-frames/
 docs/images/qa/
 deploy/tmp-*
 # local output / scratch
+*.bin
+tmp-*.bin
 out.json
 *.log.json
 test.md
