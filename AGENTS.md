@@ -8,13 +8,13 @@ Read this file first. Load **one** domain steering doc, then use the code graph 
 |------|------------|---------------|
 | Any change | `.kiro/steering/tech.md` | `get_ast_chunk` / `get_blast_radius` |
 | Product / UX guardrails | `.kiro/steering/product.md` | — |
-| Live clipper / Clip Studio | `.kiro/steering/clipper.md`, `memories/repo/live-clipper-ast-graph.md` | `get_ast_chunk("ClipStudio")`, `get_call_chain("_process")` |
-| Analytics / rollups / VODs | `.kiro/steering/analytics.md`, `.kiro/specs/vod-chat-pipeline-notes.md`, `memories/repo/analytics-notes.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("gqlCommentText")` |
+| Live clipper / Clip Studio | `.kiro/steering/clipper.md` | `get_ast_chunk("ClipStudio")`, `get_ast_chunk("VideoStage")`, `get_ast_chunk("CaptionOverlayEditor")`, `get_ast_chunk("_process")`, `get_ast_chunk("prepare_emote_assets")` |
+| Analytics / rollups / VODs | `.kiro/steering/analytics.md`, `.kiro/specs/vod-chat-pipeline-notes.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("gqlCommentText")`, `get_ast_chunk("hasGoodChatCoverageFromRollups")` |
 | Scraper optimization / TT perf | `.kiro/specs/scraper-optimization-notes.md`, `.kiro/steering/analytics.md` | — |
-| HLS playback / MediaMTX 401 | `.kiro/steering/playback.md`, `memories/repo/playback-notes.md` | `get_call_chain("waitForHLS")` |
+| HLS playback / MediaMTX 401 | `.kiro/steering/playback.md` | `get_call_chain("waitForHLS")`, `get_blast_radius("filterTwitchAdSegments")` |
 | Local Twitch auth | `.kiro/steering/local-auth.md` | — |
 | Emotes / 7TV / FFZ | `.kiro/steering/emote-pipeline.md` | — |
-| Windows / Docker localhost | `.kiro/steering/windows-dev.md`, `memories/repo/windows-dev-notes.md` | — |
+| Windows / Docker localhost | `.kiro/steering/windows-dev.md` | — |
 | Scraper / CDP Bypass / Cloudflare | `.kiro/steering/windows-dev.md`, `.kiro/specs/scraper-optimization-notes.md`, `streamclone-scraper/main.py` | — |
 | Full feature specs | `.kiro/specs/<feature>/` | Use for planning, not every bugfix |
 
@@ -54,6 +54,7 @@ If the graph is missing or stale, run `make codegraph` before debugging cross-pa
 4. Summarize API/job payloads in prose — do not paste full JSON into chat.
 5. Narrow tests first (`go test ./internal/analytics/...`, `clipper-test`), then broader suites when crossing packages.
 6. Debug mode / instrumentation only when the failure is unknown — not for routine fixes.
+7. Git commits use [Conventional Commits](https://www.conventionalcommits.org/) — see `CONTRIBUTING.md` (`type(scope): summary`).
 
 ## Layout
 
@@ -62,4 +63,4 @@ If the graph is missing or stale, run `make codegraph` before debugging cross-pa
 - Frontend: `frontend/src/`
 - Clipper (standalone): `clipper/liveclipper/`
 - Compose: `deploy/docker-compose.yml` + `deploy/docker-compose.local-tunnel.yml`
-- Agent steering: `.kiro/steering/`, specs: `.kiro/specs/`, memories: `memories/repo/`
+- Agent steering: `.kiro/steering/`, specs: `.kiro/specs/`
