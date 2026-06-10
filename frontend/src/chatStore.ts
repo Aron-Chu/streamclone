@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { CHAT_WS, MAX_RETAINED_MESSAGES } from './config'
 import type { AuthUser, ChannelEmote } from './api'
+import { buildEmoteLookup, splitZeroWidthSuffix } from './emoteText'
 
 export interface Fragment {
   t: 'text' | 'emote' | 'mention'
@@ -138,37 +139,63 @@ function userLogin(user?: AuthUser) {
   return (user?.login || userLabel(user)).toLowerCase()
 }
 
+function emoteFragment(name: string, emote: ChannelEmote): Fragment {
+  return { t: 'emote', c: name, u: emote.url, zw: emote.zw }
+}
+
 function tokenizeClientSide(text: string, loadedEmotes?: ChannelEmote[]): Fragment[] {
   if (!loadedEmotes || !loadedEmotes.length) return [{ t: 'text', c: text }]
-  
-  const emoteMap = new Map<string, ChannelEmote>()
-  for (const emote of loadedEmotes) {
-    if (emote.name) {
-      emoteMap.set(emote.name, emote)
-    }
+
+  const emoteMap = buildEmoteLookup(loadedEmotes)
+
+  const fragments: Fragment[] = []
+  const runes = [...text]
+  let index = 0
+
+  const flushText = (value: string) => {
+    if (value) fragments.push({ t: 'text', c: value })
   }
 
-  const words = text.split(/(\s+)/)
-  const fragments: Fragment[] = []
-  
-  for (const word of words) {
-    if (!word.trim()) {
-      fragments.push({ t: 'text', c: word })
+  let pending = ''
+  while (index < runes.length) {
+    if (runes[index] === ' ') {
+      let end = index
+      while (end < runes.length && runes[end] === ' ') end++
+      pending += runes.slice(index, end).join('')
+      index = end
       continue
     }
+
+    let end = index
+    while (end < runes.length && runes[end] !== ' ') end++
+    const word = runes.slice(index, end).join('')
+
     const emote = emoteMap.get(word)
     if (emote) {
-      fragments.push({
-        t: 'emote',
-        c: word,
-        u: emote.url,
-        zw: emote.zw,
-      })
+      if (emote.zw && fragments.length > 0 && fragments[fragments.length - 1].t === 'emote' && !pending.trim()) {
+        pending = ''
+      }
+      flushText(pending)
+      pending = ''
+      fragments.push(emoteFragment(word, emote))
     } else {
-      fragments.push({ t: 'text', c: word })
+      const split = splitZeroWidthSuffix(emoteMap, word)
+      if (split) {
+        flushText(pending)
+        pending = ''
+        fragments.push(emoteFragment(split.base, emoteMap.get(split.base)!))
+        for (const overlay of split.overlays) {
+          fragments.push(emoteFragment(overlay.name, overlay.emote))
+        }
+      } else {
+        pending += word
+      }
     }
+    index = end
   }
-  return fragments
+
+  flushText(pending)
+  return fragments.length ? fragments : [{ t: 'text', c: text }]
 }
 
 function smooth(prev: number | null, next: number | null) {

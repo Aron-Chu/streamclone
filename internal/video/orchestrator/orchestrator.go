@@ -37,7 +37,7 @@ var (
 	hlsStabilityWindow            = 100 * time.Millisecond
 )
 
-type SpawnFunc func(channel, quality, rtmp string, logw io.Writer) (registry.Streamer, error)
+type SpawnFunc func(channel, quality, rtmp, liveEdge string, logw io.Writer) (registry.Streamer, error)
 type DirectSpawnFunc func(channel, sourceURL, rtmp string, logw io.Writer) (registry.Streamer, error)
 
 type TokenClient interface {
@@ -76,8 +76,8 @@ type Orchestrator struct {
 
 func New(o Options) *Orchestrator {
 	if o.Spawn == nil {
-		o.Spawn = func(ch, q, rtmp string, logw io.Writer) (registry.Streamer, error) {
-			return worker.Start(ch, q, rtmp, logw)
+		o.Spawn = func(ch, q, rtmp, liveEdge string, logw io.Writer) (registry.Streamer, error) {
+			return worker.Start(ch, q, rtmp, liveEdge, logw)
 		}
 	}
 	if o.DirectSpawn == nil {
@@ -116,8 +116,9 @@ func (h *Orchestrator) Routes(r chi.Router) {
 }
 
 type startReq struct {
-	Channel string `json:"channel"`
-	Quality string `json:"quality"`
+	Channel     string `json:"channel"`
+	Quality     string `json:"quality"`
+	LatencyMode string `json:"latency_mode"`
 }
 
 type sessionReq struct {
@@ -153,6 +154,8 @@ type diagnosticsResp struct {
 	UptimeMs          int64                     `json:"uptimeMs,omitempty"`
 	WorkerStarted     int64                     `json:"workerStartedAt,omitempty"`
 	WorkerUptimeMs    int64                     `json:"workerUptimeMs,omitempty"`
+	LatencyMode       string                    `json:"latencyMode"`
+	LiveEdge          int                       `json:"liveEdge,omitempty"`
 	Restarts          int64                     `json:"restarts"`
 	MaxRestarts       int                       `json:"maxRestarts"`
 	LastRestartAt     int64                     `json:"lastRestartAt,omitempty"`
@@ -160,7 +163,6 @@ type diagnosticsResp struct {
 	LastStartError    string                    `json:"lastStartError,omitempty"`
 	Stopped           bool                      `json:"stopped"`
 	BackendVersion    string                    `json:"backendVersion"`
-	LatencyMode       string                    `json:"latencyMode"`
 	RenderProtocol    string                    `json:"protocol"`
 	Renditions        []usher.Rendition         `json:"renditions,omitempty"`
 	SelectedRendition *usher.Rendition          `json:"selectedRendition,omitempty"`
@@ -220,9 +222,10 @@ func (h *Orchestrator) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Quality = effectiveQuality(req.Quality, h.o.DefaultQuality)
+	latencyMode, liveEdge := parseLatencyMode(req.LatencyMode)
 	qualityRestarted := false
 	if s, ok := h.o.Registry.Get(req.Channel); ok {
-		if s.Quality != req.Quality {
+		if s.Quality != req.Quality || s.LatencyMode != latencyMode {
 			qualityRestarted = true
 			h.stopExistingForQualityChange(s)
 		} else {
@@ -236,7 +239,7 @@ func (h *Orchestrator) start(w http.ResponseWriter, r *http.Request) {
 	}
 	sfKey := req.Channel + ":" + req.Quality
 	v, err, _ := h.sf.Do(sfKey, func() (any, error) {
-		return h.create(r.Context(), req.Channel, req.Quality, qualityRestarted)
+		return h.create(r.Context(), req.Channel, req.Quality, latencyMode, liveEdge, qualityRestarted)
 	})
 	if err != nil {
 		code := h.startErrorCode(err)
@@ -300,7 +303,7 @@ func (h *Orchestrator) writeStartError(w http.ResponseWriter, channel string, er
 	}
 }
 
-func (h *Orchestrator) create(ctx context.Context, channel, quality string, qualityRestarted bool) (*registry.Session, error) {
+func (h *Orchestrator) create(ctx context.Context, channel, quality, latencyMode string, liveEdge int, qualityRestarted bool) (*registry.Session, error) {
 	startupStartedAt := time.Now()
 	select {
 	case h.sem <- struct{}{}:
@@ -343,7 +346,7 @@ func (h *Orchestrator) create(ctx context.Context, channel, quality string, qual
 	selected := selectRendition(rends, quality)
 	upstreamFetchMs := time.Since(upstreamStartedAt).Milliseconds()
 	rtmp := "rtmp://" + h.o.RTMPBase + "/live/" + channel
-	st, backend, fallbackAttempted, fallbackAttempts, lastStartErr, startupBreakdown, err := h.startWorker(ctx, channel, quality, rtmp, selected)
+	st, backend, fallbackAttempted, fallbackAttempts, lastStartErr, startupBreakdown, err := h.startWorker(ctx, channel, quality, rtmp, liveEdge, latencyMode, selected)
 	if err != nil {
 		return nil, err
 	}
@@ -364,6 +367,8 @@ func (h *Orchestrator) create(ctx context.Context, channel, quality string, qual
 		FallbackAttempts:  fallbackAttempts,
 		LastStartError:    lastStartErr,
 		QualityRestarted:  qualityRestarted,
+		LatencyMode:       latencyMode,
+		LiveEdge:          liveEdge,
 		StartedAt:         now,
 	}
 	s.MarkWorkerStart(now)
@@ -375,16 +380,18 @@ func (h *Orchestrator) create(ctx context.Context, channel, quality string, qual
 	return s, nil
 }
 
-func (h *Orchestrator) startWorker(ctx context.Context, channel, quality, rtmp string, selected *usher.Rendition) (registry.Streamer, string, bool, int, string, registry.StartupBreakdown, error) {
+func (h *Orchestrator) startWorker(ctx context.Context, channel, quality, rtmp string, liveEdge int, latencyMode string, selected *usher.Rendition) (registry.Streamer, string, bool, int, string, registry.StartupBreakdown, error) {
 	var lastErr error
 	fallbackAttempts := 0
+	liveEdgeStr := strconv.Itoa(liveEdge)
 	backends := normalizeBackends(h.o.WorkerBackends)
+	stabilityWindow, skipVariant := hlsProbeTuning(latencyMode)
 	for i, backend := range backends {
 		if i > 0 {
 			fallbackAttempts++
 		}
 		spawnStartedAt := time.Now()
-		st, err := h.spawnBackend(channel, quality, rtmp, backend, selected)
+		st, err := h.spawnBackend(channel, quality, rtmp, backend, liveEdgeStr, selected)
 		spawnMs := time.Since(spawnStartedAt).Milliseconds()
 		if err != nil {
 			if !errors.Is(err, errDirectHLSSourceUnavailable) || lastErr == nil {
@@ -393,7 +400,7 @@ func (h *Orchestrator) startWorker(ctx context.Context, channel, quality, rtmp s
 			continue
 		}
 		hlsReadyStartedAt := time.Now()
-		if err := waitForHLS(ctx, h.o.HLSProbeBase, channel, h.o.HLSProbeTimeout); err != nil {
+		if err := waitForHLS(ctx, h.o.HLSProbeBase, channel, h.o.HLSProbeTimeout, stabilityWindow, skipVariant); err != nil {
 			st.Kill()
 			lastErr = err
 			continue
@@ -414,11 +421,14 @@ func (h *Orchestrator) startWorker(ctx context.Context, channel, quality, rtmp s
 	return nil, "", fallbackAttempts > 0, fallbackAttempts, lastErr.Error(), registry.StartupBreakdown{}, lastErr
 }
 
-func (h *Orchestrator) spawnBackend(channel, quality, rtmp, backend string, selected *usher.Rendition) (registry.Streamer, error) {
+func (h *Orchestrator) spawnBackend(channel, quality, rtmp, backend, liveEdge string, selected *usher.Rendition) (registry.Streamer, error) {
 	switch backend {
 	case "direct_hls":
 		if selected == nil || selected.URL == "" {
 			return nil, errDirectHLSSourceUnavailable
+		}
+		if _, err := allowedProxyURL(selected.URL); err != nil {
+			return nil, fmt.Errorf("%w: %v", errDirectHLSSourceUnavailable, err)
 		}
 		localPort := "8080"
 		if addr := os.Getenv("HTTP_ADDR"); addr != "" {
@@ -430,7 +440,7 @@ func (h *Orchestrator) spawnBackend(channel, quality, rtmp, backend string, sele
 		h.o.Log.Info("spawning direct HLS worker with local manifest proxy", "channel", channel, "proxy_url", proxyURL)
 		return h.o.DirectSpawn(channel, proxyURL, rtmp, logWriter{log: h.o.Log, ch: channel})
 	default:
-		return h.o.Spawn(channel, quality, rtmp, logWriter{log: h.o.Log, ch: channel})
+		return h.o.Spawn(channel, quality, rtmp, liveEdge, logWriter{log: h.o.Log, ch: channel})
 	}
 }
 
@@ -544,6 +554,21 @@ func copyRendition(r usher.Rendition) *usher.Rendition {
 
 func (h *Orchestrator) supervise(s *registry.Session, channel, quality, rtmp string) {
 	restarts := 0
+	backends := normalizeBackends(h.o.WorkerBackends)
+	backendIdx := 0
+	for i, backend := range backends {
+		if backend == s.WorkerBackend {
+			backendIdx = i
+			break
+		}
+	}
+	liveEdgeStr := strconv.Itoa(s.LiveEdge)
+	if s.LiveEdge <= 0 {
+		_, edge := parseLatencyMode(s.LatencyMode)
+		liveEdgeStr = strconv.Itoa(edge)
+	}
+	stabilityWindow, skipVariant := hlsProbeTuning(s.LatencyMode)
+
 	for {
 		err := s.Stream().Wait()
 		s.RecordWorkerError(err)
@@ -558,14 +583,43 @@ func (h *Orchestrator) supervise(s *registry.Session, channel, quality, rtmp str
 		s.RecordRestart(time.Now(), err)
 		metrics.StreamRestarts.WithLabelValues(channel).Inc()
 		h.o.Log.Warn("worker exited; restarting", "channel", channel, "attempt", restarts, "err", err)
-		nst, serr := h.spawnBackend(channel, quality, rtmp, s.WorkerBackend, s.SelectedRendition)
-		if serr != nil {
-			h.o.Log.Error("restart failed", "channel", channel, "err", serr)
-			s.RecordWorkerError(serr)
+
+		backoff := time.Duration(restarts) * 2 * time.Second
+		if backoff > 30*time.Second {
+			backoff = 30 * time.Second
+		}
+		time.Sleep(backoff)
+
+		var recovered bool
+		for attempt := 0; attempt < len(backends); attempt++ {
+			backendIdx = (backendIdx + 1) % len(backends)
+			backend := backends[backendIdx]
+			h.o.Log.Info("supervise restart attempt", "channel", channel, "backend", backend, "attempt", attempt+1)
+			nst, serr := h.spawnBackend(channel, quality, rtmp, backend, liveEdgeStr, s.SelectedRendition)
+			if serr != nil {
+				h.o.Log.Error("restart spawn failed", "channel", channel, "backend", backend, "err", serr)
+				s.RecordWorkerError(serr)
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), h.o.HLSProbeTimeout)
+			probeErr := waitForHLS(ctx, h.o.HLSProbeBase, channel, h.o.HLSProbeTimeout, stabilityWindow, skipVariant)
+			cancel()
+			if probeErr != nil {
+				h.o.Log.Error("restart hls probe failed", "channel", channel, "backend", backend, "err", probeErr)
+				nst.Kill()
+				s.RecordWorkerError(probeErr)
+				continue
+			}
+			s.SetStream(nst)
+			s.WorkerBackend = backend
+			s.MarkWorkerStart(time.Now())
+			recovered = true
 			break
 		}
-		s.SetStream(nst)
-		s.MarkWorkerStart(time.Now())
+		if !recovered {
+			h.o.Log.Error("restart failed after backend rotation", "channel", channel)
+			break
+		}
 	}
 	s.MarkStopped()
 	h.o.Registry.Remove(channel)
@@ -662,7 +716,7 @@ func (h *Orchestrator) diagnostics(w http.ResponseWriter, r *http.Request) {
 			Active:         false,
 			MaxRestarts:    h.o.MaxRestarts,
 			BackendVersion: h.o.BackendVersion,
-			LatencyMode:    "Stable HLS",
+			LatencyMode:    "stable",
 			RenderProtocol: "HLS",
 			HLSProbe:       probeHLS(r.Context(), h.o.HLSProbeBase, channel),
 			UpdatedAt:      now.UnixMilli(),
@@ -686,7 +740,8 @@ func (h *Orchestrator) diagnostics(w http.ResponseWriter, r *http.Request) {
 		LastStartError:    s.LastStartError,
 		Stopped:           s.Stopped(),
 		BackendVersion:    h.o.BackendVersion,
-		LatencyMode:       "Stable HLS",
+		LatencyMode:       latencyModeLabel(s.LatencyMode),
+		LiveEdge:          s.LiveEdge,
 		RenderProtocol:    "HLS",
 		Renditions:        s.Renditions,
 		SelectedRendition: s.SelectedRendition,
@@ -739,7 +794,7 @@ func writeAPIError(w http.ResponseWriter, status int, code, message string, retr
 	writeJSON(w, status, apiError{Code: code, Error: message, Retryable: retryable})
 }
 
-func waitForHLS(ctx context.Context, base, channel string, timeout time.Duration) error {
+func waitForHLS(ctx context.Context, base, channel string, timeout time.Duration, stabilityWindow time.Duration, skipVariant bool) error {
 	if base == "" {
 		return nil
 	}
@@ -761,12 +816,12 @@ func waitForHLS(ctx context.Context, base, channel string, timeout time.Duration
 	stableSince := time.Time{}
 
 	for {
-		ready, err := probePlaylistGraph(ctx, client, playlist)
+		ready, err := probePlaylistGraph(ctx, client, playlist, skipVariant)
 		if err == nil && ready {
 			if stableSince.IsZero() {
 				stableSince = time.Now()
 			}
-			if time.Since(stableSince) >= hlsStabilityWindow {
+			if time.Since(stableSince) >= stabilityWindow {
 				result = "ok"
 				return nil
 			}
@@ -782,13 +837,13 @@ func waitForHLS(ctx context.Context, base, channel string, timeout time.Duration
 	}
 }
 
-func probePlaylistGraph(ctx context.Context, client *http.Client, playlist string) (bool, error) {
+func probePlaylistGraph(ctx context.Context, client *http.Client, playlist string, skipVariant bool) (bool, error) {
 	body, err := fetchPlaylistBody(ctx, client, playlist)
 	if err != nil {
 		return false, err
 	}
 	child := firstVariantPlaylist(body)
-	if child == "" {
+	if child == "" || skipVariant {
 		return true, nil
 	}
 	childURL, err := resolvePlaylistReference(playlist, child)
@@ -929,6 +984,10 @@ func (h *Orchestrator) proxyPlaylist(w http.ResponseWriter, r *http.Request) {
 	sourceURL := r.URL.Query().Get("url")
 	if sourceURL == "" {
 		http.Error(w, "missing url parameter", http.StatusBadRequest)
+		return
+	}
+	if _, err := allowedProxyURL(sourceURL); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

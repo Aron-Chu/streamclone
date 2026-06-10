@@ -27,14 +27,17 @@ type Worker struct {
 	ff      *exec.Cmd
 }
 
-func Start(channel, quality, rtmpURL string, logw io.Writer) (*Worker, error) {
+func Start(channel, quality, rtmpURL, liveEdge string, logw io.Writer) (*Worker, error) {
 	if !ValidChannel(channel) {
 		return nil, ErrInvalidChannel
 	}
 	if quality == "" {
 		quality = "best"
 	}
-	liveEdge := strings.TrimSpace(os.Getenv("STREAMLINK_HLS_LIVE_EDGE"))
+	liveEdge = strings.TrimSpace(liveEdge)
+	if liveEdge == "" {
+		liveEdge = strings.TrimSpace(os.Getenv("STREAMLINK_HLS_LIVE_EDGE"))
+	}
 	if liveEdge == "" {
 		liveEdge = "2"
 	}
@@ -52,7 +55,9 @@ func Start(channel, quality, rtmpURL string, logw io.Writer) (*Worker, error) {
 		"twitch.tv/"+channel,
 		quality,
 	)
-	ff := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-c", "copy", "-f", "flv", rtmpURL)
+	ffArgs := append([]string{"-hide_banner", "-loglevel", "error"}, ffmpegReconnectFlags()...)
+	ffArgs = append(ffArgs, "-i", "pipe:0", "-c", "copy", "-f", "flv", rtmpURL)
+	ff := exec.Command("ffmpeg", ffArgs...)
 
 	pr, pw, err := os.Pipe()
 	if err != nil {
@@ -108,24 +113,27 @@ func StartDirectHLS(channel, sourceURL, rtmpURL string, logw io.Writer) (*Worker
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return nil, fmt.Errorf("invalid hls source url")
 	}
-	ff := exec.Command(
-		"ffmpeg",
-		"-hide_banner",
-		"-loglevel", "error",
-		"-reconnect", "1",
-		"-reconnect_streamed", "1",
-		"-reconnect_delay_max", "2",
-		"-i", sourceURL,
-		"-c", "copy",
-		"-f", "flv",
-		rtmpURL,
-	)
+	args := append([]string{"-hide_banner", "-loglevel", "error"}, ffmpegReconnectFlags()...)
+	args = append(args, "-i", sourceURL, "-c", "copy", "-f", "flv", rtmpURL)
+	ff := exec.Command("ffmpeg", args...)
 	ff.Stderr = logw
 	ff.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := ff.Start(); err != nil {
 		return nil, fmt.Errorf("start ffmpeg direct hls: %w", err)
 	}
 	return &Worker{Channel: channel, PGID: ff.Process.Pid, ff: ff}, nil
+}
+
+func ffmpegReconnectFlags() []string {
+	return []string{
+		"-rw_timeout", "15000000",
+		"-reconnect", "1",
+		"-reconnect_streamed", "1",
+		"-reconnect_on_network_error", "1",
+		"-reconnect_on_http_error", "5xx",
+		"-reconnect_max_retries", "5",
+		"-reconnect_delay_max", "5",
+	}
 }
 
 func Reconcile(match string) int {

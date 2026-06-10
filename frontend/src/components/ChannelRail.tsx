@@ -10,6 +10,7 @@ interface ChannelRailProps {
   mobileOpen: boolean
   onToggleCollapsed: () => void
   onCloseMobile: () => void
+  viewerOverrides?: Record<string, number | undefined>
 }
 
 function fromLiveDirectory(streams: Awaited<ReturnType<typeof getStreams>> | undefined): FollowedChannel[] {
@@ -41,7 +42,8 @@ function formatViewers(val: number): string {
   return val.toString()
 }
 
-function ChannelItem({ channel, collapsed, active, onClick }: { channel: FollowedChannel; collapsed: boolean; active: boolean; onClick?: () => void }) {
+function ChannelItem({ channel, collapsed, active, onClick, viewerOverrides }: { channel: FollowedChannel; collapsed: boolean; active: boolean; onClick?: () => void; viewerOverrides?: Record<string, number | undefined> }) {
+  const viewers = viewerOverrides?.[channel.login] ?? channel.viewers ?? 0
   return (
     <Link
       to={`/c/${channel.login}`}
@@ -64,7 +66,7 @@ function ChannelItem({ channel, collapsed, active, onClick }: { channel: Followe
           {channel.isLive ? (
             <div className="ml-2 flex items-center gap-1 text-[10px] font-black text-red-500">
               <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-              <span>{formatViewers(channel.viewers ?? 0)}</span>
+              <span>{formatViewers(viewers)}</span>
             </div>
           ) : null}
         </div>
@@ -106,10 +108,12 @@ function ChannelList({
   channels,
   collapsed,
   onCloseMobile,
+  viewerOverrides,
 }: {
   channels: FollowedChannel[]
   collapsed: boolean
   onCloseMobile?: () => void
+  viewerOverrides?: Record<string, number | undefined>
 }) {
   const location = useLocation()
   return (
@@ -121,13 +125,14 @@ function ChannelList({
           collapsed={collapsed}
           active={location.pathname === `/c/${channel.login}`}
           onClick={onCloseMobile}
+          viewerOverrides={viewerOverrides}
         />
       ))}
     </div>
   )
 }
 
-function RailContent({ collapsed, onCloseMobile }: { collapsed: boolean; onCloseMobile?: () => void }) {
+function RailContent({ collapsed, onCloseMobile, viewerOverrides }: { collapsed: boolean; onCloseMobile?: () => void; viewerOverrides?: Record<string, number | undefined> }) {
   const auth = useAuth()
   const settings = useUiSettings(s => s.settings)
   const toggleRailSection = useUiSettings(s => s.toggleRailSection)
@@ -180,7 +185,7 @@ function RailContent({ collapsed, onCloseMobile }: { collapsed: boolean; onClose
                 onToggle={() => toggleRailSection(section.id)}
                 collapsed={collapsed}
               />
-              {open ? <ChannelList channels={section.channels} collapsed={collapsed} onCloseMobile={onCloseMobile} /> : null}
+              {open ? <ChannelList channels={section.channels} collapsed={collapsed} onCloseMobile={onCloseMobile} viewerOverrides={viewerOverrides} /> : null}
             </div>
           )
         })}
@@ -190,11 +195,11 @@ function RailContent({ collapsed, onCloseMobile }: { collapsed: boolean; onClose
   )
 }
 
-export default function ChannelRail({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobile }: ChannelRailProps) {
+export default function ChannelRail({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobile, viewerOverrides }: ChannelRailProps) {
   return (
     <>
       <aside className={`hidden min-h-screen shrink-0 flex-col border-r border-white/10 bg-[#111117] text-white lg:flex ${collapsed ? 'w-16' : 'w-64'}`}>
-        <RailContent collapsed={collapsed} />
+        <RailContent collapsed={collapsed} viewerOverrides={viewerOverrides} />
         <button onClick={onToggleCollapsed} className="border-t border-white/10 px-2 py-3 text-xs font-black text-zinc-400 transition hover:bg-white/[0.06] hover:text-white">
           {collapsed ? '>>' : 'Collapse'}
         </button>
@@ -204,7 +209,7 @@ export default function ChannelRail({ collapsed, mobileOpen, onToggleCollapsed, 
         <div className="fixed inset-0 z-50 lg:hidden">
           <button aria-label="Close navigation" onClick={onCloseMobile} className="absolute inset-0 bg-black/70" />
           <aside className="relative flex h-full w-72 flex-col border-r border-white/10 bg-[#111117] text-white shadow-2xl">
-            <RailContent collapsed={false} onCloseMobile={onCloseMobile} />
+            <RailContent collapsed={false} onCloseMobile={onCloseMobile} viewerOverrides={viewerOverrides} />
           </aside>
         </div>
       ) : null}

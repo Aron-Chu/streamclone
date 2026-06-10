@@ -36,6 +36,7 @@ The schema is:
 
 - Nodes: `File`, `Class`, `Function`, `Interface`, `ImportModule`
 - Edges: `DEFINES`, `CALLS`, `INHERITS_FROM`, `IMPORTS`
+- Languages: Go and TypeScript/TSX (definitions, imports, calls); Python (definitions and classes, including `clipper/liveclipper/`)
 
 ## Run the MCP server
 

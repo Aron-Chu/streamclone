@@ -16,21 +16,39 @@ function mentionAliases(user?: AuthUser) {
   ].filter((value): value is string => Boolean(value && value.trim())).map(normalizeMentionToken))
 }
 
+function EmoteStack({ base, overlays }: { base: Fragment; overlays: Fragment[] }) {
+  const title = [base.c, ...overlays.map(overlay => overlay.c)].join(' ')
+  return (
+    <span className="relative inline-block align-middle" style={{ height: '1.65em', lineHeight: 0 }} title={title}>
+      <img
+        src={normalizeBrowserOriginUrl(base.u, ['/emotes/'])}
+        alt={base.c}
+        className="inline-block h-full w-auto max-w-none align-middle drop-shadow"
+      />
+      {overlays.map((overlay, index) => (
+        <img
+          key={`${overlay.c}-${index}`}
+          src={normalizeBrowserOriginUrl(overlay.u, ['/emotes/'])}
+          alt={overlay.c}
+          title={overlay.c}
+          className="pointer-events-none absolute inset-0 z-10 h-full w-full object-contain drop-shadow"
+        />
+      ))}
+    </span>
+  )
+}
+
 function Frag({ f, selfMention, mentionColor }: { f: Fragment; selfMention?: boolean; mentionColor?: string }) {
   if (f.t === 'emote') {
-    const emote = (
+    return (
       <img
         src={normalizeBrowserOriginUrl(f.u, ['/emotes/'])}
         alt={f.c}
         title={f.c}
-        className={`inline-block align-middle drop-shadow${f.zw ? ' -ml-[1.65em] relative z-10' : ''}`}
+        className="inline-block align-middle drop-shadow"
         style={{ height: '1.65em', width: f.zw ? '1.65em' : undefined }}
       />
     )
-    if (f.zw) {
-      return <span title={f.c} className="relative z-10 inline-block">{emote}</span>
-    }
-    return emote
   }
   if (f.t === 'mention') {
     if (selfMention) {
@@ -75,6 +93,35 @@ function BadgeStrip({ rawBadges, badges }: { rawBadges: string[]; badges: Record
   )
 }
 
+function renderMessageFragments(fragments: Fragment[], mentionNames: Set<string>, mentionColor?: string) {
+  const nodes: JSX.Element[] = []
+  let index = 0
+  while (index < fragments.length) {
+    const fragment = fragments[index]
+    if (fragment.t === 'emote' && !fragment.zw) {
+      const overlays: Fragment[] = []
+      let next = index + 1
+      while (next < fragments.length && fragments[next].t === 'emote' && fragments[next].zw) {
+        overlays.push(fragments[next])
+        next++
+      }
+      nodes.push(<EmoteStack key={`stack-${index}-${fragment.c}`} base={fragment} overlays={overlays} />)
+      index = next
+      continue
+    }
+    nodes.push(
+      <Frag
+        key={`frag-${index}-${fragment.c}`}
+        f={fragment}
+        selfMention={fragment.t === 'mention' ? mentionNames.has(normalizeMentionToken(fragment.c)) : false}
+        mentionColor={mentionColor}
+      />,
+    )
+    index++
+  }
+  return nodes
+}
+
 function Row({ msg, badges, mentionNames }: { msg: Message; badges: Record<string, ChatBadge>; mentionNames: Set<string> }) {
   const time = Number.isFinite(msg.ts) ? new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
   const tone = msg.ackState === 'error'
@@ -88,14 +135,7 @@ function Row({ msg, badges, mentionNames }: { msg: Message; badges: Record<strin
       <BadgeStrip rawBadges={msg.badges ?? []} badges={badges} />
       <span style={{ color: msg.color || '#c4b5fd' }} className="mr-1 font-black">{msg.user || 'viewer'}:</span>
       <span className="align-baseline">
-        {msg.fragments.map((f, i) => (
-          <Frag
-            key={i}
-            f={f}
-            selfMention={f.t === 'mention' ? mentionNames.has(normalizeMentionToken(f.c)) : false}
-            mentionColor={msg.color}
-          />
-        ))}
+        {renderMessageFragments(msg.fragments, mentionNames, msg.color)}
       </span>
       {msg.ackState && msg.source === 'local' ? (
         <span className={`ml-2 align-baseline text-[11px] font-bold ${msg.ackState === 'error' ? 'text-red-300' : msg.ackState === 'live' ? 'text-emerald-300' : 'text-zinc-500'}`}>

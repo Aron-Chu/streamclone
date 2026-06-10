@@ -60,3 +60,24 @@ func TestLiveSchemaMismatch(t *testing.T) {
 		t.Fatalf("expected ErrUpstreamSchema, got %v", err)
 	}
 }
+
+func TestLiveTokenCache(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Write([]byte(`{"data":{"streamPlaybackAccessToken":{"value":"{\"v\":1}","signature":"abc"}}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+	ctx := context.Background()
+	if _, err := client.Live(ctx, "ninja"); err != nil {
+		t.Fatalf("first live: %v", err)
+	}
+	if _, err := client.Live(ctx, "ninja"); err != nil {
+		t.Fatalf("second live: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected 1 upstream call, got %d", calls)
+	}
+}

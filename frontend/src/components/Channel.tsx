@@ -10,18 +10,20 @@ import {
   getChannelDetails,
   getChannelEmotes,
   getChannelInsights,
+  getAnalyticsLive,
   getStreamDiagnostics,
   keepaliveStream,
   startStream,
   stopStream,
   watchAnalyticsChannel,
 } from '../api'
-import type { ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat } from '../api'
+import type { AnalyticsTopEmote, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat } from '../api'
 import { useAuth } from '../auth'
 import { useChatStore } from '../chatStore'
 import { normalizeBrowserOriginUrl } from '../config'
 import { useHlsPlayback, type PlaybackMetrics, type PlaybackState } from '../playback'
 import { useThemeEffect, useUiSettings, type BottomDensityMode, type ClipPeriod, type PlaybackLatencyMode, type StatsPeriod, type VideoFitMode } from '../settings'
+import { emoteLoadPercent, formatEmoteProviderProgress, sortChannelEmotesByUsage } from '../emoteUtils'
 import Chat, { type ChatEmoteStatus } from './Chat'
 import ChannelRail from './ChannelRail'
 import LocalTokenImportButton from './LocalTokenImportButton'
@@ -55,7 +57,7 @@ type QualityMenuOption = {
 type RenditionOption = NonNullable<StartResponse['renditions']>[number]
 
 function qualityLabel(value: string) {
-  if (value === autoHighStableQuality) return 'Fast high stable'
+  if (value === autoHighStableQuality) return '720p fast'
   if (value === 'best') return 'Best / source'
   return value
 }
@@ -338,7 +340,8 @@ function providerCardTone(state: string) {
   return 'border-white/10 bg-white/[0.035] text-zinc-300'
 }
 
-function providerProgress(state: string, active: boolean, percent?: number) {
+function providerProgress(state: string, active: boolean, count: number, total: number, percent?: number) {
+  if (total > 0) return emoteLoadPercent(count, total, percent)
   if (typeof percent === 'number') return Math.max(0, Math.min(100, percent))
   if (state === 'ready') return 100
   if (state === 'processing') return 55
@@ -354,6 +357,7 @@ function EmoteProviderPanel({
   emotesLoading,
   channelLabel,
   channelCategory,
+  topEmotes,
   onToggle,
   onLoad,
   onAutoLoad,
@@ -366,6 +370,7 @@ function EmoteProviderPanel({
   emotesLoading: boolean
   channelLabel?: string
   channelCategory?: string
+  topEmotes?: AnalyticsTopEmote[]
   onToggle: (provider: EmoteProvider) => void
   onLoad: () => void
   onAutoLoad: (value: boolean) => void
@@ -375,20 +380,27 @@ function EmoteProviderPanel({
   const previewLimit = 16
   const providerRows = emoteProviderOptions.map(option => {
     const row = status.providers?.find(provider => provider.provider === option.id)
-    const emotes = loadedEmotes.filter(emote => emote.provider === option.id)
+    const emotes = sortChannelEmotesByUsage(
+      loadedEmotes.filter(emote => emote.provider === option.id),
+      topEmotes,
+    )
     const active = selected.includes(option.id)
-    const state = row?.state ?? (emotes.length ? 'ready' : active && busy ? 'processing' : 'idle')
+    const count = row?.count ?? 0
+    const total = row?.total ?? 0
+    const state = row?.state ?? (total > 0 && count < total ? 'processing' : emotes.length ? 'ready' : active && busy ? 'processing' : 'idle')
+    const pending = row?.pending ?? (state === 'processing' ? status.pending : 0)
     const expanded = Boolean(expandedProviders[option.id])
+    const percent = emoteLoadPercent(count, total, row?.percent)
     return {
       ...option,
       active,
       expanded,
       state,
-      pending: row?.pending ?? (state === 'processing' ? status.pending : 0),
+      pending,
       failed: row?.failed ?? 0,
-      total: row?.total ?? emotes.length,
-      percent: row?.percent,
-      count: Math.max(row?.count ?? 0, emotes.length),
+      total,
+      percent,
+      count,
       previewCount: Math.min(previewLimit, emotes.length),
       visibleEmotes: expanded ? emotes : emotes.slice(0, previewLimit),
       emotes,
@@ -461,9 +473,7 @@ function EmoteProviderPanel({
               <div>
                 <div className="text-sm font-black text-white">{provider.label}</div>
                 <div className="mt-1 text-xs font-semibold text-current/80">
-                  {provider.total ? `${provider.percent ?? 0}% loaded (${provider.count}/${provider.total})` : provider.state === 'ready' ? 'Loaded; no emotes found' : provider.count ? `${provider.count} loaded` : provider.active ? 'Selected for loading' : 'Not selected'}
-                  {provider.pending ? ` / ${provider.pending} pending` : ''}
-                  {provider.failed ? ` / ${provider.failed} failed` : ''}
+                  {formatEmoteProviderProgress(provider)}
                 </div>
                 {provider.emotes.length > previewLimit ? (
                   <div className="mt-1 text-[11px] font-bold text-current/70">
@@ -478,7 +488,7 @@ function EmoteProviderPanel({
               </span>
             </div>
             <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/35">
-              <div className="h-full rounded-full bg-current transition-all" style={{ width: `${providerProgress(provider.state, provider.active, provider.percent)}%` }} />
+              <div className="h-full rounded-full bg-current transition-all" style={{ width: `${providerProgress(provider.state, provider.active, provider.count, provider.total, provider.percent)}%` }} />
             </div>
             <div className="mt-3 grid grid-cols-8 gap-1">
               {provider.visibleEmotes.map(emote => (
@@ -651,6 +661,7 @@ function LivePlayerControls({
   loadedQuality,
   renditions,
   latencyMode,
+  latencyModeAuto,
   videoFit,
   bottomDensity,
   muted,
@@ -673,6 +684,7 @@ function LivePlayerControls({
   loadedQuality: string
   renditions: StartResponse['renditions'] | undefined
   latencyMode: PlaybackLatencyMode
+  latencyModeAuto?: boolean
   videoFit: VideoFitMode
   bottomDensity: BottomDensityMode
   muted: boolean
@@ -734,10 +746,15 @@ function LivePlayerControls({
             aria-haspopup="listbox"
             aria-expanded={qualityOpen}
             onClick={() => setQualityOpen(open => !open)}
-            className="flex h-9 min-w-[13rem] items-center justify-between gap-3 rounded border border-white/10 bg-white/[0.045] px-3 text-left text-xs font-black uppercase text-zinc-500 transition hover:bg-white/[0.075]"
+            className="flex h-9 min-w-[15rem] items-center justify-between gap-3 rounded border border-white/10 bg-white/[0.045] px-3 text-left text-xs font-black uppercase text-zinc-500 transition hover:bg-white/[0.075]"
           >
             <span>Request</span>
-            <span className="min-w-0 flex-1 truncate text-sm normal-case text-white">{selectedQuality?.label ?? qualityLabel(requestedQuality)}</span>
+            <span
+              title={selectedQuality?.label === '720p fast' ? 'Fast high stable — starts at 720p60/720p for faster relay' : selectedQuality?.label ?? qualityLabel(requestedQuality)}
+              className="min-w-0 flex-1 truncate text-sm normal-case text-white"
+            >
+              {selectedQuality?.label ?? qualityLabel(requestedQuality)}
+            </span>
             <span className="text-zinc-400">{qualityOpen ? '^' : 'v'}</span>
           </button>
           {qualityOpen ? (
@@ -771,7 +788,10 @@ function LivePlayerControls({
           <span>Loaded</span>
           <span title={loadedQuality} className="truncate text-sm normal-case text-white">{loadedQuality}</span>
         </div>
-        <div className="flex h-9 rounded border border-white/10 bg-white/[0.045] p-1">
+        <div
+          className="flex h-9 rounded border border-white/10 bg-white/[0.045] p-1"
+          title={latencyModeAuto ? `Auto-switched to ${latencyMode} after buffering (change mode to override)` : undefined}
+        >
           {(['instant', 'fast', 'stable'] as const).map(mode => (
             <button
               key={mode}
@@ -876,7 +896,7 @@ function ChannelMeta({
           </div>
         </div>
         <div className={`grid grid-cols-2 text-xs font-bold text-zinc-300 sm:grid-cols-4 ${dense ? 'gap-1.5 2xl:w-[460px]' : 'gap-2 2xl:w-[520px]'}`}>
-          <div className={`rounded border border-white/10 bg-white/[0.055] ${dense ? 'px-2.5 py-2' : 'px-3 py-2'}`}>
+          <div className={`rounded border border-white/10 bg-white/[0.055] ${dense ? 'px-2.5 py-2' : 'px-3 py-2'}`} title="Live viewer count from Twitch metadata (sidebar uses the same value when this channel is open)">
             <div className="text-[11px] uppercase text-zinc-500">Viewers</div>
             <div className="mt-0.5 text-sm text-white">{fullCount(details?.viewers)}</div>
           </div>
@@ -1128,23 +1148,31 @@ function ChannelTabs({
   ]
   return (
     <section className={`border-t border-white/10 bg-[#09090d] ${dense ? 'px-3 py-3 lg:px-4' : 'px-4 py-4 lg:px-6'}`}>
-      <div className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between ${dense ? 'mb-3' : 'mb-4'}`}>
-        <div>
-          <h2 className="text-base font-black text-white">Channel workspace</h2>
-          <div className="mt-1 text-xs font-semibold text-zinc-500">{loading ? 'Loading sources' : insights?.updatedAt ? `${statsPeriod} · updated ${relativeTime(insights.updatedAt / 1000)}` : 'Sources pending'}</div>
-        </div>
-        <div className="flex flex-wrap rounded border border-white/10 bg-white/[0.045] p-1">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => onTab(tab.id)}
-              className={`rounded px-3 py-1.5 text-xs font-black transition ${activeTab === tab.id ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
-            >
-              {tab.label}
-            </button>
-          ))}
+      <div className={`sticky top-0 z-10 -mx-3 bg-[#09090d]/95 px-3 py-2 backdrop-blur-sm lg:-mx-4 lg:px-4 ${dense ? 'mb-2' : 'mb-3'}`}>
+        <div className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`}>
+          <div>
+            <h2 className="text-base font-black text-white">Channel workspace</h2>
+            <div className="mt-1 text-xs font-semibold text-zinc-500">{loading ? 'Loading sources' : insights?.updatedAt ? `${statsPeriod} · updated ${relativeTime(insights.updatedAt / 1000)}` : 'Sources pending'}</div>
+          </div>
+          <div className="flex flex-wrap rounded border border-white/10 bg-white/[0.045] p-1">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => onTab(tab.id)}
+                className={`rounded px-3 py-1.5 text-xs font-black transition ${activeTab === tab.id ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {activeTab === 'diagnostics' ? (
+        <p className={`text-xs font-semibold leading-relaxed text-zinc-500 ${dense ? 'mb-3' : 'mb-4'}`}>
+          Advanced playback tools for comparing local HLS relay latency against Twitch&apos;s embed player. Most viewers can stay on About or Stats — open this tab when tuning buffer, quality, or relay startup.
+        </p>
+      ) : null}
 
       {activeTab === 'about' ? <ChannelDetailSections details={details} dense={dense} /> : null}
       {activeTab === 'stats' ? (
@@ -1337,7 +1365,6 @@ export default function Channel() {
   const [hlsUrl, setHlsUrl] = useState('')
   const [streamSession, setStreamSession] = useState<StartResponse | null>(null)
   const [listeners, setListeners] = useState<number | null>(null)
-  const [railCollapsed, setRailCollapsed] = useState(false)
   const [mobileRailOpen, setMobileRailOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<ChannelTab>('about')
   const [detailsExpanded, setDetailsExpanded] = useState(false)
@@ -1355,6 +1382,7 @@ export default function Channel() {
   const auth = useAuth()
   const settings = useUiSettings(s => s.settings)
   const updateSettings = useUiSettings(s => s.updateSettings)
+  const [railCollapsed, setRailCollapsed] = useState(false)
   const toggleSavedEmoteProvider = useUiSettings(s => s.toggleEmoteProvider)
   const selectedEmoteProviders = settings.emoteProviders
   const autoLoadEmotes = settings.emoteAutoLoad
@@ -1395,6 +1423,13 @@ export default function Channel() {
     enabled: Boolean(channelLogin),
     staleTime: 5000,
     refetchInterval: emoteStatus.state === 'loading' || emoteStatus.state === 'processing' ? 5000 : false,
+  })
+  const liveAnalytics = useQuery({
+    queryKey: ['channel-live-analytics', channelLogin],
+    queryFn: () => getAnalyticsLive(channelLogin),
+    enabled: Boolean(channelLogin),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   })
 
   useEffect(() => {
@@ -1450,7 +1485,7 @@ export default function Channel() {
     const start = async () => {
       try {
         const requestedQuality = requestQuality(settings.preferredQuality || 'best')
-        const response = await startStream(channelLogin, requestedQuality)
+        const response = await startStream(channelLogin, requestedQuality, settings.playbackLatencyMode)
         if (!alive) {
           await stopStream(channelLogin, response.session_id).catch(() => undefined)
           return
@@ -1487,7 +1522,7 @@ export default function Channel() {
       unsubscribe(channelLogin)
       stopStream(channelLogin, sessionIdRef.current).catch(() => undefined)
     }
-  }, [channelLogin, retryKey, settings.preferredQuality, subscribe, unsubscribe])
+  }, [channelLogin, retryKey, settings.playbackLatencyMode, settings.preferredQuality, subscribe, unsubscribe])
 
   useEffect(() => {
     setEmoteStatus({ state: 'idle', count: 0, pending: 0 })
@@ -1614,7 +1649,16 @@ export default function Channel() {
     return () => window.clearInterval(timer)
   }, [error, hlsUrl, playback.error, playback.state, relayState])
 
+  const sortedLoadedEmotes = useMemo(
+    () => sortChannelEmotesByUsage(emotePreview.data ?? [], liveAnalytics.data?.topEmotes),
+    [emotePreview.data, liveAnalytics.data?.topEmotes],
+  )
   const headerTitle = useMemo(() => details.data?.displayName || channelLogin || 'Channel', [channelLogin, details.data?.displayName])
+  const railViewerOverrides = useMemo(() => {
+    if (!channelLogin || details.data?.viewers == null) return undefined
+    return { [channelLogin]: details.data.viewers }
+  }, [channelLogin, details.data?.viewers])
+  const streamPoster = details.data?.thumbnailUrl?.replace('{width}', '960').replace('{height}', '540')
   const playbackState = hlsUrl ? playback.state : relayState
   const playbackError = error || playback.error
   const activeRenditions = streamSession?.renditions ?? diagnostics.data?.renditions
@@ -1622,16 +1666,16 @@ export default function Channel() {
   const requestedQuality = resolveRequestedQuality(activeRenditions, settings.preferredQuality, activeSelectedRendition)
   const loadedQuality = selectedRenditionText(streamSession, diagnostics.data)
   const isDenseBottom = settings.bottomDensity === 'dense'
-  const playerHeightClass = detailsExpanded
-    ? isDenseBottom ? 'h-[clamp(130px,24vh,28vh)]' : 'h-[clamp(170px,34vh,38vh)]'
-    : isDenseBottom ? 'h-[clamp(220px,48vh,54vh)]' : 'h-[clamp(240px,56vh,62vh)]'
-  const theaterHeightClass = isDenseBottom ? 'h-[clamp(320px,70vh,78vh)]' : 'h-[clamp(360px,72vh,80vh)]'
-  const playerViewportClass = `grid min-h-[170px] shrink-0 place-items-center bg-black transition-[height] duration-200 ${isTheater ? theaterHeightClass : playerHeightClass}`
-  const playerFrameClass = settings.videoFit === 'fill'
-    ? 'relative h-full w-full overflow-hidden bg-black'
-    : isTheater
-      ? 'relative h-full w-full overflow-hidden bg-black'
-      : 'relative aspect-video h-full max-h-full max-w-full overflow-hidden bg-black'
+  const compactPlayerHeightClass = detailsExpanded
+    ? isDenseBottom ? 'h-[clamp(130px,22vh,26vh)]' : 'h-[clamp(170px,30vh,34vh)]'
+    : isDenseBottom ? 'h-[clamp(220px,42vh,48vh)]' : 'h-[clamp(240px,48vh,54vh)]'
+  const playerViewportClass = isTheater
+    ? 'grid min-h-[180px] flex-1 place-items-center bg-black transition-[flex,height] duration-200'
+    : `grid min-h-[170px] shrink-0 place-items-center bg-black transition-[flex,height] duration-200 ${compactPlayerHeightClass}`
+  const playerFrameClass = settings.videoFit === 'fill' || isTheater
+    ? 'relative h-full w-full min-h-0 overflow-hidden bg-black'
+    : 'relative aspect-video h-full max-h-full max-w-full overflow-hidden bg-black'
+  const showBottomPanel = !isTheater || detailsExpanded
   const overlayState = startupOverlayState({
     playbackError,
     relayState,
@@ -1646,10 +1690,11 @@ export default function Channel() {
       status={emoteStatus}
       autoLoad={autoLoadEmotes}
       disabled={!channelLogin || details.isLoading}
-      loadedEmotes={emotePreview.data ?? []}
+      loadedEmotes={sortedLoadedEmotes}
       emotesLoading={emotePreview.isLoading || emotePreview.isFetching}
       channelLabel={details.data?.displayName || channelLogin}
       channelCategory={details.data?.category}
+      topEmotes={liveAnalytics.data?.topEmotes}
       onToggle={toggleEmoteProvider}
       onLoad={loadSelectedEmotes}
       onAutoLoad={setAutoLoadPreference}
@@ -1658,14 +1703,15 @@ export default function Channel() {
 
   return (
     <main className="h-screen overflow-hidden bg-[#050507] text-zinc-100">
-      <div className="relative flex h-screen min-h-0 bg-[linear-gradient(135deg,rgba(139,92,246,.14),rgba(5,5,7,0)_32%),linear-gradient(180deg,#07070a,#050507)]">
+      <div className="relative flex h-screen min-h-0 overflow-hidden bg-[linear-gradient(135deg,rgba(139,92,246,.14),rgba(5,5,7,0)_32%),linear-gradient(180deg,#07070a,#050507)]">
         <ChannelRail
           collapsed={railCollapsed}
           mobileOpen={mobileRailOpen}
           onToggleCollapsed={() => setRailCollapsed(v => !v)}
           onCloseMobile={() => setMobileRailOpen(false)}
+          viewerOverrides={railViewerOverrides}
         />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <header className="relative z-30 flex min-h-16 items-center justify-between gap-3 border-b border-white/10 bg-black/45 px-3 py-3 backdrop-blur-xl lg:px-5">
             <div className="flex min-w-0 items-center gap-2">
               <button onClick={() => setMobileRailOpen(true)} className="rounded border border-white/10 bg-white/[0.06] px-3 py-2 text-sm font-black text-white lg:hidden">
@@ -1692,12 +1738,22 @@ export default function Channel() {
             </div>
           </header>
 
-          <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-            <section className="min-h-0 flex flex-1 flex-col bg-black">
-              <div className="flex flex-col">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+            <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-black">
+              <div className={`flex min-h-0 flex-col ${isTheater ? (detailsExpanded ? 'min-h-0 flex-[3]' : 'min-h-0 flex-1') : 'shrink-0'}`}>
                 <div className={playerViewportClass}>
                   <div className={playerFrameClass}>
-                    <video ref={videoRef} className={`h-full w-full bg-black ${settings.videoFit === 'fill' ? 'object-cover' : 'object-contain'}`} autoPlay muted={muted} playsInline />
+                    <video ref={videoRef} className={`h-full w-full bg-black ${settings.videoFit === 'fill' ? 'object-cover' : 'object-contain'}`} autoPlay muted={muted} playsInline poster={streamPoster || undefined} />
+
+                    {/* Stream thumbnail poster until first frame */}
+                    {!isChannelOffline && playback.metrics.firstFrameMs === null && streamPoster && !(playbackError && details.data && !details.data.isLive) ? (
+                      <img
+                        src={streamPoster}
+                        alt=""
+                        className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-contain"
+                        aria-hidden
+                      />
+                    ) : null}
 
                     {/* Offline background */}
                     {(isChannelOffline || (playbackError && details.data && !details.data.isLive)) ? (
@@ -1843,7 +1899,8 @@ export default function Channel() {
                   requestedQuality={requestedQuality}
                   loadedQuality={loadedQuality}
                   renditions={activeRenditions}
-                  latencyMode={settings.playbackLatencyMode}
+                  latencyMode={playback.effectiveLatencyMode}
+                  latencyModeAuto={playback.effectiveLatencyMode !== settings.playbackLatencyMode}
                   videoFit={settings.videoFit}
                   bottomDensity={settings.bottomDensity}
                   muted={muted}
@@ -1861,7 +1918,7 @@ export default function Channel() {
                   onDetailsExpanded={setDetailsExpanded}
                 />
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className={`min-h-0 overflow-y-auto transition-[flex,max-height,opacity] duration-200 ${showBottomPanel ? (isTheater && detailsExpanded ? 'min-h-0 flex-1' : 'flex-1') : 'max-h-0 flex-none overflow-hidden opacity-0'}`}>
                 <ChannelMeta
                   login={channelLogin}
                   details={details.data}
@@ -1898,7 +1955,7 @@ export default function Channel() {
                   isAuthenticated={auth.isAuthenticated}
                   emotes={emoteStatus}
                   badgeCatalog={badgeCatalog.data?.badges ?? {}}
-                  loadedEmotes={emotePreview.data ?? []}
+                  loadedEmotes={sortedLoadedEmotes}
                 />
               </div>
             </aside>

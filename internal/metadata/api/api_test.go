@@ -398,7 +398,7 @@ func TestRedditLSFAutoUsesFirecrawlBeforeHTML(t *testing.T) {
 	if !sawFirecrawl || sawHTML || len(posts) != 1 || posts[0].ID != "fc1" {
 		t.Fatalf("expected firecrawl before html, sawFirecrawl=%v sawHTML=%v posts=%+v", sawFirecrawl, sawHTML, posts)
 	}
-	if statuses[len(statuses)-1].Provider != "firecrawl" || statuses[len(statuses)-1].State != "ready" {
+	if statuses[len(statuses)-1].Provider != "scraper" || statuses[len(statuses)-1].State != "ready" {
 		t.Fatalf("unexpected statuses: %+v", statuses)
 	}
 }
@@ -433,7 +433,7 @@ func TestRedditLSFFirecrawlProviderSkipsOfficialAndJSON(t *testing.T) {
 	if !sawFirecrawl || sawJSON || sawHTML || len(posts) != 1 || posts[0].ID != "fc2" {
 		t.Fatalf("expected direct firecrawl path, sawFirecrawl=%v sawJSON=%v sawHTML=%v posts=%+v", sawFirecrawl, sawJSON, sawHTML, posts)
 	}
-	if len(statuses) != 1 || statuses[0].Provider != "firecrawl" || statuses[0].State != "ready" {
+	if len(statuses) != 1 || statuses[0].Provider != "scraper" || statuses[0].State != "ready" {
 		t.Fatalf("unexpected statuses: %+v", statuses)
 	}
 }
@@ -545,7 +545,7 @@ func TestFetchTwitchTrackerStreamHistoryFallsBackToFirecrawl(t *testing.T) {
 	if !sawFirecrawl || len(history) != 1 {
 		t.Fatalf("expected firecrawl-backed history, sawFirecrawl=%v history=%+v", sawFirecrawl, history)
 	}
-	if status.Provider != "firecrawl" || status.State != "ready" {
+	if status.Provider != "scraper" || status.State != "ready" {
 		t.Fatalf("unexpected history status: %+v", status)
 	}
 }
@@ -558,5 +558,150 @@ func TestNormalizeSort(t *testing.T) {
 	}
 	if normalizeSort("weird") != "top" {
 		t.Fatal("bad sort should default to top")
+	}
+}
+
+func TestParseYouTubeURL(t *testing.T) {
+	ref, ok := parseYouTubeURL("https://www.youtube.com/@streamer")
+	if !ok || ref.Kind != "handle" || ref.Value != "streamer" {
+		t.Fatalf("unexpected handle ref: %+v ok=%v", ref, ok)
+	}
+	ref, ok = parseYouTubeURL("https://www.youtube.com/channel/UCabc123")
+	if !ok || ref.Kind != "channel_id" || ref.Value != "UCabc123" {
+		t.Fatalf("unexpected channel ref: %+v ok=%v", ref, ok)
+	}
+}
+
+func TestParseYouTubeChannelHTML(t *testing.T) {
+	body := `"subscriberCountText":{"simpleText":"1.2M subscribers"}` +
+		`"videoId":"12345678901"` +
+		`"title":{"simpleText":"Latest upload"}`
+	info := parseYouTubeChannelHTML(body, youtubeRef{Kind: "handle", Value: "streamer"}, 5)
+	if info == nil || info.SubscriberCount == nil || *info.SubscriberCount != 1200000 {
+		t.Fatalf("unexpected subscriber parse: %+v", info)
+	}
+	if len(info.LatestVideos) != 1 || info.LatestVideos[0].ID != "12345678901" || info.LatestVideos[0].Title != "Latest upload" {
+		t.Fatalf("unexpected videos: %+v", info.LatestVideos)
+	}
+}
+
+func TestYouTubeAPIProviderLoadsChannelAndVideos(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/youtube/v3/channels":
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Query().Get("forHandle") == "streamer" {
+				w.Write([]byte(`{"items":[{"id":"UCstreamer"}]}`))
+				return
+			}
+			if r.URL.Query().Get("id") == "UCstreamer" {
+				w.Write([]byte(`{"items":[{"id":"UCstreamer","snippet":{"title":"Streamer YT","customUrl":"@streamer","thumbnails":{"default":{"url":"https://img.example/yt.jpg"}}},"statistics":{"subscriberCount":"42000","videoCount":"12","hiddenSubscriberCount":false}}]}`))
+				return
+			}
+		case "/youtube/v3/search":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"items":[{"id":{"videoId":"vid001"},"snippet":{"title":"New VOD","publishedAt":"2026-06-01T00:00:00Z","thumbnails":{"medium":{"url":"https://img.example/vid.jpg"}}}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	h := New(newTestCache(), &fakeGQL{}).
+		WithYouTubeOptions(YouTubeOptions{Provider: "api", APIKey: "yt-test", APIURL: srv.URL + "/youtube/v3"})
+	info, statuses := h.fetchYouTubeInfo(context.Background(), youtubeRef{Kind: "handle", Value: "streamer"}, 5)
+	if info == nil || info.Title != "Streamer YT" || info.SubscriberCount == nil || *info.SubscriberCount != 42000 {
+		t.Fatalf("unexpected youtube info: %+v", info)
+	}
+	if info.VideoCount == nil || *info.VideoCount != 12 || len(info.LatestVideos) != 1 || info.LatestVideos[0].ID != "vid001" {
+		t.Fatalf("unexpected videos/count: count=%v videos=%+v", info.VideoCount, info.LatestVideos)
+	}
+	if len(statuses) != 1 || statuses[0].Provider != "api" || statuses[0].State != "ready" {
+		t.Fatalf("unexpected statuses: %+v", statuses)
+	}
+}
+
+func TestYouTubeAutoFallsBackToScrape(t *testing.T) {
+	var sawScrape bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/youtube/v3/channels":
+			w.WriteHeader(http.StatusForbidden)
+		case "/firecrawl":
+			sawScrape = true
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["siteProfile"] != "social_public" {
+				t.Fatalf("expected social_public siteProfile, got %#v", payload["siteProfile"])
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"data":{"html":"\"subscriberCountText\":{\"simpleText\":\"900 subscribers\"}\"videoId\":\"zzzzzzzzzzz\"\"title\":{\"simpleText\":\"Scraped video\"}"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	h := New(newTestCache(), &fakeGQL{}).
+		WithYouTubeOptions(YouTubeOptions{Provider: "auto", APIKey: "yt-test", APIURL: srv.URL + "/youtube/v3"}).
+		WithRedditOptions(RedditOptions{FirecrawlURL: srv.URL + "/firecrawl", FirecrawlKey: "fc-test"})
+	info, statuses := h.fetchYouTubeInfo(context.Background(), youtubeRef{Kind: "handle", Value: "streamer"}, 5)
+	if !sawScrape || info == nil || len(info.LatestVideos) != 1 || info.LatestVideos[0].Title != "Scraped video" {
+		t.Fatalf("expected scrape fallback, sawScrape=%v info=%+v", sawScrape, info)
+	}
+	if len(statuses) < 2 || statuses[len(statuses)-1].Provider != "scrape" || statuses[len(statuses)-1].State != "ready" {
+		t.Fatalf("unexpected statuses: %+v", statuses)
+	}
+}
+
+func TestYouTubeResolveFromTwitchSocialLink(t *testing.T) {
+	h := New(newTestCache(), &fakeGQL{about: gql.ChannelAbout{
+		SocialLinks: []gql.SocialLink{{URL: "https://www.youtube.com/@fromtwitch"}},
+	}}).WithYouTubeOptions(YouTubeOptions{Provider: "off"})
+	ref, source, err := h.resolveYouTubeRef(context.Background(), "streamer", "", "")
+	if err != nil || ref.Kind != "handle" || ref.Value != "fromtwitch" || source != "from twitch about social links" {
+		t.Fatalf("unexpected resolve: ref=%+v source=%q err=%v", ref, source, err)
+	}
+}
+
+func TestChannelYouTubeRoute(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/youtube/v3/channels" {
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Query().Get("forHandle") == "streamer" {
+				w.Write([]byte(`{"items":[{"id":"UCstreamer"}]}`))
+				return
+			}
+			w.Write([]byte(`{"items":[{"id":"UCstreamer","snippet":{"title":"Streamer YT","customUrl":"@streamer","thumbnails":{"default":{"url":"https://img.example/yt.jpg"}}},"statistics":{"subscriberCount":"1000","videoCount":"2","hiddenSubscriberCount":false}}]}`))
+			return
+		}
+		if r.URL.Path == "/youtube/v3/search" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"items":[]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	h := New(newTestCache(), &fakeGQL{}).
+		WithYouTubeOptions(YouTubeOptions{Provider: "api", APIKey: "yt-test", APIURL: srv.URL + "/youtube/v3"})
+	r := chi.NewRouter()
+	h.Mount(r)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/channels/streamer/youtube?handle=streamer", nil)
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body %s", rec.Code, rec.Body.String())
+	}
+	var body model.YouTubeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Channel != "streamer" || body.YouTube == nil || body.YouTube.Title != "Streamer YT" {
+		t.Fatalf("unexpected response: %+v", body)
 	}
 }

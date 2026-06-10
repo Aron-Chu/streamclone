@@ -8,7 +8,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"streamclone/internal/upstream"
 )
@@ -18,12 +22,23 @@ type Token struct {
 	Signature string
 }
 
+type cachedEntry struct {
+	token     Token
+	expiresAt time.Time
+}
+
 type Client struct {
 	http     *http.Client
 	url      string
 	clientID string
 	ua       string
+
+	mu    sync.Mutex
+	cache map[string]cachedEntry
+	sf    singleflight.Group
 }
+
+const tokenCacheTTL = 45 * time.Second
 
 func New(e upstream.Endpoints) *Client {
 	return &Client{
@@ -31,6 +46,7 @@ func New(e upstream.Endpoints) *Client {
 		url:      e.TwitchGQLURL,
 		clientID: e.TwitchClientID,
 		ua:       e.UserAgent,
+		cache:    make(map[string]cachedEntry),
 	}
 }
 
@@ -49,6 +65,50 @@ type response struct {
 }
 
 func (c *Client) Live(ctx context.Context, login string) (Token, error) {
+	login = strings.ToLower(strings.TrimSpace(login))
+	if login == "" {
+		return Token{}, fmt.Errorf("%w: empty login", upstream.ErrPlaybackToken)
+	}
+	if tok, ok := c.cached(login); ok {
+		return tok, nil
+	}
+	v, err, _ := c.sf.Do(login, func() (any, error) {
+		if tok, ok := c.cached(login); ok {
+			return tok, nil
+		}
+		tok, err := c.fetchLive(ctx, login)
+		if err != nil {
+			return Token{}, err
+		}
+		c.store(login, tok)
+		return tok, nil
+	})
+	if err != nil {
+		return Token{}, err
+	}
+	return v.(Token), nil
+}
+
+func (c *Client) cached(login string) (Token, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.cache[login]
+	if !ok || time.Now().After(entry.expiresAt) {
+		if ok {
+			delete(c.cache, login)
+		}
+		return Token{}, false
+	}
+	return entry.token, true
+}
+
+func (c *Client) store(login string, tok Token) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cache[login] = cachedEntry{token: tok, expiresAt: time.Now().Add(tokenCacheTTL)}
+}
+
+func (c *Client) fetchLive(ctx context.Context, login string) (Token, error) {
 	playerType := os.Getenv("TWITCH_PLAYER_TYPE")
 	if playerType == "" {
 		playerType = "embed"

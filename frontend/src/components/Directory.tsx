@@ -206,17 +206,22 @@ function RandomLiveHero() {
       <div className="grid min-h-[360px] lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,.9fr)]">
         <div className="relative min-h-[260px] bg-black">
           {previewImage ? <img src={previewImage} alt="" className="absolute inset-0 h-full w-full object-cover opacity-30 blur-sm" /> : null}
-          <video ref={videoRef} className="relative z-10 h-full w-full bg-black object-contain" muted={settings.previewMuted} playsInline autoPlay />
+          <video ref={videoRef} className={`relative z-10 h-full w-full bg-black object-contain ${previewError ? 'opacity-0' : ''}`} muted={settings.previewMuted} playsInline autoPlay poster={previewImage || undefined} />
           <div className="absolute left-4 top-4 z-20 flex flex-wrap items-center gap-2">
             <span className="rounded bg-red-600 px-2 py-1 text-[11px] font-black uppercase text-white">Random live</span>
             <span className="rounded bg-black/70 px-2 py-1 text-[11px] font-black uppercase text-zinc-200">{status}</span>
             {random.data?.poolSize ? <span className="rounded bg-black/70 px-2 py-1 text-[11px] font-black uppercase text-zinc-200">{random.data.poolSize.toLocaleString()} pool</span> : null}
           </div>
-          {status !== 'playing' ? (
+          {previewError || status !== 'playing' ? (
             <div className="absolute inset-0 z-10 grid place-items-center bg-black/45">
-              <div className="rounded border border-white/10 bg-zinc-950/85 px-5 py-4 text-center shadow-2xl">
+              {previewImage && previewError ? (
+                <img src={previewImage} alt="" className="absolute inset-0 h-full w-full object-contain opacity-40" />
+              ) : null}
+              <div className="relative rounded border border-white/10 bg-zinc-950/85 px-5 py-4 text-center shadow-2xl">
                 <div className="text-sm font-black text-white">{previewError ? 'Preview unavailable' : random.isLoading ? 'Finding stream' : previewEnabled ? 'Preview loading' : 'Preview paused'}</div>
-                <div className="mt-1 max-w-xs text-xs font-semibold text-zinc-400">{previewError || (previewEnabled ? `Relay ${playback.metrics.hlsStage}` : 'Autoplay is off.')}</div>
+                <div className="mt-1 max-w-xs text-xs font-semibold text-zinc-400">
+                  {previewError ? `${previewError} — showing stream thumbnail instead of live video.` : (previewEnabled ? `Relay ${playback.metrics.hlsStage}` : 'Autoplay is off.')}
+                </div>
               </div>
             </div>
           ) : null}
@@ -303,8 +308,8 @@ function HeaderAuth() {
 export default function Directory() {
   const [q, setQ] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null)
-  const [railCollapsed, setRailCollapsed] = useState(false)
   const [mobileRailOpen, setMobileRailOpen] = useState(false)
+  const [railCollapsed, setRailCollapsed] = useState(false)
   const settings = useUiSettings(s => s.settings)
   const query = q.trim()
   useThemeEffect(settings.theme)
@@ -382,6 +387,9 @@ export default function Directory() {
               <input
                 className="w-full rounded-lg border border-white/10 bg-white/[0.07] px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-zinc-500 focus:border-violet-300 focus:bg-white/[0.1] focus:ring-4 focus:ring-violet-500/15"
                 placeholder="Search channels or categories"
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
                 value={q}
                 onChange={e => {
                   setQ(e.target.value)

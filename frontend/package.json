@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "screenshots:readme": "playwright test e2e/readme-screenshots.spec.ts",
     "docs:media": "playwright test e2e/docs-media.spec.ts",
+    "docs:media:analytics": "playwright test e2e/docs-media-analytics.spec.ts",
     "test:smoke": "playwright test e2e/smoke-core.spec.ts",
     "test": "node --experimental-strip-types --test tests/*.test.ts"
   },

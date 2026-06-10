@@ -151,9 +151,15 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
         onClick={useLocalToken}
         disabled={opening || auth.isClaimingPreparedLocalToken}
         className={`${compact ? 'px-3' : 'px-4'} rounded border border-cyan-300/30 bg-cyan-400/10 py-2 text-xs font-black text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-70`}
+        title="Optional: sign in for chat badges and follows. Clipping and analytics work without it."
       >
-        {opening || auth.isClaimingPreparedLocalToken ? 'Opening local token...' : 'Use local token'}
+        {opening || auth.isClaimingPreparedLocalToken ? 'Opening Twitch login…' : 'Sign in (optional)'}
       </button>
+      {!compact ? (
+        <p className="max-w-56 text-right text-[10px] font-semibold leading-snug text-zinc-500">
+          Browse and clip without signing in. Use this for chat badges and follows.
+        </p>
+      ) : null}
       {status ? (
         <div className="max-w-64 text-right text-[11px] font-semibold text-amber-100">
           {status}

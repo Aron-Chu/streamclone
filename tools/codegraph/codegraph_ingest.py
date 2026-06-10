@@ -110,6 +110,12 @@ QUERY_BY_LANGUAGE = {
 
 QUERY_BY_LANGUAGE["tsx"] = QUERY_BY_LANGUAGE["typescript"]
 QUERY_BY_LANGUAGE["javascript"] = QUERY_BY_LANGUAGE["typescript"]
+QUERY_BY_LANGUAGE["python"] = {
+    "definitions": r"""
+      (function_definition name: (identifier) @name) @function
+      (class_definition name: (identifier) @name) @class
+    """,
+}
 
 
 @dataclass(frozen=True)
@@ -306,7 +312,11 @@ class CodeGraphBuilder:
             if "function" in match:
                 node = match["function"][0]
                 name = node_text(match["name"][0], source)
-                qualified_name = f"{package_name}.{name}" if package_name else name
+                if language == "python":
+                    receiver = enclosing_class_name(node, source)
+                    qualified_name = f"{receiver}.{name}" if receiver else name
+                else:
+                    qualified_name = f"{package_name}.{name}" if package_name else name
                 self.add_definition("Function", rel_path, node, name, qualified_name)
             elif "method" in match:
                 node = match["method"][0]
@@ -801,7 +811,7 @@ def extract_go_receiver(node: Node, source: bytes) -> str:
 def enclosing_class_name(node: Node, source: bytes) -> str:
     parent = node.parent
     while parent is not None:
-        if parent.type == "class_declaration":
+        if parent.type in {"class_declaration", "class_definition"}:
             name = parent.child_by_field_name("name")
             return node_text(name, source)
         parent = parent.parent

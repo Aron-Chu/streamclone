@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('version', 'configure', 'token', 'sync-env', 'local-auth')]
+    [ValidateSet('version', 'configure', 'token', 'sync-env', 'local-auth', 'refresh-clipper-token')]
     [string]$Action = 'token',
     [string]$Scopes = 'chat:read chat:edit user:read:follows clips:edit',
     [string]$EnvFile = '.env',
@@ -124,6 +124,27 @@ function Join-Url {
     return $Base.TrimEnd('/') + $Path
 }
 
+function Convert-ToWslPath {
+    param([string]$Path)
+    $resolved = (Resolve-Path $Path).Path
+    if ($resolved -match '^([A-Za-z]):\\(.*)$') {
+        return '/mnt/' + $Matches[1].ToLower() + '/' + ($Matches[2] -replace '\\', '/')
+    }
+    return $resolved
+}
+
+function Invoke-RepoPython {
+    param(
+        [string]$ScriptPath
+    )
+    $wslScript = Convert-ToWslPath -Path $ScriptPath
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    $wslRoot = Convert-ToWslPath -Path $repoRoot
+    $output = wsl -e bash -lc "cd '$wslRoot' && python3 '$wslScript'" 2>&1
+    Write-Host $output
+    return $LASTEXITCODE
+}
+
 $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
 
 $command = Get-Command twitch -ErrorAction Stop
@@ -183,8 +204,21 @@ switch ($Action) {
         if (Test-Path $EnvFile) {
             $lines = [string[]](Get-Content $EnvFile)
             $lines = Set-EnvValue -Lines $lines -Key 'CLIPPER_TWITCH_USER_ACCESS_TOKEN' -Value $tokens.AccessToken
+            if (-not [string]::IsNullOrWhiteSpace($tokens.RefreshToken)) {
+                $lines = Set-EnvValue -Lines $lines -Key 'CLIPPER_TWITCH_REFRESH_TOKEN' -Value $tokens.RefreshToken
+            }
+            $envValues = Read-KeyValueFile -Path $EnvFile
+            if (-not [string]::IsNullOrWhiteSpace($envValues['TWITCH_OAUTH_CLIENT_ID'])) {
+                $lines = Set-EnvValue -Lines $lines -Key 'CLIPPER_TWITCH_CLIENT_ID' -Value $envValues['TWITCH_OAUTH_CLIENT_ID']
+            }
             Set-Content -Path $EnvFile -Value $lines
             Write-Host "Synced token to $EnvFile as CLIPPER_TWITCH_USER_ACCESS_TOKEN."
+            if (-not [string]::IsNullOrWhiteSpace($tokens.RefreshToken)) {
+                Write-Host "Synced CLIPPER_TWITCH_REFRESH_TOKEN for automatic refresh."
+            }
+            if (-not [string]::IsNullOrWhiteSpace($envValues['TWITCH_OAUTH_CLIENT_ID'])) {
+                Write-Host "Synced TWITCH_OAUTH_CLIENT_ID to CLIPPER_TWITCH_CLIENT_ID."
+            }
         }
 
         Write-Host "Prepared local Streamclone login for $($response.user.login)."
@@ -192,6 +226,25 @@ switch ($Action) {
         if (-not $NoOpen) {
             Start-Process $response.claimUrl
         }
+
+        $validateScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'validate-clipper-token.py'
+        if (Test-Path $validateScript) {
+            $validateExit = Invoke-RepoPython -ScriptPath $validateScript
+            if ($validateExit -ne 0) {
+                throw "Clipper token was synced but Twitch validation still failed. Approve the Twitch login and run make twitch-local-auth again."
+            }
+        }
+    }
+    'refresh-clipper-token' {
+        $refreshScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'refresh-clipper-token.py'
+        if (-not (Test-Path $refreshScript)) {
+            throw "Missing refresh script at $refreshScript"
+        }
+        $refreshExit = Invoke-RepoPython -ScriptPath $refreshScript
+        if ($refreshExit -ne 0) {
+            throw "Could not refresh clipper Twitch token. Run make twitch-local-auth and approve the Twitch login."
+        }
+        Write-Host "Clipper token refreshed in .env. Recreate the clipper service to load it."
     }
     'sync-env' {
         if (-not (Test-Path $CliConfig)) {

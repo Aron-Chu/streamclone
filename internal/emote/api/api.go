@@ -455,27 +455,19 @@ func applyProviderSummary(resp *ensureResponse, summary map[string]store.Provide
 		load, loadOK := loads[resp.Providers[i].Provider]
 		if !ok {
 			if loadOK {
-				resp.Providers[i].State = load.State
+				target := load.Count
 				resp.Providers[i].Count = 0
-				resp.Providers[i].Pending = 0
+				resp.Providers[i].Pending = target
 				resp.Providers[i].Failed = 0
-				resp.Providers[i].Total = load.Count
-				if load.State == "ready" {
-					resp.Providers[i].Percent = 100
-				}
+				resp.Providers[i].Total = target
+				resp.Providers[i].Percent = percentLoaded(0, target)
+				resp.Providers[i].State = providerProgressState(store.ProviderEmoteSummary{}, load, loadOK, load.State)
 				resp.Providers[i].Error = load.Error
 			}
 			continue
 		}
-		total := item.Ready + item.Pending + item.Failed
-		state := resp.Providers[i].State
-		if item.Failed > 0 && item.Ready == 0 && item.Pending == 0 {
-			state = "failed"
-		} else if item.Pending > 0 {
-			state = "processing"
-		} else if total > 0 {
-			state = "ready"
-		}
+		total := providerProgressTotal(item, load, loadOK)
+		state := providerProgressState(item, load, loadOK, resp.Providers[i].State)
 		resp.Providers[i].State = state
 		resp.Providers[i].Count = item.Ready
 		resp.Providers[i].Pending = item.Pending
@@ -487,6 +479,37 @@ func applyProviderSummary(resp *ensureResponse, summary map[string]store.Provide
 			resp.Providers[i].Error = load.Error
 		}
 	}
+}
+
+func providerProgressTotal(item store.ProviderEmoteSummary, load store.ChannelProviderLoad, loadOK bool) int {
+	observed := item.Ready + item.Pending + item.Failed
+	if loadOK && load.Count > observed {
+		return load.Count
+	}
+	return observed
+}
+
+func providerProgressState(item store.ProviderEmoteSummary, load store.ChannelProviderLoad, loadOK bool, fallback string) string {
+	if item.Failed > 0 && item.Ready == 0 && item.Pending == 0 {
+		return "failed"
+	}
+	if item.Pending > 0 {
+		return "processing"
+	}
+	total := providerProgressTotal(item, load, loadOK)
+	if loadOK && load.Count > 0 && item.Ready < load.Count {
+		return "processing"
+	}
+	if total > 0 && item.Ready >= total {
+		return "ready"
+	}
+	if loadOK && load.State == "processing" {
+		return "processing"
+	}
+	if loadOK && load.State == "failed" {
+		return "failed"
+	}
+	return fallback
 }
 
 func benchmarkFromResponse(resp ensureResponse, cacheHit bool) *ensureBenchmark {

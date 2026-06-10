@@ -111,6 +111,7 @@ type StatsTimelinePoint struct {
 
 type StreamStat struct {
 	ID              string `json:"id"`
+	VideoID         string `json:"videoId,omitempty"`
 	Title           string `json:"title"`
 	Category        string `json:"category,omitempty"`
 	StartedAt       string `json:"startedAt,omitempty"`
@@ -144,6 +145,34 @@ type RedditPost struct {
 	Subreddit    string   `json:"subreddit,omitempty"`
 	FlairText    string   `json:"flairText,omitempty"`
 	StreamerTags []string `json:"streamerTags"`
+}
+
+type YouTubeVideo struct {
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	URL          string `json:"url"`
+	ThumbnailURL string `json:"thumbnailUrl,omitempty"`
+	PublishedAt  string `json:"publishedAt,omitempty"`
+	ViewCount    int64  `json:"viewCount,omitempty"`
+}
+
+type YouTubeChannelInfo struct {
+	ChannelID        string         `json:"channelId,omitempty"`
+	Title            string         `json:"title,omitempty"`
+	Handle           string         `json:"handle,omitempty"`
+	CustomURL        string         `json:"customUrl,omitempty"`
+	SubscriberCount  *int64         `json:"subscriberCount,omitempty"`
+	SubscriberHidden bool           `json:"subscriberCountHidden,omitempty"`
+	VideoCount       *int64         `json:"videoCount,omitempty"`
+	ProfileImageURL  string         `json:"profileImageUrl,omitempty"`
+	LatestVideos     []YouTubeVideo `json:"latestVideos"`
+}
+
+type YouTubeResponse struct {
+	Channel   string              `json:"channel"`
+	YouTube   *YouTubeChannelInfo `json:"youtube,omitempty"`
+	Sources   []SourceStatus      `json:"sources"`
+	UpdatedAt int64               `json:"updatedAt"`
 }
 
 type InsightsResponse struct {

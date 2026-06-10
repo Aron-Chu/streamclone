@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"streamclone/internal/emote/seeder"
+	"streamclone/internal/emote/store"
 )
 
 func newTestHandler(token string) *Handler {
@@ -160,6 +161,38 @@ func TestEnsureChannelEmotesSeedFailure(t *testing.T) {
 	rec := postEnsure(h, "leeonbeeon", `{"twitch_id":"670388028"}`)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d", rec.Code)
+	}
+}
+
+func TestApplyProviderSummaryUsesCatalogTargetWhileAssetsPending(t *testing.T) {
+	resp := makeEnsureResponse("processing", 100, 851, []seeder.Provider{seeder.ProviderSevenTV})
+	applyProviderSummary(&resp, map[string]store.ProviderEmoteSummary{
+		"seventv": {Provider: "seventv", Ready: 100, Pending: 0, Failed: 0},
+	}, map[string]store.ChannelProviderLoad{
+		"seventv": {Provider: "seventv", State: "ready", Count: 951},
+	})
+
+	if len(resp.Providers) != 1 {
+		t.Fatalf("expected one provider, got %+v", resp.Providers)
+	}
+	provider := resp.Providers[0]
+	if provider.State != "processing" {
+		t.Fatalf("expected processing state, got %+v", provider)
+	}
+	if provider.Count != 100 || provider.Total != 951 || provider.Percent != 10 {
+		t.Fatalf("unexpected progress: %+v", provider)
+	}
+}
+
+func TestApplyProviderSummaryBootstrapsFromCatalogBeforeSummaryExists(t *testing.T) {
+	resp := makeEnsureResponse("processing", 0, 1, []seeder.Provider{seeder.ProviderSevenTV})
+	applyProviderSummary(&resp, map[string]store.ProviderEmoteSummary{}, map[string]store.ChannelProviderLoad{
+		"seventv": {Provider: "seventv", State: "ready", Count: 951},
+	})
+
+	provider := resp.Providers[0]
+	if provider.State != "processing" || provider.Total != 951 || provider.Percent != 0 || provider.Pending != 951 {
+		t.Fatalf("unexpected bootstrap progress: %+v", provider)
 	}
 }
 

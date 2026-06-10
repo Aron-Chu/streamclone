@@ -428,6 +428,7 @@ func (c *Client) ArchivedStreamHistory(ctx context.Context, login string, limit 
 		}
 		var resp struct {
 			Data []struct {
+				ID        string `json:"id"`
 				StreamID  string `json:"stream_id"`
 				Title     string `json:"title"`
 				GameName  string `json:"game_name"`
@@ -452,6 +453,7 @@ func (c *Client) ArchivedStreamHistory(ctx context.Context, login string, limit 
 			}
 			out = append(out, model.StreamStat{
 				ID:              item.StreamID,
+				VideoID:         item.ID,
 				Title:           title,
 				Category:        strings.TrimSpace(item.GameName),
 				StartedAt:       startedAt,

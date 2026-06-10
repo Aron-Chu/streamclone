@@ -215,6 +215,7 @@ export default function PlaybackDiagnostics({
           <MetricCell label="Twitch delay" value={fmtSec(actualTwitchLatencySec)} title={referenceLatency !== null ? 'Read from Twitch embed hlsLatencyBroadcaster' : 'Manual comparison value'} />
           <MetricCell label="Local minus Twitch" value={delayDelta(localLiveLatencySec, actualTwitchLatencySec)} />
           <MetricCell label="Relay restarts" value={String(diagnostics?.restarts ?? 0)} title={diagnostics?.lastWorkerError} />
+          <MetricCell label="Live edge" value={diagnostics?.liveEdge ? String(diagnostics.liveEdge) : '-'} title="Streamlink HLS live-edge segments behind Twitch" />
           <MetricCell label="Backend" value={diagnostics?.workerBackend || '-'} title={diagnostics?.lastStartError} />
           <MetricCell label="Rendition" value={diagnostics?.selectedRendition?.name || diagnostics?.quality || '-'} />
           <MetricCell label="Startup" value={diagnostics?.startupMs ? `${diagnostics.startupMs}ms` : '-'} />
@@ -257,6 +258,7 @@ export default function PlaybackDiagnostics({
         <span>Codecs {metrics.codecs}</span>
         <span>Protocol {diagnostics?.protocol || metrics.protocol}</span>
         <span>Latency {diagnostics?.latencyMode || metrics.latencyMode}</span>
+        {diagnostics?.liveEdge ? <span>Live edge {diagnostics.liveEdge}</span> : null}
         <span>Backend {diagnostics?.backendVersion || '-'}</span>
         <span>Probe {diagnostics?.hlsProbe?.ready ? 'ready' : diagnostics?.hlsProbe?.error || diagnostics?.hlsProbe?.statusCode || '-'}</span>
       </div>

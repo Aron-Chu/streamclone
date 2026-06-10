@@ -33,6 +33,8 @@ type Session struct {
 	FallbackAttempts  int
 	LastStartError    string
 	QualityRestarted  bool
+	LatencyMode       string
+	LiveEdge          int
 	StartedAt         time.Time
 
 	listeners atomic.Int64

@@ -65,6 +65,14 @@ const emptyMetrics: PlaybackMetrics = {
 
 const maxFatalNetworkRecoveries = 3
 const maxFatalMediaRecoveries = 2
+const stallDowngradeThreshold = 3
+const rebufferDowngradeMs = 4000
+
+function nextLatencyMode(mode: PlaybackLatencyMode): PlaybackLatencyMode | null {
+  if (mode === 'instant') return 'fast'
+  if (mode === 'fast') return 'stable'
+  return null
+}
 
 function normalizePlaybackError(message: string | null | undefined) {
   const fallback = message?.trim() || 'media playback error'
@@ -91,6 +99,7 @@ interface UseHlsPlaybackOptions {
   muted?: boolean
   autoPlay?: boolean
   latencyMode?: PlaybackLatencyMode
+  onLatencyDowngrade?: (mode: PlaybackLatencyMode) => void
 }
 
 function hlsLatencyConfig(latencyMode: PlaybackLatencyMode) {
@@ -135,9 +144,11 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
   const [state, setState] = useState<PlaybackState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [metrics, setMetrics] = useState<PlaybackMetrics>(emptyMetrics)
+  const [effectiveLatencyMode, setEffectiveLatencyMode] = useState<PlaybackLatencyMode>(options.latencyMode ?? 'stable')
   const hlsRef = useRef<Hls | null>(null)
   const recoveryRef = useRef(0)
   const stallsRef = useRef(0)
+  const rebufferStartedRef = useRef<number | null>(null)
   const stageRef = useRef('idle')
   const firstFrameRef = useRef<number | null>(null)
   const startedAtRef = useRef<number>(0)
@@ -158,6 +169,10 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     video.play().catch(() => undefined)
     return true
   }, [videoRef])
+
+  useEffect(() => {
+    setEffectiveLatencyMode(options.latencyMode ?? 'stable')
+  }, [options.latencyMode])
 
   useEffect(() => {
     const video = videoRef.current
@@ -184,15 +199,23 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     const src = options.src
     recoveryRef.current = 0
     stallsRef.current = 0
+    rebufferStartedRef.current = null
     firstFrameRef.current = null
     startedAtRef.current = performance.now()
     fpsRef.current = { startedAt: performance.now(), frames: 0, fps: null }
     stageRef.current = 'starting'
     setState('starting')
     setError(null)
-    const latencyMode = options.latencyMode ?? 'stable'
-    setMetrics({ ...emptyMetrics, hlsStage: 'starting', latencyMode: latencyMode === 'fast' ? 'Fast HLS' : 'Stable HLS' })
+    const latencyMode = effectiveLatencyMode
+    setMetrics({ ...emptyMetrics, hlsStage: 'starting', latencyMode: latencyModeLabel(latencyMode) })
     video.muted = Boolean(options.muted)
+
+    const downgradeLatency = () => {
+      const next = nextLatencyMode(latencyMode)
+      if (!next || !alive) return
+      setEffectiveLatencyMode(next)
+      options.onLatencyDowngrade?.(next)
+    }
 
     const updateMetrics = () => {
       if (!alive) return
@@ -208,6 +231,13 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
 
     const markPlaying = () => {
       if (!alive) return
+      if (rebufferStartedRef.current !== null) {
+        const rebufferMs = performance.now() - rebufferStartedRef.current
+        if (rebufferMs >= rebufferDowngradeMs) {
+          downgradeLatency()
+        }
+        rebufferStartedRef.current = null
+      }
       if (firstFrameRef.current === null) {
         firstFrameRef.current = performance.now()
       }
@@ -219,6 +249,13 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     const onPlaying = () => markPlaying()
     const onWaiting = () => {
       stallsRef.current += 1
+      if (rebufferStartedRef.current === null) {
+        rebufferStartedRef.current = performance.now()
+      }
+      if (stallsRef.current >= stallDowngradeThreshold && nextLatencyMode(latencyMode)) {
+        downgradeLatency()
+        stallsRef.current = 0
+      }
       stageRef.current = 'buffering'
       setState(current => current === 'playing' ? 'buffering' : current)
       updateMetrics()
@@ -361,9 +398,9 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
       video.removeAttribute('src')
       video.load()
     }
-  }, [options.src, options.enabled, options.autoPlay, options.latencyMode, videoRef])
+  }, [effectiveLatencyMode, options.autoPlay, options.enabled, options.muted, options.onLatencyDowngrade, options.src, videoRef])
 
-  return useMemo(() => ({ state, error, metrics, jumpLive }), [state, error, metrics, jumpLive])
+  return useMemo(() => ({ state, error, metrics, jumpLive, effectiveLatencyMode }), [state, error, metrics, jumpLive, effectiveLatencyMode])
 }
 
 export function getLiveEdgeMetrics(video: HTMLVideoElement, hls: Hls | null) {

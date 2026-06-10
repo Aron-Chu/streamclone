@@ -59,7 +59,7 @@ func newOrch(maxStreams int, spawned *int32) *Orchestrator {
 		HLSBase:     "http://localhost:8888",
 		MaxStreams:  maxStreams,
 		IdleTimeout: time.Hour,
-		Spawn: func(string, string, string, io.Writer) (registry.Streamer, error) {
+		Spawn: func(string, string, string, string, io.Writer) (registry.Streamer, error) {
 			atomic.AddInt32(spawned, 1)
 			return newFakeStream(), nil
 		},
@@ -154,7 +154,7 @@ func TestStartHLSReadinessTimeout(t *testing.T) {
 		HLSProbeTimeout: 25 * time.Millisecond,
 		MaxStreams:      5,
 		IdleTimeout:     time.Hour,
-		Spawn: func(string, string, string, io.Writer) (registry.Streamer, error) {
+		Spawn: func(string, string, string, string, io.Writer) (registry.Streamer, error) {
 			atomic.AddInt32(&spawned, 1)
 			return newFakeStream(), nil
 		},
@@ -211,7 +211,7 @@ func TestStartHLSReadinessTimeoutWhenVariantUnauthorized(t *testing.T) {
 		HLSProbeTimeout: 60 * time.Millisecond,
 		MaxStreams:      5,
 		IdleTimeout:     time.Hour,
-		Spawn: func(string, string, string, io.Writer) (registry.Streamer, error) {
+		Spawn: func(string, string, string, string, io.Writer) (registry.Streamer, error) {
 			atomic.AddInt32(&spawned, 1)
 			return newFakeStream(), nil
 		},
@@ -290,7 +290,7 @@ func TestDiagnosticsActiveStreamIncludesProbeAndVersion(t *testing.T) {
 		MaxStreams:     5,
 		IdleTimeout:    time.Hour,
 		BackendVersion: "test-version",
-		Spawn: func(string, string, string, io.Writer) (registry.Streamer, error) {
+		Spawn: func(string, string, string, string, io.Writer) (registry.Streamer, error) {
 			atomic.AddInt32(&spawned, 1)
 			return newFakeStream(), nil
 		},
@@ -312,6 +312,47 @@ func TestDiagnosticsActiveStreamIncludesProbeAndVersion(t *testing.T) {
 	}
 	if !body.Active || body.BackendVersion != "test-version" || !body.HLSProbe.Ready || body.HLSProbe.TargetDuration != "2" {
 		t.Fatalf("unexpected diagnostics: %+v", body)
+	}
+	if body.LatencyMode != "stable" || body.LiveEdge != 3 {
+		t.Fatalf("expected stable latency diagnostics, got mode=%q edge=%d", body.LatencyMode, body.LiveEdge)
+	}
+}
+
+func TestStartLatencyModeMapsLiveEdge(t *testing.T) {
+	hls := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		w.Write([]byte("#EXTM3U\n"))
+	}))
+	defer hls.Close()
+
+	var capturedLiveEdge string
+	h := New(Options{
+		Token:          fakeToken{},
+		Usher:          fakeUsher{},
+		Registry:       registry.New(),
+		Log:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+		RTMPBase:       "mediamtx:1935",
+		HLSBase:        "http://localhost:8888",
+		HLSProbeBase:   hls.URL,
+		HLSProbeTimeout: 200 * time.Millisecond,
+		MaxStreams:     5,
+		IdleTimeout:    time.Hour,
+		Spawn: func(_, _, _, liveEdge string, _ io.Writer) (registry.Streamer, error) {
+			capturedLiveEdge = liveEdge
+			return newFakeStream(), nil
+		},
+	})
+
+	rec := post(h, "/v1/stream/start", `{"channel":"ninja","latency_mode":"instant"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if capturedLiveEdge != "1" {
+		t.Fatalf("expected live edge 1, got %q", capturedLiveEdge)
+	}
+	s, ok := h.o.Registry.Get("ninja")
+	if !ok || s.LiveEdge != 1 || s.LatencyMode != "instant" {
+		t.Fatalf("unexpected session: ok=%v session=%+v", ok, s)
 	}
 }
 

@@ -67,13 +67,18 @@ type Handler struct {
 	redditHTMLFallback  bool
 	redditThirdPartyURL string
 	redditThirdPartyKey string
-	firecrawlAPIURL     string
-	firecrawlAPIKey     string
+	scraperAPIURL     string
+	scraperAPIKey     string
+	youtubeProvider     string
+	youtubeAPIKey       string
+	youtubeAPIBaseURL   string
 	userAgent           string
 	sf                  singleflight.Group
 	redditMu            sync.Mutex
 	redditToken         redditToken
 	redditBackoff       map[string]time.Time
+	youtubeMu           sync.Mutex
+	youtubeBackoff      map[string]time.Time
 }
 
 func New(c *cache.Cache, g GQLClient) *Handler {
@@ -87,9 +92,12 @@ func New(c *cache.Cache, g GQLClient) *Handler {
 		redditOAuthAPIURL:   "https://oauth.reddit.com",
 		redditTokenURL:      "https://www.reddit.com/api/v1/access_token",
 		redditProvider:      "auto",
-		firecrawlAPIURL:     "https://api.firecrawl.dev/v2/scrape",
+		scraperAPIURL:     "http://scraper:8000/v2/scrape",
+		youtubeProvider:     "auto",
+		youtubeAPIBaseURL:   defaultYouTubeAPIBase,
 		userAgent:           "streamclone/1.0",
 		redditBackoff:       map[string]time.Time{},
+		youtubeBackoff:      map[string]time.Time{},
 	}
 }
 
@@ -104,8 +112,10 @@ type RedditOptions struct {
 	HTMLFallback  bool
 	ThirdPartyURL string
 	ThirdPartyKey string
-	FirecrawlURL  string
-	FirecrawlKey  string
+	ScraperURL   string
+	ScraperKey   string
+	FirecrawlURL string // deprecated alias for ScraperURL
+	FirecrawlKey string // deprecated alias for ScraperKey
 }
 
 type redditToken struct {
@@ -152,10 +162,18 @@ func (h *Handler) WithRedditOptions(opts RedditOptions) *Handler {
 		h.redditThirdPartyURL = strings.TrimRight(opts.ThirdPartyURL, "/")
 	}
 	h.redditThirdPartyKey = opts.ThirdPartyKey
-	if opts.FirecrawlURL != "" {
-		h.firecrawlAPIURL = strings.TrimRight(opts.FirecrawlURL, "/")
+	scraperURL := opts.ScraperURL
+	if scraperURL == "" {
+		scraperURL = opts.FirecrawlURL
 	}
-	h.firecrawlAPIKey = opts.FirecrawlKey
+	if scraperURL != "" {
+		h.scraperAPIURL = strings.TrimRight(scraperURL, "/")
+	}
+	scraperKey := opts.ScraperKey
+	if scraperKey == "" {
+		scraperKey = opts.FirecrawlKey
+	}
+	h.scraperAPIKey = scraperKey
 	return h
 }
 
@@ -171,6 +189,7 @@ func (h *Handler) Mount(r *chi.Mux) {
 		r.Get("/badges", h.channelBadges)
 		r.Get("/clips", h.channelClips)
 		r.Get("/lsf", h.channelLSF)
+		r.Get("/youtube", h.channelYouTube)
 		r.Get("/insights", h.channelInsights)
 		r.Get("/streams/history", h.channelStreamHistory)
 	})
@@ -811,8 +830,8 @@ func (h *Handler) fetchTwitchTrackerStreamHistory(ctx context.Context, login, pe
 	}
 	filtered := buildStreamHistory(history, period)
 	message := "parsed TwitchTracker streams table"
-	if provider == "firecrawl" {
-		message += " via Firecrawl"
+	if provider == "scraper" {
+		message += " via browser scraper"
 	}
 	return filtered, sourceWithProvider("stream_history", provider, "ready", message)
 }
@@ -926,22 +945,22 @@ func (h *Handler) fetchTwitchTrackerPage(ctx context.Context, rawURL string) (st
 			err = fmt.Errorf("status %d", resp.StatusCode)
 		}
 	}
-	if h.firecrawlAPIKey == "" {
+	if h.scraperAPIKey == "" {
 		if err == nil {
-			err = fmt.Errorf("firecrawl api key not configured")
+			err = fmt.Errorf("scraper api key not configured")
 		} else if strings.Contains(strings.ToLower(err.Error()), "cloudflare") {
-			err = fmt.Errorf("%s; firecrawl api key not configured", err.Error())
+			err = fmt.Errorf("%s; scraper api key not configured", err.Error())
 		}
 		return "", "html", err
 	}
-	htmlBody, firecrawlErr := h.fetchTwitchTrackerPageFirecrawl(ctx, rawURL)
-	if firecrawlErr != nil {
-		return "", "firecrawl", firecrawlErr
+	htmlBody, scraperErr := h.fetchTwitchTrackerPageScraper(ctx, rawURL)
+	if scraperErr != nil {
+		return "", "scraper", scraperErr
 	}
-	return htmlBody, "firecrawl", nil
+	return htmlBody, "scraper", nil
 }
 
-func (h *Handler) fetchTwitchTrackerPageFirecrawl(ctx context.Context, rawURL string) (string, error) {
+func (h *Handler) fetchTwitchTrackerPageScraper(ctx context.Context, rawURL string) (string, error) {
 	body, _ := json.Marshal(map[string]any{
 		"url":             rawURL,
 		"formats":         []string{"html"},
@@ -949,12 +968,12 @@ func (h *Handler) fetchTwitchTrackerPageFirecrawl(ctx context.Context, rawURL st
 		"maxAge":          300000,
 		"timeout":         30000,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.firecrawlAPIURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.scraperAPIURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.firecrawlAPIKey)
+	req.Header.Set("Authorization", "Bearer "+h.scraperAPIKey)
 	if h.userAgent != "" {
 		req.Header.Set("User-Agent", h.userAgent)
 	}
@@ -989,7 +1008,7 @@ func (h *Handler) fetchTwitchTrackerPageFirecrawl(ctx context.Context, rawURL st
 		htmlBody = out.Data.Markdown
 	}
 	if strings.TrimSpace(htmlBody) == "" {
-		return "", fmt.Errorf("firecrawl response missing html")
+		return "", fmt.Errorf("scraper response missing html")
 	}
 	return htmlBody, nil
 }
@@ -1000,7 +1019,7 @@ func twitchTrackerStreamHistoryState(err error) string {
 	}
 	message := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
-	case strings.Contains(message, "firecrawl api key not configured"):
+	case strings.Contains(message, "scraper api key not configured"):
 		return "unavailable"
 	case strings.Contains(message, "cloudflare"), strings.Contains(message, "status 401"), strings.Contains(message, "status 403"), strings.Contains(message, "status 429"):
 		return "blocked"
@@ -1030,7 +1049,7 @@ func (h *Handler) fetchRedditLSF(ctx context.Context, login, period, sort string
 	// We always try the primary configured provider first.
 	// If it fails/is blocked/unavailable, we roll over to try the others.
 	providersToTry := []string{provider}
-	allProviders := []string{"official", "public_json", "third_party", "firecrawl"}
+	allProviders := []string{"official", "public_json", "third_party", "scraper"}
 	for _, p := range allProviders {
 		if p != provider {
 			providersToTry = append(providersToTry, p)
@@ -1056,9 +1075,9 @@ func (h *Handler) fetchRedditLSF(ctx context.Context, login, period, sort string
 				posts, status = h.fetchRedditLSFThirdParty(ctx, login, period, sort)
 				tried = true
 			}
-		case "firecrawl":
-			if h.firecrawlAPIKey != "" {
-				posts, status = h.fetchRedditLSFFirecrawl(ctx, login, period, sort)
+		case "scraper":
+			if h.scraperAPIKey != "" {
+				posts, status = h.fetchRedditLSFScraper(ctx, login, period, sort)
 				tried = true
 			}
 		}
@@ -1085,8 +1104,12 @@ func (h *Handler) fetchRedditLSF(ctx context.Context, login, period, sort string
 
 func normalizeRedditProvider(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "official", "public_json", "third_party", "firecrawl", "off":
-		return strings.ToLower(strings.TrimSpace(value))
+	case "official", "public_json", "third_party", "scraper", "firecrawl", "off":
+		p := strings.ToLower(strings.TrimSpace(value))
+		if p == "firecrawl" {
+			return "scraper"
+		}
+		return p
 	default:
 		return "auto"
 	}
@@ -1174,17 +1197,17 @@ func (h *Handler) fetchRedditLSFThirdParty(ctx context.Context, login, period, s
 	return posts, status
 }
 
-func (h *Handler) fetchRedditLSFFirecrawl(ctx context.Context, login, period, sort string) ([]model.RedditPost, model.SourceStatus) {
-	if h.firecrawlAPIKey == "" {
-		return nil, sourceWithProvider("reddit_lsf", "firecrawl", "unavailable", "firecrawl api key not configured")
+func (h *Handler) fetchRedditLSFScraper(ctx context.Context, login, period, sort string) ([]model.RedditPost, model.SourceStatus) {
+	if h.scraperAPIKey == "" {
+		return nil, sourceWithProvider("reddit_lsf", "scraper", "unavailable", "scraper api key not configured")
 	}
-	if until, ok := h.redditBackoffActive("firecrawl"); ok {
-		return nil, model.SourceStatus{Source: "reddit_lsf", Provider: "firecrawl", State: "blocked", Message: "provider in backoff", BackoffUntil: until.UnixMilli()}
+	if until, ok := h.redditBackoffActive("scraper"); ok {
+		return nil, model.SourceStatus{Source: "reddit_lsf", Provider: "scraper", State: "blocked", Message: "provider in backoff", BackoffUntil: until.UnixMilli()}
 	}
 	searchURL, err := h.redditSearchURL(h.redditBaseURL, "", login, period, sort)
 	if err != nil {
-		status := sourceWithProvider("reddit_lsf", "firecrawl", "error", err.Error())
-		h.markRedditBackoff("firecrawl", status)
+		status := sourceWithProvider("reddit_lsf", "scraper", "error", err.Error())
+		h.markRedditBackoff("scraper", status)
 		return nil, status
 	}
 	body, _ := json.Marshal(map[string]any{
@@ -1194,21 +1217,21 @@ func (h *Handler) fetchRedditLSFFirecrawl(ctx context.Context, login, period, so
 		"maxAge":          300000,
 		"timeout":         30000,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.firecrawlAPIURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.scraperAPIURL, bytes.NewReader(body))
 	if err != nil {
-		status := sourceWithProvider("reddit_lsf", "firecrawl", "error", err.Error())
-		h.markRedditBackoff("firecrawl", status)
+		status := sourceWithProvider("reddit_lsf", "scraper", "error", err.Error())
+		h.markRedditBackoff("scraper", status)
 		return nil, status
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.firecrawlAPIKey)
+	req.Header.Set("Authorization", "Bearer "+h.scraperAPIKey)
 	if h.userAgent != "" {
 		req.Header.Set("User-Agent", h.userAgent)
 	}
 	resp, err := h.scrapeHTTP.Do(req)
 	if err != nil {
-		status := sourceWithProvider("reddit_lsf", "firecrawl", "error", err.Error())
-		h.markRedditBackoff("firecrawl", status)
+		status := sourceWithProvider("reddit_lsf", "scraper", "error", err.Error())
+		h.markRedditBackoff("scraper", status)
 		return nil, status
 	}
 	defer resp.Body.Close()
@@ -1217,8 +1240,8 @@ func (h *Handler) fetchRedditLSFFirecrawl(ctx context.Context, login, period, so
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusTooManyRequests {
 			state = "blocked"
 		}
-		status := sourceWithProvider("reddit_lsf", "firecrawl", state, fmt.Sprintf("status %d", resp.StatusCode))
-		h.markRedditBackoff("firecrawl", status)
+		status := sourceWithProvider("reddit_lsf", "scraper", state, fmt.Sprintf("status %d", resp.StatusCode))
+		h.markRedditBackoff("scraper", status)
 		return nil, status
 	}
 	var out struct {
@@ -1231,13 +1254,13 @@ func (h *Handler) fetchRedditLSFFirecrawl(ctx context.Context, login, period, so
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 512*1024)).Decode(&out); err != nil {
-		status := sourceWithProvider("reddit_lsf", "firecrawl", "error", err.Error())
-		h.markRedditBackoff("firecrawl", status)
+		status := sourceWithProvider("reddit_lsf", "scraper", "error", err.Error())
+		h.markRedditBackoff("scraper", status)
 		return nil, status
 	}
 	if !out.Success && out.Error != "" {
-		status := sourceWithProvider("reddit_lsf", "firecrawl", "error", out.Error)
-		h.markRedditBackoff("firecrawl", status)
+		status := sourceWithProvider("reddit_lsf", "scraper", "error", out.Error)
+		h.markRedditBackoff("scraper", status)
 		return nil, status
 	}
 	htmlBody := out.Data.HTML
@@ -1248,11 +1271,11 @@ func (h *Handler) fetchRedditLSFFirecrawl(ctx context.Context, login, period, so
 		htmlBody = out.Data.Markdown
 	}
 	posts := parseRedditHTMLListing(htmlBody, h.redditBaseURL, login)
-	status := sourceWithProvider("reddit_lsf", "firecrawl", "ready", "")
+	status := sourceWithProvider("reddit_lsf", "scraper", "ready", "")
 	if len(posts) == 0 {
-		status = sourceWithProvider("reddit_lsf", "firecrawl", "unavailable", "scrape did not contain usable posts")
+		status = sourceWithProvider("reddit_lsf", "scraper", "unavailable", "scrape did not contain usable posts")
 	}
-	h.markRedditBackoff("firecrawl", status)
+	h.markRedditBackoff("scraper", status)
 	return posts, status
 }
 
