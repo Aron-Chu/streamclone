@@ -50,41 +50,56 @@ Player, IRC chat with 7TV / FFZ / Twitch emotes, stats, and tabs.
 
 Historical streams, minute rollups, chat/emote counts, and optional TwitchTracker viewer sync.
 
-**Past streams list**
+**Past streams**
 
-<img src="docs/images/analytics-xqc-streams.png" alt="Analytics streams list with synced history" width="960" />
-
-**Stream detail with charts**
-
-<img src="docs/images/analytics-stream-detail.png" alt="Analytics stream detail with viewer chart and emote breakdown" width="960" />
+<img src="docs/images/analytics-xqc-streams.png" alt="Analytics past streams list with synced session selected" width="960" />
 
 **Synced minute rollups**
 
-<img src="docs/images/analytics-xqc-chart.png" alt="Analytics minute rollups with category segments and emote legend" width="960" />
+<img src="docs/images/analytics-xqc-chart.png" alt="Completed analytics chart with viewer, chat, and emote minute rollups" width="960" />
 
-**Historical sync in progress**
+**Initial sync load**
 
-<img src="docs/images/analytics-xqc-sync.gif" alt="Analytics sync progress loading stats and charts" width="960" />
+<img src="docs/images/analytics-sync-load.gif" alt="Analytics initial sync loading phases before chart data appears" width="960" />
+
+**TwitchTracker scrape**
+
+<img src="docs/images/analytics-tt-scrape.gif" alt="TwitchTracker viewer scrape progress during analytics sync" width="960" />
 
 ---
 
 ## Quick start
 
-**Prerequisites:** Docker Desktop with `docker compose` on PATH.
+**Prerequisites:** [Docker](https://docs.docker.com/get-docker/) with `docker compose` (Docker Desktop on Windows/macOS; Docker Engine on Linux).
+
+### Non-developers (recommended)
+
+No terminal commands — see **[docs/install-desktop.md](docs/install-desktop.md)**.
+
+**Windows:**
+
+1. Install [Docker Desktop](https://docs.docker.com/desktop/) and start it.
+2. Download **`Install Streamclone.cmd`** from [Releases](https://github.com/Aron-Chu/streamclone/releases/latest) (or double-click it from a downloaded repo ZIP).
+3. After install, double-click **Start Streamclone** on your Desktop.
+
+**macOS:**
+
+1. Install Docker Desktop and start it.
+2. Extract a release bundle to `~/streamclone`, open **`launchers`**, double-click **`Install Streamclone.command`**.
+3. Use **Streamclone Start** in `~/Applications` to run.
+
+Opens **http://localhost:8090** when ready. Stop via **Stop Streamclone** (Windows Desktop) or **Streamclone Stop** (macOS).
+
+### Developers
 
 ```sh
 git clone https://github.com/Aron-Chu/streamclone.git
 cd streamclone
-make bootstrap    # creates .env, starts core stack
+make setup        # interactive wizard; or make setup-core
 make smoke        # health checks once services are up
 ```
 
-**Windows (no make):**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
-powershell -ExecutionPolicy Bypass -File scripts/smoke-core.ps1
-```
+**Windows (no make):** `powershell -File scripts/setup.ps1` — legacy `scripts/bootstrap.ps1` is core-only.
 
 ### Optional profiles
 
