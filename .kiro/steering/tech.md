@@ -10,6 +10,17 @@ Agents: start at `AGENTS.md`, then this file. Use codegraph MCP (`make codegraph
 - HLS: MediaMTX 1.18+ session cookies break plain HTTP localhost unless `hlsCDNSecret` in `deploy/mediamtx.yml` matches the `Authorization: Bearer` header Caddy sends on `/live/*` — see `.kiro/steering/playback.md`.
 - Image pipeline: libvips CLI through `vips thumbnail`, producing WebP variants `1x`, `2x`, `3x`, and `4x`.
 
+## Runtime boundaries
+
+| Runtime | Role | Heavy work delegated to |
+|---------|------|-------------------------|
+| Go (`cmd/*`) | HTTP/WS services, Redis/Postgres glue | Streamlink, FFmpeg, MediaMTX, `vips` CLI |
+| Python (`clipper/`) | Clip jobs, ASR, vertical render | FFmpeg, Streamlink, faster-whisper |
+| Python (scraper sibling) | Browser scrape for Tracker/Reddit | Camoufox/Chromium CDP |
+| Browser (React) | Directory, player, chat UI | hls.js |
+
+Go services are I/O-bound glue around upstream Twitch loops and external media tools. Consolidate duplicate IRC/Helix clients in Go before introducing new languages. See `.kiro/steering/playback.md` (HLS subprocess map) and `.kiro/steering/analytics.md` (chat IRC sharing).
+
 ## Local Commands
 
 - Human setup guide: `docs/getting-started.md`

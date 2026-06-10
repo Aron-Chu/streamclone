@@ -50,11 +50,49 @@ Files: `deploy/Caddyfile.local-tunnel` (`@hls_local`, `@hls`) and `deploy/Caddyf
 | 404 on segments | Stream not started or worker not publishing to MediaMTX yet |
 | Playback works on LAN IP but not localhost | Stale `wslrelay` — see `.kiro/steering/windows-dev.md` |
 
+## Architecture boundaries
+
+Go does not download HLS segments in-process. Segment fetch and transmux are delegated to external subprocesses; the orchestrator is the control plane.
+
+| Layer | In-process (Go) | Subprocess / external |
+|-------|-----------------|----------------------|
+| Playback token + usher | `internal/video/token`, `internal/video/usher` | GQL + usher HTTP |
+| Default relay (`streamlink`) | spawn + supervise | `streamlink --stdout` → pipe → `ffmpeg -c copy -f flv` → MediaMTX RTMP |
+| Fallback relay (`direct_hls`) | `/v1/stream/proxy` manifest rewrite | single `ffmpeg` reading proxied usher URL |
+| Local HLS output | readiness probe (`waitForHLS`, 100ms ticks) | MediaMTX (`1s` segments × 5) |
+| Browser playback | — | hls.js |
+
+**`direct_hls` proxy path:** `proxyPlaylist` fetches upstream manifests and runs `filterTwitchAdSegments` on every FFmpeg refresh. That rewriter strips Twitch stitched-ad `DATERANGE` blocks and related segments. Probes cap manifest reads at 4 KB; the proxy path uses `io.ReadAll` without a size cap — treat large LL-HLS manifests as a known memory risk.
+
+**Process supervision:** `worker.Kill` uses process-group SIGKILL (Linux). `worker.Reconcile` scans `/proc` for orphan streamlink/ffmpeg at boot. Windows lacks the same PGID semantics.
+
+**Startup breakdown:** `registry.StartupBreakdown` tracks `upstreamFetchMs`, `workerSpawnMs`, and `hlsReadyMs` for cold-start diagnosis.
+
 ## API flow
 
+- `POST /v1/stream/start` accepts `latency_mode` (`instant` | `fast` | `stable`). Maps to streamlink `--hls-live-edge` **1 / 2 / 3** and is stored on `registry.Session` for diagnostics.
 - `POST /v1/stream/start` → returns `hlsUrl` like `http://localhost:8090/live/{channel}/index.m3u8` (via `HLS_PUBLIC_BASE` / `PUBLIC_ORIGIN` in local-tunnel compose).
+- `GET /v1/stream/diagnostics?channel=` returns real `latencyMode`, `liveEdge`, worker restart stats, and HLS probe — not hardcoded labels.
 - `POST /v1/stream/keepalive` — session listener heartbeat; aborts during restarts are normal.
+- Frontend sends `settings.playbackLatencyMode` on start; `playback.ts` auto-downgrades **instant → fast → stable** after stall/rebuffer thresholds (brief on-player notice).
+- `/v1/stream/proxy` only allows `http(s)` URLs on `*.ttvnw.net` / `usher.ttvnw.net`.
+- Worker crashes: `supervise()` rotates `streamlink` ↔ `direct_hls` with backoff and re-runs `waitForHLS`.
+- Playback tokens: short-lived per-channel cache + single-flight in `internal/video/token`.
 - Frontend rewrites `/live/` URLs to same origin via `normalizeBrowserOriginUrl` in `frontend/src/config.ts`.
+
+## Latency / resilience knobs
+
+| Knob | Default | Effect |
+|------|---------|--------|
+| `latency_mode` on start | `stable` if omitted | Coordinates streamlink live-edge with browser hls.js mode |
+| `playbackLatencyMode` (UI) | `fast` | Browser buffer policy; may auto-downgrade on stalls |
+| `STREAMLINK_HLS_LIVE_EDGE` | `2` | Fallback when start request omits `latency_mode` |
+| `HLS_FAST_START_SEGMENT_COUNT` | unset | When set (>0) or `instant`/`fast` start: faster HLS readiness probe (0 stability window; optional variant skip) |
+| `HLS_PROBE_TIMEOUT` | 15s | Max wait for local HLS ready |
+
+FFmpeg workers (streamlink pipe + `direct_hls`) use reconnect flags: `rw_timeout`, `reconnect_on_network_error`, `reconnect_on_http_error`, `reconnect_max_retries`, `reconnect_delay_max`.
+
+See `docs/hls-relay-buffer-latency.md` for the full latency budget.
 
 ## Task checklist
 

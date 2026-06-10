@@ -22,7 +22,19 @@ These frontend surfaces are **allowed** — they are thin clients over the clipp
 | Analytics clips | `Analytics.tsx` tabs | List jobs, queue from graph, link to studio |
 | Caddy proxy | `/v1/clipper/*` → `clipper:8095` | Same-origin API (`VITE_CLIPPER_URL: auto`) |
 
-Do not move job state, rendering, or Helix writes into Go viewer services. New clipper features belong in `clipper/liveclipper/` first; add UI in `ClipStudio.tsx` / `Analytics.tsx` only as API consumers.
+Do not move job state, rendering, or Helix writes into Go viewer services. New clipper features belong in `clipper/liveclipper/` first; add UI in `ClipStudio.tsx` / `frontend/src/components/clipStudio/` / `Analytics.tsx` only as API consumers.
+
+### Upstream client duplication
+
+Clipper currently reimplements Twitch clients that also exist in Go services:
+
+| Clipper module | Go equivalent | Notes |
+|----------------|---------------|-------|
+| `clipper/liveclipper/twitch.py` | `internal/metadata/helix`, `internal/analytics/helix` | Separate Helix token refresh and clip APIs |
+| `clipper/liveclipper/irc.py` | `internal/chat/ircconn` (chat + analytics) | Third IRC parser alongside Go `parse` |
+| `clipper/liveclipper/emote_overlay.py` | emote CDN (`/emotes/{id}/1x.webp`) | Downloads pre-rendered URLs; does not call Go emote service |
+
+When extending clipper, prefer consuming Go stack surfaces (webhook/SSE from chat for spikes, proxied Helix via shared client) over adding a fourth IRC or Helix implementation.
 - Store clipper job state in local SQLite by default. The durable source of truth for clipper jobs is the clipper database, not Streamclone metadata cache or chat pub/sub.
 - Keep render artifacts under a configurable local output directory. Object storage upload is optional and should be added as a later distribution concern, not as a V1 dependency.
 

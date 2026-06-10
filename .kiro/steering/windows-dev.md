@@ -81,4 +81,4 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 
 - Read this file when localhost behaves differently from `docker ps` / container logs.
 - Prefer `curl.exe http://localhost:8090/...` for probes on Windows PowerShell.
-- After `.env` token changes, recreate affected services (`clipper`, `chat`, `metadata`) — not just restart the browser.
+- After `.env` / OAuth changes, run `make reload-env` (or `make twitch-sync`, which calls it). `docker compose restart` does **not** reload `env_file`; affected services: `chat`, `metadata`, `analytics`, `emote`, and `clipper` when using Clip Studio. `make app` / `make up` run `ensure-oauth` + `reload-env-if-stale` to catch drift (e.g. `.env` has OAuth but `emote` container was created without it).

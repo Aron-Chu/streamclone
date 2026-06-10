@@ -2,7 +2,7 @@
 
 ## Current Implementation Review
 
-The current project has a local 7TV-style emote system. It does not currently fetch or render native Twitch emote images from the IRC `emotes` tag, and it does not yet support FFZ.
+The current project has a local 7TV-style emote system with 7TV and FFZ channel loading. It does not currently fetch or render native Twitch emote images from the IRC `emotes` tag. FFZ globals and provider SSE/TTL reconciliation are still future work.
 
 Current provider/channel flow:
 
@@ -39,7 +39,7 @@ Current chat/rendering flow:
 5. Redis `emotes:delta:{login}` events trigger a debounced dictionary reload and atomic pointer swap.
 6. The frontend renders `fragments[]`; emote fragments become `<img src={u} alt={c}>`.
 
-## Gaps Against `test.md`
+## Gaps Against emote tokenizer roadmap
 
 - Metadata and binary assets are not fully separated during seeding. The project now records provider identity, but the V1 provider loader still downloads selected channel emote assets immediately instead of using full lazy hydration.
 - Asset loading is eager per channel, not lazy per observed emote/cache miss.
@@ -71,7 +71,7 @@ Asset pipeline:
 Matching pipeline:
 
 - Keep the current Trie for exact whitespace-delimited matching unless requirements change.
-- If adopting the `test.md` target, update requirements/design first, then replace or augment the Trie with an Aho-Corasick automaton that can scan the whole message in linear time and handle punctuation boundaries deterministically.
+- If adopting the [emote tokenizer roadmap](../specs/emote-tokenizer-roadmap.md) target, update requirements/design first, then replace or augment the Trie with an Aho-Corasick automaton that can scan the whole message in linear time and handle punctuation boundaries deterministically.
 - Rebuild matchers off the hot path and install them with the existing atomic pointer-swap pattern.
 - Add tokenizer benchmarks before and after changing the matcher.
 
@@ -96,7 +96,7 @@ Native Twitch emotes:
 
 ## Task Checklist For Emote Changes
 
-- Read this file, `test.md`, `.kiro/specs/twitch-7tv-clone/requirements.md`, and `.kiro/specs/twitch-7tv-clone/design.md` before changing emote behavior.
+- Read this file, [`.kiro/specs/emote-tokenizer-roadmap.md`](../specs/emote-tokenizer-roadmap.md), `.kiro/specs/twitch-7tv-clone/requirements.md`, and `.kiro/specs/twitch-7tv-clone/design.md` before changing emote behavior.
 - Decide whether the task is metadata sync, asset hydration, tokenizer matching, live sync, frontend rendering, or schema work.
 - Update requirements/design if behavior changes user-visible contracts or provider support.
 - If the task touches the channel workspace, preserve the existing emote provider toggles, processing polling, and emote tab affordances.

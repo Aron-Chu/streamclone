@@ -26,7 +26,7 @@ Use **Playwright MCP** only against **`http://localhost:8090`** (Caddy proxy). D
 
 - Auth: `curl.exe http://localhost:8090/v1/auth/debug`
 - Ports: `powershell -File scripts/stack-ports.ps1`
-- After `.env` token changes: `--force-recreate clipper chat metadata`
+- After `.env` / OAuth changes: `make reload-env` (chat, metadata, analytics, emote) or `make twitch-sync`. `make app` auto-runs `reload-env-if-stale` when container OAuth ≠ `.env`.
 
 ## Output
 

@@ -87,7 +87,7 @@ Backend is Go across all services (PC-2). Shared libraries:
 | Redis | `redis/go-redis/v9` | Cache, hashes, pub/sub |
 | PostgreSQL | `jackc/pgx/v5` + `pgxpool` | Native driver, pooling |
 | Migrations | `golang-migrate/migrate` | Versioned SQL migrations |
-| Image processing | `davidbyttow/govips` (libvips) | Animated WebP, low memory |
+| Image processing | libvips CLI (`vips thumbnail` via `os/exec`) | Animated WebP via `[n=-1]`; `CGO_ENABLED=0` emote image |
 | Config | env vars via `caarlos0/env` | 12-factor, no secrets in source |
 | Logging | stdlib `log/slog` | Structured JSON logs |
 | Metrics | `prometheus/client_golang` | `/metrics` per service |
@@ -275,7 +275,7 @@ emote/
   http        curator API, auth middleware, upload validation
   repo        pgx queries for emotes/sets/items/channels/jobs
   storage     S3-compatible client (MinIO or AWS/R2)
-  worker      claims jobs SKIP LOCKED, govips -> webp scales, idempotent
+  worker      claims jobs SKIP LOCKED, vips thumbnail -> webp scales, idempotent
   seeder      provider fetch (7TV/FFZ) -> download selected assets -> reprocess -> upsert
   dict        rebuild channel:emotes:{login}, publish emotes:delta:{channel}
 ```
@@ -621,8 +621,12 @@ func (r *Reaper) tick(now int64) {
 
 ### 7.3 libvips scale pipeline
 
+The emote asset worker shells out to the `vips thumbnail` CLI (`internal/emote/assets/assets.go`);
+the emote container installs `libvips-tools` at runtime. Each scale is a separate subprocess today.
+In-process `govips` remains a future optimization if fork/exec overhead becomes a bottleneck.
+
 Emotes scale by height, preserving aspect ratio and animation, exported as WebP (WebP-only per
-requirements). Animated sources are loaded with all pages so animation survives the resize.
+requirements). Animated sources are loaded with all pages (`src[n=-1]`) so animation survives the resize.
 
 ```go
 type Scale struct {
