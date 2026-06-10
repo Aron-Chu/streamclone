@@ -5,17 +5,63 @@
 *.out
 .env
 .env.test
+# env templates only — never commit live .env.local etc.
+.env.*
+!.env.example
+!.env.dev
 node_modules/
 memories/
 frontend/test-results/
 frontend/dist/
 clipper/.venv/
 clipper-data/
+**/__pycache__/
+*.py[cod]
+benchmark-*.json
+.vscode/
 .DS_Store
 .codegraph/
 .cocoindex_code/
 cookies.txt
 *.tsbuildinfo
 .cursor/debug-*.log
+.cursor/hooks/__pycache__/
 scratch/
 weppy-project-sync/
+.tmp/
+.playwright-mcp/
+frontend/artifacts/
+debug-*.log
+debug-f1a2b1.log
+*_scraped.html
+frontend/vite-*.out.log
+frontend/vite-*.err.log
+frontend/playwright-*-debug.png
+frontend/playwright-report/
+frontend/blob-report/
+coverage/
+docs/images/.sync-frames/
+docs/images/qa/
+deploy/tmp-*
+# local output / scratch
+out.json
+*.log.json
+test.md
+# runtime data
+*.sqlite
+*.sqlite3
+# python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+# IDE / OS
+.idea/
+*.swp
+Thumbs.db
+# agent screenshot stash (not README media)
+.kiro/assets/
+# MCP / agent debug captures (repo root)
+/analytics-*.png
+/debug-mcp-*.txt
+/mcp-*.txt

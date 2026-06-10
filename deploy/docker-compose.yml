@@ -13,6 +13,8 @@ x-go: &go
     LOG_LEVEL: info
     REDIS_URL: redis://redis:6379/0
     DATABASE_URL: postgres://app:app@postgres:5432/streamclone?sslmode=disable
+    SCRAPER_API_URL: http://scraper:8000/v2/scrape
+    SCRAPER_API_KEY: ${SCRAPER_API_KEY:-local-dev-key}
 
 services:
   redis:
@@ -74,12 +76,11 @@ services:
       - ../.env
     environment:
       <<: *go-env
+      REDDIT_PROVIDER: ${REDDIT_PROVIDER:-off}
     ports: ["8081:8080"]
     depends_on:
       redis:
         condition: service_healthy
-      scraper:
-        condition: service_started
 
   video:
     <<: *go
@@ -127,6 +128,13 @@ services:
     environment:
       <<: *go-env
       EMOTE_SERVICE_URL: http://emote:8080
+      ANALYTICS_VOD_GQL_CONCURRENCY: ${ANALYTICS_VOD_GQL_CONCURRENCY:-6}
+      ANALYTICS_VOD_GQL_SEGMENT_SECONDS: ${ANALYTICS_VOD_GQL_SEGMENT_SECONDS:-600}
+      ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS: ${ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS:-120000}
+      ANALYTICS_PASS_TT_MAXAGE: ${ANALYTICS_PASS_TT_MAXAGE:-true}
+      ANALYTICS_TT_MAX_AGE_MS: ${ANALYTICS_TT_MAX_AGE_MS:-0}
+      ANALYTICS_TT_DIRECT_HTTP_ENABLED: ${ANALYTICS_TT_DIRECT_HTTP_ENABLED:-false}
+      ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS: ${ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS:-1200}
     ports: ["8086:8080"]
     depends_on:
       postgres:
@@ -135,8 +143,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      scraper:
-        condition: service_started
 
   emote:
     <<: *go
@@ -194,6 +200,7 @@ services:
         condition: service_healthy
 
   clipper:
+    profiles: [clipper]
     restart: unless-stopped
     build:
       context: ..
@@ -210,7 +217,12 @@ services:
     volumes:
       - clipper-data:/data
 
+  # Scraper browser profiles (override via ../.env):
+  #   Bridge (local Windows dev): SCRAPER_EPHEMERAL_BROWSER=true, SCRAPER_MAX_CONCURRENT=1
+  #   Pooled (production): SCRAPER_EPHEMERAL_BROWSER=false, SCRAPER_BROWSER_POOL_SIZE=1, SCRAPER_MAX_CONCURRENT=2
+  # Never raise MAX_CONCURRENT above 1 while ephemeral=true — competing Camoufox profiles deadlock TT detail scrapes.
   scraper:
+    profiles: [scraper]
     build:
       context: ../../streamclone-scraper
       dockerfile: Dockerfile
@@ -228,15 +240,33 @@ services:
       - CDP_CHROME_PATH=${CDP_CHROME_PATH:-}
       - CAMOUFOX_GEOIP=${CAMOUFOX_GEOIP:-false}
       - CAMOUFOX_PERSISTENT_PROFILE=/data/camoufox-profile
-      - SCRAPER_EPHEMERAL_BROWSER=${SCRAPER_EPHEMERAL_BROWSER:-true}
+      - SCRAPER_EPHEMERAL_BROWSER=${SCRAPER_EPHEMERAL_BROWSER:-false}
       - SCRAPER_HEADLESS=${SCRAPER_HEADLESS:-true}
+      - SCRAPER_MAX_CONCURRENT=${SCRAPER_MAX_CONCURRENT:-2}
+      - SCRAPER_BROWSER_POOL_SIZE=${SCRAPER_BROWSER_POOL_SIZE:-1}
+      - SCRAPER_CONTEXT_TTL_REQUESTS=${SCRAPER_CONTEXT_TTL_REQUESTS:-50}
+      - SCRAPER_BROWSER_TTL_SECONDS=${SCRAPER_BROWSER_TTL_SECONDS:-3600}
+      - SCRAPER_TWITCHTRACKER_INJECT_HIGHCHARTS=${SCRAPER_TWITCHTRACKER_INJECT_HIGHCHARTS:-true}
       - BROWSER_PROFILE_DIR=/data/camoufox-profile
+      - PROXY_SERVER=${PROXY_SERVER:-}
+      - PROXY_USERNAME=${PROXY_USERNAME:-}
+      - PROXY_PASSWORD=${PROXY_PASSWORD:-}
+      - PROXY_BYPASS=${PROXY_BYPASS:-}
+      - PROXY_POOL=${PROXY_POOL:-}
+      - SESSION_VAULT_KEY=${SESSION_VAULT_KEY:-}
+      - SESSION_VAULT_DIR=${SESSION_VAULT_DIR:-/data/sessions}
     volumes:
       - scraper-profile:/data
       - camoufox-cache:/root/.cache/camoufox
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
 volumes:
   pg-data:

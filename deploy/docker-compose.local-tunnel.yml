@@ -19,8 +19,6 @@ services:
         condition: service_healthy
       emote:
         condition: service_healthy
-      clipper:
-        condition: service_started
 
   video:
     environment:

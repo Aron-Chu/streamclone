@@ -1,80 +1,42 @@
 # Contributing
 
-Thank you for your interest in Streamclone. This guide covers local setup, CI expectations, and what not to commit.
-
-## Clone layout (required)
-
-Streamclone and the analytics scraper are two repositories. Compose builds the scraper from a sibling path:
+## Clone layout
 
 ```
 parent/
-  streamclone/          ← this repo
-  streamclone-scraper/  ← https://github.com/YOUR_GITHUB_USER/streamclone-scraper
+  streamclone/          ← this repo (make bootstrap → http://localhost:8090)
+  streamclone-scraper/  ← optional sibling for `make up-scraper`
 ```
 
-From `deploy/docker-compose.yml`, the scraper build context is `../../streamclone-scraper` (one directory above the main repo root).
+## Local setup
 
-## Local development
+1. `make bootstrap` (or `scripts/bootstrap.ps1` on Windows)
+2. `make smoke` when services are healthy
+3. `make install-hooks` — requires `pip install pre-commit`
 
-1. Copy `.env.example` to `.env` and set `CURATOR_API_TOKEN` to a strong random value.
-2. Start the stack: `make up` → open **`http://localhost:8090`**.
-3. Run targeted tests before opening a PR:
-   - `go test ./...` and `go vet ./...`
-   - `cd frontend && npm ci && npm run build`
-
-See [docs/development.md](docs/development.md) and [docs/getting-started.md](docs/getting-started.md) for more detail.
-
-## Regenerating README screenshots
-
-Requires a healthy stack and at least one live Twitch channel at capture time:
+## Tests before PR
 
 ```sh
-make up
-make docs-screenshots
+go test ./... && go vet ./...
+cd frontend && npm ci && npm run build
+make smoke          # stack must be up
+make smoke-ui       # adds Playwright smoke-core
 ```
 
-Outputs: `docs/images/directory.png`, `docs/images/channel.png`. See [docs/screenshots.md](docs/screenshots.md).
+## CI
 
-On Windows without `make`:
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml): backend, frontend build, docker image builds, **smoke-core** (no scraper).
 
-```powershell
-cd frontend
-npx playwright install chromium
-npm run screenshots:readme
-```
+[`.github/workflows/smoke-scraper.yml`](.github/workflows/smoke-scraper.yml): nightly / manual scraper profile smoke.
 
-## CI (GitHub Actions)
+## Secrets — never commit
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on push/PR to `main`/`master`:
+`.env` and any `.env.*` except `.env.example` / `.env.dev`, Twitch/clipper tokens, `PROXY_*` credentials, `node_modules/`, `frontend/dist/`, `clipper/.venv/`, `clipper-data/`, `*.sqlite`, `.codegraph/`, `out.json`
 
-| Job | What it checks |
-|---|---|
-| `backend` | `go test ./...`, `go vet ./...` |
-| `frontend` | `npm ci`, `npm run build` |
-| `docker` | Compose config validation; Docker builds for metadata, chat, video, emote, **analytics**, and frontend |
-| `smoke` | Full compose stack with scraper sibling checked out at `../streamclone-scraper` |
+Use `.env.dev` for local bootstrap; `.env.example` for the full reference.
 
-The smoke job clones **`${{ github.repository_owner }}/streamclone-scraper`**. If your fork uses a different org or the scraper repo is not published yet, smoke may fail until that repository exists — backend and frontend jobs still gate most changes.
+## Maintainer media
 
-Image publishing (manual): [`.github/workflows/publish-images.yml`](.github/workflows/publish-images.yml).
+Regenerate README screenshots/GIF: `make docs-media` (healthy stack + ffmpeg for GIF).
 
-## Secrets and git hygiene
-
-**Never commit:**
-
-- `.env` or `.env.test` (live tokens, Duck DNS credentials, OAuth secrets)
-- `node_modules/`, `frontend/dist/`, `clipper/.venv/`, `clipper-data/`
-- `.codegraph/`, `cookies.txt`, `scratch/`, `memories/`, `frontend/test-results/`
-
-Use `.env.example` as the template for new variables.
-
-## Pull requests
-
-- Keep changes focused; match existing naming and patterns in the touched package.
-- Run the relevant tests locally (narrow packages first).
-- Do not paste full API JSON or secrets into PR descriptions.
-- Include updated screenshots only when UI changes warrant it.
-
-## Legal
-
-Operators are solely responsible for compliance with third-party Terms of Service. See [docs/security.md](docs/security.md).
+Agent/developer docs live under `.kiro/steering/` — not linked from this README.

@@ -42,19 +42,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout scraper sibling
-        env:
-          # Replace org/user if the scraper repo lives under a different GitHub account.
-          SCRAPER_REPO: ${{ github.repository_owner }}/streamclone-scraper
+      - run: cp .env.dev .env
+      - name: Validate core compose
         run: |
-          set -euo pipefail
-          dest="$(dirname "$GITHUB_WORKSPACE")/streamclone-scraper"
-          if [ ! -d "$dest/.git" ]; then
-            git clone --depth 1 "https://github.com/${SCRAPER_REPO}.git" "$dest"
-          fi
-      - run: cp .env.example .env
-      - name: Validate app compose
-        run: docker compose -f deploy/docker-compose.yml config
+          docker compose --env-file .env \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml config
       - name: Validate observability compose
         run: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml config
       - name: Build metadata image
@@ -70,49 +63,25 @@ jobs:
       - name: Build frontend image
         run: docker build -f frontend/Dockerfile -t streamclone/frontend:ci frontend
 
-  smoke:
-    name: Local compose smoke
+  smoke-core:
+    name: Core compose smoke
     runs-on: ubuntu-latest
     needs:
       - backend
       - frontend
       - docker
-    timeout-minutes: 35
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout scraper sibling
-        env:
-          SCRAPER_REPO: ${{ github.repository_owner }}/streamclone-scraper
+      - run: cp .env.dev .env
+      - name: Start core stack
         run: |
-          set -euo pipefail
-          dest="$(dirname "$GITHUB_WORKSPACE")/streamclone-scraper"
-          if [ ! -d "$dest/.git" ]; then
-            git clone --depth 1 "https://github.com/${SCRAPER_REPO}.git" "$dest"
-          fi
-      - run: cp .env.example .env
-      - name: Start stack
-        run: docker compose -f deploy/docker-compose.yml up -d --build
+          docker compose --env-file .env \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            up -d --build
       - name: Wait for health endpoints
-        run: |
-          set -euo pipefail
-          for url in \
-            http://localhost:8081/healthz \
-            http://localhost:8082/healthz \
-            http://localhost:8083/healthz \
-            http://localhost:8084/healthz \
-            http://localhost:5174/; do
-            echo "waiting for $url"
-            for i in $(seq 1 90); do
-              if curl -fsS "$url" >/dev/null; then
-                break
-              fi
-              if [ "$i" -eq 90 ]; then
-                curl -v "$url" || true
-                exit 1
-              fi
-              sleep 2
-            done
-          done
+        run: bash scripts/smoke-core.sh
       - name: Check metrics endpoints
         run: |
           set -euo pipefail
@@ -126,8 +95,15 @@ jobs:
       - name: Dump compose state on failure
         if: failure()
         run: |
-          docker compose -f deploy/docker-compose.yml ps
-          docker compose -f deploy/docker-compose.yml logs
+          docker compose --env-file .env \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml ps
+          docker compose --env-file .env \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml logs
       - name: Stop stack
         if: always()
-        run: docker compose -f deploy/docker-compose.yml down -v
+        run: |
+          docker compose --env-file .env \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml down -v

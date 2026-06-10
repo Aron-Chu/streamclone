@@ -9,12 +9,13 @@ Read this file first. Load **one** domain steering doc, then use the code graph 
 | Any change | `.kiro/steering/tech.md` | `get_ast_chunk` / `get_blast_radius` |
 | Product / UX guardrails | `.kiro/steering/product.md` | — |
 | Live clipper / Clip Studio | `.kiro/steering/clipper.md`, `memories/repo/live-clipper-ast-graph.md` | `get_ast_chunk("ClipStudio")`, `get_call_chain("_process")` |
-| Analytics / rollups / VODs | `.kiro/steering/analytics.md`, `memories/repo/analytics-notes.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("gqlCommentText")` |
+| Analytics / rollups / VODs | `.kiro/steering/analytics.md`, `.kiro/specs/vod-chat-pipeline-notes.md`, `memories/repo/analytics-notes.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("gqlCommentText")` |
+| Scraper optimization / TT perf | `.kiro/specs/scraper-optimization-notes.md`, `.kiro/steering/analytics.md` | — |
 | HLS playback / MediaMTX 401 | `.kiro/steering/playback.md`, `memories/repo/playback-notes.md` | `get_call_chain("waitForHLS")` |
 | Local Twitch auth | `.kiro/steering/local-auth.md` | — |
 | Emotes / 7TV / FFZ | `.kiro/steering/emote-pipeline.md` | — |
 | Windows / Docker localhost | `.kiro/steering/windows-dev.md`, `memories/repo/windows-dev-notes.md` | — |
-| Scraper / CDP Bypass / Cloudflare | `.kiro/steering/windows-dev.md`, `streamclone-scraper/main.py` | — |
+| Scraper / CDP Bypass / Cloudflare | `.kiro/steering/windows-dev.md`, `.kiro/specs/scraper-optimization-notes.md`, `streamclone-scraper/main.py` | — |
 | Full feature specs | `.kiro/specs/<feature>/` | Use for planning, not every bugfix |
 
 ## Code graph MCP (`streamclone-codegraph`)
@@ -56,7 +57,7 @@ If the graph is missing or stale, run `make codegraph` before debugging cross-pa
 
 ## Layout
 
-- Human docs: `README.md` (hub) and `docs/` (detailed guides)
+- Human docs: `README.md` (user-facing) and `CONTRIBUTING.md`
 - Go services: `cmd/*` entrypoints, `internal/*` packages
 - Frontend: `frontend/src/`
 - Clipper (standalone): `clipper/liveclipper/`

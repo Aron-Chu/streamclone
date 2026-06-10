@@ -1,0 +1,38 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: detect-private-key
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: forbid-env-commit
+        name: forbid secret env files
+        entry: bash -c 'for f in "$@"; do case "$f" in .env.example|.env.dev) ;; .env*) echo "Refusing to commit $f (use .env.example or .env.dev templates only)"; exit 1;; esac; done'
+        language: system
+        files: ^\.env
+        pass_filenames: true
+
+      - id: go-fmt-vet
+        name: go fmt and vet (staged)
+        entry: bash scripts/pre-commit-go-test.sh
+        language: system
+        files: \.go$
+        pass_filenames: false
+
+      - id: frontend-tsc
+        name: frontend tsc (staged)
+        entry: bash scripts/pre-commit-frontend.sh
+        language: system
+        files: ^frontend/(src|e2e)/
+        pass_filenames: false

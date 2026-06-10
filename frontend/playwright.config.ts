@@ -5,7 +5,8 @@ export default defineConfig({
   timeout: 180_000,
   use: {
     baseURL: 'http://localhost:8090',
-    viewport: { width: 1280, height: 800 },
+    viewport: { width: 1920, height: 1080 },
+    deviceScaleFactor: 1,
     screenshot: 'off',
     trace: 'off',
   },

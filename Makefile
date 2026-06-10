@@ -1,6 +1,9 @@
 GO ?= go
 ENV_FILE ?= .env
-COMPOSE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml
+COMPOSE_CORE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml
+COMPOSE ?= $(COMPOSE_CORE)
+COMPOSE_SCRAPER ?= $(COMPOSE_CORE) --profile scraper
+COMPOSE_FULL ?= $(COMPOSE_CORE) --profile scraper --profile clipper
 OBS_COMPOSE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml
 PROD_COMPOSE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml
 BASE_COMPOSE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml
@@ -15,17 +18,24 @@ CODEGRAPH_VENV ?= .codegraph/.venv
 CODEGRAPH_PY ?= $(CODEGRAPH_VENV)/bin/python
 CODEGRAPH_DB ?= .codegraph/streamclone.kuzu
 
-.PHONY: env app stop restart up down down-clean ps ports migrate logs obs-up obs-down obs-logs obs-config test vet build tidy twitch twitch-debug twitch-version twitch-configure twitch-sync twitch-token twitch-local-auth clipper-test clipper-run codegraph-install codegraph codegraph-mcp docs-screenshots
+.PHONY: env app stop restart up down down-clean ps ports migrate logs obs-up obs-down obs-logs obs-config test vet build tidy twitch twitch-debug twitch-version twitch-configure twitch-sync twitch-token twitch-local-auth clipper-test clipper-run clipper-restart codegraph-install codegraph codegraph-mcp docs-screenshots docs-media frontend-build frontend-restart frontend-logs up-scraper up-full bootstrap smoke smoke-ui install-hooks
 
 env:
-	@test -f .env || cp .env.example .env
+	@test -f .env || cp .env.dev .env
 
 app: env
-	$(COMPOSE) up -d --build --remove-orphans
+	$(COMPOSE_CORE) up -d --build --remove-orphans
+
+up-scraper: env
+	$(COMPOSE_SCRAPER) up -d --build --remove-orphans
+
+up-full: env
+	$(COMPOSE_FULL) up -d --build --remove-orphans
 
 stop: env
 	@echo "Stopping all Streamclone compose stacks..."
-	-$(COMPOSE) down --remove-orphans --timeout 30
+	-$(COMPOSE_FULL) down --remove-orphans --timeout 30
+	-$(COMPOSE_CORE) down --remove-orphans --timeout 30
 	-$(OBS_COMPOSE) down --remove-orphans --timeout 30
 	-$(PROD_COMPOSE) down --remove-orphans --timeout 30
 	-$(BASE_COMPOSE) down --remove-orphans --timeout 30
@@ -40,7 +50,8 @@ down: stop
 
 down-clean: env
 	@echo "Stopping stacks and removing named volumes (pg-data, minio-data, clipper-data)..."
-	-$(COMPOSE) down --remove-orphans -v --timeout 30
+	-$(COMPOSE_FULL) down --remove-orphans -v --timeout 30
+	-$(COMPOSE_CORE) down --remove-orphans -v --timeout 30
 	-$(OBS_COMPOSE) down --remove-orphans -v --timeout 30
 	-$(PROD_COMPOSE) down --remove-orphans -v --timeout 30
 	-$(BASE_COMPOSE) down --remove-orphans -v --timeout 30
@@ -53,10 +64,10 @@ ports:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/stack-ports.ps1
 
 migrate: env
-	$(COMPOSE) run --rm migrate
+	$(COMPOSE_CORE) run --rm migrate
 
 logs: env
-	$(COMPOSE) logs -f
+	$(COMPOSE_CORE) logs -f
 
 obs-up: env
 	$(OBS_COMPOSE) up -d --build
@@ -108,14 +119,17 @@ twitch: env
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action token -Scopes "$(TWITCH_SCOPES)"; \
 	elif [ "$(TWITCH_ACTION)" = "sync" ]; then \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action sync-env -EnvFile $(ENV_FILE); \
-		$(COMPOSE) up -d chat metadata; \
+		$(COMPOSE_CORE) up -d chat metadata; \
 	elif [ "$(TWITCH_ACTION)" = "local-auth" ]; then \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action sync-env -EnvFile $(ENV_FILE); \
-		$(COMPOSE) up -d chat metadata local-proxy clipper; \
+		$(COMPOSE_FULL) up -d chat metadata local-proxy clipper; \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action local-auth -Scopes "$(TWITCH_SCOPES)" -ChatHttp "$(TWITCH_LOCAL_AUTH_URL)"; \
-		$(COMPOSE) up -d --force-recreate clipper; \
+		$(COMPOSE_FULL) up -d --force-recreate clipper; \
+	elif [ "$(TWITCH_ACTION)" = "refresh-clipper-token" ]; then \
+		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action refresh-clipper-token -EnvFile $(ENV_FILE); \
+		$(COMPOSE_FULL) up -d --force-recreate clipper; \
 	else \
-		echo "Unsupported TWITCH_ACTION=$(TWITCH_ACTION). Use version, configure, token, sync, or local-auth."; \
+		echo "Unsupported TWITCH_ACTION=$(TWITCH_ACTION). Use version, configure, token, sync, local-auth, or refresh-clipper-token."; \
 		exit 1; \
 	fi
 
@@ -141,5 +155,38 @@ twitch-token:
 twitch-local-auth:
 	@$(MAKE) twitch TWITCH_ACTION=local-auth
 
+clipper-refresh-token:
+	@$(MAKE) twitch TWITCH_ACTION=refresh-clipper-token
+
 docs-screenshots:
 	cd frontend && npx playwright install chromium && npm run screenshots:readme
+
+docs-media:
+	cd frontend && npx playwright install chromium && npm run docs:media
+
+frontend-build:
+	cd frontend && npm run build
+
+frontend-restart: env
+	$(COMPOSE_CORE) build frontend
+	$(COMPOSE_CORE) up -d --no-deps --force-recreate frontend local-proxy
+
+clipper-restart: env
+	$(COMPOSE_FULL) build clipper
+	$(COMPOSE_FULL) up -d --no-deps --force-recreate clipper local-proxy
+
+frontend-logs: env
+	$(COMPOSE_CORE) logs -f frontend
+
+bootstrap:
+	@bash scripts/bootstrap.sh
+
+smoke:
+	@bash scripts/smoke-core.sh
+
+smoke-ui:
+	@bash scripts/smoke-core.sh --ui
+
+install-hooks:
+	@command -v pre-commit >/dev/null 2>&1 || { echo "Install pre-commit: pip install pre-commit"; exit 1; }
+	pre-commit install
