@@ -2,31 +2,17 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/env.sh
+source "$ROOT/scripts/lib/env.sh"
+
 cd "$ROOT"
-
-if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker is required. Install Docker Desktop and ensure 'docker' is on PATH."
-  exit 1
-fi
-
-if ! docker compose version >/dev/null 2>&1; then
-  echo "docker compose is required. Update Docker Desktop."
-  exit 1
-fi
+env_preflight_docker
 
 if [ ! -f .env ]; then
-  cp .env.dev .env
-  if command -v openssl >/dev/null 2>&1; then
-    token="$(openssl rand -hex 24)"
-  else
-    token="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-  fi
-  if [ "$(uname)" = "Darwin" ]; then
-    sed -i '' "s/^CURATOR_API_TOKEN=.*/CURATOR_API_TOKEN=${token}/" .env
-  else
-    sed -i "s/^CURATOR_API_TOKEN=.*/CURATOR_API_TOKEN=${token}/" .env
-  fi
-  echo "Created .env from .env.dev (random CURATOR_API_TOKEN)."
+  env_synthesize core .env
+  echo "Created .env from .env.dev + profile-core (secrets generated)."
+else
+  env_generate_secrets .env
 fi
 
 echo "Starting core stack (no scraper/clipper profiles)..."

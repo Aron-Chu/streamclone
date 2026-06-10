@@ -1,12 +1,15 @@
 package config
 
 import (
+	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
 
 	"streamclone/internal/upstream"
 )
+
+const defaultScraperAPIURL = "http://scraper:8000/v2/scrape"
 
 type Config struct {
 	HTTPAddr    string `env:"HTTP_ADDR" envDefault:":8080"`
@@ -27,8 +30,13 @@ type Config struct {
 	RedditHTMLFallback  bool          `env:"REDDIT_HTML_FALLBACK" envDefault:"false"`
 	RedditThirdPartyURL string        `env:"REDDIT_THIRD_PARTY_URL"`
 	RedditThirdPartyKey string        `env:"REDDIT_THIRD_PARTY_KEY"`
-	FirecrawlAPIURL     string        `env:"FIRECRAWL_API_URL" envDefault:"https://api.firecrawl.dev/v2/scrape"`
-	FirecrawlAPIKey     string        `env:"FIRECRAWL_API_KEY"`
+	ScraperAPIURL  string `env:"SCRAPER_API_URL"`
+	ScraperAPIKey  string `env:"SCRAPER_API_KEY"`
+	FirecrawlAPIURL string `env:"FIRECRAWL_API_URL"` // deprecated alias for SCRAPER_API_URL
+	FirecrawlAPIKey string `env:"FIRECRAWL_API_KEY"` // deprecated alias for SCRAPER_API_KEY
+	YouTubeAPIKey       string        `env:"YOUTUBE_API_KEY"`
+	YouTubeProvider     string        `env:"YOUTUBE_PROVIDER" envDefault:"auto"`
+	YouTubeAPIBaseURL   string        `env:"YOUTUBE_API_BASE_URL" envDefault:"https://www.googleapis.com/youtube/v3"`
 	TwitchGQLURL        string        `env:"TWITCH_GQL_URL" envDefault:"https://gql.twitch.tv/gql"`
 	TwitchClientID      string        `env:"TWITCH_CLIENT_ID" envDefault:"kimne78kx3ncx6brgo4mv6wki5h1ko"`
 	EmoteServiceURL     string        `env:"EMOTE_SERVICE_URL"`
@@ -51,8 +59,19 @@ type Config struct {
 	AnalyticsPollInterval        time.Duration `env:"ANALYTICS_POLL_INTERVAL" envDefault:"15s"`
 	AnalyticsRetentionDays       int           `env:"ANALYTICS_RETENTION_DAYS" envDefault:"30"`
 	AnalyticsTopEmotesPerMinute  int           `env:"ANALYTICS_TOP_EMOTES_PER_MINUTE" envDefault:"200"`
-	AnalyticsVODGQLPageDelayMS   int           `env:"ANALYTICS_VOD_GQL_PAGE_DELAY_MS" envDefault:"0"`
-	AnalyticsTrackerScrapeMS     int           `env:"ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS" envDefault:"60000"`
+	AnalyticsVODGQLPageDelayMS        int `env:"ANALYTICS_VOD_GQL_PAGE_DELAY_MS" envDefault:"0"`
+	AnalyticsVODGQLConcurrency        int `env:"ANALYTICS_VOD_GQL_CONCURRENCY" envDefault:"3"`
+	AnalyticsVODGQLConcurrencyMin     int `env:"ANALYTICS_VOD_GQL_CONCURRENCY_MIN" envDefault:"0"`
+	AnalyticsVODGQLConcurrencyMax     int `env:"ANALYTICS_VOD_GQL_CONCURRENCY_MAX" envDefault:"0"`
+	AnalyticsVODGQLSegmentSeconds          int  `env:"ANALYTICS_VOD_GQL_SEGMENT_SECONDS" envDefault:"600"`
+	AnalyticsVODGQLDenseSegmentSeconds     int  `env:"ANALYTICS_VOD_GQL_DENSE_SEGMENT_SECONDS" envDefault:"120"`
+	AnalyticsVODGQLHotSegmentPageThreshold int  `env:"ANALYTICS_VOD_GQL_HOT_SEGMENT_PAGE_THRESHOLD" envDefault:"50"`
+	AnalyticsVODGQLIncrementalDB             bool `env:"ANALYTICS_VOD_GQL_INCREMENTAL_DB" envDefault:"true"`
+	AnalyticsTrackerScrapeMS        int  `env:"ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS" envDefault:"120000"`
+	AnalyticsPassTTMaxAge           bool `env:"ANALYTICS_PASS_TT_MAXAGE" envDefault:"true"`
+	AnalyticsTTMaxAgeMS             int  `env:"ANALYTICS_TT_MAX_AGE_MS" envDefault:"0"`
+	AnalyticsTTDirectHTTPEnabled    bool `env:"ANALYTICS_TT_DIRECT_HTTP_ENABLED" envDefault:"true"`
+	AnalyticsTTDirectHTTPTimeoutMS  int  `env:"ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS" envDefault:"1200"`
 	AlwaysTrackedChannels        []string      `env:"ALWAYS_TRACKED_CHANNELS" envSeparator:","`
 
 	TwitchOAuthClientID     string `env:"TWITCH_OAUTH_CLIENT_ID"`
@@ -86,6 +105,16 @@ func Load() (Config, error) {
 	var c Config
 	if err := env.Parse(&c); err != nil {
 		return Config{}, err
+	}
+	if strings.TrimSpace(c.ScraperAPIURL) == "" {
+		if strings.TrimSpace(c.FirecrawlAPIURL) != "" {
+			c.ScraperAPIURL = strings.TrimSpace(c.FirecrawlAPIURL)
+		} else {
+			c.ScraperAPIURL = defaultScraperAPIURL
+		}
+	}
+	if strings.TrimSpace(c.ScraperAPIKey) == "" && strings.TrimSpace(c.FirecrawlAPIKey) != "" {
+		c.ScraperAPIKey = strings.TrimSpace(c.FirecrawlAPIKey)
 	}
 	return c, nil
 }

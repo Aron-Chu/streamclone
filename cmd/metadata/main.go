@@ -58,8 +58,13 @@ func main() {
 			HTMLFallback:  cfg.RedditHTMLFallback,
 			ThirdPartyURL: cfg.RedditThirdPartyURL,
 			ThirdPartyKey: cfg.RedditThirdPartyKey,
-			FirecrawlURL:  cfg.FirecrawlAPIURL,
-			FirecrawlKey:  cfg.FirecrawlAPIKey,
+			ScraperURL:    cfg.ScraperAPIURL,
+			ScraperKey:    cfg.ScraperAPIKey,
+		}).
+		WithYouTubeOptions(api.YouTubeOptions{
+			Provider: cfg.YouTubeProvider,
+			APIKey:   cfg.YouTubeAPIKey,
+			APIURL:   cfg.YouTubeAPIBaseURL,
 		})
 
 	srv := httpx.New("metadata", cfg.HTTPAddr, logger, metrics.HTTPMiddleware("metadata"), httpx.CORS, httpx.NewRateLimiter(20, 40).Middleware)
