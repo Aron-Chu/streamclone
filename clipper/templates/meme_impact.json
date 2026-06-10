@@ -1,0 +1,15 @@
+{
+  "id": "meme_impact",
+  "name": "Meme Impact",
+  "description": "Impact gaming font on blurred vertical layout",
+  "format_preset": "tiktok",
+  "caption": {
+    "preset": "gaming",
+    "max_words_per_line": 2,
+    "position": "center"
+  },
+  "video": {
+    "layout": "blur_bg_center"
+  },
+  "audio": {}
+}

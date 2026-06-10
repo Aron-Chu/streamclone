@@ -94,6 +94,26 @@ class JobWorker:
                 self._finish_from_raw(job_id, job, raw_path, captions_path, final_path, source_duration)
                 return
 
+            clip_id = str(job.get("twitch_clip_id") or "")
+            if clip_id and not job.get("twitch_clip_url"):
+                self.store.set_state(job_id, "waiting_for_clip", "resuming clip readiness poll")
+                ready = self.twitch.poll_clip(
+                    clip_id,
+                    self.cfg.clip_poll_timeout_seconds,
+                    self.cfg.clip_poll_interval_seconds,
+                )
+                self.store.update_job(
+                    job_id,
+                    twitch_clip_url=ready.url,
+                    twitch_clip_duration=ready.duration,
+                )
+                self.store.set_state(job_id, "downloading", "downloading clip")
+                self.downloader.download(ready.url, raw_path)
+                self.store.update_job(job_id, raw_path=str(raw_path))
+                source_duration = ready.duration or float(job.get("source_duration") or self.cfg.source_duration)
+                self._finish_from_raw(job_id, job, raw_path, captions_path, final_path, source_duration)
+                return
+
             broadcaster_id = job.get("broadcaster_id") or ""
             if not broadcaster_id:
                 broadcaster_id = self.twitch.resolve_broadcaster_id(job["channel"])
@@ -168,6 +188,16 @@ class JobWorker:
                 )
         elif caption_file is None and captions_path.exists():
             caption_file = captions_path
+
+        if not self.cfg.auto_render:
+            self.store.update_job(job_id, raw_path=str(raw_path))
+            self.store.set_state(
+                job_id,
+                "ready",
+                "source ready for Clip Studio",
+                artifact_available=0,
+            )
+            return
 
         self.store.set_state(job_id, "rendering", "rendering vertical mp4")
         self.renderer.render(

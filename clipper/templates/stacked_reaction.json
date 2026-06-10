@@ -1,0 +1,19 @@
+{
+  "id": "stacked_reaction",
+  "name": "Stacked Reaction",
+  "description": "Facecam top, gameplay bottom — ideal for reaction clips",
+  "format_preset": "tiktok",
+  "caption": {
+    "preset": "karaoke_pop",
+    "max_words_per_line": 3,
+    "position": "bottom"
+  },
+  "video": {
+    "layout": "stacked_game_face",
+    "intro_zoom": { "duration": 0.35, "scale": 1.06 },
+    "vignette": false
+  },
+  "audio": {
+    "normalize": true
+  }
+}

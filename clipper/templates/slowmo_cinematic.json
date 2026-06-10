@@ -1,0 +1,23 @@
+{
+  "id": "slowmo_cinematic",
+  "name": "Slowmo Cinematic",
+  "description": "Long intro zoom with vignette for cinematic slow-mo feel",
+  "format_preset": "tiktok",
+  "caption": {
+    "preset": "none",
+    "max_words_per_line": 3,
+    "position": "bottom"
+  },
+  "video": {
+    "layout": "blur_bg_center",
+    "intro_zoom": {
+      "start": 0,
+      "duration": 0.8,
+      "scale": 1.05
+    },
+    "vignette": true
+  },
+  "audio": {
+    "normalize": true
+  }
+}

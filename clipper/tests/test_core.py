@@ -12,6 +12,8 @@ from liveclipper.templates import TemplateLoader, resolve_render_options
 from liveclipper.templates import AudioEffects, IntroZoom, VideoEffects
 from liveclipper.transcribe import (
     ass_time,
+    build_style_line,
+    detect_emote_tokens,
     format_karaoke_text,
     group_words_into_segments,
     offset_caption_segments,
@@ -81,6 +83,39 @@ class StoreTests(unittest.TestCase):
                 job = store.get_job(first.job_id)
                 assert job is not None
                 self.assertEqual(job["suppressed_count"], 1)
+            finally:
+                store.close()
+
+    def test_moment_context_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = Store(Path(td) / "clipper.sqlite")
+            store.init()
+            try:
+                ctx = {
+                    "stream_id": "abc",
+                    "chat_per_min": 42,
+                    "pick_reason": "chat_spike",
+                }
+                result = store.insert_job(
+                    channel="chan",
+                    broadcaster_id="",
+                    trigger_type="manual",
+                    reason="analytics",
+                    title="title",
+                    requested_duration=60,
+                    source_duration=60,
+                    final_duration=30,
+                    event_latency_offset=8,
+                    trigger_detected_at=1000,
+                    peak_chat_ts=None,
+                    message_count=None,
+                    duplicate_window_seconds=60,
+                    moment_context=ctx,
+                )
+                assert result.job_id is not None
+                job = store.get_job(result.job_id)
+                assert job is not None
+                self.assertEqual(job["moment_context"]["chat_per_min"], 42)
             finally:
                 store.close()
 
@@ -195,15 +230,93 @@ class CaptionTests(unittest.TestCase):
         self.assertEqual(len(grouped), 2)
         self.assertEqual(grouped[0]["text"], "a b")
 
+    def test_caption_size_and_position_in_ass(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "sized.ass"
+            write_ass(
+                path,
+                [(0, 1.0, "hello")],
+                caption_size="lg",
+                caption_position="top",
+            )
+            data = path.read_text(encoding="utf-8")
+            self.assertIn(",8,80,80,80,1", data)
+
+    def test_build_style_line_scales_font(self) -> None:
+        sm = build_style_line("default", caption_size="sm")
+        lg = build_style_line("default", caption_size="lg")
+        self.assertIn(",56,", sm)
+        self.assertIn(",92,", lg)
+
+    def test_detect_emote_tokens(self) -> None:
+        found = detect_emote_tokens("OMEGALUL that was crazy", {"omegalul"})
+        self.assertEqual(found, ["OMEGALUL"])
+
+    def test_write_ass_returns_emote_hits(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "emotes.ass"
+            hits = write_ass(
+                path,
+                [(0, 1.0, "KEKW moment")],
+                emote_names={"kekw"},
+            )
+            self.assertEqual(len(hits), 1)
+            self.assertEqual(hits[0]["name"], "KEKW")
+
+    def test_write_ass_transform_and_effect(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "transform.ass"
+            segments = [
+                {
+                    "start": 0.0,
+                    "end": 2.0,
+                    "text": "placed text",
+                    "transform": {
+                        "x": 0.5,
+                        "y": 0.25,
+                        "rotation": 15,
+                        "scale": 1.2,
+                    },
+                    "effect": "pop",
+                },
+                {
+                    "start": 2.0,
+                    "end": 4.0,
+                    "text": "shake line",
+                    "transform": {"x": 0.1, "y": 0.9, "rotation": 0},
+                    "effect": "shake",
+                },
+            ]
+            write_ass(path, segments)
+            data = path.read_text(encoding="utf-8")
+            self.assertIn("\\pos(540,480)", data)
+            self.assertIn("\\frz15.0", data)
+            self.assertIn("\\fscx120\\fscy120", data)
+            self.assertIn("\\fscx80\\fscy80\\t(0,150,\\fscx100\\fscy100)", data)
+            self.assertIn("\\pos(108,1728)", data)
+            self.assertIn("\\t(0,50,\\pos(116,1728))", data)
+            self.assertIn("shake line", data)
+
+    def test_write_ass_without_transform_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "plain.ass"
+            write_ass(path, [(0, 1.0, "plain caption")])
+            data = path.read_text(encoding="utf-8")
+            self.assertIn("plain caption", data)
+            self.assertNotIn("\\pos(", data)
+
 
 class TemplateTests(unittest.TestCase):
     def test_load_builtin_templates(self) -> None:
         loader = TemplateLoader()
         items = loader.list_public()
-        self.assertGreaterEqual(len(items), 5)
+        self.assertGreaterEqual(len(items), 16)
         ids = {item["id"] for item in items}
         self.assertIn("tiktok_pop", ids)
         self.assertIn("gaming_punch", ids)
+        self.assertIn("stacked_reaction", ids)
+        self.assertIn("hype_zoom", ids)
+        self.assertIn("slowmo_cinematic", ids)
 
     def test_resolve_render_options_from_template(self) -> None:
         loader = TemplateLoader()
@@ -223,11 +336,31 @@ class TemplateTests(unittest.TestCase):
         self.assertIn("zoompan", graph)
         self.assertIn("[v]", graph)
 
+    def test_stacked_game_face_layout(self) -> None:
+        graph = build_filter(None, "tiktok", layout="stacked_game_face", layout_split_ratio=0.35)
+        self.assertIn("vstack", graph)
+        self.assertIn("[v]", graph)
+
     def test_build_audio_filter_light_noise(self) -> None:
         chain = build_audio_filter(AudioEffects(noise_reduce="light"))
         self.assertIsNotNone(chain)
         assert chain is not None
         self.assertIn("afftdn", chain)
+
+
+class ConfigTests(unittest.TestCase):
+    def test_auto_render_defaults_false(self) -> None:
+        import os
+
+        from liveclipper.config import load_config
+
+        saved = os.environ.pop("CLIPPER_AUTO_RENDER", None)
+        try:
+            cfg = load_config()
+            self.assertFalse(cfg.auto_render)
+        finally:
+            if saved is not None:
+                os.environ["CLIPPER_AUTO_RENDER"] = saved
 
 
 if __name__ == "__main__":

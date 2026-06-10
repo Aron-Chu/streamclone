@@ -4,6 +4,12 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .emote_overlay import (
+    build_caption_emote_overlays,
+    build_reaction_strip_filter,
+    prepare_emote_assets,
+    prepare_top_emote_assets,
+)
 from .templates import AudioEffects, IntroZoom, VideoEffects
 
 
@@ -56,38 +62,57 @@ def _output_size(format_preset: str) -> tuple[int, int]:
     return 1080, 1920
 
 
-def _layout_filter(format_preset: str) -> str:
-    if format_preset in {"tiktok", "youtube_short", "instagram_reel"}:
-        return (
-            "[0:v]split=2[bg][fg];"
-            "[bg]scale=1080:1920:force_original_aspect_ratio=increase,"
-            "crop=1080:1920,boxblur=20:5[base];"
-            "[fg]scale=1080:1920:force_original_aspect_ratio=decrease,"
-            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2[vfg];"
-            "[base][vfg]overlay=0:0[vpre];"
-        )
+def _blur_bg_center_filter(width: int, height: int) -> str:
+    return (
+        "[0:v]split=2[bg][fg];"
+        f"[bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},boxblur=20:5[base];"
+        f"[fg]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2[vfg];"
+        "[base][vfg]overlay=0:0[vpre];"
+    )
+
+
+def _stacked_game_face_filter(width: int, height: int, split_ratio: float) -> str:
+    ratio = max(0.2, min(0.6, split_ratio))
+    top_h = int(height * ratio)
+    bottom_h = height - top_h
+    return (
+        "[0:v]split=2[topsrc][botsrc];"
+        f"[topsrc]crop=iw:ih*{ratio:.4f}:0:0,scale={width}:{top_h}:"
+        "force_original_aspect_ratio=increase,"
+        f"crop={width}:{top_h}[face];"
+        f"[botsrc]crop=iw:ih*{1 - ratio:.4f}:0:ih*{ratio:.4f},scale={width}:{bottom_h}:"
+        "force_original_aspect_ratio=increase,"
+        f"crop={width}:{bottom_h}[game];"
+        "[face][game]vstack=inputs=2[vpre];"
+    )
+
+
+def _layout_filter(
+    format_preset: str,
+    *,
+    layout: str = "blur_bg_center",
+    layout_split_ratio: float = 0.35,
+) -> str:
+    width, height = _output_size(format_preset)
+    if layout == "stacked_game_face":
+        return _stacked_game_face_filter(width, height, layout_split_ratio)
     if format_preset == "youtube":
         return (
-            "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,"
-            "pad=1920:1080:(ow-iw)/2:(oh-ih)/2[vpre];"
+            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2[vpre];"
         )
     if format_preset == "twitter":
         return (
             "[0:v]split=2[bg][fg];"
-            "[bg]scale=1080:1080:force_original_aspect_ratio=increase,"
-            "crop=1080:1080,boxblur=20:5[base];"
-            "[fg]scale=1080:1080:force_original_aspect_ratio=decrease,"
-            "pad=1080:1080:(ow-iw)/2:(oh-ih)/2[vfg];"
+            f"[bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},boxblur=20:5[base];"
+            f"[fg]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2[vfg];"
             "[base][vfg]overlay=0:0[vpre];"
         )
-    return (
-        "[0:v]split=2[bg][fg];"
-        "[bg]scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,boxblur=20:5[base];"
-        "[fg]scale=1080:1920:force_original_aspect_ratio=decrease,"
-        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2[vfg];"
-        "[base][vfg]overlay=0:0[vpre];"
-    )
+    return _blur_bg_center_filter(width, height)
 
 
 def _intro_zoom_filter(intro_zoom: IntroZoom, width: int, height: int, fps: int = 30) -> str:
@@ -135,13 +160,66 @@ def build_filter(
     captions_path: Path | None,
     format_preset: str = "tiktok",
     video_effects: VideoEffects | None = None,
+    *,
+    layout: str | None = None,
+    layout_split_ratio: float = 0.35,
+    emote_assets_dir: Path | None = None,
+    emote_map: dict[str, str] | None = None,
+    emote_hits: list[dict] | None = None,
+    moment_context: dict | None = None,
 ) -> str:
-    base = _layout_filter(format_preset)
+    active_layout = layout or (video_effects.layout if video_effects else "blur_bg_center")
+    base = _layout_filter(
+        format_preset,
+        layout=active_layout,
+        layout_split_ratio=layout_split_ratio,
+    )
+    width, height = _output_size(format_preset)
+    post = _apply_video_effects("vpre", "vfx", video_effects, format_preset)
+    chain = base + post
+
+    current = "vfx"
+    assets: dict[str, Path] = {}
+    if emote_assets_dir:
+        if emote_map:
+            assets.update(prepare_emote_assets(emote_map, emote_assets_dir))
+        top_emotes_raw = []
+        if moment_context and isinstance(moment_context.get("top_emotes"), list):
+            top_emotes_raw = moment_context["top_emotes"]
+            assets.update(prepare_top_emote_assets(top_emotes_raw, emote_assets_dir))
+
+    top_emotes = []
+    if moment_context and isinstance(moment_context.get("top_emotes"), list):
+        top_emotes = moment_context["top_emotes"]
+    if top_emotes and assets:
+        chain += ";" + build_reaction_strip_filter(
+            input_label=current,
+            output_label="vreact",
+            top_emotes=top_emotes,
+            assets=assets,
+            width=width,
+        )
+        current = "vreact"
+
     if captions_path:
-        post = _apply_video_effects("vpre", "vpost", video_effects, format_preset)
-        return base + post + f";[vpost]subtitles='{escape_filter_path(captions_path)}'[v]"
-    post = _apply_video_effects("vpre", "v", video_effects, format_preset)
-    return base + post
+        chain += f";[{current}]subtitles='{escape_filter_path(captions_path)}'[vsub]"
+        current = "vsub"
+    else:
+        chain += f";[{current}]null[vsub]"
+        current = "vsub"
+
+    if emote_hits and assets:
+        chain += ";" + build_caption_emote_overlays(
+            input_label=current,
+            output_label="v",
+            emote_hits=emote_hits,
+            assets=assets,
+            width=width,
+            height=height,
+        )
+    else:
+        chain += f";[{current}]null[v]"
+    return chain
 
 
 def build_audio_filter(effects: AudioEffects | None) -> str | None:
@@ -174,6 +252,12 @@ def build_command(
     trim_start: float | None = None,
     video_effects: VideoEffects | None = None,
     audio_effects: AudioEffects | None = None,
+    layout: str | None = None,
+    layout_split_ratio: float = 0.35,
+    emote_assets_dir: Path | None = None,
+    emote_map: dict[str, str] | None = None,
+    emote_hits: list[dict] | None = None,
+    moment_context: dict | None = None,
 ) -> RenderPlan:
     if trim_start is None:
         trim_start = compute_trim_start(
@@ -197,7 +281,17 @@ def build_command(
         "-i",
         str(input_path),
         "-filter_complex",
-        build_filter(captions_path, format_preset, video_effects),
+        build_filter(
+            captions_path,
+            format_preset,
+            video_effects,
+            layout=layout,
+            layout_split_ratio=layout_split_ratio,
+            emote_assets_dir=emote_assets_dir,
+            emote_map=emote_map,
+            emote_hits=emote_hits,
+            moment_context=moment_context,
+        ),
         "-map",
         "[v]",
     ]
@@ -244,6 +338,12 @@ class Renderer:
         trim_start: float | None = None,
         video_effects: VideoEffects | None = None,
         audio_effects: AudioEffects | None = None,
+        layout: str | None = None,
+        layout_split_ratio: float = 0.35,
+        emote_assets_dir: Path | None = None,
+        emote_map: dict[str, str] | None = None,
+        emote_hits: list[dict] | None = None,
+        moment_context: dict | None = None,
     ) -> RenderPlan:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         plan = build_command(
@@ -262,6 +362,12 @@ class Renderer:
             trim_start=trim_start,
             video_effects=video_effects,
             audio_effects=audio_effects,
+            layout=layout,
+            layout_split_ratio=layout_split_ratio,
+            emote_assets_dir=emote_assets_dir,
+            emote_map=emote_map,
+            emote_hits=emote_hits,
+            moment_context=moment_context,
         )
         try:
             proc = subprocess.run(

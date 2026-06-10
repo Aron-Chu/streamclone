@@ -23,6 +23,39 @@ from .validate import normalize_channel
 from .worker import JobWorker
 
 
+def _probe_twitch_token(client_id: str, access_token: str) -> dict[str, object]:
+    import json
+    import urllib.error
+    import urllib.request
+
+    if not access_token:
+        return {"ok": False, "reason": "token_missing"}
+    req = urllib.request.Request(
+        "https://id.twitch.tv/oauth2/validate",
+        headers={"Authorization": "Bearer " + access_token.strip()},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode())
+            token_client = str(body.get("client_id") or "")
+            return {
+                "ok": True,
+                "client_id_match": token_client == client_id,
+                "token_client_prefix": token_client[:4] if len(token_client) >= 4 else "",
+                "has_clips_edit": "clips:edit" in (body.get("scopes") or []),
+                "expires_in": body.get("expires_in"),
+            }
+    except urllib.error.HTTPError as exc:
+        return {
+            "ok": False,
+            "reason": "validate_http_error",
+            "status": exc.code,
+            "body_excerpt": exc.read().decode("utf-8", errors="replace")[:160],
+        }
+    except Exception as exc:
+        return {"ok": False, "reason": "validate_failed", "error": str(exc)[:160]}
+
+
 def create_app() -> FastAPI:
     cfg = load_config()
     ensure_dirs(cfg)
@@ -54,6 +87,11 @@ def create_app() -> FastAPI:
         format_preset: str | None,
         caption_preset: str | None,
         template_id: str | None,
+        caption_size: str | None = None,
+        caption_position: str | None = None,
+        layout: str | None = None,
+        layout_split_ratio: float | None = None,
+        emote_map: dict[str, str] | None = None,
     ):
         try:
             job = store.get_job(job_id)
@@ -92,22 +130,37 @@ def create_app() -> FastAPI:
                 trim_end=trim_end,
             )
 
+            emote_hits: list[dict[str, Any]] = []
+            emote_names = {k.strip().lower() for k in (emote_map or {})}
             if resolved.caption_preset == "none":
                 captions_file = None
             else:
-                write_ass(
+                emote_hits = write_ass(
                     captions_path,
                     offset_segments,
                     style_preset=resolved.caption_preset,
                     max_words_per_line=resolved.max_words_per_line,
+                    caption_size=caption_size or "md",
+                    caption_position=caption_position or "bottom",
+                    emote_names=emote_names or None,
                 )
                 captions_file = captions_path
+
+            moment_context = job.get("moment_context")
+            if isinstance(moment_context, str):
+                try:
+                    moment_context = json.loads(moment_context)
+                except Exception:
+                    moment_context = None
 
             final_path = Path(job.get("final_path") or (str(cfg.output_dir / (job_id + ".mp4"))))
 
             store.set_state(job_id, "rendering", "re-rendering video")
 
             source_duration = job.get("twitch_clip_duration") or float(job.get("source_duration") or cfg.source_duration)
+
+            active_layout = layout or resolved.video_effects.layout
+            split_ratio = float(layout_split_ratio if layout_split_ratio is not None else 0.35)
 
             renderer.render(
                 input_path=raw_path,
@@ -122,6 +175,12 @@ def create_app() -> FastAPI:
                 trim_start=trim_start,
                 video_effects=resolved.video_effects,
                 audio_effects=resolved.audio_effects,
+                layout=active_layout,
+                layout_split_ratio=split_ratio,
+                emote_assets_dir=job_dir,
+                emote_map=emote_map,
+                emote_hits=emote_hits,
+                moment_context=moment_context if isinstance(moment_context, dict) else None,
             )
 
             store.set_state(
@@ -249,6 +308,55 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=JSONResponse)
     def api_root() -> dict[str, str]:
         return {"status": "ok", "service": "Streamclone Clipper Service"}
+
+    @app.get("/v1/twitch/status")
+    def twitch_status() -> dict[str, Any]:
+        if not cfg.twitch_client_id or not cfg.twitch_user_access_token:
+            return {
+                "ok": False,
+                "failure_code": "twitch_not_configured",
+                "remediation": (
+                    "Set TWITCH_OAUTH_CLIENT_ID and run make twitch-local-auth to write "
+                    "CLIPPER_TWITCH_USER_ACCESS_TOKEN, then recreate the clipper service."
+                ),
+            }
+        probe = _probe_twitch_token(cfg.twitch_client_id, cfg.twitch_user_access_token)
+        if probe.get("ok"):
+            if probe.get("client_id_match") is False:
+                return {
+                    "ok": False,
+                    "failure_code": "client_id_mismatch",
+                    "remediation": (
+                        "CLIPPER_TWITCH_CLIENT_ID does not match the Twitch app that issued the token. "
+                        "Run make twitch-local-auth to resync both values."
+                    ),
+                }
+            if not probe.get("has_clips_edit"):
+                return {
+                    "ok": False,
+                    "failure_code": "missing_scope",
+                    "remediation": (
+                        "Twitch token is missing clips:edit. Run make twitch-local-auth and approve "
+                        "the login prompt, then recreate the clipper service."
+                    ),
+                }
+            return {
+                "ok": True,
+                "expires_in": probe.get("expires_in"),
+                "has_clips_edit": True,
+            }
+        failure_code = "invalid_token"
+        if probe.get("reason") == "token_missing":
+            failure_code = "twitch_not_configured"
+        return {
+            "ok": False,
+            "failure_code": failure_code,
+            "remediation": (
+                "Twitch token is expired or revoked. Run make twitch-local-auth, approve the Twitch "
+                "login in your browser, then recreate the clipper service. Restarting clipper alone "
+                "does not refresh the token."
+            ),
+        }
 
     @app.get("/v1/channels")
     def list_channels() -> dict[str, Any]:
@@ -389,6 +497,23 @@ def create_app() -> FastAPI:
         if template_id is not None:
             template_id = str(template_id)
 
+        caption_size = body.get("caption_size")
+        if caption_size is not None:
+            caption_size = str(caption_size)
+        caption_position = body.get("caption_position")
+        if caption_position is not None:
+            caption_position = str(caption_position)
+        layout = body.get("layout")
+        if layout is not None:
+            layout = str(layout)
+        layout_split_ratio = body.get("layout_split_ratio")
+        if layout_split_ratio is not None:
+            layout_split_ratio = float(layout_split_ratio)
+        emote_map_raw = body.get("emote_map")
+        emote_map: dict[str, str] | None = None
+        if isinstance(emote_map_raw, dict):
+            emote_map = {str(k): str(v) for k, v in emote_map_raw.items() if v}
+
         store.set_state(job_id, "rendering", "queued for re-render")
 
         background_tasks.add_task(
@@ -399,6 +524,11 @@ def create_app() -> FastAPI:
             format_preset=format_preset,
             caption_preset=caption_preset,
             template_id=template_id,
+            caption_size=caption_size,
+            caption_position=caption_position,
+            layout=layout,
+            layout_split_ratio=layout_split_ratio,
+            emote_map=emote_map,
         )
         return {"status": "rendering", "job_id": job_id}
 
@@ -436,6 +566,14 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail={"error": "invalid_channel"})
         duration = float(body.get("duration") or cfg.source_duration)
         final_duration = float(body.get("final_duration") or cfg.final_duration)
+        import json as json_mod
+        moment_context_raw = body.get("moment_context")
+        moment_context_value: str | None = None
+        if isinstance(moment_context_raw, dict):
+            moment_context_value = json_mod.dumps(moment_context_raw)
+        elif isinstance(moment_context_raw, str) and moment_context_raw.strip():
+            moment_context_value = moment_context_raw.strip()
+
         result = store.insert_job(
             channel=channel,
             broadcaster_id=str(body.get("broadcaster_id") or ""),
@@ -450,6 +588,7 @@ def create_app() -> FastAPI:
             peak_chat_ts=as_optional_int(body.get("peak_chat_ts")),
             message_count=as_optional_int(body.get("message_count")),
             duplicate_window_seconds=cfg.duplicate_window_seconds,
+            moment_context=moment_context_value,
         )
         if result.suppressed:
             return JSONResponse(

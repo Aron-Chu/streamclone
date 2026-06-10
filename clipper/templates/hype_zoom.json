@@ -1,0 +1,22 @@
+{
+  "id": "hype_zoom",
+  "name": "Hype Zoom",
+  "description": "Strong intro zoom with karaoke captions for peak moments",
+  "format_preset": "tiktok",
+  "caption": {
+    "preset": "karaoke_pop",
+    "max_words_per_line": 2,
+    "position": "bottom"
+  },
+  "video": {
+    "layout": "blur_bg_center",
+    "intro_zoom": {
+      "start": 0,
+      "duration": 0.6,
+      "scale": 1.12
+    }
+  },
+  "audio": {
+    "noise_reduce": "light"
+  }
+}

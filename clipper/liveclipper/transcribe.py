@@ -38,13 +38,111 @@ def ass_escape_text(text: str) -> str:
 KARAOKE_PRESETS = {"karaoke_pop", "tiktok_pop"}
 
 
-STYLE_LINES = {
-    "default": "Style: Default,Arial,72,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,1,2,80,80,210,1",
-    "tiktok_pop": "Style: Default,Arial Black,80,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,80,80,210,1",
-    "karaoke_pop": "Style: Default,Arial Black,80,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,80,80,210,1",
-    "subtitle_bar": "Style: Default,Arial,64,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,3,0,0,2,80,80,210,1",
-    "gaming": "Style: Default,Impact,80,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,8,2,2,80,80,210,1",
+STYLE_BASE = {
+    "default": ("Default", "Arial", 72, 1, 5, 1),
+    "tiktok_pop": ("Default", "Arial Black", 80, 1, 6, 0),
+    "karaoke_pop": ("Default", "Arial Black", 80, 1, 6, 0),
+    "subtitle_bar": ("Default", "Arial", 64, 3, 0, 0),
+    "gaming": ("Default", "Impact", 80, 1, 8, 2),
 }
+
+CAPTION_SIZE_SCALE = {"sm": 0.78, "md": 1.0, "lg": 1.28}
+CAPTION_POSITION_ALIGN = {"bottom": 2, "center": 5, "top": 8}
+CAPTION_POSITION_MARGIN = {"bottom": 210, "center": 0, "top": 80}
+
+PLAY_RES_X = 1080
+PLAY_RES_Y = 1920
+
+
+def _ass_pos_from_transform(transform: dict[str, Any]) -> tuple[int, int]:
+    x = int(round(float(transform.get("x", 0.5)) * PLAY_RES_X))
+    y = int(round(float(transform.get("y", 0.5)) * PLAY_RES_Y))
+    return x, y
+
+
+def _transform_ass_tags(transform: dict[str, Any]) -> str:
+    x, y = _ass_pos_from_transform(transform)
+    rotation = float(transform.get("rotation", 0))
+    scale = float(transform.get("scale", 1.0))
+    tags = [f"\\pos({x},{y})", f"\\an5", f"\\frz{rotation:.1f}"]
+    if scale != 1.0:
+        scale_pct = max(1, int(round(scale * 100)))
+        tags.append(f"\\fscx{scale_pct}\\fscy{scale_pct}")
+    return "".join(tags)
+
+
+def _effect_ass_tags(effect: str, x: int, y: int) -> str:
+    if effect in ("", "none", None):
+        return ""
+    if effect == "pop":
+        return "\\fscx80\\fscy80\\t(0,150,\\fscx100\\fscy100)"
+    if effect == "glow":
+        return "\\blur3\\bord4\\3c&HFFFFFF&"
+    if effect == "bounce":
+        return (
+            f"\\t(0,150,\\pos({x},{y - 40}))"
+            f"\\t(150,300,\\pos({x},{y}))"
+        )
+    if effect == "shake":
+        return (
+            f"\\t(0,50,\\pos({x + 8},{y}))"
+            f"\\t(50,100,\\pos({x - 8},{y}))"
+            f"\\t(100,150,\\pos({x + 6},{y}))"
+            f"\\t(150,200,\\pos({x},{y}))"
+        )
+    return ""
+
+
+def _wrap_dialogue_text(
+    text: str,
+    *,
+    transform: dict[str, Any] | None,
+    effect: str | None,
+) -> str:
+    if not transform:
+        return text
+    x, y = _ass_pos_from_transform(transform)
+    tags = [_transform_ass_tags(transform)]
+    effect_tag = _effect_ass_tags(str(effect or ""), x, y)
+    if effect_tag:
+        tags.append(effect_tag)
+    return "{" + "".join(tags) + "}" + text
+
+
+def build_style_line(
+    style_preset: str,
+    *,
+    caption_size: str = "md",
+    caption_position: str = "bottom",
+) -> str:
+    name, font, base_size, border_style, outline, shadow = STYLE_BASE.get(
+        style_preset, STYLE_BASE["default"]
+    )
+    scale = CAPTION_SIZE_SCALE.get(caption_size, 1.0)
+    font_size = max(32, int(round(base_size * scale)))
+    alignment = CAPTION_POSITION_ALIGN.get(caption_position, 2)
+    margin_v = CAPTION_POSITION_MARGIN.get(caption_position, 210)
+    colours = {
+        "default": "&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000",
+        "tiktok_pop": "&H0000FFFF,&H0000FFFF,&H00000000,&H00000000",
+        "karaoke_pop": "&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000",
+        "subtitle_bar": "&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000",
+        "gaming": "&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000",
+    }
+    colour = colours.get(style_preset, colours["default"])
+    return (
+        f"Style: {name},{font},{font_size},{colour},-1,0,0,0,100,100,0,0,"
+        f"{border_style},{outline},{shadow},{alignment},80,80,{margin_v},1"
+    )
+
+
+def detect_emote_tokens(text: str, emote_names: set[str]) -> list[str]:
+    found: list[str] = []
+    for part in text.split():
+        key = part.strip().lower()
+        if key and key in emote_names:
+            found.append(part.strip())
+    return found
 
 
 def offset_caption_segments(
@@ -120,9 +218,17 @@ def write_ass(
     segments: list[dict[str, Any]] | list[tuple[float, float, str]],
     style_preset: str = "default",
     max_words_per_line: int | None = None,
-) -> None:
+    caption_size: str = "md",
+    caption_position: str = "bottom",
+    emote_names: set[str] | None = None,
+) -> list[dict[str, Any]]:
     path.parent.mkdir(parents=True, exist_ok=True)
-    style_str = STYLE_LINES.get(style_preset, STYLE_LINES["default"])
+    style_str = build_style_line(
+        style_preset,
+        caption_size=caption_size,
+        caption_position=caption_position,
+    )
+    emote_hits: list[dict[str, Any]] = []
     use_karaoke = style_preset in KARAOKE_PRESETS
 
     lines = [
@@ -153,8 +259,18 @@ def write_ass(
         end = float(seg.get("end", 0))
         text = str(seg.get("text", "")).strip()
         words_raw = seg.get("words")
+        transform_raw = seg.get("transform")
+        transform = transform_raw if isinstance(transform_raw, dict) else None
+        effect = str(seg.get("effect") or "")
         if end <= start:
             end = start + 0.6
+
+        def apply_overrides(dialogue_text: str) -> str:
+            return _wrap_dialogue_text(
+                dialogue_text,
+                transform=transform,
+                effect=effect,
+            )
 
         dialogue_text = text
         if use_karaoke and isinstance(words_raw, list) and words_raw:
@@ -176,7 +292,8 @@ def write_ass(
                     karaoke = format_karaoke_text(chunk)
                     if karaoke:
                         lines.append(
-                            f"Dialogue: 0,{ass_time(c_start)},{ass_time(c_end)},Default,,0,0,0,,{karaoke}"
+                            f"Dialogue: 0,{ass_time(c_start)},{ass_time(c_end)},Default,,0,0,0,,"
+                            f"{apply_overrides(karaoke)}"
                         )
                 continue
             dialogue_text = format_karaoke_text(words_raw) or ass_escape_text(text)
@@ -185,11 +302,18 @@ def write_ass(
 
         if not dialogue_text:
             continue
+        if emote_names:
+            for emote_name in detect_emote_tokens(text, emote_names):
+                emote_hits.append(
+                    {"name": emote_name, "start": start, "end": end}
+                )
         lines.append(
-            f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{dialogue_text}"
+            f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,"
+            f"{apply_overrides(dialogue_text)}"
         )
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return emote_hits
 
 
 def group_words_into_segments(

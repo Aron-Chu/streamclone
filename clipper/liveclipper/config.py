@@ -5,8 +5,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _env_file_candidates() -> tuple[Path, ...]:
+    repo_root = Path(__file__).resolve().parents[2]
+    return (
+        Path(".env"),
+        Path("..") / ".env",
+        repo_root / ".env",
+    )
+
+
 def _load_env_files() -> None:
-    for path in (Path(".env"), Path("..") / ".env"):
+    for path in _env_file_candidates():
         if not path.exists():
             continue
         for raw in path.read_text(encoding="utf-8").splitlines():
@@ -78,6 +87,7 @@ class Config:
     final_retention_hours: int
     cleanup_interval_seconds: int
     stale_job_seconds: int
+    auto_render: bool
 
 
 def load_config() -> Config:
@@ -101,8 +111,8 @@ def load_config() -> Config:
         event_latency_offset=_float("CLIPPER_EVENT_LATENCY_OFFSET_SECONDS", 8.0),
         duplicate_window_seconds=_int("CLIPPER_DUPLICATE_WINDOW_SECONDS", 60),
         cooldown_seconds=_int("CLIPPER_COOLDOWN_SECONDS", 120),
-        clip_poll_timeout_seconds=_int("CLIPPER_CLIP_POLL_TIMEOUT_SECONDS", 15),
-        clip_poll_interval_seconds=_float("CLIPPER_CLIP_POLL_INTERVAL_SECONDS", 1.5),
+        clip_poll_timeout_seconds=_int("CLIPPER_CLIP_POLL_TIMEOUT_SECONDS", 60),
+        clip_poll_interval_seconds=_float("CLIPPER_CLIP_POLL_INTERVAL_SECONDS", 1.0),
         chat_window_seconds=_int("CLIPPER_CHAT_WINDOW_SECONDS", 12),
         chat_min_messages=_int("CLIPPER_CHAT_MIN_MESSAGES", 18),
         chat_spike_multiplier=_float("CLIPPER_CHAT_SPIKE_MULTIPLIER", 2.5),
@@ -117,6 +127,7 @@ def load_config() -> Config:
         final_retention_hours=_int("CLIPPER_FINAL_RETENTION_HOURS", 48),
         cleanup_interval_seconds=_int("CLIPPER_CLEANUP_INTERVAL_SECONDS", 3600),
         stale_job_seconds=_int("CLIPPER_STALE_JOB_SECONDS", 120),
+        auto_render=_bool("CLIPPER_AUTO_RENDER", False),
     )
 
 

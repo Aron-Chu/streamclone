@@ -1,0 +1,18 @@
+{
+  "id": "horror_vignette",
+  "name": "Horror",
+  "description": "Dark vignette with minimal captions for horror moments",
+  "format_preset": "tiktok",
+  "caption": {
+    "preset": "none",
+    "max_words_per_line": 3,
+    "position": "bottom"
+  },
+  "video": {
+    "layout": "blur_bg_center",
+    "vignette": true
+  },
+  "audio": {
+    "normalize": true
+  }
+}

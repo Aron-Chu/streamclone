@@ -119,6 +119,10 @@ class Store:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN captions TEXT")
             except sqlite3.OperationalError:
                 pass
+            try:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN moment_context TEXT")
+            except sqlite3.OperationalError:
+                pass
             self._conn.commit()
 
     def upsert_watched_channel(self, login: str, broadcaster_id: str = "") -> dict[str, Any]:
@@ -186,6 +190,7 @@ class Store:
         peak_chat_ts: int | None,
         message_count: int | None,
         duplicate_window_seconds: int,
+        moment_context: dict[str, Any] | None = None,
     ) -> JobInsertResult:
         ts = now_ms()
         cutoff = ts - duplicate_window_seconds * 1000
@@ -214,9 +219,9 @@ class Store:
                 INSERT INTO jobs (
                     id, channel, broadcaster_id, trigger_type, reason, title, requested_duration,
                     source_duration, final_duration, event_latency_offset, trigger_detected_at,
-                    peak_chat_ts, message_count, state, created_at, updated_at
+                    peak_chat_ts, message_count, moment_context, state, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
                 """,
                 (
                     job_id,
@@ -232,6 +237,7 @@ class Store:
                     trigger_detected_at,
                     peak_chat_ts,
                     message_count,
+                    json.dumps(moment_context) if moment_context else None,
                     ts,
                     ts,
                 ),
@@ -360,6 +366,19 @@ class Store:
             row = self._conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 return None
+            if row["twitch_clip_id"] and not row["twitch_clip_url"]:
+                ts = now_ms()
+                self._conn.execute(
+                    """
+                    UPDATE jobs
+                    SET state='queued', failure_code=NULL, error_message=NULL, updated_at=?, finished_at=NULL
+                    WHERE id=?
+                    """,
+                    (ts, job_id),
+                )
+                self._insert_event_locked(job_id, "queued", "resume clip readiness poll", ts)
+                self._conn.commit()
+                return self.get_job(job_id)
             new_id = uuid.uuid4().hex
             ts = now_ms()
             self._conn.execute(
@@ -367,9 +386,9 @@ class Store:
                 INSERT INTO jobs (
                     id, channel, broadcaster_id, trigger_type, reason, title, requested_duration,
                     source_duration, final_duration, event_latency_offset, trigger_detected_at,
-                    peak_chat_ts, message_count, state, created_at, updated_at
+                    peak_chat_ts, message_count, moment_context, state, created_at, updated_at
                 )
-                VALUES (?, ?, ?, 'retry', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+                VALUES (?, ?, ?, 'retry', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
                 """,
                 (
                     new_id,
@@ -384,6 +403,7 @@ class Store:
                     now_ms(),
                     row["peak_chat_ts"],
                     row["message_count"],
+                    row.get("moment_context"),
                     ts,
                     ts,
                 ),
@@ -446,4 +466,12 @@ class Store:
     def _decode_job(self, row: sqlite3.Row) -> dict[str, Any]:
         out = dict(row)
         out["warnings"] = json.loads(out.get("warnings") or "[]")
+        raw_ctx = out.get("moment_context")
+        if isinstance(raw_ctx, str) and raw_ctx:
+            try:
+                out["moment_context"] = json.loads(raw_ctx)
+            except json.JSONDecodeError:
+                out["moment_context"] = None
+        elif not raw_ctx:
+            out["moment_context"] = None
         return out

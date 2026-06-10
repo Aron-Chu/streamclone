@@ -134,6 +134,7 @@ class TemplateLoader:
                     "format_preset": recipe.format_preset,
                     "caption_preset": recipe.caption.preset,
                     "max_words_per_line": recipe.caption.max_words_per_line,
+                    "layout": recipe.video.layout,
                     "has_intro_zoom": recipe.video.intro_zoom is not None,
                     "has_vignette": recipe.video.vignette,
                     "noise_reduce": recipe.audio.noise_reduce,

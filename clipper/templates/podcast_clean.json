@@ -1,0 +1,17 @@
+{
+  "id": "podcast_clean",
+  "name": "Podcast Clean",
+  "description": "16:9 layout with clean subtitle bar for talk clips",
+  "format_preset": "youtube",
+  "caption": {
+    "preset": "subtitle_bar",
+    "max_words_per_line": 4,
+    "position": "bottom"
+  },
+  "video": {
+    "layout": "blur_bg_center"
+  },
+  "audio": {
+    "normalize": true
+  }
+}
