@@ -49,7 +49,7 @@ function Invoke-StreamcloneInstall {
     & $tempInstall -Release -NonInteractive -DesktopShortcut
 }
 
-$root = Get-StreamcloneRoot -FromLauncher $LauncherRoot
+$root = Get-StreamcloneRoot -LauncherRoot $LauncherRoot
 
 switch ($Action) {
     'install' { Invoke-StreamcloneInstall }

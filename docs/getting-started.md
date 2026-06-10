@@ -32,7 +32,15 @@ Optional:
 
 ## Non-developer quick path
 
-Check dependencies, then start (first run runs setup automatically):
+### Windows — double-click (no terminal)
+
+1. Clone or download ZIP and extract.
+2. **First time:** double-click **`Install Streamclone.cmd`** in the repo folder (requires Docker Desktop running). This runs setup and adds **Start** / **Stop** shortcuts to your Desktop.
+3. **Every day:** double-click **`Start Streamclone.cmd`** (repo folder or Desktop shortcut). Browser opens **http://localhost:8090/welcome** when ready.
+
+See [install-desktop.md](install-desktop.md) for release ZIP / shortcut details.
+
+### Command line (optional)
 
 ```powershell
 # Windows

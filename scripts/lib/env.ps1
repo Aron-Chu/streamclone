@@ -119,6 +119,13 @@ function Invoke-EnvGenerateSecrets {
     }
 }
 
+function Repair-FrontendDockerEntrypointLf {
+    $path = Join-Path (Get-EnvRepoRoot) 'frontend\docker-entrypoint.d\40-streamclone-config.sh'
+    if (-not (Test-Path $path)) { return }
+    $text = [System.IO.File]::ReadAllText($path) -replace "`r`n", "`n" -replace "`r", "`n"
+    [System.IO.File]::WriteAllText($path, $text, [System.Text.UTF8Encoding]::new($false))
+}
+
 function Invoke-EnvSynthesize {
     param(
         [ValidateSet('core', 'scraper', 'clipper', 'full')][string]$Profile = 'core',
@@ -134,6 +141,7 @@ function Invoke-EnvSynthesize {
     $local = Join-Path $root '.env.local'
     if (Test-Path $local) { $sources += $local }
     Merge-EnvFiles -OutFile $OutFile -Sources $sources
+    Set-EnvFileValue -Path $OutFile -Key 'STREAMCLONE_PROFILE' -Value $Profile
     Invoke-EnvGenerateSecrets -EnvFile $OutFile
 }
 

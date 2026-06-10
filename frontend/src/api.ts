@@ -291,6 +291,34 @@ export interface LSFResponse {
   updatedAt: number
 }
 
+export type SetupServiceState = 'ready' | 'offline'
+
+export interface SetupWelcomeServices {
+  scraper: SetupServiceState
+  clipper: SetupServiceState
+}
+
+export interface SetupWelcome {
+  profile: string
+  services: SetupWelcomeServices
+  incomplete: boolean
+  showWelcome: boolean
+  setupGuideUrl: string
+}
+
+export interface SetupControlHealth {
+  ok: boolean
+  service?: string
+}
+
+export interface SetupControlStartResponse {
+  ok: boolean
+  service?: string
+  message?: string
+  error?: string
+  log?: string
+}
+
 export interface AuthDebug {
   ready: boolean
   clientIdConfigured: boolean
@@ -746,6 +774,21 @@ export const ensureChannelEmotes = (login: string, twitchId: string, providers: 
 
 export const getChannelEmotes = (login: string): Promise<ChannelEmote[]> =>
   fetch(`${EMOTE}/v1/channels/${encodeURIComponent(login)}/emotes`).then(r => json<ChannelEmote[]>(r))
+
+export const getSetupWelcome = (): Promise<SetupWelcome> =>
+  fetch(`${METADATA}/v1/setup/welcome`).then(r => json<SetupWelcome>(r))
+
+export const getSetupControlHealth = (): Promise<SetupControlHealth> =>
+  fetch('/v1/setup-control/health').then(r => json<SetupControlHealth>(r))
+
+export const startSetupService = (service: 'scraper' | 'clipper'): Promise<SetupControlStartResponse> =>
+  fetch(`/v1/setup-control/start/${service}`, { method: 'POST' }).then(async r => {
+    const body = await r.json().catch(() => ({})) as SetupControlStartResponse
+    if (!r.ok) {
+      throw new ApiError(body.error || r.statusText, r.status)
+    }
+    return body
+  })
 
 export const getAuthDebug = (): Promise<AuthDebug> =>
   fetch(`${CHAT_HTTP}/v1/auth/debug`, { credentials: 'include' }).then(r => json<AuthDebug>(r))

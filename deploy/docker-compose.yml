@@ -179,6 +179,8 @@ services:
       VITE_CLIPPER_URL: auto
       VITE_CLIPPER_TOKEN: ${VITE_CLIPPER_TOKEN:-${CLIPPER_WEBHOOK_TOKEN:-}}
       VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}
+      STREAMCLONE_PROFILE: ${STREAMCLONE_PROFILE:-core}
+      TWITCH_DEV_TOKEN_IMPORT_ENABLED: ${TWITCH_DEV_TOKEN_IMPORT_ENABLED:-false}
     ports: ["5174:80"]
     volumes:
       - ../frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro

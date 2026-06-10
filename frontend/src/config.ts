@@ -8,6 +8,8 @@ type RuntimeConfig = {
   clipperUrl?: string
   clipperToken?: string
   maxRetainedMessages?: string | number
+  streamcloneProfile?: string
+  devTokenImportEnabled?: string | boolean
 }
 
 declare global {
@@ -59,3 +61,5 @@ export const CHAT_HTTP = resolveHttp(runtime.chatHttp || (import.meta.env.VITE_C
 export const CLIPPER = resolveHttp(runtime.clipperUrl || (import.meta.env.VITE_CLIPPER_URL as string), 'http://localhost:8095')
 export const CLIPPER_TOKEN = String(runtime.clipperToken ?? import.meta.env.VITE_CLIPPER_TOKEN ?? '')
 export const MAX_RETAINED_MESSAGES = Number(runtime.maxRetainedMessages ?? import.meta.env.VITE_MAX_RETAINED_MESSAGES ?? 250)
+export const STREAMCLONE_PROFILE = String(runtime.streamcloneProfile ?? import.meta.env.VITE_STREAMCLONE_PROFILE ?? 'core').toLowerCase()
+export const DEV_TOKEN_IMPORT_ENABLED = String(runtime.devTokenImportEnabled ?? import.meta.env.VITE_TWITCH_DEV_TOKEN_IMPORT_ENABLED ?? 'false') === 'true'

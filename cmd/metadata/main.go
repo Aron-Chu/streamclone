@@ -65,6 +65,13 @@ func main() {
 			Provider: cfg.YouTubeProvider,
 			APIKey:   cfg.YouTubeAPIKey,
 			APIURL:   cfg.YouTubeAPIBaseURL,
+		}).
+		WithSetupWelcome(api.SetupWelcomeOptions{
+			Profile:               cfg.StreamcloneProfile,
+			DevTokenImportEnabled: cfg.TwitchDevTokenImport,
+			OAuthClientID:         cfg.TwitchOAuthClientID,
+			OAuthClientSecret:     cfg.TwitchOAuthClientSecret,
+			ClipperServiceURL:     cfg.ClipperServiceURL,
 		})
 
 	srv := httpx.New("metadata", cfg.HTTPAddr, logger, metrics.HTTPMiddleware("metadata"), httpx.CORS, httpx.NewRateLimiter(20, 40).Middleware)

@@ -5,6 +5,7 @@
 *.out
 .env
 .streamclone-profile
+.streamclone-setup-control.pid
 .env.test
 # env templates only — never commit live .env.local etc.
 .env.*

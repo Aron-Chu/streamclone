@@ -2,6 +2,16 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
+$Root = Split-Path -Parent $PSScriptRoot
+$controlPidFile = Join-Path $Root '.streamclone-setup-control.pid'
+if (Test-Path $controlPidFile) {
+    $controlPid = (Get-Content $controlPidFile -Raw).Trim()
+    if ($controlPid -match '^\d+$') {
+        Stop-Process -Id ([int]$controlPid) -Force -ErrorAction SilentlyContinue
+    }
+    Remove-Item $controlPidFile -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host 'Stopping Streamclone...' -ForegroundColor Cyan
 docker compose --env-file .env `
     -f deploy/docker-compose.yml `

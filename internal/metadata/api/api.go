@@ -69,6 +69,11 @@ type Handler struct {
 	redditThirdPartyKey string
 	scraperAPIURL     string
 	scraperAPIKey     string
+	streamcloneProfile  string
+	devTokenImportEnabled bool
+	oauthClientID       string
+	oauthClientSecret   string
+	clipperServiceURL   string
 	youtubeProvider     string
 	youtubeAPIKey       string
 	youtubeAPIBaseURL   string
@@ -178,6 +183,7 @@ func (h *Handler) WithRedditOptions(opts RedditOptions) *Handler {
 }
 
 func (h *Handler) Mount(r *chi.Mux) {
+	r.Get("/v1/setup/welcome", h.setupWelcome)
 	r.Get("/v1/streams", h.streams)
 	r.Get("/v1/streams/random", h.randomStream)
 	r.Get("/v1/categories", h.categories)

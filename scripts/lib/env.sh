@@ -203,6 +203,7 @@ env_synthesize() {
   fi
 
   env_merge_files "$outfile" "${sources[@]}"
+  env_set_key "$outfile" STREAMCLONE_PROFILE "$profile"
   env_generate_secrets "$outfile"
 }
 

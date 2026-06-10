@@ -85,6 +85,16 @@ $null = $LASTEXITCODE
 & (Join-Path $PSScriptRoot 'lib\wait-stack.ps1')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+$controlPidFile = Join-Path $Root '.streamclone-setup-control.pid'
+$controlScript = Join-Path $PSScriptRoot 'setup-control.ps1'
+if (-not (Test-Path $controlPidFile)) {
+    Start-Process -FilePath 'powershell.exe' `
+        -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $controlScript) `
+        -WorkingDirectory $Root | Out-Null
+    Start-Sleep -Milliseconds 400
+}
+
+
 Write-Host ''
 Write-Host 'Streamclone is running at http://localhost:8090' -ForegroundColor Green
 Write-Host 'Stop:  powershell -File scripts/stop-streamclone.ps1'
@@ -93,5 +103,5 @@ if ($Profile -in @('clipper', 'full')) {
 }
 
 if (-not $NoBrowser) {
-    Start-Process 'http://localhost:8090'
+    Start-Process 'http://localhost:8090/welcome'
 }

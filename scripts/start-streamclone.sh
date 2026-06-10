@@ -117,8 +117,8 @@ esac
 
 if [ "$NO_BROWSER" = false ]; then
   if command -v xdg-open >/dev/null 2>&1; then
-    xdg-open 'http://localhost:8090' >/dev/null 2>&1 || true
+    xdg-open 'http://localhost:8090/welcome' >/dev/null 2>&1 || true
   elif command -v open >/dev/null 2>&1; then
-    open 'http://localhost:8090' || true
+    open 'http://localhost:8090/welcome' || true
   fi
 fi

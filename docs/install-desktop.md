@@ -30,7 +30,7 @@ winget install Docker.DockerDesktop
 | Action | What to do |
 |--------|------------|
 | **Start** | Double-click **Start Streamclone** on your Desktop |
-| **Use app** | Browser opens **http://localhost:8090** automatically when ready |
+| **Use app** | Browser opens **http://localhost:8090/welcome** automatically when ready |
 | **Stop** | Double-click **Stop Streamclone** on your Desktop |
 
 No PowerShell, no terminal commands required.

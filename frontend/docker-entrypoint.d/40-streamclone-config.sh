@@ -11,6 +11,8 @@ window.__STREAMCLONE_CONFIG__ = {
   chatHttp: "${VITE_CHAT_HTTP:-auto}",
   clipperUrl: "${VITE_CLIPPER_URL:-auto}",
   clipperToken: "${VITE_CLIPPER_TOKEN:-}",
-  maxRetainedMessages: "${VITE_MAX_RETAINED_MESSAGES:-250}"
+  maxRetainedMessages: "${VITE_MAX_RETAINED_MESSAGES:-250}",
+  streamcloneProfile: "${STREAMCLONE_PROFILE:-core}",
+  devTokenImportEnabled: "${TWITCH_DEV_TOKEN_IMPORT_ENABLED:-false}"
 };
 EOF

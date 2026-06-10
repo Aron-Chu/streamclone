@@ -83,6 +83,8 @@ type Config struct {
 	TwitchValidateURL       string `env:"TWITCH_VALIDATE_URL" envDefault:"https://id.twitch.tv/oauth2/validate"`
 	TwitchAPIURL            string `env:"TWITCH_API_URL" envDefault:"https://api.twitch.tv/helix"`
 	TwitchDevTokenImport    bool   `env:"TWITCH_DEV_TOKEN_IMPORT_ENABLED" envDefault:"false"`
+	StreamcloneProfile      string `env:"STREAMCLONE_PROFILE" envDefault:"core"`
+	ClipperServiceURL       string `env:"CLIPPER_SERVICE_URL" envDefault:"http://clipper:8095"`
 	FrontendOrigin          string `env:"FRONTEND_ORIGIN" envDefault:"http://localhost:5174"`
 	AuthCookieSecret        string `env:"AUTH_COOKIE_SECRET" envDefault:"dev-insecure-cookie-secret"`
 	AuthCookieSameSite      string `env:"AUTH_COOKIE_SAMESITE" envDefault:"lax"`

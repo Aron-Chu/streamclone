@@ -113,6 +113,7 @@ foreach ($p in (Get-EnvComposeProfiles -Profile $Profile)) {
 }
 
 if (-not $NoUp) {
+    Repair-FrontendDockerEntrypointLf
     $upArgs = @('up', '-d', '--remove-orphans')
     if ($UseImages) {
         $upArgs += '--pull', 'always'
@@ -127,7 +128,7 @@ if (-not $NoUp) {
         & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-clipper-auth.ps1') -EnvFile $envFile 2>$null
     }
     Write-Host ''
-    Write-Host 'Streamclone: http://localhost:8090'
+    Write-Host 'Streamclone: http://localhost:8090/welcome'
 }
 
 if (-not $NoSmoke -and -not $NoUp) {

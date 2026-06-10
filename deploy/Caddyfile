@@ -42,6 +42,14 @@
 		header_up Authorization "Bearer streamclone-local-hls-cdn"
 	}
 
+	@setup_control {
+		path /v1/setup-control /v1/setup-control/*
+	}
+	route @setup_control {
+		uri strip_prefix /v1/setup-control
+		reverse_proxy host.docker.internal:9191
+	}
+
 	@clipper {
 		path /v1/clipper /v1/clipper/*
 	}
