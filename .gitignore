@@ -4,6 +4,7 @@
 *.test
 *.out
 .env
+.streamclone-profile
 .env.test
 # env templates only — never commit live .env.local etc.
 .env.*
@@ -42,6 +43,8 @@ frontend/playwright-report/
 frontend/blob-report/
 coverage/
 docs/images/.sync-frames/
+docs/images/.sync-load-frames/
+docs/images/.tt-scrape-frames/
 docs/images/qa/
 deploy/tmp-*
 # local output / scratch

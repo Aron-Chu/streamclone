@@ -1,0 +1,1 @@
+ALTER TABLE analytics_streams ADD COLUMN IF NOT EXISTS vod_source TEXT NOT NULL DEFAULT '';
