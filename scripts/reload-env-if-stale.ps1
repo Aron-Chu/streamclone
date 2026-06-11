@@ -2,12 +2,14 @@
 # docker compose restart does NOT reload env_file — only --force-recreate does.
 param(
     [string]$EnvFile = '.env',
-    [string[]]$Services = @('chat', 'metadata', 'analytics', 'emote'),
-    [string]$ComposeFile = 'deploy/docker-compose.yml',
-    [string]$ComposeTunnelFile = 'deploy/docker-compose.local-tunnel.yml'
+    [string[]]$Services = @('chat', 'metadata', 'analytics', 'emote')
 )
 
 $ErrorActionPreference = 'Stop'
+$Root = Split-Path -Parent $PSScriptRoot
+Set-Location $Root
+
+. (Join-Path $PSScriptRoot 'lib\stack-progress.ps1')
 
 function Read-EnvValue {
     param([string]$Path, [string]$Key)
@@ -23,12 +25,12 @@ function Read-EnvValue {
 function Get-ContainerEnvValue {
     param([string]$Container, [string]$Key)
     if (-not $Container) { return '' }
-    $state = docker inspect -f '{{.State.Status}}' $Container 2>$null
-    if ($LASTEXITCODE -ne 0 -or $state -ne 'running') { return $null }
-    $lines = docker inspect $Container --format '{{range .Config.Env}}{{println .}}{{end}}' 2>$null
-    if ($LASTEXITCODE -ne 0) { return $null }
+    $result = Invoke-EnvDockerCaptured -Arguments @('inspect', '-f', '{{.State.Status}}', $Container)
+    if ($result.ExitCode -ne 0 -or ($result.Output | Select-Object -First 1) -ne 'running') { return $null }
+    $linesResult = Invoke-EnvDockerCaptured -Arguments @('inspect', $Container, '--format', '{{range .Config.Env}}{{println .}}{{end}}')
+    if ($linesResult.ExitCode -ne 0) { return $null }
     $prefix = "$Key="
-    foreach ($line in $lines) {
+    foreach ($line in $linesResult.Output) {
         if ($line.StartsWith($prefix)) {
             return $line.Substring($prefix.Length)
         }
@@ -42,34 +44,45 @@ if ([string]::IsNullOrWhiteSpace($desiredId)) {
     exit 0
 }
 
-$project = 'streamclone'
-$stale = @()
-$checks = @(
-    @{ Service = 'emote'; Container = "${project}-emote-1" },
-    @{ Service = 'metadata'; Container = "${project}-metadata-1" },
-    @{ Service = 'analytics'; Container = "${project}-analytics-1" },
-    @{ Service = 'chat'; Container = "${project}-chat-1" }
-)
+$profile = Read-EnvValue -Path $EnvFile -Key 'STREAMCLONE_PROFILE'
+if ([string]::IsNullOrWhiteSpace($profile)) { $profile = 'core' }
+$useImages = (Read-EnvValue -Path $EnvFile -Key 'STREAMCLONE_USE_IMAGES') -eq '1'
+if (-not $useImages -and (Read-EnvValue -Path $EnvFile -Key 'IMAGE_TAG')) { $useImages = $true }
 
-foreach ($check in $checks) {
-    if ($check.Service -notin $Services) { continue }
-    $actual = Get-ContainerEnvValue -Container $check.Container -Key 'TWITCH_OAUTH_CLIENT_ID'
+$composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile -UseImages:$useImages
+$psResult = Invoke-EnvDockerCaptured -Arguments ($composeArgs + @('ps', '--format', '{{.Service}}|{{.Name}}|{{.State}}'))
+if ($psResult.ExitCode -ne 0) {
+    Write-Host 'reload-env-if-stale: docker compose ps unavailable - skip'
+    exit 0
+}
+
+$stale = @()
+foreach ($line in $psResult.Output) {
+    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+    $parts = $line -split '\|', 3
+    if ($parts.Count -lt 3) { continue }
+    $service = $parts[0]
+    $container = $parts[1]
+    $state = $parts[2]
+    if ($service -notin $Services) { continue }
+    if ($state -ne 'running') { continue }
+    $actual = Get-ContainerEnvValue -Container $container -Key 'TWITCH_OAUTH_CLIENT_ID'
     if ($null -eq $actual) { continue }
     if ($actual -ne $desiredId) {
-        $stale += $check.Service
+        $stale += $service
     }
 }
 
 if ($stale.Count -eq 0) {
-    Write-Host "reload-env-if-stale: container OAuth env matches .env"
+    Write-Host 'reload-env-if-stale: container OAuth env matches .env'
     exit 0
 }
 
 Write-Host "reload-env-if-stale: stale OAuth in [$($stale -join ', ')] - force-recreating: $($Services -join ' ')"
-docker compose --env-file $EnvFile -f $ComposeFile -f $ComposeTunnelFile up -d --no-deps --force-recreate @Services
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "reload-env-if-stale: docker compose recreate failed (exit $LASTEXITCODE)" -ForegroundColor Red
-    exit $LASTEXITCODE
+$code = Invoke-EnvDocker -Arguments ($composeArgs + @('up', '-d', '--no-deps', '--force-recreate') + $Services)
+if ($code -ne 0) {
+    Write-Host "reload-env-if-stale: docker compose recreate failed (exit $code)" -ForegroundColor Red
+    exit $code
 }
 Write-Host "reload-env-if-stale: recreated $($Services -join ' ')"
 exit 0

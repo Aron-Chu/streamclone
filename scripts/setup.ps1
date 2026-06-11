@@ -6,6 +6,7 @@ param(
     [switch]$UseImages,
     [switch]$NoUp,
     [switch]$NoSmoke,
+    [switch]$SkipPreflight,
     [switch]$SkipTwitch,
     [switch]$SkipScraperClone
 )
@@ -42,8 +43,12 @@ if (-not $NonInteractive) {
 
 Write-Host "Profile: $Profile"
 
-Test-EnvPreflightDocker
-Write-Host 'Docker: ok'
+    if (-not $SkipPreflight) {
+        Test-EnvPreflightDocker
+        Write-Host 'Docker: ok'
+    } else {
+        Write-Host 'Docker: preflight already checked'
+    }
 
 $envFile = Join-Path (Get-Location) '.env'
 Invoke-EnvSynthesize -Profile $Profile -OutFile $envFile
@@ -114,21 +119,23 @@ foreach ($p in (Get-EnvComposeProfiles -Profile $Profile)) {
 
 if (-not $NoUp) {
     Repair-FrontendDockerEntrypointLf
-    $upArgs = @('up', '-d', '--remove-orphans')
     if ($UseImages) {
-        $upArgs += '--pull', 'always'
+        Write-Host 'Pulling Docker images...'
+        $code = Invoke-EnvDocker -Arguments ($composeArgs + @('pull'))
+        if ($code -ne 0) { exit $code }
+        $upArgs = @('up', '-d', '--remove-orphans', '--pull', 'missing')
     } else {
-        $upArgs += '--build'
+        $upArgs = @('up', '-d', '--remove-orphans', '--build')
     }
     Write-Host "Starting stack (profile: $Profile)..."
-    & docker @composeArgs @upArgs
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $code = Invoke-EnvDocker -Arguments ($composeArgs + $upArgs)
+    if ($code -ne 0) { exit $code }
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'reload-env-if-stale.ps1') -EnvFile $envFile 2>$null
     if ($Profile -in @('clipper', 'full')) {
         & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-clipper-auth.ps1') -EnvFile $envFile 2>$null
     }
     Write-Host ''
-    Write-Host 'Streamclone: http://localhost:8090/welcome'
+    Write-Host 'Streamclone: http://localhost:8090/'
 }
 
 if (-not $NoSmoke -and -not $NoUp) {

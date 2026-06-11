@@ -406,8 +406,144 @@ func TestStartDeviceAuthReturnsVerificationData(t *testing.T) {
 	if body.RequestID == "" || body.UserCode != "ABCDEFGH" || body.PollIntervalSeconds != 5 {
 		t.Fatalf("unexpected device auth body: %+v", body)
 	}
+	if body.VerificationURI != "https://www.twitch.tv/activate?public=true&device-code=ABCDEFGH" {
+		t.Fatalf("unexpected verification URI: %q", body.VerificationURI)
+	}
 	if _, err := store.GetDeviceAuth(context.Background(), body.RequestID); err != nil {
 		t.Fatalf("device auth was not stored: %v", err)
+	}
+}
+
+func TestStartDeviceAuthPrefersVerificationURIComplete(t *testing.T) {
+	store := newMemoryStore()
+	twitch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/device" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_code":               "device-code",
+			"expires_in":                1800,
+			"interval":                  5,
+			"user_code":                 "ABCDEFGH",
+			"verification_uri":          "https://www.twitch.tv/activate",
+			"verification_uri_complete": "https://www.twitch.tv/activate?device-code=ABCDEFGH&public=true",
+		})
+	}))
+	defer twitch.Close()
+
+	h := New(store, Config{
+		ClientID:              "cid",
+		DeviceURL:             twitch.URL + "/device",
+		DevTokenImportEnabled: true,
+		CookieSecret:          "cookie-secret",
+	}, slog.Default())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/dev/device/start", nil)
+	req.Host = "localhost:8090"
+	h.startDeviceAuth(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status got %d body %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		VerificationURI string `json:"verificationUri"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	want := "https://www.twitch.tv/activate?device-code=ABCDEFGH&public=true"
+	if body.VerificationURI != want {
+		t.Fatalf("verification URI got %q want %q", body.VerificationURI, want)
+	}
+}
+
+func TestStartDeviceAuthAppendsDeviceCodeWhenMissing(t *testing.T) {
+	store := newMemoryStore()
+	twitch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/device" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_code":      "device-code",
+			"expires_in":       1800,
+			"interval":         5,
+			"user_code":        "AB CD",
+			"verification_uri": "https://www.twitch.tv/activate",
+		})
+	}))
+	defer twitch.Close()
+
+	h := New(store, Config{
+		ClientID:              "cid",
+		DeviceURL:             twitch.URL + "/device",
+		DevTokenImportEnabled: true,
+		CookieSecret:          "cookie-secret",
+	}, slog.Default())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/dev/device/start", nil)
+	req.Host = "localhost:8090"
+	h.startDeviceAuth(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status got %d body %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		VerificationURI string `json:"verificationUri"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	want := "https://www.twitch.tv/activate?device-code=AB+CD"
+	if body.VerificationURI != want {
+		t.Fatalf("verification URI got %q want %q", body.VerificationURI, want)
+	}
+}
+
+func TestDeviceVerificationURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		uri         string
+		userCode    string
+		completeURI string
+		want        string
+	}{
+		{
+			name:        "prefers complete uri",
+			uri:         "https://www.twitch.tv/activate",
+			userCode:    "ABCDEFGH",
+			completeURI: "https://www.twitch.tv/activate?device-code=ABCDEFGH&public=true",
+			want:        "https://www.twitch.tv/activate?device-code=ABCDEFGH&public=true",
+		},
+		{
+			name:     "uses uri when code already present",
+			uri:      "https://www.twitch.tv/activate?public=true&device-code=ABCDEFGH",
+			userCode: "OTHER",
+			want:     "https://www.twitch.tv/activate?public=true&device-code=ABCDEFGH",
+		},
+		{
+			name:     "appends device code to base uri",
+			uri:      "https://www.twitch.tv/activate",
+			userCode: "AB CD",
+			want:     "https://www.twitch.tv/activate?device-code=AB+CD",
+		},
+		{
+			name:     "appends with ampersand when query exists",
+			uri:      "https://www.twitch.tv/activate?public=true",
+			userCode: "ABCDEFGH",
+			want:     "https://www.twitch.tv/activate?public=true&device-code=ABCDEFGH",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deviceVerificationURL(tc.uri, tc.userCode, tc.completeURI)
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
 	}
 }
 

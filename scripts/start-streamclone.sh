@@ -81,7 +81,7 @@ else
   done
   up_flags=(-d --remove-orphans)
   if [ "$USE_IMAGES" = true ]; then
-    up_flags+=(--pull always)
+    up_flags+=(--pull missing)
   else
     up_flags+=(--build)
   fi
@@ -117,8 +117,8 @@ esac
 
 if [ "$NO_BROWSER" = false ]; then
   if command -v xdg-open >/dev/null 2>&1; then
-    xdg-open 'http://localhost:8090/welcome' >/dev/null 2>&1 || true
+    xdg-open 'http://localhost:8090/' >/dev/null 2>&1 || true
   elif command -v open >/dev/null 2>&1; then
-    open 'http://localhost:8090/welcome' || true
+    open 'http://localhost:8090/' || true
   fi
 fi

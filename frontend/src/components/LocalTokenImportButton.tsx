@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -21,11 +22,13 @@ type DeviceAuthModalState = {
   verificationUri: string
   expiresAt: number
   pollIntervalMs: number
+  twitchTabBlocked: boolean
 }
 
 export default function LocalTokenImportButton({ compact = false }: LocalTokenImportButtonProps) {
   const auth = useAuth()
   const queryClient = useQueryClient()
+  const twitchTabRef = useRef<Window | null>(null)
   const [opening, setOpening] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [deviceAuth, setDeviceAuth] = useState<DeviceAuthModalState | null>(null)
@@ -33,6 +36,19 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
 
   if (auth.isAuthenticated) {
     return null
+  }
+
+  function closeTwitchTab(): boolean {
+    const tab = twitchTabRef.current
+    if (!tab || tab.closed) {
+      twitchTabRef.current = null
+      return true
+    }
+    tab.close()
+    window.focus()
+    const closed = tab.closed
+    twitchTabRef.current = null
+    return closed
   }
 
   useEffect(() => {
@@ -55,12 +71,14 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
           return
         }
         applyAuthenticatedDeviceLogin(queryClient, result)
+        const tabClosed = closeTwitchTab()
         setDeviceAuth(null)
-        setStatus(null)
+        setStatus(tabClosed ? null : 'Signed in. You can close the Twitch tab manually.')
       } catch (error) {
         if (cancelled) {
           return
         }
+        closeTwitchTab()
         const message = error instanceof Error ? error.message : 'Unable to complete Twitch verification.'
         setDeviceAuth(null)
         setStatus(message)
@@ -81,12 +99,21 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
   useEffect(() => {
     if (!deviceAuth) return
     if (deviceAuth.expiresAt > now) return
+    closeTwitchTab()
     setDeviceAuth(null)
-    setStatus('Twitch verification expired. Click Use local token to start again.')
+    setStatus('Twitch verification expired. Click Sign in to start again.')
   }, [deviceAuth, now])
 
   async function beginDeviceAuth() {
     const started = await startDevTwitchDeviceAuth()
+    let twitchTabBlocked = !twitchTabRef.current || twitchTabRef.current.closed
+    if (twitchTabRef.current && !twitchTabRef.current.closed) {
+      try {
+        twitchTabRef.current.location.href = started.verificationUri
+      } catch {
+        twitchTabBlocked = true
+      }
+    }
     setNow(Date.now())
     setDeviceAuth({
       requestId: started.requestId,
@@ -94,6 +121,7 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
       verificationUri: started.verificationUri,
       expiresAt: Date.now() + started.expiresInSeconds * 1000,
       pollIntervalMs: Math.max(started.pollIntervalSeconds, 1) * 1000,
+      twitchTabBlocked,
     })
   }
 
@@ -115,8 +143,12 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
       setOpening(false)
       return
     }
+
+    twitchTabRef.current = window.open('about:blank', '_blank', 'noopener,noreferrer')
+
     try {
       await auth.claimPreparedLocalToken()
+      closeTwitchTab()
       setStatus(null)
     } catch (error) {
       const statusCode = error instanceof ApiError
@@ -134,14 +166,21 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
         try {
           await beginDeviceAuth()
         } catch (deviceError) {
+          closeTwitchTab()
           setStatus(deviceError instanceof Error ? deviceError.message : 'Unable to start Twitch verification.')
         }
         return
       }
+      closeTwitchTab()
       setStatus(message || 'Unable to claim the local token.')
     } finally {
       setOpening(false)
     }
+  }
+
+  function handleCloseModal() {
+    closeTwitchTab()
+    setDeviceAuth(null)
   }
 
   return (
@@ -169,7 +208,7 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
         <DeviceAuthModal
           auth={deviceAuth}
           remainingSeconds={Math.max(0, Math.ceil((deviceAuth.expiresAt - now) / 1000))}
-          onClose={() => setDeviceAuth(null)}
+          onClose={handleCloseModal}
         />
       ) : null}
     </div>
@@ -185,14 +224,27 @@ function DeviceAuthModal({
   remainingSeconds: number
   onClose: () => void
 }) {
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#04050a]/80 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded border border-cyan-300/20 bg-[#111117] p-5 text-left text-zinc-100 shadow-2xl shadow-black/60">
+  const [copied, setCopied] = useState(false)
+
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(auth.userCode)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#04050a]/80 p-4 sm:p-6 backdrop-blur-sm">
+      <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded border border-cyan-300/20 bg-[#111117] p-5 text-left text-zinc-100 shadow-2xl shadow-black/60">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-base font-black text-white">Finish Twitch verification</div>
             <div className="mt-1 text-xs font-semibold text-zinc-400">
-              Leave this dialog open. Streamclone will sign you in automatically after Twitch approval.
+              Click <span className="font-black text-white">Authorize</span> on the Twitch tab we opened.
+              Leave this dialog open — Streamclone will sign you in automatically.
             </div>
           </div>
           <button
@@ -204,26 +256,38 @@ function DeviceAuthModal({
           </button>
         </div>
 
-        <a
-          href={auth.verificationUri}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-4 inline-flex rounded border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-xs font-black text-cyan-100 transition hover:bg-cyan-400/20"
-        >
-          Open Twitch verification
-        </a>
+        {auth.twitchTabBlocked ? (
+          <a
+            href={auth.verificationUri}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-4 inline-flex rounded border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-xs font-black text-cyan-100 transition hover:bg-cyan-400/20"
+          >
+            Open Twitch verification
+          </a>
+        ) : null}
 
         <div className="mt-4 rounded border border-white/10 bg-white/[0.04] p-4">
-          <div className="text-[11px] font-black uppercase tracking-[0.24em] text-zinc-500">Code</div>
-          <div className="mt-2 font-mono text-2xl font-black tracking-[0.35em] text-white">{auth.userCode}</div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[11px] font-black uppercase tracking-[0.24em] text-zinc-500">Backup code</div>
+            <button
+              type="button"
+              onClick={() => void copyCode()}
+              className="rounded border border-white/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-300 transition hover:bg-white/10 hover:text-white"
+            >
+              {copied ? 'Copied' : 'Copy code'}
+            </button>
+          </div>
+          <div className="mt-2 break-all font-mono text-2xl font-black tracking-[0.2em] text-white">{auth.userCode}</div>
         </div>
 
         <div className="mt-4 flex items-center justify-between text-xs font-semibold text-zinc-400">
           <span>{remainingSeconds > 0 ? `Expires in ${formatRemaining(remainingSeconds)}` : 'Verification expired'}</span>
-          <span>Waiting for Twitch approval...</span>
+          <span>Waiting for Twitch approval…</span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

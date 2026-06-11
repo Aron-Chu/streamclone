@@ -6,6 +6,8 @@ param(
     [int]$Runs = 2
 )
 
+$env:STREAMCLONE_NO_BROWSER = '1'
+
 function Wait-Manifest {
     param([string]$Url, [int]$TimeoutSec = 20)
     $deadline = (Get-Date).AddSeconds($TimeoutSec)

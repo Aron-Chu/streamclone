@@ -86,11 +86,12 @@ type tokenValidation struct {
 }
 
 type deviceCodeStartResponse struct {
-	DeviceCode      string `json:"device_code"`
-	ExpiresIn       int    `json:"expires_in"`
-	Interval        int    `json:"interval"`
-	UserCode        string `json:"user_code"`
-	VerificationURI string `json:"verification_uri"`
+	DeviceCode              string `json:"device_code"`
+	ExpiresIn               int    `json:"expires_in"`
+	Interval                int    `json:"interval"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete"`
 }
 
 type deviceCodeTokenError struct {
@@ -315,10 +316,11 @@ func (h *Handler) startDeviceAuth(w http.ResponseWriter, r *http.Request) {
 	if pollInterval <= 0 {
 		pollInterval = 5
 	}
+	verificationURI := deviceVerificationURL(started.VerificationURI, started.UserCode, started.VerificationURIComplete)
 	deviceAuth := DeviceAuth{
 		DeviceCode:          started.DeviceCode,
 		UserCode:            started.UserCode,
-		VerificationURI:     started.VerificationURI,
+		VerificationURI:     verificationURI,
 		PollIntervalSeconds: pollInterval,
 		ExpiresAt:           time.Now().Add(ttl).Unix(),
 	}
@@ -327,10 +329,10 @@ func (h *Handler) startDeviceAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"requestId":         requestID,
-		"userCode":          deviceAuth.UserCode,
-		"verificationUri":   deviceAuth.VerificationURI,
-		"expiresInSeconds":  started.ExpiresIn,
+		"requestId":           requestID,
+		"userCode":            deviceAuth.UserCode,
+		"verificationUri":     deviceAuth.VerificationURI,
+		"expiresInSeconds":    started.ExpiresIn,
 		"pollIntervalSeconds": pollInterval,
 	})
 }
@@ -667,6 +669,23 @@ func (h *Handler) allowDevTokenImport(r *http.Request) bool {
 
 func (h *Handler) ready() bool {
 	return h.cfg.ClientID != "" && h.cfg.ClientSecret != ""
+}
+
+func deviceVerificationURL(uri, userCode, completeURI string) string {
+	if completeURI != "" {
+		return completeURI
+	}
+	if strings.Contains(uri, "device-code=") {
+		return uri
+	}
+	if uri == "" || userCode == "" {
+		return uri
+	}
+	sep := "?"
+	if strings.Contains(uri, "?") {
+		sep = "&"
+	}
+	return uri + sep + "device-code=" + url.QueryEscape(userCode)
 }
 
 func (h *Handler) beginDeviceAuth(ctx context.Context) (deviceCodeStartResponse, error) {

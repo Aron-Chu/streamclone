@@ -1,12 +1,10 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { Routes, Route } from 'react-router-dom'
-import WelcomeGate from './components/welcome/WelcomeGate'
+import { Routes, Route, Navigate } from 'react-router-dom'
 
 const Directory = lazy(() => import('./components/Directory'))
 const Channel = lazy(() => import('./components/Channel'))
 const Analytics = lazy(() => import('./components/Analytics'))
 const ClipStudio = lazy(() => import('./components/ClipStudio'))
-const Welcome = lazy(() => import('./components/welcome/Welcome'))
 
 export default function App() {
   const [authNotice, setAuthNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
@@ -32,10 +30,9 @@ export default function App() {
           {authNotice.message}
         </div>
       ) : null}
-      <WelcomeGate />
       <Suspense fallback={<main className="grid min-h-screen place-items-center bg-[#07070a] text-sm font-bold text-zinc-300">Loading</main>}>
         <Routes>
-          <Route path="/welcome" element={<Welcome />} />
+          <Route path="/welcome" element={<Navigate to="/" replace />} />
           <Route path="/" element={<Directory />} />
           <Route path="/c/:login" element={<Channel />} />
           <Route path="/analytics/:login" element={<Analytics />} />

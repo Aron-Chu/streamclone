@@ -69,9 +69,9 @@ if (-not $SkipSetup -and -not (Test-Path $envFile)) {
         $composeArgs += '--profile', $p
     }
     $upArgs = @('up', '-d', '--remove-orphans')
-    if ($pullImages) { $upArgs += '--pull', 'always' } else { $upArgs += '--build' }
-    & docker @composeArgs @upArgs
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if ($pullImages) { $upArgs += '--pull', 'missing' } else { $upArgs += '--build' }
+    $code = Invoke-EnvDocker -Arguments ($composeArgs + $upArgs)
+    if ($code -ne 0) { exit $code }
 
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'reload-env-if-stale.ps1') -EnvFile $envFile 2>$null
     if ($Profile -in @('clipper', 'full')) {
@@ -103,5 +103,5 @@ if ($Profile -in @('clipper', 'full')) {
 }
 
 if (-not $NoBrowser) {
-    Start-Process 'http://localhost:8090/welcome'
+    Start-Process 'http://localhost:8090/'
 }

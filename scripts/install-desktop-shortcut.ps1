@@ -53,7 +53,7 @@ try {
         $sc.TargetPath = $pair.Target
         $sc.WorkingDirectory = $Root
         $sc.Description = if ($pair.Name -like 'Start*') {
-            'Start Streamclone and open http://localhost:8090/welcome'
+            'Start Streamclone and open http://localhost:8090/'
         } else {
             'Stop all Streamclone Docker containers'
         }

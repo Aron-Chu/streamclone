@@ -184,7 +184,9 @@ done
 if [ "$SKIP_UP" = false ]; then
   up_flags=(-d --remove-orphans)
   if [ "$USE_IMAGES" = true ]; then
-    up_flags+=(--pull always)
+    echo "Pulling Docker images..."
+    docker "${compose_args[@]}" pull
+    up_flags+=(--pull missing)
   else
     up_flags+=(--build)
   fi

@@ -6,8 +6,14 @@ function Get-EnvRepoRoot {
 
 function Get-EnvRandomHex {
     param([int]$Bytes = 24)
-    $chars = (1..($Bytes * 2) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) }) -join ''
-    return $chars
+    $buffer = New-Object byte[] $Bytes
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($buffer)
+    } finally {
+        $rng.Dispose()
+    }
+    return ([BitConverter]::ToString($buffer) -replace '-', '').ToLower()
 }
 
 function Get-EnvProfileFragment {
@@ -91,6 +97,7 @@ function Test-EnvPlaceholderValue {
         'SCRAPER_API_KEY' { return [string]::IsNullOrWhiteSpace($Value) -or $Value -eq 'local-dev-key' }
         'CLIPPER_WEBHOOK_TOKEN' { return [string]::IsNullOrWhiteSpace($Value) }
         'VITE_CLIPPER_TOKEN' { return [string]::IsNullOrWhiteSpace($Value) }
+        'SETUP_CONTROL_TOKEN' { return [string]::IsNullOrWhiteSpace($Value) }
         default { return $false }
     }
 }
@@ -116,6 +123,11 @@ function Invoke-EnvGenerateSecrets {
         Set-EnvFileValue -Path $EnvFile -Key 'VITE_CLIPPER_TOKEN' -Value $clipper
     } elseif ([string]::IsNullOrWhiteSpace($current['VITE_CLIPPER_TOKEN']) -and -not [string]::IsNullOrWhiteSpace($current['CLIPPER_WEBHOOK_TOKEN'])) {
         Set-EnvFileValue -Path $EnvFile -Key 'VITE_CLIPPER_TOKEN' -Value $current['CLIPPER_WEBHOOK_TOKEN']
+    }
+
+    $current = Read-EnvKeyValueFile -Path $EnvFile
+    if (Test-EnvPlaceholderValue -Key 'SETUP_CONTROL_TOKEN' -Value $current['SETUP_CONTROL_TOKEN']) {
+        Set-EnvFileValue -Path $EnvFile -Key 'SETUP_CONTROL_TOKEN' -Value (Get-EnvRandomHex -Bytes 24)
     }
 }
 
@@ -171,12 +183,120 @@ function Get-EnvScraperSiblingPath {
 }
 
 function Test-EnvPreflightDocker {
-    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    $docker = Get-EnvDockerExe
+    if (-not $docker) {
         throw "Docker is required. Install Docker Desktop and ensure 'docker' is on PATH."
     }
-    $null = docker compose version 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $info = Invoke-EnvDockerCaptured -Arguments @('info')
+    if ($info.ExitCode -ne 0) {
+        throw "Docker is installed but the engine is not running. Start Docker Desktop."
+    }
+    $compose = Invoke-EnvDockerCaptured -Arguments @('compose', 'version')
+    if ($compose.ExitCode -ne 0) {
         throw "docker compose is required. Update Docker Desktop."
+    }
+}
+
+function Get-EnvDockerExe {
+    $candidates = @()
+    if ($env:ProgramFiles) {
+        $candidates += (Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin\docker.exe')
+    }
+    $cmd = Get-Command docker.exe -ErrorAction SilentlyContinue
+    if ($cmd) { $candidates += $cmd.Source }
+    $cmd = Get-Command docker -ErrorAction SilentlyContinue
+    if ($cmd -and [IO.Path]::GetExtension($cmd.Source) -ieq '.exe') {
+        $candidates += $cmd.Source
+    }
+    foreach ($path in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+        if (Test-Path $path) {
+            $resolved = (Resolve-Path -LiteralPath $path).Path
+            $bin = Split-Path -Parent $resolved
+            $pathParts = @($env:PATH -split ';' | Where-Object { $_ })
+            if (($pathParts | Where-Object { $_ -ieq $bin }).Count -eq 0) {
+                $env:PATH = "$bin;$env:PATH"
+            }
+            if ($env:PATHEXT -notmatch '(?i)\.EXE') {
+                $env:PATHEXT = ".COM;.EXE;.BAT;.CMD;$env:PATHEXT"
+            }
+            return $resolved
+        }
+    }
+    return $null
+}
+
+function Join-EnvProcessArguments {
+    param([string[]]$Arguments)
+    $parts = foreach ($arg in $Arguments) {
+        $s = [string]$arg
+        if ($s -match '[\s"]') {
+            '"' + ($s -replace '"', '\"') + '"'
+        } else {
+            $s
+        }
+    }
+    return ($parts -join ' ')
+}
+
+function Invoke-EnvDocker {
+    param([string[]]$Arguments)
+    $docker = Get-EnvDockerExe
+    if (-not $docker) {
+        Write-Error "Docker is required. Install Docker Desktop and ensure 'docker.exe' is on PATH."
+        return 127
+    }
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $docker
+    $psi.Arguments = Join-EnvProcessArguments -Arguments $Arguments
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $proc.WaitForExit()
+    return [int]$proc.ExitCode
+}
+
+function Invoke-EnvDockerCaptured {
+    param([string[]]$Arguments)
+    $docker = Get-EnvDockerExe
+    if (-not $docker) {
+        return [pscustomobject]@{
+            ExitCode = 127
+            Output   = @("Docker is required. Install Docker Desktop and ensure 'docker.exe' is on PATH.")
+        }
+    }
+
+    $output = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
+    try {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $docker
+        $psi.Arguments = Join-EnvProcessArguments -Arguments $Arguments
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+
+        $proc = [System.Diagnostics.Process]::new()
+        $proc.StartInfo = $psi
+        $handler = [System.Diagnostics.DataReceivedEventHandler]{
+            param($sender, $eventArgs)
+            if ($null -ne $eventArgs.Data) { [void]$output.Add($eventArgs.Data) }
+        }
+        $proc.add_OutputDataReceived($handler)
+        $proc.add_ErrorDataReceived($handler)
+        [void]$proc.Start()
+        $proc.BeginOutputReadLine()
+        $proc.BeginErrorReadLine()
+        $proc.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = [int]$proc.ExitCode
+            Output   = @($output)
+        }
+    } finally {
+        if ($proc) {
+            $proc.remove_OutputDataReceived($handler)
+            $proc.remove_ErrorDataReceived($handler)
+            $proc.Dispose()
+        }
     }
 }
 

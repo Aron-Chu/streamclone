@@ -2,36 +2,91 @@
 
 **Need:** [Docker Desktop](https://docs.docker.com/desktop/) (running). **Not needed:** Git, Go, Node, Twitch login (for watching).
 
-Open **`http://localhost:8090/welcome`** when running. Use that URL only — not raw ports like `:8081`.
+Open **`http://localhost:8090/`** when running. Use that URL only — not raw ports like `:8081`.
+
+### System requirements
+
+| | Minimum | Recommended |
+|---|---------|-------------|
+| **OS** | Windows 10/11 64-bit, macOS 12+, Linux with Docker | Same |
+| **RAM** | 8 GB (Docker + Streamclone stack) | 16 GB |
+| **Disk** | 5 GB free (images + volumes) | 10 GB+ |
+| **CPU** | 4 cores | 6+ cores |
+| **Network** | Stable broadband; **~1.5–2 GB** first-time download | Wired or fast Wi‑Fi |
+
+**First install time:** ~3–8 minutes depending on network (image pull dominates). **Daily Start:** ~10–30 seconds if images are cached.
+
+**`Streamclone-Setup.exe`** shows **in-wizard progress** during setup (pulling images, starting containers, health checks) — no extra terminal window.
+
+### What downloads on first install
+
+**GHCR pull sizes at the `v0.1.4` tag are pending measurement** (run `scripts/benchmark-ghcr-pull.ps1` after tagging). The table below uses **local trimmed build estimates** as reference only — registry layers may differ slightly.
+
+| Image | Local trim (reference) | Notes |
+|-------|------------------------|-------|
+| `video` | ~380 MB | Largest core service; was ~900 MB before trim |
+| `emote` | ~136 MB | Emote proxy; was ~430 MB before trim |
+| `metadata`, `chat`, `analytics`, `frontend` | ~600 MB combined | Go services + static frontend |
+| Third-party (`postgres`, `minio`, `caddy`, …) | varies | Not published to `ghcr.io/aron-chu/streamclone/*` |
+| **Total (core profile)** | **~1.1–1.5 GB** (estimate) | Confirm with GHCR pull benchmark at release tag |
+
+Reinstalls and **Start** use `--pull missing` so already-downloaded images are not re-fetched.
+
+### Product tiers
+
+**`Streamclone-Setup.exe` installs Core Watch only.** Optional tiers are enabled later with compose profiles (see [scraper-cloudflare-and-proxy.md](./scraper-cloudflare-and-proxy.md) for Analytics).
+
+| Tier | How you get it | First-pull download | Prerequisites | Without scraper |
+|------|----------------|---------------------|---------------|-----------------|
+| **Core Watch** | Setup.exe / default install | ~1.1–1.5 GB (core GHCR images; **sizes pending GHCR measurement at v0.1.4**) | Docker Desktop running | Directory, live playback, chat, emotes, Helix/VOD stream history, TwitchTracker **summary** stats (avg/peak on stream rows) |
+| **Analytics** | `setup.ps1 -Profile scraper` or compose `--profile scraper` | + scraper image (builds from sibling repo; **not** published to GHCR) | Clone [`streamclone-scraper`](https://github.com/Aron-Chu/streamclone-scraper) beside this repo | Minute-level viewer charts on Analytics, reliable TwitchTracker sync |
+| **Clip Studio** | `--profile clipper` | + ~1 GB `clipper` image | Twitch CLI + device login (`make twitch-local-auth`) | Clip Studio at `/studio` |
+| **Full** | both profiles | Analytics + Clip Studio sizes combined | Scraper sibling + Twitch CLI | All optional features |
+
+If you only use Setup.exe, expect **Core Watch** behavior: Analytics pages show stream lists and session stats, but **per-minute charts stay empty** until you add the Analytics (scraper) tier.
 
 ---
 
 ## Windows (recommended)
 
-### First time (one double-click)
+### First time (installer)
 
 1. Start **Docker Desktop** (wait until Running)
-2. From **[GitHub Releases](https://github.com/Aron-Chu/streamclone/releases/latest)**, download **`Install Streamclone.cmd`** only
-3. Double-click it — downloads the release, sets up Docker, adds Desktop shortcuts, and **opens the welcome page**
-
-Windows may show **"Unknown Publisher"** — click **Run**. Streamclone is not code-signed yet (no `.exe` installer).
+2. From **[GitHub Releases](https://github.com/Aron-Chu/streamclone/releases/latest)**, download **`Streamclone-Setup-v*.exe`**
+3. Run the installer — wizard extracts files to `%USERPROFILE%\streamclone`, sets up Docker, adds shortcuts, and **opens the directory**
 
 Takes **~3–5 minutes** (pulls pre-built images; no local compile).
 
-**Alternative:** download `streamclone-*-windows.zip`, extract, then run **`Install Streamclone.cmd`** inside the folder (same result; you unzip manually).
+Windows may show **"Unknown Publisher"** — click **Run** or **More info → Run anyway**. Streamclone is open source but not code-signed yet (signing removes that warning).
+
+**Alternatives**
+
+| Method | When to use |
+|--------|-------------|
+| **`Install Streamclone.cmd`** | One-file download; fetches the release ZIP automatically |
+| **`streamclone-*-windows.zip`** | Manual extract, then run **`Install Streamclone.cmd`** inside |
 
 ### Lifecycle
 
 | Launcher | What it does | Keeps install folder? | Keeps data volumes? |
 |----------|----------------|----------------------|---------------------|
-| **Install Streamclone.cmd** | First-time setup — config, pull images, shortcuts, open welcome | Yes | Creates fresh volumes |
-| **Start Streamclone.cmd** | Start stack → open welcome page | Yes | Yes |
+| **Streamclone-Setup.exe** | First-time setup — wizard, config, pull images, shortcuts, open directory | Yes | Creates fresh volumes |
+| **Install Streamclone.cmd** | Same as Setup.exe (without wizard UI) | Yes | Creates fresh volumes |
+| **Start Streamclone.cmd** | Start stack → open directory | Yes | Yes |
 | **Stop Streamclone.cmd** | Stop containers (pause) | Yes | Yes |
-| **Uninstall Streamclone.cmd** | Remove everything — volumes, `.env`, shortcuts, install folder | **No** | **No** |
+| **Uninstall** (see below) | Remove everything — volumes, `.env`, shortcuts, install folder | **No** | **No** |
 
 **Stop** = pause. Your `.env`, install folder, and database/MinIO volumes stay on disk. Run **Start** to resume.
 
-**Uninstall** = complete removal. Type `YES` to confirm. Deletes Docker volumes (all local stream data), secrets in `.env`, Desktop shortcuts, and the install folder. Optional advanced flag: `powershell -File scripts\uninstall-streamclone.ps1 -PruneImages` also removes downloaded `ghcr.io/aron-chu/streamclone/*` images.
+**Uninstall** = complete removal. Three equivalent paths:
+
+| How | Confirmation |
+|-----|----------------|
+| **Settings → Apps → Streamclone → Uninstall** | Windows uninstall wizard (recommended after Setup.exe install) |
+| **Start menu → Streamclone → Uninstall Streamclone** | Same uninstall wizard |
+| **`Uninstall Streamclone.cmd`** in the install folder | Type `YES` in the terminal |
+
+All paths stop Docker, delete volumes and `.env`, remove Desktop shortcuts, and delete `%USERPROFILE%\streamclone`. The **Setup.exe uninstall wizard** shows in-app progress (no extra CMD window). Docker images stay cached for faster reinstall; optional advanced: `powershell -File scripts\uninstall-streamclone.ps1 -PruneImages`.
 
 ---
 
@@ -48,7 +103,7 @@ Takes **~3–5 minutes** (pulls pre-built images; no local compile).
 
 | File | Role |
 |------|------|
-| **Install** | First-time setup |
+| **Setup.exe / Install** | First-time setup |
 | **Start** | Daily open |
 | **Stop** | Shutdown containers only |
 | **Uninstall** | Complete teardown |
@@ -61,11 +116,11 @@ Nothing is uploaded to GitHub. Images come from **`ghcr.io/aron-chu/streamclone/
 
 | | **Releases** | **Packages** (GHCR) |
 |---|---|---|
-| **What** | ZIP + launchers (`Install`, `Start`, `Stop`, `Uninstall`) | Pre-built Docker images |
-| **For you** | Download and double-click | Pulled automatically by Install |
+| **What** | Setup.exe, ZIP + launchers (`Install`, `Start`, `Stop`, `Uninstall`) | Pre-built Docker images |
+| **For you** | Download and run | Pulled automatically by Install |
 | **URL** | [releases/latest](https://github.com/Aron-Chu/streamclone/releases/latest) | `ghcr.io/aron-chu/streamclone/metadata`, `chat`, `video`, etc. |
 
-**Maintainer:** tag `v*` (e.g. `v0.1.1`) → CI publishes both. GHCR packages must be **public** for installs without `docker login`.
+**Maintainer:** tag `v*` (e.g. `v0.1.4`) → CI publishes images, ZIP, `.cmd`, and **Setup.exe**. GHCR packages must be **public** for installs without `docker login`.
 
 ---
 
@@ -96,6 +151,8 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for tests and PR workflow. Optional fe
 | Docker not running | Start Docker Desktop, retry |
 | Port 8090 in use | Run **Stop Streamclone**, or free the port |
 | Images fail to pull | Set GHCR packages to **Public**, or run `docker login ghcr.io` |
-| Git-clone build too slow | Use the **release ZIP** or `setup.ps1 -UseImages` |
+| Git-clone build too slow | Use **Setup.exe** or the **release ZIP** |
 | Frontend fails on release ZIP | Fixed in v0.1.1+ (`docker-compose.release.yml` — no host nginx mount) |
-| Start from scratch | Run **Uninstall**, then **Install** again |
+| Start from scratch | Run **Uninstall**, then **Setup.exe** or **Install** again |
+| Install feels slow | Normal on first run (large `video`/`emote` images). Use wired network; second Start is much faster |
+| Setup.exe stuck on "Pulling Docker images" | Normal on first install (~1.5 GB). Ensure Docker Desktop is running and network is stable |

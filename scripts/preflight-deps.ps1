@@ -2,16 +2,35 @@
 # Check prerequisites for Streamclone (non-developer friendly).
 param(
     [switch]$InstallHints,
-    [switch]$Quiet
+    [switch]$Quiet,
+    [Alias('JsonSummary')]
+    [switch]$Json,
+    [string]$ImageTag = '',
+    [int]$DockerInfoTimeoutSec = 15
 )
 
 $ErrorActionPreference = 'Stop'
 $errors = 0
 $warnings = 0
+$blockedReasons = [System.Collections.Generic.List[string]]::new()
+$summary = [ordered]@{
+    blocked  = $false
+    ok       = $true
+    errors   = 0
+    warnings = 0
+    reason   = ''
+    context  = ''
+    engine   = ''
+    ghcr     = 'skipped'
+    checks   = @()
+}
+
+. (Join-Path $PSScriptRoot 'lib\env.ps1')
 
 function Write-Check {
     param([string]$Status, [string]$Message)
-    if ($Quiet) { return }
+    $summary.checks += [pscustomobject]@{ status = $Status; message = $Message }
+    if ($Quiet -or $Json) { return }
     $color = switch ($Status) {
         'ok' { 'Green' }
         'warn' { 'Yellow' }
@@ -27,13 +46,147 @@ function Write-Check {
     Write-Host "$icon $Message" -ForegroundColor $color
 }
 
-function Test-PortFree {
-    param([int]$Port)
-    $inUse = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    return -not $inUse
+function Add-BlockedReason {
+    param([string]$Reason)
+    if ($blockedReasons -notcontains $Reason) {
+        [void]$blockedReasons.Add($Reason)
+    }
 }
 
-if (-not $Quiet) {
+function Test-PortFree {
+    param([int]$Port)
+    $listener = $null
+    try {
+        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+        $listener.Start()
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($listener) { $listener.Stop() }
+    }
+}
+
+function Invoke-ExternalWithTimeout {
+    param(
+        [string]$FilePath,
+        [string]$Arguments = '',
+        [int]$TimeoutSec = 5
+    )
+    $output = [System.Collections.ArrayList]::new()
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $FilePath
+    $psi.Arguments = $Arguments
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $proc = [System.Diagnostics.Process]::new()
+    $proc.StartInfo = $psi
+    $handler = [System.Diagnostics.DataReceivedEventHandler]{
+        param($sender, $eventArgs)
+        if ($null -ne $eventArgs.Data) { [void]$output.Add($eventArgs.Data) }
+    }
+    $proc.add_OutputDataReceived($handler)
+    $proc.add_ErrorDataReceived($handler)
+    try {
+        [void]$proc.Start()
+        $proc.BeginOutputReadLine()
+        $proc.BeginErrorReadLine()
+        $timedOut = -not $proc.WaitForExit($TimeoutSec * 1000)
+        if ($timedOut) {
+            try { $proc.Kill() } catch { }
+        }
+        return [pscustomobject]@{
+            TimedOut = $timedOut
+            Output   = @($output)
+            ExitCode = if ($timedOut) { 124 } else { [int]$proc.ExitCode }
+        }
+    } finally {
+        $proc.remove_OutputDataReceived($handler)
+        $proc.remove_ErrorDataReceived($handler)
+        $proc.Dispose()
+    }
+}
+
+function Invoke-DockerCapturedWithTimeout {
+    param(
+        [string[]]$Arguments,
+        [int]$TimeoutSec = 15
+    )
+    $docker = Get-EnvDockerExe
+    if (-not $docker) {
+        return [pscustomobject]@{
+            ExitCode = 127
+            TimedOut = $false
+            Output   = @('Docker CLI not found')
+        }
+    }
+
+    $output = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $docker
+    $psi.Arguments = Join-EnvProcessArguments -Arguments $Arguments
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+
+    $proc = [System.Diagnostics.Process]::new()
+    $proc.StartInfo = $psi
+    $handler = [System.Diagnostics.DataReceivedEventHandler]{
+        param($sender, $eventArgs)
+        if ($null -ne $eventArgs.Data) { [void]$output.Add($eventArgs.Data) }
+    }
+    $proc.add_OutputDataReceived($handler)
+    $proc.add_ErrorDataReceived($handler)
+    try {
+        [void]$proc.Start()
+        $proc.BeginOutputReadLine()
+        $proc.BeginErrorReadLine()
+        $timedOut = -not $proc.WaitForExit($TimeoutSec * 1000)
+        if ($timedOut) {
+            try { $proc.Kill() } catch { }
+        }
+        return [pscustomobject]@{
+            ExitCode = if ($timedOut) { 124 } else { [int]$proc.ExitCode }
+            TimedOut = $timedOut
+            Output   = @($output)
+        }
+    } finally {
+        $proc.remove_OutputDataReceived($handler)
+        $proc.remove_ErrorDataReceived($handler)
+        $proc.Dispose()
+    }
+}
+
+function Invoke-DockerInfoWithTimeout {
+    param([int]$TimeoutSec = 15)
+    return Invoke-DockerCapturedWithTimeout -Arguments @('info') -TimeoutSec $TimeoutSec
+}
+
+function Get-DockerContextName {
+    $result = Invoke-DockerCapturedWithTimeout -Arguments @('context', 'show') -TimeoutSec 10
+    if ($result.TimedOut -or $result.ExitCode -ne 0) { return '' }
+    return (($result.Output | Select-Object -First 1) -as [string]).Trim()
+}
+
+function Resolve-PreflightImageTag {
+    param([string]$Requested)
+    if (-not [string]::IsNullOrWhiteSpace($Requested)) { return $Requested.Trim() }
+    if (-not [string]::IsNullOrWhiteSpace($env:IMAGE_TAG)) { return $env:IMAGE_TAG.Trim() }
+    $root = Split-Path -Parent $PSScriptRoot
+    $envPath = Join-Path $root '.env'
+    if (Test-Path $envPath) {
+        $vals = Read-EnvKeyValueFile -Path $envPath
+        if ($vals['IMAGE_TAG']) { return $vals['IMAGE_TAG'].Trim() }
+    }
+    $tag = Get-EnvReleaseVersionTag
+    if ($tag) { return $tag }
+    return 'latest'
+}
+
+if (-not $Quiet -and -not $Json) {
     Write-Host ''
     Write-Host 'Streamclone - dependency check' -ForegroundColor Cyan
     Write-Host '------------------------------'
@@ -45,45 +198,78 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 } else {
     Write-Check fail 'Git is not installed'
     $errors++
+    Add-BlockedReason 'Git is not installed'
     if ($InstallHints) {
         Write-Host '  Install: winget install Git.Git' -ForegroundColor DarkGray
     }
 }
 
 # Docker CLI
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+$dockerExe = Get-EnvDockerExe
+$engineRunning = $false
+if (-not $dockerExe) {
     Write-Check fail 'Docker is not installed or not on PATH'
     $errors++
+    Add-BlockedReason 'Docker is not installed or not on PATH'
+    $summary.engine = 'missing'
     if ($InstallHints) {
         Write-Host '  Install Docker Desktop: https://docs.docker.com/desktop/setup/install/windows-install/' -ForegroundColor DarkGray
         Write-Host '  Or try: winget install Docker.DockerDesktop' -ForegroundColor DarkGray
     }
 } else {
     Write-Check ok 'Docker CLI found'
-    try {
-        docker info 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'docker info failed' }
-        Write-Check ok 'Docker engine is running'
-    } catch {
+    $info = Invoke-DockerInfoWithTimeout -TimeoutSec $DockerInfoTimeoutSec
+    if ($info.TimedOut) {
+        Write-Check fail "Docker Desktop Linux engine not responding (timed out after ${DockerInfoTimeoutSec}s)"
+        $errors++
+        Add-BlockedReason 'Docker Desktop Linux engine not responding'
+        $summary.engine = 'timeout'
+    } elseif ($info.ExitCode -ne 0) {
         Write-Check fail 'Docker is installed but not running - start Docker Desktop'
         $errors++
+        Add-BlockedReason 'Docker Desktop is not running'
+        $summary.engine = 'stopped'
+    } else {
+        Write-Check ok 'Docker engine is running'
+        $engineRunning = $true
+        $summary.engine = 'running'
     }
-    try {
-        docker compose version 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'compose missing' }
-        Write-Check ok 'Docker Compose v2 available'
-    } catch {
-        Write-Check fail 'docker compose is missing - update Docker Desktop'
-        $errors++
+
+    if ($engineRunning) {
+        try {
+            $compose = Invoke-DockerCapturedWithTimeout -Arguments @('compose', 'version') -TimeoutSec 10
+            if ($compose.ExitCode -ne 0) { throw 'compose missing' }
+            Write-Check ok 'Docker Compose v2 available'
+        } catch {
+            Write-Check fail 'docker compose is missing - update Docker Desktop'
+            $errors++
+            Add-BlockedReason 'docker compose is missing'
+        }
+    }
+
+    if ($engineRunning) {
+        $contextName = Get-DockerContextName
+        $summary.context = $contextName
+        if ($contextName) {
+            if (($IsWindows -or $env:OS -match 'Windows') -and $contextName -ne 'desktop-linux') {
+                Write-Check warn "Docker context is '$contextName' (expected desktop-linux on Windows)"
+                $warnings++
+            } else {
+                Write-Check ok "Docker context: $contextName"
+            }
+        }
     }
 }
 
-# WSL2 hint (Docker Desktop on Windows)
+# WSL2 hint (Docker Desktop on Windows) — bounded so a stuck WSL does not hang install
 if ($IsWindows -or $env:OS -match 'Windows') {
     $wsl = Get-Command wsl -ErrorAction SilentlyContinue
     if ($wsl) {
-        $wslList = wsl -l -v 2>$null
-        if ($wslList -match 'Stopped') {
+        $wslResult = Invoke-ExternalWithTimeout -FilePath $wsl.Source -Arguments '-l -v' -TimeoutSec 5
+        if ($wslResult.TimedOut) {
+            Write-Check warn 'WSL status check timed out (5s) - if Docker is slow, run: wsl --shutdown'
+            $warnings++
+        } elseif ($wslResult.Output -match 'Stopped') {
             Write-Check warn 'One or more WSL distros are stopped - if localhost acts stale, run: wsl --shutdown'
             $warnings++
         } else {
@@ -127,12 +313,25 @@ try {
     $warnings++
 }
 
-if (-not $Quiet) {
+# GHCR reachability is measured by benchmark-ghcr-pull.ps1. Keep preflight local
+# so install/restart benchmarks are not blocked by registry-specific failures.
+
+$summary.errors = $errors
+$summary.warnings = $warnings
+$summary.blocked = ($errors -gt 0)
+$summary.ok = ($errors -eq 0)
+$summary.reason = ($blockedReasons -join '; ')
+
+if ($Json) {
+    Write-Output ($summary | ConvertTo-Json -Compress -Depth 4)
+} elseif (-not $Quiet) {
     Write-Host ''
     if ($errors -gt 0) {
         Write-Host "preflight-deps: FAILED - fix $errors issue(s) above, then re-run." -ForegroundColor Red
-        exit 1
+    } else {
+        Write-Host "preflight-deps: OK - $warnings warning(s). Run scripts/start-streamclone.ps1" -ForegroundColor Green
     }
-    Write-Host "preflight-deps: OK - $warnings warning(s). Run scripts/start-streamclone.ps1" -ForegroundColor Green
 }
-exit 0
+
+if ($errors -gt 0) { [Environment]::Exit(1) }
+[Environment]::Exit(0)

@@ -59,13 +59,19 @@ func (h *Handler) setupWelcome(w http.ResponseWriter, r *http.Request) {
 		Clipper: serviceStatus(h.probeServiceHealth(ctx, h.clipperServiceURL+"/v1/twitch/status")),
 	}
 
-	incomplete := services.Scraper == "offline" || services.Clipper == "offline"
+	incomplete := false
+	if profileHasScraper(profile) && services.Scraper == "offline" {
+		incomplete = true
+	}
+	if profileHasClipper(profile) && services.Clipper == "offline" {
+		incomplete = true
+	}
 
 	writeJSON(w, http.StatusOK, setupWelcomeResponse{
 		Profile:       profile,
 		Services:      services,
 		Incomplete:    incomplete,
-		ShowWelcome:   incomplete,
+		ShowWelcome:   false,
 		SetupGuideURL: "https://github.com/Aron-Chu/streamclone/blob/master/docs/install-desktop.md",
 	})
 }
