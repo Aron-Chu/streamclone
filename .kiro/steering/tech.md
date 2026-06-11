@@ -23,7 +23,7 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 
 ## Local Commands
 
-- Human setup guide: `docs/getting-started.md`
+- Human setup guide: `docs/install-desktop.md` (options: `docs/options.md`)
 - Backend build: `make build`
 - Backend tests: `make test`
 - Backend vet: `make vet`

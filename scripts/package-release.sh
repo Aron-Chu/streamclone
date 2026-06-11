@@ -52,13 +52,13 @@ cat >"$STAGE/README-quickstart.md" <<'EOF'
 # Streamclone quick start
 
 1. Install Docker Desktop and start it.
-2. Windows: double-click **Start Streamclone.cmd**
-3. macOS: double-click **Start Streamclone.command** in the launchers folder
-4. Open http://localhost:8090
+2. First time: double-click **Install Streamclone.cmd** (~3–5 min)
+3. Every day: double-click **Start Streamclone.cmd**
+4. Open http://localhost:8090/welcome
 
 Stop: **Stop Streamclone.cmd** (Windows) or **Stop Streamclone.command** (macOS)
 
-Full guide: https://github.com/Aron-Chu/streamclone/blob/master/docs/install-desktop.md
+Guide: https://github.com/Aron-Chu/streamclone/blob/master/docs/install-desktop.md
 EOF
 
 chmod +x "$STAGE/scripts"/*.sh 2>/dev/null || true
