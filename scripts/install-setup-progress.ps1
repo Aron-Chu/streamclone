@@ -165,6 +165,8 @@ try {
         & $shortcutPs1 -InstallDir $InstallDir
     }
 
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'scripts\ensure-setup-control.ps1') -Root $InstallDir
+
     if ($env:STREAMCLONE_NO_BROWSER -ne '1') {
         Start-Process 'http://localhost:8090/'
     }

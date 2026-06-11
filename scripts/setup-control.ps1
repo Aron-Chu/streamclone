@@ -58,8 +58,16 @@ function Invoke-ProfileServiceUp {
     $profile = $Service
     if ($Service -eq 'scraper') {
         $sibling = Get-EnvScraperSiblingPath
-        if (-not ((Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile')))) {
-            throw "streamclone-scraper sibling repo missing at $sibling"
+        $hasRepo = (Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile'))
+        if (-not $hasRepo) {
+            Write-Host "Cloning streamclone-scraper to $sibling ..."
+            $parent = Split-Path -Parent $sibling
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            $clone = Invoke-EnvCapturedProcess -FilePath 'git' -ArgumentList @('clone', 'https://github.com/Aron-Chu/streamclone-scraper.git', $sibling) -TimeoutSec 300
+            if ($clone.ExitCode -ne 0) {
+                $log = ($clone.Output -join [Environment]::NewLine).Trim()
+                throw "Could not clone streamclone-scraper: $log"
+            }
         }
     }
 
