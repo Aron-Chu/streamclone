@@ -1,7 +1,7 @@
 @echo off
-title Streamclone — Open
+title Streamclone - Open
 echo.
-echo  Streamclone — Open
+echo  Streamclone - Open
 echo  ==================
 echo  Starts the Docker stack and opens http://localhost:8090/welcome
 echo.

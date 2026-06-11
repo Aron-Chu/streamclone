@@ -1,7 +1,7 @@
 @echo off
-title Streamclone — First-time setup
+title Streamclone - First-time setup
 echo.
-echo  Streamclone — First-time setup
+echo  Streamclone - First-time setup
 echo  ==============================
 echo  Requires Docker Desktop (running).
 echo.

@@ -1,7 +1,7 @@
 @echo off
-title Streamclone — Uninstall
+title Streamclone - Uninstall
 echo.
-echo  Streamclone — Complete uninstall
+echo  Streamclone - Complete uninstall
 echo  ================================
 echo  Stops containers, deletes data volumes, removes secrets,
 echo  removes shortcuts, and deletes this install folder.

@@ -1,7 +1,7 @@
 @echo off
-title Streamclone — Stop
+title Streamclone - Stop
 echo.
-echo  Streamclone — Stop
+echo  Streamclone - Stop
 echo  ==================
 echo  Stops all Streamclone Docker containers.
 echo.
