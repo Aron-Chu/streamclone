@@ -4,9 +4,13 @@ Status snapshot and prioritized recommendations beyond the v0.1.3/v0.1.4 install
 
 ---
 
-## Status (as of audit)
+## Status (as of 2026-06-11)
 
-Not fully benchmark-finished. The install path is much healthier, `VERSION` is pinned to `v0.1.4`, and local image-trim builds completed. Final cold install, cached restart, GHCR pull-size, HLS, and analytics benchmarks remain **blocked** because Docker Desktop’s Linux engine is stopped; `preflight-deps.ps1 -Json` fails in ~20s (docker info timeout) without auto-launching Docker Desktop.
+**v0.1.4 RC benchmark pass (local):** Docker Desktop running; GHCR `v0.1.4-rc1` images published via [workflow run 27380531927](https://github.com/Aron-Chu/streamclone/actions/runs/27380531927). Core smoke, GHCR pull sizes, cached restart, HLS relay, and analytics latency measured locally.
+
+**Blocked for final tag:** `git push origin master` rejected — OAuth token lacks `workflow` scope (`.github/workflows/ci.yml` changes in the 8-commit delta). Run `gh auth refresh -h github.com -s workflow` from an interactive terminal, then push master + tag `v0.1.4`. **Do not tag final** until push succeeds and CI `release-smoke` runs green (RC dispatch above did **not** spawn `release-smoke` — only publish matrix + package; investigate workflow `needs` before final cut).
+
+**UI polish:** Local commit `53adbd0` — player hover controls, volume/fullscreen, skeletons, viewer-friendly banners (not on `origin/master` until push unblocks).
 
 ### Run benchmarks when Docker is available
 
@@ -33,8 +37,8 @@ Record results in the benchmark table below before tagging `v0.1.4`.
 | Analytics empty state (core users) | **Done** | `Analytics.tsx` + `ServiceStatusBanner.tsx` — links to `scraper-cloudflare-and-proxy.md` |
 | Setup-control token (frontend) | **Done** | `config.ts` + `api.ts` send `X-Streamclone-Setup-Token`; `setup-control.ps1` validates on POST |
 | Setup-control token (backend) | **Done** | `setup-control.ps1` reads `SETUP_CONTROL_TOKEN` from `.env`; 401 on bad/missing header |
-| Cold install + smoke benchmark | **Env-blocked** | Docker Desktop Linux engine stopped; use `benchmark-exe-install.ps1` when Docker is up |
-| GHCR trim pull sizes documented | **Env-blocked** | Run `scripts/benchmark-ghcr-pull.ps1 -ImageTag v0.1.4` when Docker is up; local trim estimates in `install-desktop.md` |
+| Cold install + smoke benchmark | **Partial** | `smoke-core.ps1` pass on `v0.1.4-rc1` stack; Setup.exe exit 0 in 2s (already installed — not a true cold machine) |
+| GHCR trim pull sizes documented | **Pass (rc1)** | Measured 382.5 MB local after pull (`dist/benchmark-ghcr-pull-v0.1.4-rc1.json`); re-run on final `v0.1.4` tag after push |
 
 **Product decision for v0.1.4:** Do not block on GHCR scraper. Block on **honest tiers** — Setup.exe ships Core Watch; minute TwitchTracker charts are Analytics tier (scraper profile).
 
@@ -53,7 +57,7 @@ Record results in the benchmark table below before tagging `v0.1.4`.
 | Area | Score | Notes |
 |------|-------|-------|
 | Install (current release) | 5/10 | `v0.1.3` Setup.exe failed on clean install |
-| Install (with patches) | 7/10 | Pending final silent cold rerun |
+| Install (with patches) | 7/10 | RC stack healthy; true cold Setup.exe on clean VM still pending |
 | Infrastructure | 7/10 | Compose shape is reasonable; Windows Desktop startup, image size, tag drift, and installer failure reporting need hardening |
 
 ### Benchmark table
@@ -63,12 +67,46 @@ Record results in the benchmark table below before tagging `v0.1.4`.
 | `v0.1.3` baseline Setup.exe | Failed, exit `5`, ~49.6s, orphan install-file issue |
 | Patched manual backend setup | Succeeded; pulled images, started stack |
 | `smoke-core.ps1` after manual setup | Passed all core checks |
-| Final silent cold Setup.exe | **Env-blocked:** Docker Desktop Linux engine stopped |
-| Cached Stop → Start (`benchmark-restart.ps1`) | **Env-blocked:** Docker engine not responding |
-| GHCR pull sizes (`benchmark-ghcr-pull.ps1`) | **Env-blocked:** Docker engine not responding |
-| HLS cold start | **Blocked** |
-| Analytics latency | **Blocked** |
+| Preflight (`preflight-deps.ps1 -Json`) | **Pass** 2026-06-11 — engine running, port 8090 free |
+| GHCR pull sizes (`v0.1.4-rc1`) | **Pass** — 382.5 MB total local (6 core images); see table below |
+| `smoke-core.ps1` (`v0.1.4-rc1`) | **Pass** — all healthz + proxy 200 |
+| Cached Stop → Start | **Pass** — stop 2.3s, compose up 17.1s, HTTP ready 0.1s (manual compose; install-dir restart script needs `%USERPROFILE%\streamclone`) |
+| HLS cold start (`jynxzi`, live) | **Pass (manual)** — `startupMs` ~18s, `hlsReadyMs` ~2.8s, `index.m3u8` HTTP 200; `benchmark-hls-start.ps1` still probes `main_stream.m3u8` (script bug) |
+| Analytics latency (`jynxzi`) | **Pass** — insights p50 15ms / p95 7459ms; history p50 13ms; streams p50 14ms |
+| Final silent cold Setup.exe | **Partial** — exit 0, 2s (reinstall over existing `%USERPROFILE%\streamclone`) |
+| CI `release-smoke` on RC dispatch | **Skipped/missing** — [run 27380531927](https://github.com/Aron-Chu/streamclone/actions/runs/27380531927) has no smoke job |
+| `v0.1.4` git tag pushed | **Not done** — blocked on master push + smoke gate |
 | Local trim build validation | `video` Streamlink/FFmpeg ok, `emote` vips ok, `clipper` streamlink/imageio-ffmpeg ok |
+
+### GHCR pull sizes (`v0.1.4-rc1`, measured 2026-06-11)
+
+| Image | Local size (MB) | Notes |
+|-------|-----------------|-------|
+| `metadata` | 7.1 | |
+| `chat` | 7.1 | |
+| `video` | 232.2 | Largest core image |
+| `emote` | 107.5 | |
+| `analytics` | 8.2 | |
+| `frontend` | 20.3 | |
+| **Total (6 core)** | **382.5** | Local size after `docker pull`; compressed registry transfer may differ |
+
+### Experience testing (2026-06-11, core profile, `localhost:8090`)
+
+| Area | Result | Notes |
+|------|--------|-------|
+| Live HLS (`/c/jynxzi`) | **OK** | Relay `startupMs` ~18s; manifest at `/live/jynxzi/index.m3u8` returns 200 |
+| Live chat | **OK (API)** | Chat service healthy; WebSocket path available when channel open |
+| Analytics summary (`/analytics/jynxzi`) | **OK** | Insights/history endpoints sub-20ms p50 on core |
+| VOD chat / minute charts | **Needs Analytics profile** | Requires `--profile scraper` + sibling `streamclone-scraper` per `scraper-cloudflare-and-proxy.md` |
+| Directory / UI polish | **Local only** | Skeletons, hover player controls, viewer-friendly banners in commit `53adbd0` (awaiting push) |
+
+### Deferred to v0.1.5
+
+- In-player VOD playback, follow button, live viewer sparkline
+- VOD chat replay without scraper profile
+- Fix `benchmark-hls-start.ps1` manifest path (`index.m3u8` not `main_stream.m3u8`)
+- Fix nested `preflight-deps.ps1` capture in benchmark scripts (stdout piping returns empty in some shells)
+- Ensure `release-smoke` runs on `workflow_dispatch` RC tags
 
 ---
 

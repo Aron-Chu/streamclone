@@ -20,15 +20,18 @@ Open **`http://localhost:8090/`** when running. Use that URL only — not raw po
 
 ### What downloads on first install
 
-**GHCR pull sizes at the `v0.1.4` tag are pending measurement** (run `scripts/benchmark-ghcr-pull.ps1` after tagging). The table below uses **local trimmed build estimates** as reference only — registry layers may differ slightly.
+**GHCR pull sizes measured at `v0.1.4-rc1`** (2026-06-11; re-run on final `v0.1.4` tag after release). Local image size after `docker pull` — compressed registry download may differ slightly.
 
-| Image | Local trim (reference) | Notes |
-|-------|------------------------|-------|
-| `video` | ~380 MB | Largest core service; was ~900 MB before trim |
-| `emote` | ~136 MB | Emote proxy; was ~430 MB before trim |
-| `metadata`, `chat`, `analytics`, `frontend` | ~600 MB combined | Go services + static frontend |
+| Image | `v0.1.4-rc1` (MB) | Notes |
+|-------|-------------------|-------|
+| `video` | 232.2 | Largest core service (trimmed from ~900 MB pre-Alpine) |
+| `emote` | 107.5 | Emote proxy (trimmed from ~430 MB) |
+| `frontend` | 20.3 | Static UI + nginx |
+| `metadata` | 7.1 | |
+| `chat` | 7.1 | |
+| `analytics` | 8.2 | |
 | Third-party (`postgres`, `minio`, `caddy`, …) | varies | Not published to `ghcr.io/aron-chu/streamclone/*` |
-| **Total (core profile)** | **~1.1–1.5 GB** (estimate) | Confirm with GHCR pull benchmark at release tag |
+| **Total (6 core GHCR images)** | **382.5 MB** | Plus third-party layers on first `docker compose up` |
 
 Reinstalls and **Start** use `--pull missing` so already-downloaded images are not re-fetched.
 
@@ -38,7 +41,7 @@ Reinstalls and **Start** use `--pull missing` so already-downloaded images are n
 
 | Tier | How you get it | First-pull download | Prerequisites | Without scraper |
 |------|----------------|---------------------|---------------|-----------------|
-| **Core Watch** | Setup.exe / default install | ~1.1–1.5 GB (core GHCR images; **sizes pending GHCR measurement at v0.1.4**) | Docker Desktop running | Directory, live playback, chat, emotes, Helix/VOD stream history, TwitchTracker **summary** stats (avg/peak on stream rows) |
+| **Core Watch** | Setup.exe / default install | **~383 MB** core GHCR images at `v0.1.4-rc1` (+ third-party on first compose up) | Docker Desktop running | Directory, live playback, chat, emotes, Helix/VOD stream history, TwitchTracker **summary** stats (avg/peak on stream rows) |
 | **Analytics** | `setup.ps1 -Profile scraper` or compose `--profile scraper` | + scraper image (builds from sibling repo; **not** published to GHCR) | Clone [`streamclone-scraper`](https://github.com/Aron-Chu/streamclone-scraper) beside this repo | Minute-level viewer charts on Analytics, reliable TwitchTracker sync |
 | **Clip Studio** | `--profile clipper` | + ~1 GB `clipper` image | Twitch CLI + device login (`make twitch-local-auth`) | Clip Studio at `/studio` |
 | **Full** | both profiles | Analytics + Clip Studio sizes combined | Scraper sibling + Twitch CLI | All optional features |
