@@ -127,7 +127,27 @@ try {
 
 $report.healthy = ($report.docker -eq 'running') -and $report.webOk -and ($report.configReady -or ($report.containers.Count -gt 0))
 
+function Test-SetupControlHealth {
+    try {
+        $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:9191/health' -UseBasicParsing -TimeoutSec 2
+        if ($resp.StatusCode -eq 200) {
+            $body = $resp.Content | ConvertFrom-Json
+            return [bool]$body.ok
+        }
+    } catch { }
+    return $false
+}
+
+$setupControlOk = Test-SetupControlHealth
+if ($setupControlOk) {
+    Write-StatusLine 'Setup helper' 'ok' 'Ready for Start Analytics / Clip Studio (port 9191)'
+} else {
+    Write-StatusLine 'Setup helper' 'warn' 'Not running - Start Analytics button will not work'
+    [void]$suggestions.Add('Run Start Streamclone.cmd once, or: powershell -File scripts\ensure-setup-control.ps1')
+}
+
 if ($Json) {
+    $report['setupControl'] = $setupControlOk
     $report['suggestions'] = @($suggestions)
     $report | ConvertTo-Json -Depth 4
 } else {

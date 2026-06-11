@@ -87,12 +87,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $controlPidFile = Join-Path $Root '.streamclone-setup-control.pid'
 $controlScript = Join-Path $PSScriptRoot 'setup-control.ps1'
-if (-not (Test-Path $controlPidFile)) {
-    Start-Process -FilePath 'powershell.exe' `
-        -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $controlScript) `
-        -WorkingDirectory $Root | Out-Null
-    Start-Sleep -Milliseconds 400
-}
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root $Root
 
 
 Write-Host ''

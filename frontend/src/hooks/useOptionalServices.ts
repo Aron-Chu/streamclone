@@ -42,7 +42,9 @@ export function useOptionalServices() {
   const startService = async (service: 'scraper' | 'clipper') => {
     setActionError(null)
     if (!controlReady) {
-      setActionError('Run Start Streamclone from your Desktop shortcut, then try again.')
+      setActionError(
+        'The install helper is not running (needed to start Analytics). Close the app tab, run Start Streamclone from Desktop, then try again.',
+      )
       return false
     }
     setStarting(service)

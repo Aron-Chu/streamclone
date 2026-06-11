@@ -148,6 +148,7 @@ if (-not $NoUp) {
     }
     Write-Host ''
     Write-Host 'Streamclone: http://localhost:8090/'
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root (Get-Location)
 }
 
 if (-not $NoSmoke -and -not $NoUp) {
