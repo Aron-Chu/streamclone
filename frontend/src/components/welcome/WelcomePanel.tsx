@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getSetupControlHealth, getSetupWelcome, startSetupService, type SetupWelcome } from '../../api'
+import BrandLogo from '../BrandLogo'
 
 const WELCOME_DISMISSED_KEY = 'streamclone-welcome-dismissed'
 const WELCOME_SEEN_KEY = 'streamclone-welcome-seen'
@@ -137,8 +138,8 @@ export default function WelcomePanel({ onDismiss, compact = false }: WelcomePane
 
   return (
     <div className={`${compact ? '' : 'mx-auto max-w-3xl'} space-y-5 text-zinc-100`}>
-      <div className="space-y-2">
-        <div className="text-xs font-black uppercase tracking-[0.2em] text-violet-300">Streamclone status</div>
+      <div className="space-y-3">
+        <BrandLogo size="lg" subtitle="Setup & status" />
         <h1 className="text-2xl font-black text-white">What is running right now</h1>
         <p className="text-sm font-semibold leading-6 text-zinc-400">
           Live checks for the core stack and optional scraper / clipper services. Status refreshes every 10 seconds.
@@ -154,14 +155,17 @@ export default function WelcomePanel({ onDismiss, compact = false }: WelcomePane
         <ul className="mt-3 space-y-2 text-xs font-semibold text-violet-50/90">
           {typeof navigator !== 'undefined' && /win/i.test(navigator.userAgent) ? (
             <>
-              <li><span className="font-black text-white">First time:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">Install Streamclone.cmd</code> — creates Desktop shortcuts and runs setup.</li>
+              <li><span className="font-black text-white">First time:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">Install Streamclone.cmd</code> — setup, shortcuts, and this page opens automatically.</li>
               <li><span className="font-black text-white">Every day:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">Start Streamclone.cmd</code> — starts Docker and opens this page.</li>
-              <li><span className="font-black text-white">Stop:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">Stop Streamclone.cmd</code> or the Desktop shortcut.</li>
+              <li><span className="font-black text-white">Pause:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">Stop Streamclone.cmd</code> — stops containers but keeps your install and data.</li>
+              <li><span className="font-black text-white">Remove everything:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">Uninstall Streamclone.cmd</code> in the install folder (not on Desktop).</li>
             </>
           ) : (
             <>
               <li><span className="font-black text-white">First time:</span> open <code className="rounded bg-black/25 px-1 py-0.5">launchers/Install Streamclone.command</code></li>
               <li><span className="font-black text-white">Every day:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">launchers/Start Streamclone.command</code></li>
+              <li><span className="font-black text-white">Pause:</span> <code className="rounded bg-black/25 px-1 py-0.5">launchers/Stop Streamclone.command</code></li>
+              <li><span className="font-black text-white">Remove everything:</span> <code className="rounded bg-black/25 px-1 py-0.5">launchers/Uninstall Streamclone.command</code></li>
             </>
           )}
         </ul>

@@ -13,15 +13,21 @@ if (Test-Path $controlPidFile) {
 }
 
 Write-Host 'Stopping Streamclone...' -ForegroundColor Cyan
-docker compose --env-file .env `
-    -f deploy/docker-compose.yml `
-    -f deploy/docker-compose.local-tunnel.yml `
-    --profile scraper --profile clipper `
-    down --remove-orphans --timeout 30 2>$null
+$prev = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    docker compose --env-file .env `
+        -f deploy/docker-compose.yml `
+        -f deploy/docker-compose.local-tunnel.yml `
+        --profile scraper --profile clipper `
+        down --remove-orphans --timeout 30 2>&1 | ForEach-Object { Write-Host $_ }
 
-docker compose --env-file .env `
-    -f deploy/docker-compose.yml `
-    -f deploy/docker-compose.local-tunnel.yml `
-    down --remove-orphans --timeout 30
+    docker compose --env-file .env `
+        -f deploy/docker-compose.yml `
+        -f deploy/docker-compose.local-tunnel.yml `
+        down --remove-orphans --timeout 30 2>&1 | ForEach-Object { Write-Host $_ }
+} finally {
+    $ErrorActionPreference = $prev
+}
 
 Write-Host 'Stopped.' -ForegroundColor Green

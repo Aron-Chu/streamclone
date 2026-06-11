@@ -1,0 +1,237 @@
+#Requires -Version 5.1
+param(
+    [string]$InstallDir = '',
+    [switch]$NonInteractive,
+    [switch]$PruneImages,
+    [switch]$KeepInstallDir
+)
+
+$ErrorActionPreference = 'Stop'
+
+function Get-StreamcloneInstallRoot {
+    param([string]$Hint)
+    $candidates = @()
+    if ($Hint) { $candidates += $Hint.TrimEnd('\', '/') }
+    $scriptRoot = Split-Path -Parent $PSScriptRoot
+    $candidates += $scriptRoot
+    $candidates += (Join-Path $env:USERPROFILE 'streamclone')
+    foreach ($candidate in $candidates) {
+        if (Test-Path (Join-Path $candidate 'scripts\start-streamclone.ps1')) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+    throw 'Streamclone install not found. Pass -InstallDir or run from an install folder.'
+}
+
+function Test-StreamcloneUseReleaseImages {
+    param([string]$Root)
+    if (Test-Path (Join-Path $Root 'VERSION')) { return $true }
+    if (Test-Path (Join-Path $Root 'deploy\env\release-bundle.env')) { return $true }
+    $envFile = Join-Path $Root '.env'
+    if (Test-Path $envFile) {
+        . (Join-Path $PSScriptRoot 'lib\env.ps1')
+        $vals = Read-EnvKeyValueFile -Path $envFile
+        if ($vals['STREAMCLONE_USE_IMAGES'] -eq '1') { return $true }
+    }
+    return $false
+}
+
+function Stop-StreamcloneControlProcess {
+    param([string]$Root)
+    $controlPidFile = Join-Path $Root '.streamclone-setup-control.pid'
+    if (-not (Test-Path $controlPidFile)) { return }
+    $controlPid = (Get-Content $controlPidFile -Raw).Trim()
+    if ($controlPid -match '^\d+$') {
+        Stop-Process -Id ([int]$controlPid) -Force -ErrorAction SilentlyContinue
+    }
+    Remove-Item $controlPidFile -Force -ErrorAction SilentlyContinue
+}
+
+function Invoke-StreamcloneComposeDown {
+    param(
+        [string]$Root,
+        [switch]$Volumes
+    )
+    $envFile = Join-Path $Root '.env'
+    if (-not (Test-Path $envFile)) {
+        Write-Host 'No .env — skipping compose down.' -ForegroundColor Yellow
+        return
+    }
+
+    Set-Location $Root
+    . (Join-Path $PSScriptRoot 'lib\env.ps1')
+
+    $profile = 'core'
+    $profileFile = Join-Path $Root '.streamclone-profile'
+    if (Test-Path $profileFile) {
+        $profile = (Get-Content $profileFile -Raw).Trim()
+    } elseif (Test-Path $envFile) {
+        $vals = Read-EnvKeyValueFile -Path $envFile
+        if ($vals['STREAMCLONE_PROFILE']) { $profile = $vals['STREAMCLONE_PROFILE'] }
+    }
+
+    $composeArgs = @(
+        'compose', '--env-file', '.env',
+        '-f', 'deploy/docker-compose.yml',
+        '-f', 'deploy/docker-compose.local-tunnel.yml'
+    )
+    if (Test-StreamcloneUseReleaseImages -Root $Root) {
+        $composeArgs += '-f', 'deploy/docker-compose.release.yml'
+    }
+    foreach ($p in @('scraper', 'clipper')) {
+        $composeArgs += '--profile', $p
+    }
+
+    $downArgs = @('down', '--remove-orphans', '--timeout', '30')
+    if ($Volumes) { $downArgs += '-v' }
+
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        Write-Host 'Stopping Docker stack...' -ForegroundColor Cyan
+        & docker @composeArgs @downArgs 2>&1 | ForEach-Object { Write-Host $_ }
+        $composeArgsNoProfiles = @(
+            'compose', '--env-file', '.env',
+            '-f', 'deploy/docker-compose.yml',
+            '-f', 'deploy/docker-compose.local-tunnel.yml'
+        )
+        if (Test-StreamcloneUseReleaseImages -Root $Root) {
+            $composeArgsNoProfiles += '-f', 'deploy/docker-compose.release.yml'
+        }
+        & docker @composeArgsNoProfiles @downArgs 2>&1 | ForEach-Object { Write-Host $_ }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+function Remove-StreamcloneDesktopShortcuts {
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    foreach ($name in @('Start Streamclone.lnk', 'Stop Streamclone.lnk')) {
+        $path = Join-Path $desktop $name
+        if (Test-Path $path) {
+            Remove-Item $path -Force
+            Write-Host "Removed Desktop\$name"
+        }
+    }
+}
+
+function Remove-StreamcloneMacShortcuts {
+    $appsDir = Join-Path $env:USERPROFILE 'Applications'
+    if (-not (Test-Path $appsDir)) { return }
+    foreach ($name in @(
+        'Streamclone Start.command',
+        'Streamclone Stop.command',
+        'Streamclone Install.command'
+    )) {
+        $path = Join-Path $appsDir $name
+        if (Test-Path $path) {
+            Remove-Item $path -Force -ErrorAction SilentlyContinue
+            Write-Host "Removed $path"
+        }
+    }
+}
+
+function Remove-StreamcloneConfigFiles {
+    param([string]$Root)
+    foreach ($name in @('.env', '.streamclone-profile', '.streamclone-setup-control.pid')) {
+        $path = Join-Path $Root $name
+        if (Test-Path $path) {
+            Remove-Item $path -Force
+            Write-Host "Removed $name"
+        }
+    }
+}
+
+function Remove-StreamcloneImages {
+    param(
+        [string]$Root,
+        [string]$Tag
+    )
+    if (-not $Tag) {
+        $versionFile = Join-Path $Root 'VERSION'
+        if (Test-Path $versionFile) {
+            $Tag = (Get-Content $versionFile -Raw).Trim()
+        }
+        $envFile = Join-Path $Root '.env'
+        if (-not $Tag -and (Test-Path $envFile)) {
+            . (Join-Path $PSScriptRoot 'lib\env.ps1')
+            $vals = Read-EnvKeyValueFile -Path $envFile
+            $Tag = $vals['IMAGE_TAG']
+        }
+    }
+    if (-not $Tag) { $Tag = 'latest' }
+
+    $repos = @('metadata', 'video', 'chat', 'analytics', 'emote', 'frontend', 'clipper')
+    Write-Host "Pruning GHCR images (tag: $Tag)..." -ForegroundColor Cyan
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        foreach ($repo in $repos) {
+            $image = "ghcr.io/aron-chu/streamclone/${repo}:$Tag"
+            & docker image rm -f $image 2>&1 | Out-Null
+        }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+function Remove-InstallDirectoryDeferred {
+    param([string]$Root)
+    $escaped = $Root.Replace("'", "''")
+    $cleanup = @"
+Start-Sleep -Seconds 2
+Remove-Item -LiteralPath '$escaped' -Recurse -Force -ErrorAction SilentlyContinue
+"@
+    Start-Process -FilePath 'powershell.exe' `
+        -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-Command', $cleanup) `
+        -WorkingDirectory $env:TEMP | Out-Null
+    Write-Host "Scheduled removal of install folder: $Root" -ForegroundColor Yellow
+}
+
+$root = Get-StreamcloneInstallRoot -Hint $InstallDir
+
+Write-Host ''
+Write-Host 'Streamclone — Complete uninstall' -ForegroundColor Red
+Write-Host '================================' -ForegroundColor Red
+Write-Host "Install folder: $root"
+Write-Host ''
+Write-Host 'This will:'
+Write-Host '  - Stop all Streamclone Docker containers'
+Write-Host '  - Delete Docker volumes (database, MinIO, clipper data)'
+Write-Host '  - Remove .env and local secrets'
+Write-Host '  - Remove Desktop / macOS shortcuts'
+if ($PruneImages) {
+    Write-Host '  - Remove downloaded ghcr.io/aron-chu/streamclone images'
+}
+if (-not $KeepInstallDir) {
+    Write-Host '  - Delete the install folder'
+}
+Write-Host ''
+
+if (-not $NonInteractive) {
+    $ans = Read-Host 'Type YES to continue'
+    if ($ans -ne 'YES') {
+        Write-Host 'Uninstall cancelled.' -ForegroundColor Yellow
+        exit 0
+    }
+}
+
+Stop-StreamcloneControlProcess -Root $root
+Invoke-StreamcloneComposeDown -Root $root -Volumes
+
+if ($PruneImages) {
+    Remove-StreamcloneImages -Root $root
+}
+
+Remove-StreamcloneConfigFiles -Root $root
+Remove-StreamcloneDesktopShortcuts
+Remove-StreamcloneMacShortcuts
+
+if ($KeepInstallDir) {
+    Write-Host ''
+    Write-Host "Uninstall complete (install folder kept): $root" -ForegroundColor Green
+} else {
+    Remove-InstallDirectoryDeferred -Root $root
+    Write-Host ''
+    Write-Host 'Uninstall complete. Install folder will be removed shortly.' -ForegroundColor Green
+}

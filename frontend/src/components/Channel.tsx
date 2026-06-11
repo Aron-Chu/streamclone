@@ -24,6 +24,7 @@ import { normalizeBrowserOriginUrl } from '../config'
 import { useHlsPlayback, type PlaybackMetrics, type PlaybackState } from '../playback'
 import { useThemeEffect, useUiSettings, type BottomDensityMode, type ClipPeriod, type PlaybackLatencyMode, type StatsPeriod, type VideoFitMode } from '../settings'
 import { emoteLoadPercent, formatEmoteProviderProgress, sortChannelEmotesByUsage } from '../emoteUtils'
+import BrandLogo from './BrandLogo'
 import Chat, { type ChatEmoteStatus } from './Chat'
 import ChannelRail from './ChannelRail'
 import LocalTokenImportButton from './LocalTokenImportButton'
@@ -1718,7 +1719,7 @@ export default function Channel() {
                 Menu
               </button>
               <Link to="/" className="flex shrink-0 items-center gap-3 rounded px-2 py-1 transition hover:bg-white/10">
-                <span className="text-lg font-black text-violet-300">Streamclone</span>
+                <BrandLogo size="sm" showText />
                 <span className="hidden rounded bg-white/10 px-2 py-0.5 text-xs font-bold text-zinc-300 sm:inline">Browse</span>
               </Link>
               <div className="hidden min-w-0 border-l border-white/10 pl-3 md:block">

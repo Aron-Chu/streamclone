@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # Shared logic for double-click Install / Start / Stop launchers.
 param(
-    [ValidateSet('install', 'start', 'stop')]
+    [ValidateSet('install', 'start', 'stop', 'uninstall')]
     [string]$Action,
     [string]$LauncherRoot = $PSScriptRoot
 )
@@ -83,6 +83,14 @@ switch ($Action) {
         if (-not (Test-Path $stopPs1)) {
             throw "Streamclone not installed at $root."
         }
+        Write-Host 'Stopping Docker stack (config and data are kept)...' -ForegroundColor Cyan
         & $stopPs1
+    }
+    'uninstall' {
+        $uninstallPs1 = Join-Path $root 'scripts\uninstall-streamclone.ps1'
+        if (-not (Test-Path $uninstallPs1)) {
+            throw "Streamclone not installed at $root."
+        }
+        & $uninstallPs1 -InstallDir $root
     }
 }

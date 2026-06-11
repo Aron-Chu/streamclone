@@ -19,6 +19,20 @@ End-user install: [docs/install-desktop.md](docs/install-desktop.md) (release ZI
 
 Legacy one-liner: `make bootstrap` still works (core profile only).
 
+### Clean re-test (contributors)
+
+Simulate a new-user install from the same clone:
+
+```powershell
+# Stop stack, wipe volumes + .env, keep repo folder
+powershell -File scripts\reset-local-install.ps1 -RemoveVolumes
+
+# Full teardown (also deletes install folder — use from a release extract, not git clone)
+powershell -File scripts\uninstall-streamclone.ps1
+```
+
+End-user lifecycle docs: [docs/install-desktop.md](docs/install-desktop.md#lifecycle).
+
 ## Tests before PR
 
 ```sh

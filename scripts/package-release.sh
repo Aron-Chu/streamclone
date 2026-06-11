@@ -38,6 +38,7 @@ cp "$ROOT/.env.example" "$STAGE/.env.example"
 cp "$ROOT/Install Streamclone.cmd" "$STAGE/Install Streamclone.cmd"
 cp "$ROOT/Start Streamclone.cmd" "$STAGE/Start Streamclone.cmd"
 cp "$ROOT/Stop Streamclone.cmd" "$STAGE/Stop Streamclone.cmd"
+cp "$ROOT/Uninstall Streamclone.cmd" "$STAGE/Uninstall Streamclone.cmd"
 
 mkdir -p "$STAGE/deploy/env"
 cat >"$STAGE/deploy/env/release-bundle.env" <<EOF
@@ -56,7 +57,9 @@ cat >"$STAGE/README-quickstart.md" <<'EOF'
 3. Every day: double-click **Start Streamclone.cmd**
 4. Open http://localhost:8090/welcome
 
-Stop: **Stop Streamclone.cmd** (Windows) or **Stop Streamclone.command** (macOS)
+Stop (pause, keep data): **Stop Streamclone.cmd** / **Stop Streamclone.command**
+
+Remove everything: **Uninstall Streamclone.cmd** / **Uninstall Streamclone.command**
 
 Guide: https://github.com/Aron-Chu/streamclone/blob/master/docs/install-desktop.md
 EOF
