@@ -1,6 +1,6 @@
 # Streamclone
 
-Self-hosted Twitch-style directory with HLS playback, emote-rich chat, analytics, and optional Clip Studio — no ads, local Docker stack at **`http://localhost:8090`**.
+Self-hosted Twitch-style directory with HLS playback, analytics, and optional Clip Studio no ads, quick and stable 7tv load.
 
 ## Quick start
 
