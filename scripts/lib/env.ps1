@@ -257,49 +257,88 @@ function Invoke-EnvDocker {
     return [int]$proc.ExitCode
 }
 
+function Invoke-EnvCapturedProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [int]$TimeoutSec = 0
+    )
+    $proc = $null
+    try {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $FilePath
+        $psi.Arguments = Join-EnvProcessArguments -Arguments $ArgumentList
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $timedOut = $false
+        if ($TimeoutSec -gt 0) {
+            $timedOut = -not $proc.WaitForExit($TimeoutSec * 1000)
+            if ($timedOut) {
+                try { $proc.Kill() } catch { }
+                return [pscustomobject]@{
+                    ExitCode = 124
+                    TimedOut = $true
+                    Output   = @("Process timed out after ${TimeoutSec}s")
+                }
+            }
+        } else {
+            $proc.WaitForExit()
+        }
+
+        $stdout = $proc.StandardOutput.ReadToEnd()
+        $stderr = $proc.StandardError.ReadToEnd()
+
+        $lines = [System.Collections.Generic.List[string]]::new()
+        foreach ($chunk in @($stdout, $stderr)) {
+            if ([string]::IsNullOrEmpty($chunk)) { continue }
+            foreach ($line in ($chunk -split "`r?`n")) {
+                if ($line -ne '') { [void]$lines.Add($line) }
+            }
+        }
+
+        return [pscustomobject]@{
+            ExitCode = [int]$proc.ExitCode
+            TimedOut = $false
+            Output   = @($lines)
+        }
+    } finally {
+        if ($proc) {
+            $proc.Dispose()
+        }
+    }
+}
+
 function Invoke-EnvDockerCaptured {
     param([string[]]$Arguments)
     $docker = Get-EnvDockerExe
     if (-not $docker) {
         return [pscustomobject]@{
             ExitCode = 127
+            TimedOut = $false
             Output   = @("Docker is required. Install Docker Desktop and ensure 'docker.exe' is on PATH.")
         }
     }
+    return Invoke-EnvCapturedProcess -FilePath $docker -ArgumentList $Arguments
+}
 
-    $output = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
-    try {
-        $psi = [System.Diagnostics.ProcessStartInfo]::new()
-        $psi.FileName = $docker
-        $psi.Arguments = Join-EnvProcessArguments -Arguments $Arguments
-        $psi.UseShellExecute = $false
-        $psi.CreateNoWindow = $true
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError = $true
-
-        $proc = [System.Diagnostics.Process]::new()
-        $proc.StartInfo = $psi
-        $handler = [System.Diagnostics.DataReceivedEventHandler]{
-            param($sender, $eventArgs)
-            if ($null -ne $eventArgs.Data) { [void]$output.Add($eventArgs.Data) }
-        }
-        $proc.add_OutputDataReceived($handler)
-        $proc.add_ErrorDataReceived($handler)
-        [void]$proc.Start()
-        $proc.BeginOutputReadLine()
-        $proc.BeginErrorReadLine()
-        $proc.WaitForExit()
+function Invoke-EnvDockerCapturedWithTimeout {
+    param(
+        [string[]]$Arguments,
+        [int]$TimeoutSec = 15
+    )
+    $docker = Get-EnvDockerExe
+    if (-not $docker) {
         return [pscustomobject]@{
-            ExitCode = [int]$proc.ExitCode
-            Output   = @($output)
-        }
-    } finally {
-        if ($proc) {
-            $proc.remove_OutputDataReceived($handler)
-            $proc.remove_ErrorDataReceived($handler)
-            $proc.Dispose()
+            ExitCode = 127
+            TimedOut = $false
+            Output   = @('Docker CLI not found')
         }
     }
+    return Invoke-EnvCapturedProcess -FilePath $docker -ArgumentList $Arguments -TimeoutSec $TimeoutSec
 }
 
 function Sync-ClipperAuthFromRuntime {

@@ -16,6 +16,7 @@ New-Item -ItemType Directory -Path $targetLaunchers -Force | Out-Null
 foreach ($name in @(
     'install-streamclone-launcher.ps1',
     'Install Streamclone.cmd',
+    'Check Streamclone.cmd',
     'Start Streamclone.cmd',
     'Stop Streamclone.cmd',
     'Manage Streamclone.cmd',
@@ -31,7 +32,7 @@ foreach ($name in @(
     }
 }
 
-foreach ($name in @('Start Streamclone.cmd', 'Stop Streamclone.cmd', 'Manage Streamclone.cmd', 'Uninstall Streamclone.cmd')) {
+foreach ($name in @('Start Streamclone.cmd', 'Stop Streamclone.cmd', 'Manage Streamclone.cmd', 'Uninstall Streamclone.cmd', 'Check Streamclone.cmd')) {
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) $name
     if (-not (Test-Path $src)) { $src = Join-Path $repoLaunchers $name }
     if (Test-Path $src) {

@@ -3,7 +3,8 @@
 # Used when Install Streamclone.cmd is run standalone (Downloads folder) without the full bundle.
 param(
     [string]$InstallDir = (Join-Path $env:USERPROFILE 'streamclone'),
-    [string]$Version = ''
+    [string]$Version = '',
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,9 +29,50 @@ function Get-ReleaseZipMeta {
     }
 }
 
+function Test-StreamcloneWebOk {
+    try {
+        $resp = Invoke-WebRequest -Uri 'http://localhost:8090/' -UseBasicParsing -TimeoutSec 5
+        return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500)
+    } catch {
+        return $false
+    }
+}
+
+function Get-LocalInstallVersion {
+    param([string]$Dir)
+    $versionFile = Join-Path $Dir 'VERSION'
+    if (-not (Test-Path $versionFile)) { return '' }
+    return (Get-Content $versionFile -Raw).Trim()
+}
+
 Write-Host 'Step 1/4: Downloading latest release...' -ForegroundColor Cyan
 $meta = Get-ReleaseZipMeta -Tag $Version
 Write-Host "  $($meta.Name) ($($meta.Tag))"
+
+$localVersion = Get-LocalInstallVersion -Dir $InstallDir
+$launcher = Join-Path $InstallDir 'launchers\install-streamclone-launcher.ps1'
+
+if (-not $Force -and $localVersion -eq $meta.Tag -and (Test-Path $launcher)) {
+    if (Test-StreamcloneWebOk -and (Test-Path (Join-Path $InstallDir '.env'))) {
+        Write-Host ''
+        Write-Host "  Already on $($meta.Tag) and running at http://localhost:8090/" -ForegroundColor Green
+        Write-Host '  Skipping re-download. Refreshing shortcuts...' -ForegroundColor Yellow
+        & $launcher -Action install -LauncherRoot $InstallDir
+        exit $LASTEXITCODE
+    }
+}
+
+$savedEnv = $null
+$savedProfile = $null
+$savedEnvLocal = $null
+if (Test-Path $InstallDir) {
+    $envPath = Join-Path $InstallDir '.env'
+    $profilePath = Join-Path $InstallDir '.streamclone-profile'
+    $envLocalPath = Join-Path $InstallDir '.env.local'
+    if (Test-Path $envPath) { $savedEnv = Get-Content $envPath -Raw }
+    if (Test-Path $profilePath) { $savedProfile = Get-Content $profilePath -Raw }
+    if (Test-Path $envLocalPath) { $savedEnvLocal = Get-Content $envLocalPath -Raw }
+}
 
 $tempZip = Join-Path ([System.IO.Path]::GetTempPath()) "streamclone-$([Guid]::NewGuid().N).zip"
 try {
@@ -44,6 +86,16 @@ try {
     if ((Test-Path $nested) -and -not (Test-Path (Join-Path $InstallDir 'VERSION'))) {
         Get-ChildItem $nested -Force | Move-Item -Destination $InstallDir -Force
         Remove-Item -Recurse -Force $nested
+    }
+    if ($savedEnv) {
+        Set-Content -Path (Join-Path $InstallDir '.env') -Value $savedEnv -NoNewline
+        Write-Host '  Preserved existing .env configuration' -ForegroundColor DarkGray
+    }
+    if ($savedProfile) {
+        Set-Content -Path (Join-Path $InstallDir '.streamclone-profile') -Value $savedProfile -NoNewline
+    }
+    if ($savedEnvLocal) {
+        Set-Content -Path (Join-Path $InstallDir '.env.local') -Value $savedEnvLocal -NoNewline
     }
 } finally {
     Remove-Item -Force $tempZip -ErrorAction SilentlyContinue

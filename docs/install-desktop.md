@@ -74,6 +74,10 @@ Takes **~3–5 minutes** (pulls pre-built images; no local compile).
 
 Windows may show **"Unknown Publisher"** — click **Run** or **More info → Run anyway**. Streamclone is open source but not code-signed yet (signing removes that warning).
 
+**Antivirus / "virus detected" on Setup.exe:** Unsigned Inno Setup installers are often flagged as suspicious by heuristic scanners (Windows Defender, Norton, etc.) even when the file is safe. Streamclone is [open source](https://github.com/Aron-Chu/streamclone); releases are built by GitHub Actions. If your AV quarantines `Streamclone-Setup-*.exe`, use **`Install Streamclone.cmd`** instead (PowerShell + Docker only, no EXE), or add an exclusion for the downloaded installer. Code signing would reduce false positives but is not set up yet.
+
+**Setup failed but the app works?** Re-running Install re-downloads the release bundle. If Docker containers from a previous install are still running, open **http://localhost:8090/** and run **`Check Streamclone.cmd`** in `%USERPROFILE%\streamclone` — it reports Docker, containers, and web UI status without changing anything.
+
 **Alternatives**
 
 | Method | When to use |
@@ -87,6 +91,7 @@ Windows may show **"Unknown Publisher"** — click **Run** or **More info → Ru
 |----------|----------------|----------------------|---------------------|
 | **Streamclone-Setup.exe** | First-time setup — wizard, config, pull images, shortcuts, open directory | Yes | Creates fresh volumes |
 | **Install Streamclone.cmd** | Same as Setup.exe (without wizard UI) | Yes | Creates fresh volumes |
+| **Check Streamclone.cmd** | Diagnostic — Docker, containers, http://localhost:8090/ (no changes) | Yes | Yes |
 | **Start Streamclone.cmd** | Start stack → open directory | Yes | Yes |
 | **Stop Streamclone.cmd** | Stop containers (pause) | Yes | Yes |
 | **Manage Streamclone.cmd** | Menu: status, repair (re-pull + restart), logs, uninstall | Yes | Repair keeps volumes |
