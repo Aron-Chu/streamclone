@@ -43,6 +43,7 @@ cp "$ROOT/LICENSE" "$STAGE/LICENSE"
 cp "$ROOT/Install Streamclone.cmd" "$STAGE/Install Streamclone.cmd"
 cp "$ROOT/Start Streamclone.cmd" "$STAGE/Start Streamclone.cmd"
 cp "$ROOT/Stop Streamclone.cmd" "$STAGE/Stop Streamclone.cmd"
+cp "$ROOT/Manage Streamclone.cmd" "$STAGE/Manage Streamclone.cmd"
 cp "$ROOT/Uninstall Streamclone.cmd" "$STAGE/Uninstall Streamclone.cmd"
 
 mkdir -p "$STAGE/deploy/env"
@@ -51,6 +52,17 @@ cat >"$STAGE/deploy/env/release-bundle.env" <<EOF
 IMAGE_TAG=$VERSION
 STREAMCLONE_USE_IMAGES=1
 EOF
+
+if [ -n "${TWITCH_OAUTH_CLIENT_ID:-}" ] && [ -n "${TWITCH_OAUTH_CLIENT_SECRET:-}" ]; then
+  cat >"$STAGE/deploy/env/oauth-bundle.env" <<EOF
+TWITCH_OAUTH_CLIENT_ID=$TWITCH_OAUTH_CLIENT_ID
+TWITCH_OAUTH_CLIENT_SECRET=$TWITCH_OAUTH_CLIENT_SECRET
+EOF
+  echo "Included oauth-bundle.env from release secrets"
+fi
+cp "$ROOT/deploy/env/oauth-bundle.env.example" "$STAGE/deploy/env/oauth-bundle.env.example"
+mkdir -p "$STAGE/runtime"
+cp "$ROOT/runtime/.gitkeep" "$STAGE/runtime/.gitkeep" 2>/dev/null || true
 
 printf '%s' "$VERSION" >"$STAGE/VERSION"
 

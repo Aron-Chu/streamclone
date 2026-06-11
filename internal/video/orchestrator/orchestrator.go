@@ -35,6 +35,7 @@ var (
 	errDirectHLSSourceUnavailable = errors.New("direct hls source unavailable for selected quality")
 	hlsProbeInterval              = 100 * time.Millisecond
 	hlsStabilityWindow            = 100 * time.Millisecond
+	backendProbeFastTimeout       = 5 * time.Second
 )
 
 type SpawnFunc func(channel, quality, rtmp, liveEdge string, logw io.Writer) (registry.Streamer, error)
@@ -86,7 +87,7 @@ func New(o Options) *Orchestrator {
 		}
 	}
 	if len(o.WorkerBackends) == 0 {
-		o.WorkerBackends = []string{"streamlink", "direct_hls"}
+		o.WorkerBackends = []string{"direct_hls", "streamlink"}
 	}
 	if o.DefaultQuality == "" {
 		o.DefaultQuality = "best"
@@ -399,8 +400,9 @@ func (h *Orchestrator) startWorker(ctx context.Context, channel, quality, rtmp s
 			}
 			continue
 		}
+		probeTimeout := backendProbeTimeout(h.o.HLSProbeTimeout, i, len(backends))
 		hlsReadyStartedAt := time.Now()
-		if err := waitForHLS(ctx, h.o.HLSProbeBase, channel, h.o.HLSProbeTimeout, stabilityWindow, skipVariant); err != nil {
+		if err := waitForHLS(ctx, h.o.HLSProbeBase, channel, probeTimeout, stabilityWindow, skipVariant); err != nil {
 			st.Kill()
 			lastErr = err
 			continue
@@ -419,6 +421,16 @@ func (h *Orchestrator) startWorker(ctx context.Context, channel, quality, rtmp s
 		lastErr = errHLSNotReady
 	}
 	return nil, "", fallbackAttempts > 0, fallbackAttempts, lastErr.Error(), registry.StartupBreakdown{}, lastErr
+}
+
+func backendProbeTimeout(full time.Duration, backendIndex, backendCount int) time.Duration {
+	if backendCount <= 1 || backendIndex >= backendCount-1 {
+		return full
+	}
+	if full > backendProbeFastTimeout {
+		return backendProbeFastTimeout
+	}
+	return full
 }
 
 func (h *Orchestrator) spawnBackend(channel, quality, rtmp, backend, liveEdge string, selected *usher.Rendition) (registry.Streamer, error) {
@@ -601,8 +613,9 @@ func (h *Orchestrator) supervise(s *registry.Session, channel, quality, rtmp str
 				s.RecordWorkerError(serr)
 				continue
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), h.o.HLSProbeTimeout)
-			probeErr := waitForHLS(ctx, h.o.HLSProbeBase, channel, h.o.HLSProbeTimeout, stabilityWindow, skipVariant)
+			probeTimeout := backendProbeTimeout(h.o.HLSProbeTimeout, backendIdx, len(backends))
+			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+			probeErr := waitForHLS(ctx, h.o.HLSProbeBase, channel, probeTimeout, stabilityWindow, skipVariant)
 			cancel()
 			if probeErr != nil {
 				h.o.Log.Error("restart hls probe failed", "channel", channel, "backend", backend, "err", probeErr)

@@ -18,6 +18,7 @@ foreach ($name in @(
     'Install Streamclone.cmd',
     'Start Streamclone.cmd',
     'Stop Streamclone.cmd',
+    'Manage Streamclone.cmd',
     'Uninstall Streamclone.cmd'
 )) {
     $src = Join-Path $repoLaunchers $name
@@ -30,7 +31,7 @@ foreach ($name in @(
     }
 }
 
-foreach ($name in @('Start Streamclone.cmd', 'Stop Streamclone.cmd', 'Uninstall Streamclone.cmd')) {
+foreach ($name in @('Start Streamclone.cmd', 'Stop Streamclone.cmd', 'Manage Streamclone.cmd', 'Uninstall Streamclone.cmd')) {
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) $name
     if (-not (Test-Path $src)) { $src = Join-Path $repoLaunchers $name }
     if (Test-Path $src) {
@@ -47,6 +48,7 @@ try {
     foreach ($pair in @(
         @{ Name = 'Start Streamclone.lnk'; Target = Join-Path $Root 'Start Streamclone.cmd' }
         @{ Name = 'Stop Streamclone.lnk'; Target = Join-Path $Root 'Stop Streamclone.cmd' }
+        @{ Name = 'Manage Streamclone.lnk'; Target = Join-Path $Root 'Manage Streamclone.cmd' }
     )) {
         $lnk = Join-Path $desktop $pair.Name
         $sc = $shell.CreateShortcut($lnk)
@@ -54,6 +56,8 @@ try {
         $sc.WorkingDirectory = $Root
         $sc.Description = if ($pair.Name -like 'Start*') {
             'Start Streamclone and open http://localhost:8090/'
+        } elseif ($pair.Name -like 'Manage*') {
+            'Repair, status, logs, and uninstall'
         } else {
             'Stop all Streamclone Docker containers'
         }

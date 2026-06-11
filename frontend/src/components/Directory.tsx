@@ -10,6 +10,7 @@ import BrandLogo from './BrandLogo'
 import ChannelRail from './ChannelRail'
 import LocalTokenImportButton from './LocalTokenImportButton'
 import ServiceStatusBanner from './ServiceStatusBanner'
+import StackStatusButton from './StackStatusButton'
 import SettingsButton from './SettingsPanel'
 
 const W = 440
@@ -376,6 +377,7 @@ export default function Directory() {
               </Link>
               </div>
               <div className="flex items-center gap-2 lg:hidden">
+                <StackStatusButton />
                 <SettingsButton />
                 <HeaderAuth />
               </div>
@@ -405,6 +407,7 @@ export default function Directory() {
             </div>
             <div className="hidden lg:block">
               <div className="flex items-center gap-2">
+                <StackStatusButton />
                 <SettingsButton />
                 <HeaderAuth />
               </div>

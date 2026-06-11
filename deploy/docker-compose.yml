@@ -91,7 +91,7 @@ services:
       - ../.env
     environment:
       <<: *go-env
-      STREAM_WORKER_BACKENDS: ${STREAM_WORKER_BACKENDS:-streamlink,direct_hls}
+      STREAM_WORKER_BACKENDS: ${STREAM_WORKER_BACKENDS:-direct_hls,streamlink}
       DEFAULT_STREAM_QUALITY: ${DEFAULT_STREAM_QUALITY:-best}
       MEDIAMTX_RTMP: mediamtx:1935
       HLS_INTERNAL_BASE: http://mediamtx:8888
@@ -112,6 +112,9 @@ services:
       - ../.env
     environment:
       <<: *go-env
+      CLIPPER_AUTH_SYNC_PATH: /runtime/clipper-twitch.env
+    volumes:
+      - ../runtime:/runtime
     ports: ["8083:8080"]
     depends_on:
       redis:

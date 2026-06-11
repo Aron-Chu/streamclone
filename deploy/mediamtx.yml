@@ -6,7 +6,7 @@ rtmpAddress: :1935
 hls: yes
 hlsAddress: :8888
 hlsVariant: mpegts
-hlsSegmentCount: 5
+hlsSegmentCount: 3
 hlsSegmentDuration: 1s
 hlsAllowOrigins: ["*"]
 # Treat Caddy as a trusted CDN so browser HLS works over HTTP localhost without Secure cookies.

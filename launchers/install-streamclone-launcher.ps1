@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # Shared logic for double-click Install / Start / Stop launchers.
 param(
-    [ValidateSet('install', 'start', 'stop', 'uninstall')]
+    [ValidateSet('install', 'start', 'stop', 'uninstall', 'manage', 'repair')]
     [string]$Action,
     [string]$LauncherRoot = $PSScriptRoot
 )
@@ -92,5 +92,19 @@ switch ($Action) {
             throw "Streamclone not installed at $root."
         }
         & $uninstallPs1 -InstallDir $root
+    }
+    'manage' {
+        $managerPs1 = Join-Path $root 'scripts\streamclone-manager.ps1'
+        if (-not (Test-Path $managerPs1)) {
+            throw "Manager script missing at $root."
+        }
+        & $managerPs1 -Action menu -InstallDir $root
+    }
+    'repair' {
+        $managerPs1 = Join-Path $root 'scripts\streamclone-manager.ps1'
+        if (-not (Test-Path $managerPs1)) {
+            throw "Manager script missing at $root."
+        }
+        & $managerPs1 -Action repair -InstallDir $root
     }
 }

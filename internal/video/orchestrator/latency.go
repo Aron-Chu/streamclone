@@ -51,5 +51,5 @@ func hlsProbeTuning(latencyMode string) (stabilityWindow time.Duration, skipVari
 			return 0, true
 		}
 	}
-	return 0, false
+	return 0, true
 }

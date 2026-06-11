@@ -34,6 +34,8 @@ import { StudioTopBar } from './clipStudio/StudioTopBar'
 import { VideoStage } from './clipStudio/VideoStage'
 import type { FormatPreset, InspectorTab, PreviewMode, RenderStatus } from './clipStudio/types'
 import { buildEmoteMap, buildUploadPackage, parseTimeInput, spikePositionInSource } from './clipStudio/utils'
+import OptionalServicesPanel from './OptionalServicesPanel'
+import StackStatusButton from './StackStatusButton'
 import './ClipStudio.css'
 
 export default function ClipStudio() {
@@ -495,11 +497,23 @@ export default function ClipStudio() {
   }
 
   if (error || !job) {
+    const analyticsBack = job?.channel
+      ? `/analytics/${encodeURIComponent(job.channel)}`
+      : '/'
     return (
       <div className="clip-studio-container clip-studio-loading">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <StackStatusButton />
+          <Link to="/" className="clip-studio-back-link">Live directory</Link>
+          {job?.channel ? (
+            <Link to={analyticsBack} className="clip-studio-back-link">&larr; Back to Analytics</Link>
+          ) : null}
+        </div>
         <h2 className="clip-studio-error-title">Error</h2>
         <p>{error || 'Job not found'}</p>
-        <Link to="/analytics" className="clip-studio-back-link">&larr; Back to Analytics</Link>
+        <div className="mt-4 max-w-xl">
+          <OptionalServicesPanel variant="banner" focus="clipper" channelLogin={job?.channel} />
+        </div>
       </div>
     )
   }

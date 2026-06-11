@@ -43,7 +43,7 @@ type Config struct {
 
 	StreamIdleTimeout    time.Duration `env:"STREAM_IDLE_TIMEOUT" envDefault:"60s"`
 	MaxConcurrentStreams int           `env:"MAX_CONCURRENT_STREAMS" envDefault:"20"`
-	StreamWorkerBackends string        `env:"STREAM_WORKER_BACKENDS" envDefault:"streamlink,direct_hls"`
+	StreamWorkerBackends string        `env:"STREAM_WORKER_BACKENDS" envDefault:"direct_hls,streamlink"`
 	DefaultStreamQuality string        `env:"DEFAULT_STREAM_QUALITY" envDefault:"best"`
 	MediaMTXRTMP         string        `env:"MEDIAMTX_RTMP" envDefault:"mediamtx:1935"`
 	HLSInternalBase      string        `env:"HLS_INTERNAL_BASE" envDefault:"http://mediamtx:8888"`
@@ -83,6 +83,7 @@ type Config struct {
 	TwitchValidateURL       string `env:"TWITCH_VALIDATE_URL" envDefault:"https://id.twitch.tv/oauth2/validate"`
 	TwitchAPIURL            string `env:"TWITCH_API_URL" envDefault:"https://api.twitch.tv/helix"`
 	TwitchDevTokenImport    bool   `env:"TWITCH_DEV_TOKEN_IMPORT_ENABLED" envDefault:"false"`
+	ClipperAuthSyncPath     string `env:"CLIPPER_AUTH_SYNC_PATH"`
 	StreamcloneProfile      string `env:"STREAMCLONE_PROFILE" envDefault:"core"`
 	ClipperServiceURL       string `env:"CLIPPER_SERVICE_URL" envDefault:"http://clipper:8095"`
 	FrontendOrigin          string `env:"FRONTEND_ORIGIN" envDefault:"http://localhost:5174"`

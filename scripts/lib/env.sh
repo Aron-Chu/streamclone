@@ -219,6 +219,9 @@ env_synthesize() {
   if [ -f "$ENV_REPO_ROOT/deploy/env/release-bundle.env" ]; then
     sources+=("$ENV_REPO_ROOT/deploy/env/release-bundle.env")
   fi
+  if [ -f "$ENV_REPO_ROOT/deploy/env/oauth-bundle.env" ]; then
+    sources+=("$ENV_REPO_ROOT/deploy/env/oauth-bundle.env")
+  fi
   if [ -f "$ENV_REPO_ROOT/.env.local" ]; then
     sources+=("$ENV_REPO_ROOT/.env.local")
   fi

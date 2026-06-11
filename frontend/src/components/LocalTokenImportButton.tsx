@@ -9,6 +9,7 @@ import {
   type MeResponse,
   pollDevTwitchDeviceAuth,
   startDevTwitchDeviceAuth,
+  syncClipperAuthFromSignIn,
 } from '../api'
 import { useAuth } from '../auth'
 
@@ -150,6 +151,7 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
       await auth.claimPreparedLocalToken()
       closeTwitchTab()
       setStatus(null)
+      void syncClipperAuthFromSignIn().catch(() => {})
     } catch (error) {
       const statusCode = error instanceof ApiError
         ? error.status
@@ -301,6 +303,7 @@ function applyAuthenticatedDeviceLogin(queryClient: ReturnType<typeof useQueryCl
   }))
   queryClient.invalidateQueries({ queryKey: ['me'] })
   queryClient.invalidateQueries({ queryKey: ['followed'] })
+  void syncClipperAuthFromSignIn().catch(() => {})
 }
 
 function formatRemaining(totalSeconds: number) {

@@ -370,3 +370,16 @@ func TestSelectRenditionBestChoosesHighestQualityWhenUnsorted(t *testing.T) {
 		t.Fatalf("expected 1080p60, got %+v", selected)
 	}
 }
+
+func TestBackendProbeTimeout(t *testing.T) {
+	full := 15 * time.Second
+	if got := backendProbeTimeout(full, 0, 2); got != backendProbeFastTimeout {
+		t.Fatalf("first backend with fallback: got %v want %v", got, backendProbeFastTimeout)
+	}
+	if got := backendProbeTimeout(full, 1, 2); got != full {
+		t.Fatalf("final backend: got %v want %v", got, full)
+	}
+	if got := backendProbeTimeout(full, 0, 1); got != full {
+		t.Fatalf("single backend: got %v want %v", got, full)
+	}
+}

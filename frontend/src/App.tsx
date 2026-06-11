@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
+import WelcomeOverlay from './components/WelcomeOverlay'
 
 const Directory = lazy(() => import('./components/Directory'))
 const Channel = lazy(() => import('./components/Channel'))
@@ -56,9 +57,10 @@ export default function App() {
           {authNotice.message}
         </div>
       ) : null}
+      <WelcomeOverlay />
       <Suspense fallback={<RouteLoadingSkeleton />}>
         <Routes>
-          <Route path="/welcome" element={<Navigate to="/" replace />} />
+          <Route path="/welcome" element={<Navigate to="/" replace state={{ showOnboarding: true }} />} />
           <Route path="/" element={<Directory />} />
           <Route path="/c/:login" element={<Channel />} />
           <Route path="/analytics/:login" element={<Analytics />} />

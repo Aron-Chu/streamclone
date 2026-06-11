@@ -10,8 +10,8 @@ Default **core** profile: watch streams, chat, emotes, basic analytics. **No Twi
 |---------|------|-------------|
 | `core` | Directory, playback, chat, emotes | None |
 | `scraper` | TwitchTracker viewer charts | [streamclone-scraper](https://github.com/Aron-Chu/streamclone-scraper) sibling repo |
-| `clipper` | Clip Studio (`/studio`) | Twitch CLI + device login |
-| `full` | Scraper + clipper | Both above |
+| `clipper` | Clip Studio (`/studio`) | Optional **Sign in** at localhost:8090 (or Twitch CLI for devs) |
+| `full` | Scraper + clipper | Scraper sibling + optional sign-in for clips |
 
 ```powershell
 # interactive
@@ -25,11 +25,15 @@ scripts\setup.sh --profile full --non-interactive
 
 ## Twitch login (chat write, Clip Studio)
 
-1. Install [Twitch CLI](https://github.com/twitchdev/twitch-cli) → `twitch configure`
-2. `make twitch-sync`
-3. `make twitch-local-auth` (device code in browser)
+**Easiest (desktop):** open **`http://localhost:8090/`** → **Sign in (optional)** → approve on Twitch. No CLI, no `.env` editing on official releases.
 
-Token refresh: `make refresh-auth`
+**Developers / custom OAuth app:**
+
+1. Copy `deploy/env/oauth-bundle.env.example` → `deploy/env/oauth-bundle.env` and fill in Client ID + Secret from [dev.twitch.tv](https://dev.twitch.tv/console/apps) (no redirect URL needed).
+2. Re-run `scripts/setup.ps1` or recreate `.env`.
+3. Use **Sign in (optional)** in the app, or optionally `make twitch-local-auth` if you still use Twitch CLI.
+
+Token refresh (clipper): automatic when refresh token is present; or `make refresh-auth`.
 
 ---
 

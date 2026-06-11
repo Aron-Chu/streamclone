@@ -41,6 +41,7 @@ type Config struct {
 	DevTokenImportEnabled bool
 	CookieSecret          string
 	CookieSameSite        string
+	ClipperAuthSyncPath   string
 }
 
 type Handler struct {
@@ -271,6 +272,7 @@ func (h *Handler) claimPreparedTokenRedirect(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.setSessionCookie(w, r, imported.Session.ID)
+	h.syncClipperAuthFile(imported.Session)
 	h.redirectAuthStatus(w, r, "success", "connected", "Twitch connected with local token.")
 }
 
@@ -285,6 +287,7 @@ func (h *Handler) claimPreparedToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.setSessionCookie(w, r, imported.Session.ID)
+	h.syncClipperAuthFile(imported.Session)
 	h.writeAuthenticatedImport(w, imported)
 }
 
@@ -449,6 +452,7 @@ func (h *Handler) createImportedSession(ctx context.Context, req importTokenReq,
 	if err := h.store.SaveSession(ctx, session, ttl); err != nil {
 		return importedSession{}, err
 	}
+	h.syncClipperAuthFile(session)
 	return importedSession{Session: session, User: user}, nil
 }
 

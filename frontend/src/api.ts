@@ -795,6 +795,20 @@ export const startSetupService = (service: 'scraper' | 'clipper'): Promise<Setup
   })
 }
 
+export const syncClipperAuthFromSignIn = (): Promise<{ ok: boolean; merged?: boolean; recreated?: boolean; message?: string }> => {
+  const headers: Record<string, string> = {}
+  if (SETUP_CONTROL_TOKEN) {
+    headers['X-Streamclone-Setup-Token'] = SETUP_CONTROL_TOKEN
+  }
+  return fetch('/v1/setup-control/sync-clipper-auth', { method: 'POST', headers }).then(async r => {
+    const body = await r.json().catch(() => ({})) as { ok: boolean; merged?: boolean; recreated?: boolean; message?: string; error?: string }
+    if (!r.ok) {
+      throw new ApiError(body.error || r.statusText, r.status)
+    }
+    return body
+  })
+}
+
 export const getAuthDebug = (): Promise<AuthDebug> =>
   fetch(`${CHAT_HTTP}/v1/auth/debug`, { credentials: 'include' }).then(r => json<AuthDebug>(r))
 
