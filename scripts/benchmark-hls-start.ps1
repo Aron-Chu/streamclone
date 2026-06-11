@@ -27,7 +27,11 @@ Write-Host "HLS benchmark: $Channel @ $BaseUrl ($Runs runs)"
 Write-Host ""
 
 $enc = [uri]::EscapeDataString($Channel)
-$manifestUrl = "$BaseUrl/live/$enc/main_stream.m3u8"
+# MediaMTX serves index.m3u8; main_stream.m3u8 is legacy.
+$manifestCandidates = @(
+    "$BaseUrl/live/$enc/index.m3u8",
+    "$BaseUrl/live/$enc/main_stream.m3u8"
+)
 
 for ($i = 0; $i -lt $Runs; $i++) {
     Write-Host "--- Run $($i + 1) ---"
@@ -56,12 +60,20 @@ for ($i = 0; $i -lt $Runs; $i++) {
     }
 
     $mSw = [System.Diagnostics.Stopwatch]::StartNew()
-    $code = Wait-Manifest -Url $manifestUrl -TimeoutSec 25
+    $code = 0
+    $manifestUrl = $null
+    foreach ($candidate in $manifestCandidates) {
+        $code = Wait-Manifest -Url $candidate -TimeoutSec 25
+        if ($code -eq 200) {
+            $manifestUrl = $candidate
+            break
+        }
+    }
     $mSw.Stop()
     if ($code -eq 200) {
-        Write-Host ("  manifest 200: {0}ms after start" -f $mSw.ElapsedMilliseconds)
+        Write-Host ("  manifest 200 ({0}): {1}ms after start" -f $manifestUrl, $mSw.ElapsedMilliseconds)
     } else {
-        Write-Host "  manifest not ready within timeout"
+        Write-Host "  manifest not ready within timeout (tried: $($manifestCandidates -join ', '))"
     }
     Write-Host ""
 }
