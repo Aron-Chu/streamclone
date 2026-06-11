@@ -15,6 +15,10 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write
@@ -94,85 +98,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ matrix.build_args }}
-
-  package:
-    name: Package release bundle
-    needs: publish
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Resolve bundle version
-        id: ver
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=dev" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build bundle
-        env:
-          VERSION: ${{ steps.ver.outputs.value }}
-        run: bash scripts/package-release.sh
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.ver.outputs.value }}
-          files: |
-            dist/streamclone-${{ steps.ver.outputs.value }}-windows.zip
-            dist/streamclone-${{ steps.ver.outputs.value }}.tar.gz
-            launchers/Install Streamclone.cmd
-          fail_on_unmatched_files: true
-
-  windows-installer:
-    name: Build Windows Setup.exe
-    needs: publish
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
-        shell: pwsh
-
-      - name: Resolve bundle version
-        id: ver
-        shell: bash
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=dev" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build release bundle
-        env:
-          VERSION: ${{ steps.ver.outputs.value }}
-        shell: bash
-        run: bash scripts/package-release.sh
-
-      - name: Build Setup.exe
-        shell: pwsh
-        run: ./scripts/build-windows-installer.ps1 -Version ${{ steps.ver.outputs.value }}
-
-      - name: Upload Setup.exe to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.ver.outputs.value }}
-          files: dist/Streamclone-Setup-*.exe
-          fail_on_unmatched_files: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   release-smoke:
     name: Release image smoke
@@ -238,6 +165,7 @@ jobs:
           IMAGE_TAG: ${{ steps.tag.outputs.value }}
         run: |
           set -euo pipefail
+          echo "GHCR pull sanity: pulling tagged release images before stack start"
           docker compose --env-file .env.dev \
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
@@ -256,6 +184,37 @@ jobs:
 
       - name: Wait for health endpoints
         run: bash scripts/smoke-core.sh
+
+      - name: HLS manifest probe
+        continue-on-error: true
+        env:
+          SMOKE_CHANNEL: ${{ vars.SMOKE_CHANNEL || 'xqc' }}
+        run: |
+          set -euo pipefail
+          CHANNEL="${SMOKE_CHANNEL:-xqc}"
+          echo "HLS probe: channel=$CHANNEL (continue-on-error if offline)"
+          stop_body=$(printf '{"channel":"%s"}' "$CHANNEL")
+          curl -fsS -X POST http://localhost:8090/v1/stream/stop \
+            -H 'Content-Type: application/json' \
+            -d "$stop_body" || true
+          sleep 2
+          if ! curl -fsS -X POST http://localhost:8090/v1/stream/start \
+            -H 'Content-Type: application/json' \
+            -d "$stop_body" \
+            --max-time 60; then
+            echo "::warning::HLS probe: /v1/stream/start failed for $CHANNEL (channel may be offline)"
+            exit 0
+          fi
+          manifest_url="http://localhost:8090/live/${CHANNEL}/index.m3u8"
+          for i in $(seq 1 50); do
+            if curl -fsS "$manifest_url" >/dev/null 2>&1; then
+              echo "HLS probe: manifest 200 at $manifest_url"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "::warning::HLS probe: manifest not ready at $manifest_url (channel may be offline)"
+          exit 0
 
       - name: Dump compose state on failure
         if: failure()
@@ -280,3 +239,86 @@ jobs:
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
             -f deploy/docker-compose.release.yml down -v
+
+  package:
+    name: Package release bundle
+    needs: [publish, release-smoke]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve bundle version
+        id: ver
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build bundle
+        env:
+          VERSION: ${{ steps.ver.outputs.value }}
+        run: bash scripts/package-release.sh
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.value }}
+          files: |
+            dist/streamclone-${{ steps.ver.outputs.value }}-windows.zip
+            dist/streamclone-${{ steps.ver.outputs.value }}.tar.gz
+            launchers/Install Streamclone.cmd
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.ver.outputs.value, '-rc') }}
+
+  windows-installer:
+    name: Build Windows Setup.exe
+    needs: [publish, release-smoke]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+        shell: pwsh
+
+      - name: Resolve bundle version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release bundle
+        env:
+          VERSION: ${{ steps.ver.outputs.value }}
+        shell: bash
+        run: bash scripts/package-release.sh
+
+      - name: Build Setup.exe
+        shell: pwsh
+        run: ./scripts/build-windows-installer.ps1 -Version ${{ steps.ver.outputs.value }}
+
+      - name: Upload Setup.exe to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.value }}
+          files: dist/Streamclone-Setup-*.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.ver.outputs.value, '-rc') }}

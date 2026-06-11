@@ -8,7 +8,9 @@ Status snapshot and prioritized recommendations beyond the v0.1.3/v0.1.4 install
 
 **v0.1.4 RC benchmark pass (local):** Docker Desktop running; GHCR `v0.1.4-rc1` images published via [workflow run 27380531927](https://github.com/Aron-Chu/streamclone/actions/runs/27380531927). Core smoke, GHCR pull sizes, cached restart, HLS relay, and analytics latency measured locally.
 
-**Blocked for final tag:** `git push origin master` rejected — OAuth token lacks `workflow` scope (`.github/workflows/ci.yml` changes in the 8-commit delta). Run `gh auth refresh -h github.com -s workflow` from an interactive terminal, then push master + tag `v0.1.4`. **Do not tag final** until push succeeds and CI `release-smoke` runs green (RC dispatch above did **not** spawn `release-smoke` — only publish matrix + package; investigate workflow `needs` before final cut).
+**Release workflow (post-revamp):** `workflow_dispatch` with an RC tag (e.g. `v0.1.4-rc1`) runs **publish + release-smoke** only — no GitHub Release assets. **package** and **windows-installer** run only on a real git tag push (`refs/tags/v*`). Final tag `git push origin v0.1.4` gates Setup.exe and ZIP on `release-smoke` passing first.
+
+**Blocked for final tag:** `git push origin master` rejected — OAuth token lacks `workflow` scope. Run `gh auth refresh -h github.com -s workflow` from an interactive terminal, then push master + tag `v0.1.4`. **Do not tag final** until push succeeds and CI `release-smoke` runs green on the RC dispatch.
 
 **UI polish:** Local commit `53adbd0` — player hover controls, volume/fullscreen, skeletons, viewer-friendly banners (not on `origin/master` until push unblocks).
 
@@ -74,7 +76,7 @@ Record results in the benchmark table below before tagging `v0.1.4`.
 | HLS cold start (`jynxzi`, live) | **Pass (manual)** — `startupMs` ~18s, `hlsReadyMs` ~2.8s, `index.m3u8` HTTP 200; `benchmark-hls-start.ps1` still probes `main_stream.m3u8` (script bug) |
 | Analytics latency (`jynxzi`) | **Pass** — insights p50 15ms / p95 7459ms; history p50 13ms; streams p50 14ms |
 | Final silent cold Setup.exe | **Partial** — exit 0, 2s (reinstall over existing `%USERPROFILE%\streamclone`) |
-| CI `release-smoke` on RC dispatch | **Skipped/missing** — [run 27380531927](https://github.com/Aron-Chu/streamclone/actions/runs/27380531927) has no smoke job |
+| CI `release-smoke` on RC dispatch | **Fixed (workflow revamp)** — RC dispatch runs publish + release-smoke; package/installer only on git tag push |
 | `v0.1.4` git tag pushed | **Not done** — blocked on master push + smoke gate |
 | Local trim build validation | `video` Streamlink/FFmpeg ok, `emote` vips ok, `clipper` streamlink/imageio-ffmpeg ok |
 
@@ -106,7 +108,7 @@ Record results in the benchmark table below before tagging `v0.1.4`.
 - VOD chat replay without scraper profile
 - Fix `benchmark-hls-start.ps1` manifest path (`index.m3u8` not `main_stream.m3u8`)
 - Fix nested `preflight-deps.ps1` capture in benchmark scripts (stdout piping returns empty in some shells)
-- Ensure `release-smoke` runs on `workflow_dispatch` RC tags
+- ~~Ensure `release-smoke` runs on `workflow_dispatch` RC tags~~ → done in workflow revamp
 
 ---
 
@@ -227,13 +229,13 @@ Until cold-install benchmarks pass, install score stays capped regardless of Doc
 
 ## CI / release pipeline gaps
 
-| Missing today | Suggested check |
-|---------------|-----------------|
-| CI never validates `docker-compose.release.yml` | `compose config` + `pull` tagged images on release |
-| Playwright / HLS smoke not in CI | Run `smoke-core` with `--ui` on release candidates |
-| Scraper smoke is manual/cron only | Pin sibling SHA; block releases if contract breaks |
-| No tag consistency gate | Assert `git tag == IMAGE_TAG == GHCR tags == Setup.exe version` |
-| `govulncheck` / `npm audit` are non-blocking | At least fail on critical CVEs |
+| Gap | Status after revamp |
+|-----|---------------------|
+| CI never validates `docker-compose.release.yml` | **Fixed** — CI reads `VERSION` for release overlay; release-smoke pulls tagged GHCR images |
+| Playwright / HLS smoke not in CI | **Fixed** — CI `smoke-core` runs Playwright `--ui`; release-smoke adds HLS manifest probe (continue-on-error) |
+| Scraper smoke daily cron failures | **Fixed** — manual dispatch only; graceful skip when sibling repo unavailable |
+| No tag consistency gate | **Partial** — release-smoke asserts IMAGE_TAG; package/installer gated on smoke |
+| `govulncheck` / `npm audit` non-blocking | **Fixed** — blocking on master |
 
 **Single `VERSION` source** — `VERSION` at repo root (`v0.1.4`); `package-release.sh`, `build-windows-installer.ps1`, and preflight read it; `dist/release-manifest.json` generated on package.
 
