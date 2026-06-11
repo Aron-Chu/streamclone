@@ -57,7 +57,7 @@ go test ./... && go vet ./...
 cd frontend && npm run build
 ```
 
-CI mirrors this with a **gitleaks** job (full history), **govulncheck** (non-blocking), and **npm audit** (non-blocking). Enable [GitHub secret scanning and push protection](https://docs.github.com/en/code-security/secret-scanning) on the remote repo.
+CI mirrors this with a **gitleaks** job (full history), **govulncheck**, and **npm audit** (blocking on `master`).
 
 Never commit: `.env` (except templates), `clipper-data/`, `*.sqlite`, `.cursor/mcp.json`, compiled binaries, `__pycache__`, Playwright debug artifacts.
 
@@ -77,4 +77,8 @@ Do not commit compiled binaries, `__pycache__`, Playwright debug artifacts, or m
 
 ## GitHub settings
 
-Enable secret scanning and push protection under **Settings → Code security**.
+Repository hygiene checklist:
+
+- Enable [secret scanning](https://docs.github.com/en/code-security/secret-scanning) and [push protection](https://docs.github.com/en/code-security/secret-scanning/working-with-push-protection-for-repositories-and-organizations) under **Settings → Code security and analysis**
+- Keep GHCR packages **public** so release smoke and end-user pulls work without registry auth
+- When editing workflows locally, use WSL SSH or refresh OAuth with workflow scope: `gh auth refresh -h github.com -s workflow` (required to push `.github/workflows/` changes)
