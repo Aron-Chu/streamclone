@@ -1,98 +1,89 @@
-# Install Streamclone on your desktop
+# Install Streamclone
 
-Streamclone runs locally in Docker. You do not need Git, Go, or Node — only Docker Desktop and a few double-clicks.
+**Need:** [Docker Desktop](https://docs.docker.com/desktop/) (running). **Not needed:** Git, Go, Node, Twitch login (for watching).
 
-## Prerequisites
+Open **`http://localhost:8090`** when running. Use that URL only — not raw ports like `:8081`.
 
-1. Install [Docker Desktop](https://docs.docker.com/desktop/) (Windows or macOS).
-2. Start Docker Desktop and wait until it reports **Running**.
+---
 
-On Windows, if `winget` is available:
+## Windows (recommended)
+
+### First time (one double-click)
+
+1. Start **Docker Desktop** (wait until Running)
+2. From **[GitHub Releases](https://github.com/Aron-Chu/streamclone/releases/latest)**, download **`Install Streamclone.cmd`** only
+3. Double-click it — it downloads the release, sets up Docker, adds Desktop shortcuts, and **opens the welcome page**
+
+Takes **~3–5 minutes** (pulls pre-built images; no local compile).
+
+**Alternative:** download `streamclone-*-windows.zip`, extract, then run **`Install Streamclone.cmd`** inside the folder (same result; you unzip manually).
+
+### Daily use
+
+| Launcher | What it does |
+|----------|----------------|
+| **Start Streamclone** | Starts Docker stack → opens **`http://localhost:8090/welcome`** |
+| **Stop Streamclone** | Stops all Streamclone containers |
+
+---
+
+## macOS
+
+1. Download **`streamclone-*.tar.gz`** from [Releases](https://github.com/Aron-Chu/streamclone/releases/latest) → extract to `~/streamclone`
+2. Double-click **`launchers/Install Streamclone.command`**
+3. Daily: **Streamclone Start** / **Stop** in `~/Applications`
+
+---
+
+## What each launcher does
+
+| File | Role |
+|------|------|
+| **Install Streamclone.cmd** | **First-time setup** — download/extract (if needed), config, pull images, start stack, Desktop shortcuts, open welcome page |
+| **Start Streamclone.cmd** | **Daily open** — ensure stack is running, open welcome page |
+| **Stop Streamclone.cmd** | **Shutdown** — stop all containers |
+
+Nothing is uploaded to GitHub. Images come from **`ghcr.io/aron-chu/streamclone/*`** (published on each `v*` release).
+
+---
+
+## Releases vs Packages
+
+| | **Releases** | **Packages** (GHCR) |
+|---|---|---|
+| **What** | ZIP + `Install Streamclone.cmd` | Pre-built Docker images |
+| **For you** | Download and double-click | Pulled automatically by Install |
+| **URL** | [releases/latest](https://github.com/Aron-Chu/streamclone/releases/latest) | `ghcr.io/aron-chu/streamclone/metadata`, `chat`, `video`, etc. |
+
+**Maintainer:** tag `v*` (e.g. `v0.1.0`) → CI publishes both. GHCR packages must be **public** for installs without `docker login`.
+
+---
+
+## Slower path: git clone (developers)
+
+Builds images locally — **~10–20 minutes** first run.
 
 ```powershell
-winget install Docker.DockerDesktop
+git clone https://github.com/Aron-Chu/streamclone.git
+cd streamclone
+powershell -File scripts\setup.ps1
 ```
 
----
-
-## Windows — click only (recommended)
-
-### First-time install
-
-1. Download **`Install Streamclone.cmd`** from the [latest GitHub Release](https://github.com/Aron-Chu/streamclone/releases/latest)  
-   *(Or from this repo: open the repo on GitHub → **Code** → **Download ZIP**, extract, double-click **`Install Streamclone.cmd`** in the folder.)*
-2. Double-click **`Install Streamclone.cmd`**.
-3. Wait for the installer to finish (first run pulls Docker images; may take a few minutes).
-4. When done, you will have **Start Streamclone** and **Stop Streamclone** shortcuts on your Desktop.
-
-### Every day after that
-
-| Action | What to do |
-|--------|------------|
-| **Start** | Double-click **Start Streamclone** on your Desktop |
-| **Use app** | Browser opens **http://localhost:8090/welcome** automatically when ready |
-| **Stop** | Double-click **Stop Streamclone** on your Desktop |
-
-No PowerShell, no terminal commands required.
-
----
-
-## macOS — click only
-
-### First-time install
-
-1. Download the release **`.tar.gz`** from [GitHub Releases](https://github.com/Aron-Chu/streamclone/releases/latest) and extract it to `~/streamclone`,  
-   **or** clone/download this repo.
-2. Open the **`launchers`** folder.
-3. Double-click **`Install Streamclone.command`** (macOS may ask you to allow it the first time).
-4. Shortcuts appear in **`~/Applications`** as **Streamclone Start**, **Streamclone Stop**, and **Streamclone Install**.
-
-### Every day after that
-
-| Action | What to do |
-|--------|------------|
-| **Start** | Double-click **Streamclone Start** in `~/Applications` |
-| **Use app** | Open **http://localhost:8090** in your browser |
-| **Stop** | Double-click **Streamclone Stop** |
-
----
-
-## Advanced: command-line install
-
-If you prefer a one-liner:
-
-**Windows:**
+Faster clone install: pull release images instead of building:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Release -NonInteractive
+powershell -File scripts\setup.ps1 -UseImages
 ```
 
-**macOS / Linux:**
-
-```bash
-bash scripts/install.sh --release --non-interactive --use-images
-```
-
----
-
-## Optional: Clip Studio
-
-Core install does **not** require Twitch login. For clipping (`/studio`), see [getting-started.md](getting-started.md).
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for tests and PR workflow. Optional features: [options.md](options.md).
 
 ---
 
 ## Troubleshooting
 
-**Docker not running** — start Docker Desktop; double-click **Start Streamclone** again.
-
-**Port 8090 in use** — stop other stacks or change the proxy port in `.env` (advanced).
-
-**Images fail to pull** — GHCR packages must be **public** or you need `docker login ghcr.io`.
-
-**Install fails before any release exists** — use the git-clone path in [README.md](../README.md) until the first `v*` release is published.
-
-More detail: [getting-started.md](getting-started.md)
-
-## Developers
-
-Contributors should use git clone + `make setup` — see [README.md](../README.md).
+| Problem | Fix |
+|---------|-----|
+| Docker not running | Start Docker Desktop, retry |
+| Port 8090 in use | Run **Stop Streamclone**, or free the port |
+| Images fail to pull | Set GHCR packages to **Public**, or run `docker login ghcr.io` |
+| Git-clone build too slow | Use the **release ZIP** or `setup.ps1 -UseImages` |

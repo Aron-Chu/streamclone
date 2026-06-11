@@ -10,6 +10,8 @@ parent/
 
 ## Local setup
 
+End-user install: [docs/install-desktop.md](docs/install-desktop.md) (release ZIP, ~3–5 min). Contributors:
+
 1. `make setup` (or `scripts/setup.ps1` on Windows) — interactive wizard; CI parity: `scripts/setup.sh --profile core --non-interactive`
 2. `make smoke` when services are healthy
 3. `make validate-env` — check `.env` for your profile

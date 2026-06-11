@@ -1,59 +1,115 @@
 # Streamclone
 
-Self-hosted Twitch-style directory with HLS playback, analytics, and optional Clip Studio no ads, quick and stable 7tv load.
 
-## Quick start
 
-**Prerequisites:** [Docker Desktop](https://docs.docker.com/desktop/) (or Docker Engine + Compose on Linux).
+Self-hosted Twitch-style directory with HLS playback, analytics, and optional Clip Studio — no ads, fast 7TV emotes.
 
-| Platform | First install | Every day |
-|----------|---------------|-----------|
-| **Windows** | Double-click **`Install Streamclone.cmd`** | Double-click **`Start Streamclone.cmd`** (Desktop shortcut after install) |
-| **macOS** | **`launchers/Install Streamclone.command`** | **`launchers/Start Streamclone.command`** |
-| **Developers** | `make setup` or `scripts/setup.ps1` | `make start` or `scripts/start-streamclone.ps1` |
 
-Browser opens **`/welcome`** — live status for core, scraper, and clipper. Then **Go to directory** when ready.
 
-Details: [docs/install-desktop.md](docs/install-desktop.md) · [docs/getting-started.md](docs/getting-started.md)
+## Install
 
-**Profiles:** `core` (default) · `scraper` (TwitchTracker charts) · `clipper` (Clip Studio) · `full`
+
+
+**Prerequisites:** [Docker Desktop](https://docs.docker.com/desktop/) running.
+
+
+
+1. Download **`Install Streamclone.cmd`** from **[latest release](https://github.com/Aron-Chu/streamclone/releases/latest)**
+
+2. Double-click it (~3–5 min) — sets up Docker, opens **`http://localhost:8090/welcome`**
+
+3. Next time: double-click **`Start Streamclone`** on your Desktop
+
+
+
+| Platform | Install | Daily |
+
+|----------|---------|-------|
+
+| Windows | `Install Streamclone.cmd` | `Start Streamclone.cmd` |
+
+| macOS | `launchers/Install Streamclone.command` | `launchers/Start Streamclone.command` |
+
+| Developers | `git clone` + `make setup` | `make start` |
+
+
+
+Full guide: [docs/install-desktop.md](docs/install-desktop.md) · Optional features: [docs/options.md](docs/options.md)
+
+
+
+**Profiles:** `core` (default) · `scraper` · `clipper` · `full`
+
+
 
 ---
+
+
 
 ## See it in action
 
-3 GIFs + 1 screenshot (1920×1080). Regenerate with stack up:
 
-```powershell
-powershell -File scripts/capture-readme-media.ps1
-```
+
+Regenerate (stack must be up): `powershell -File scripts/capture-readme-media.ps1`
+
+
 
 **Directory**
 
+
+
 <img src="docs/images/directory.gif" alt="Live channel directory" width="960" />
+
+
 
 **Channel — live playback + chat**
 
+
+
 <img src="docs/images/channel.gif" alt="Channel player and chat" width="960" />
+
+
 
 **Analytics — sync in progress**
 
-<img src="docs/images/analytics-sync-load.gif" alt="Analytics VOD sync loading chat and rollups" width="960" />
+
+
+<img src="docs/images/analytics-sync-load.gif" alt="Analytics VOD sync" width="960" />
+
+
 
 **Analytics — finished chart**
 
-<img src="docs/images/image.png" alt="Synced analytics chart with viewers, chat, emotes, and top moments" width="960" />
+
+
+<img src="docs/images/image.png" alt="Synced analytics chart" width="960" />
+
+
 
 ---
 
+
+
 ## Stack
 
-```
-Browser :8090 → Caddy → frontend, metadata, video, chat, emote, analytics, MediaMTX (HLS), MinIO
+
+
 ```
 
-PostgreSQL + Redis behind the Go services. Use **`http://localhost:8090`** only (same-origin auth, chat WS, HLS).
+Browser :8090 → Caddy → frontend, metadata, video, chat, emote, analytics, MediaMTX, MinIO
+
+```
+
+
+
+PostgreSQL + Redis behind the Go services.
+
+
 
 ## License
 
-MIT — [LICENSE](LICENSE). Not affiliated with Twitch or 7TV; self-hosting is your responsibility.
+
+
+MIT — [LICENSE](LICENSE). Not affiliated with Twitch or 7TV; compliance is your responsibility.
+
+

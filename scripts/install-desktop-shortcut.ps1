@@ -51,7 +51,11 @@ try {
         $sc = $shell.CreateShortcut($lnk)
         $sc.TargetPath = $pair.Target
         $sc.WorkingDirectory = $Root
-        $sc.Description = 'Streamclone desktop launcher'
+        $sc.Description = if ($pair.Name -like 'Start*') {
+            'Start Streamclone and open http://localhost:8090/welcome'
+        } else {
+            'Stop all Streamclone Docker containers'
+        }
         $sc.Save()
     }
     Write-Host "Desktop shortcuts created on $desktop"

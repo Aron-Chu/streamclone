@@ -21,6 +21,7 @@ if ($Release) {
     if ($NonInteractive -and -not $PSBoundParameters.ContainsKey('DesktopShortcut')) {
         $DesktopShortcut = $true
     }
+    Write-Host 'Step 1/4: Downloading latest release...' -ForegroundColor Cyan
     $dlArgs = @{ InstallDir = $Dir }
     if ($Version) { $dlArgs['Version'] = $Version }
     & (Join-Path $PSScriptRoot 'lib\release-download.ps1') @dlArgs
@@ -38,15 +39,30 @@ $setupArgs = @{
 if ($NonInteractive) { $setupArgs['NonInteractive'] = $true }
 if ($UseImages) { $setupArgs['UseImages'] = $true }
 
+if ($Release) {
+    Write-Host 'Step 2/4: Creating config and secrets...' -ForegroundColor Cyan
+    Write-Host 'Step 3/4: Pulling Docker images and starting stack (~3-5 min)...' -ForegroundColor Cyan
+}
 & (Join-Path $Dir 'scripts\setup.ps1') @setupArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($DesktopShortcut) {
+    Write-Host 'Step 4/4: Creating Desktop shortcuts...' -ForegroundColor Cyan
     & (Join-Path $Dir 'scripts\install-desktop-shortcut.ps1') -InstallDir $Dir
 }
 
 Write-Host ''
 Write-Host "Installed at: $Dir"
-Write-Host 'Open:         http://localhost:8090'
-Write-Host "Start:        powershell -File `"$Dir\scripts\start-streamclone.ps1`""
-Write-Host "Stop stack:   powershell -File `"$Dir\scripts\stop-streamclone.ps1`""
+
+if ($Release) {
+    $startPs1 = Join-Path $Dir 'scripts\start-streamclone.ps1'
+    if (Test-Path $startPs1) {
+        Write-Host ''
+        Write-Host 'Opening Streamclone in your browser...' -ForegroundColor Green
+        & $startPs1
+    }
+} else {
+    Write-Host 'Open:         http://localhost:8090'
+    Write-Host "Start:        powershell -File `"$Dir\scripts\start-streamclone.ps1`""
+    Write-Host "Stop stack:   powershell -File `"$Dir\scripts\stop-streamclone.ps1`""
+}

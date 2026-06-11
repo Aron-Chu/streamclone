@@ -31,5 +31,5 @@ while ((Get-Date) -lt $deadline) {
 Write-Host ''
 Write-Host 'Streamclone did not become ready in time.' -ForegroundColor Red
 Write-Host 'Try: docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml ps'
-Write-Host 'See: docs/install-desktop.md and docs/getting-started.md'
+Write-Host 'See: docs/install-desktop.md'
 exit 1
