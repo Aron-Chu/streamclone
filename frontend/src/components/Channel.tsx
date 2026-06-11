@@ -666,12 +666,16 @@ function LivePlayerControls({
   videoFit,
   bottomDensity,
   muted,
+  volume,
+  isFullscreen,
   backend,
   startupMs,
   fallbackAttempted,
   detailsExpanded,
   onTogglePlay,
   onMuted,
+  onVolume,
+  onToggleFullscreen,
   onJumpLive,
   onQuality,
   onLatencyMode,
@@ -689,12 +693,16 @@ function LivePlayerControls({
   videoFit: VideoFitMode
   bottomDensity: BottomDensityMode
   muted: boolean
+  volume: number
+  isFullscreen: boolean
   backend?: string
   startupMs?: number
   fallbackAttempted?: boolean
   detailsExpanded: boolean
   onTogglePlay: () => void
   onMuted: (muted: boolean) => void
+  onVolume: (volume: number) => void
+  onToggleFullscreen: () => void
   onJumpLive: () => void
   onQuality: (quality: string) => void
   onLatencyMode: (mode: PlaybackLatencyMode) => void
@@ -711,55 +719,56 @@ function LivePlayerControls({
     ? 'border-amber-300/35 bg-amber-400/15 text-amber-100'
     : 'border-red-400/35 bg-red-500/15 text-red-100'
   return (
-    <section className="shrink-0 border-t border-white/10 bg-[#0a0a0f] px-3 py-2 lg:px-5">
+    <section className="bg-gradient-to-t from-black/90 via-black/70 to-transparent px-3 py-3 lg:px-5">
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={onTogglePlay}
-          className="h-9 rounded border border-white/10 bg-white/[0.06] px-3 text-xs font-black text-white transition hover:bg-white/10"
+          aria-label="Play or pause"
+          className="grid h-9 w-9 place-items-center rounded border border-white/10 bg-white/[0.08] text-xs font-black text-white transition hover:bg-white/15"
         >
-          Play/Pause
+          {playbackState === 'playing' ? '❚❚' : '▶'}
         </button>
-        <span className="h-9 rounded border border-white/10 bg-white/[0.045] px-3 py-2 text-xs font-black uppercase text-zinc-300">
-          {playbackState}
-        </span>
         <button
           type="button"
           onClick={() => onMuted(!muted)}
-          className="h-9 rounded border border-white/10 bg-white/[0.06] px-3 text-xs font-black text-white transition hover:bg-white/10"
+          aria-label={muted ? 'Unmute' : 'Mute'}
+          className="grid h-9 w-9 place-items-center rounded border border-white/10 bg-white/[0.08] text-xs font-black text-white transition hover:bg-white/15"
         >
-          {muted ? 'Muted' : 'Sound'}
+          {muted || volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊'}
         </button>
-        <span className={`h-9 rounded border px-3 py-2 text-xs font-black uppercase ${liveTone}`}>
-          LIVE {metrics.behindLiveSec === null ? '' : `+${fmtMetricSec(metrics.behindLiveSec)}`}
-        </span>
-        <button
-          type="button"
-          onClick={onJumpLive}
-          disabled={!metrics.canJumpLive}
-          className="h-9 rounded border border-cyan-300/30 bg-cyan-400/10 px-3 text-xs font-black text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.04] disabled:text-zinc-500"
-        >
-          Jump Live
-        </button>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={muted ? 0 : volume}
+          onChange={event => {
+            const next = Number(event.target.value)
+            onVolume(next)
+            if (next > 0 && muted) onMuted(false)
+          }}
+          aria-label="Volume"
+          className="h-1.5 w-24 cursor-pointer accent-violet-400"
+        />
         <div className="relative">
           <button
             type="button"
             aria-haspopup="listbox"
             aria-expanded={qualityOpen}
             onClick={() => setQualityOpen(open => !open)}
-            className="flex h-9 min-w-[15rem] items-center justify-between gap-3 rounded border border-white/10 bg-white/[0.045] px-3 text-left text-xs font-black uppercase text-zinc-500 transition hover:bg-white/[0.075]"
+            className="flex h-9 min-w-[10rem] items-center justify-between gap-2 rounded border border-white/10 bg-white/[0.08] px-3 text-left text-xs font-black text-white transition hover:bg-white/15"
           >
-            <span>Request</span>
             <span
               title={selectedQuality?.label === '720p fast' ? 'Fast high stable — starts at 720p60/720p for faster relay' : selectedQuality?.label ?? qualityLabel(requestedQuality)}
-              className="min-w-0 flex-1 truncate text-sm normal-case text-white"
+              className="min-w-0 flex-1 truncate text-sm"
             >
               {selectedQuality?.label ?? qualityLabel(requestedQuality)}
             </span>
             <span className="text-zinc-400">{qualityOpen ? '^' : 'v'}</span>
           </button>
           {qualityOpen ? (
-            <div role="listbox" className="absolute left-0 top-10 z-40 w-80 max-w-[calc(100vw-2rem)] rounded border border-white/10 bg-[#181820] p-1 shadow-2xl shadow-black/60">
+            <div role="listbox" className="absolute bottom-10 left-0 z-40 w-80 max-w-[calc(100vw-2rem)] rounded border border-white/10 bg-[#181820] p-1 shadow-2xl shadow-black/60">
               <div className="px-2 py-1.5 text-[10px] font-black uppercase text-zinc-500">
                 {discoveredCount ? `${discoveredCount} backend renditions discovered` : 'Preset requests until renditions load'}
               </div>
@@ -785,68 +794,125 @@ function LivePlayerControls({
             </div>
           ) : null}
         </div>
-        <div className="flex h-9 max-w-[22rem] items-center gap-2 rounded border border-white/10 bg-white/[0.045] px-3 text-xs font-black uppercase text-zinc-500">
-          <span>Loaded</span>
-          <span title={loadedQuality} className="truncate text-sm normal-case text-white">{loadedQuality}</span>
-        </div>
-        <div
-          className="flex h-9 rounded border border-white/10 bg-white/[0.045] p-1"
-          title={latencyModeAuto ? `Auto-switched to ${latencyMode} after buffering (change mode to override)` : undefined}
+        <button
+          type="button"
+          onClick={onToggleFullscreen}
+          aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          className="h-9 rounded border border-white/10 bg-white/[0.08] px-3 text-xs font-black text-white transition hover:bg-white/15"
         >
-          {(['instant', 'fast', 'stable'] as const).map(mode => (
+          {isFullscreen ? 'Exit' : 'Fullscreen'}
+        </button>
+        {detailsExpanded ? (
+          <>
+            <span className="h-9 rounded border border-white/10 bg-white/[0.045] px-3 py-2 text-xs font-black uppercase text-zinc-300">
+              {playbackState}
+            </span>
+            <span className={`h-9 rounded border px-3 py-2 text-xs font-black uppercase ${liveTone}`}>
+              LIVE {metrics.behindLiveSec === null ? '' : `+${fmtMetricSec(metrics.behindLiveSec)}`}
+            </span>
             <button
-              key={mode}
               type="button"
-              onClick={() => onLatencyMode(mode)}
-              className={`rounded px-3 py-1.5 text-xs font-black uppercase transition ${latencyMode === mode ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
+              onClick={onJumpLive}
+              disabled={!metrics.canJumpLive}
+              className="h-9 rounded border border-cyan-300/30 bg-cyan-400/10 px-3 text-xs font-black text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.04] disabled:text-zinc-500"
             >
-              {mode}
+              Jump Live
             </button>
-          ))}
-        </div>
-        <div className="flex h-9 rounded border border-white/10 bg-white/[0.045] p-1">
-          {(['fit', 'fill'] as const).map(mode => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => onVideoFit(mode)}
-              className={`rounded px-3 py-1.5 text-xs font-black uppercase transition ${videoFit === mode ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
+            <div className="flex h-9 max-w-[22rem] items-center gap-2 rounded border border-white/10 bg-white/[0.045] px-3 text-xs font-black uppercase text-zinc-500">
+              <span>Loaded</span>
+              <span title={loadedQuality} className="truncate text-sm normal-case text-white">{loadedQuality}</span>
+            </div>
+            <div
+              className="flex h-9 rounded border border-white/10 bg-white/[0.045] p-1"
+              title={latencyModeAuto ? `Auto-switched to ${latencyMode} after buffering (change mode to override)` : undefined}
             >
-              {mode}
-            </button>
-          ))}
-        </div>
+              {(['instant', 'fast', 'stable'] as const).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onLatencyMode(mode)}
+                  className={`rounded px-3 py-1.5 text-xs font-black uppercase transition ${latencyMode === mode ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <div className="flex h-9 rounded border border-white/10 bg-white/[0.045] p-1">
+              {(['fit', 'fill'] as const).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onVideoFit(mode)}
+                  className={`rounded px-3 py-1.5 text-xs font-black uppercase transition ${videoFit === mode ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <div className="flex h-9 rounded border border-white/10 bg-white/[0.045] p-1">
+              {([
+                { id: 'comfortable', label: 'Comfort' },
+                { id: 'dense', label: 'Dense' },
+              ] as const).map(mode => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => onBottomDensity(mode.id)}
+                  className={`rounded px-3 py-1.5 text-xs font-black uppercase transition ${bottomDensity === mode.id ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2 text-[11px] font-black uppercase text-zinc-500">
+              <span className="rounded bg-white/[0.045] px-2 py-1">Delay {fmtMetricSec(metrics.behindLiveSec)}</span>
+              <span className="rounded bg-white/[0.045] px-2 py-1">Buffered {fmtMetricSec(metrics.bufferSizeSec)}</span>
+              <span className="rounded bg-white/[0.045] px-2 py-1">Target {fmtMetricSec(metrics.targetLatencySec)}</span>
+              <span className="rounded bg-white/[0.045] px-2 py-1">Stage {formatPlaybackStage(metrics.hlsStage)}</span>
+              <span className="rounded bg-white/[0.045] px-2 py-1">Backend {backend || '-'}</span>
+              <span className="rounded bg-white/[0.045] px-2 py-1">Startup {startupMs ? `${startupMs}ms` : '-'}</span>
+              <span className="rounded bg-white/[0.045] px-2 py-1">First frame {fmtMs(metrics.firstFrameMs)}</span>
+              {fallbackAttempted ? <span className="rounded bg-cyan-400/10 px-2 py-1 text-cyan-100">Fallback used</span> : null}
+            </div>
+          </>
+        ) : null}
         <button
           type="button"
           onClick={() => onDetailsExpanded(!detailsExpanded)}
           className={`h-9 rounded border px-3 text-xs font-black uppercase transition ${detailsExpanded ? 'border-violet-300/40 bg-violet-400/20 text-violet-100' : 'border-white/10 bg-white/[0.06] text-zinc-200 hover:bg-white/10'}`}
         >
-          {detailsExpanded ? 'Collapse bottom' : 'Expand bottom'}
+          {detailsExpanded ? 'Less' : 'More'}
         </button>
-        <div className="flex h-9 rounded border border-white/10 bg-white/[0.045] p-1">
-          {([
-            { id: 'comfortable', label: 'Comfort' },
-            { id: 'dense', label: 'Dense' },
-          ] as const).map(mode => (
-            <button
-              key={mode.id}
-              type="button"
-              onClick={() => onBottomDensity(mode.id)}
-              className={`rounded px-3 py-1.5 text-xs font-black uppercase transition ${bottomDensity === mode.id ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
-            >
-              {mode.label}
-            </button>
-          ))}
+      </div>
+    </section>
+  )
+}
+
+function ChannelMetaSkeleton({ dense }: { dense: boolean }) {
+  return (
+    <section className={`border-t border-white/10 bg-[#0d0d12] ${dense ? 'px-3 py-3 lg:px-4' : 'px-4 py-4 lg:px-6'}`}>
+      <div className={`flex flex-col ${dense ? 'gap-3' : 'gap-4'} 2xl:flex-row 2xl:items-start 2xl:justify-between`}>
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex gap-2">
+            <div className={`animate-pulse rounded bg-white/10 ${dense ? 'h-5 w-14' : 'h-5 w-16'}`} />
+            <div className="h-5 w-24 animate-pulse rounded bg-white/10" />
+          </div>
+          <div className={`animate-pulse rounded bg-white/10 ${dense ? 'h-7 w-4/5' : 'h-8 w-3/4'}`} />
+          <div className={`flex items-start ${dense ? 'gap-2' : 'gap-3'}`}>
+            <div className={`shrink-0 animate-pulse rounded bg-white/10 ${dense ? 'h-10 w-10' : 'h-12 w-12'}`} />
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="h-4 w-32 animate-pulse rounded bg-white/10" />
+              <div className="h-3 w-full max-w-md animate-pulse rounded bg-white/10" />
+            </div>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2 text-[11px] font-black uppercase text-zinc-500">
-          <span className="rounded bg-white/[0.045] px-2 py-1">Delay {fmtMetricSec(metrics.behindLiveSec)}</span>
-          <span className="rounded bg-white/[0.045] px-2 py-1">Buffered {fmtMetricSec(metrics.bufferSizeSec)}</span>
-          <span className="rounded bg-white/[0.045] px-2 py-1">Target {fmtMetricSec(metrics.targetLatencySec)}</span>
-          <span className="rounded bg-white/[0.045] px-2 py-1">Stage {formatPlaybackStage(metrics.hlsStage)}</span>
-          <span className="rounded bg-white/[0.045] px-2 py-1">Backend {backend || '-'}</span>
-          <span className="rounded bg-white/[0.045] px-2 py-1">Startup {startupMs ? `${startupMs}ms` : '-'}</span>
-          <span className="rounded bg-white/[0.045] px-2 py-1">First frame {fmtMs(metrics.firstFrameMs)}</span>
-          {fallbackAttempted ? <span className="rounded bg-cyan-400/10 px-2 py-1 text-cyan-100">Fallback used</span> : null}
+        <div className={`grid grid-cols-2 sm:grid-cols-4 ${dense ? 'gap-1.5 2xl:w-[460px]' : 'gap-2 2xl:w-[520px]'}`}>
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className={`rounded border border-white/10 bg-white/[0.04] ${dense ? 'px-2.5 py-2' : 'px-3 py-2'}`}>
+              <div className="h-3 w-12 animate-pulse rounded bg-white/10" />
+              <div className={`mt-1.5 animate-pulse rounded bg-white/10 ${dense ? 'h-4 w-16' : 'h-5 w-20'}`} />
+            </div>
+          ))}
         </div>
       </div>
     </section>
@@ -868,6 +934,9 @@ function ChannelMeta({
   listeners: number | null
   dense: boolean
 }) {
+  if (detailsLoading && !details) {
+    return <ChannelMetaSkeleton dense={dense} />
+  }
   const display = details?.displayName || login
   const title = details?.streamTitle || (detailsLoading ? 'Loading stream details' : `${display}'s channel`)
   const avatar = details?.profileImage
@@ -1374,6 +1443,7 @@ export default function Channel() {
   const [emoteStatus, setEmoteStatus] = useState<ChatEmoteStatus>({ state: 'idle', count: 0, pending: 0 })
   const [emoteLoadRequest, setEmoteLoadRequest] = useState<{ providers: EmoteProvider[]; token: number } | null>(null)
   const [muted, setMuted] = useState(true)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const [isTheater, setIsTheater] = useState(false)
   const [isChannelOffline, setIsChannelOffline] = useState(false)
   const [startupStartedAt, setStartupStartedAt] = useState(() => Date.now())
@@ -1610,6 +1680,27 @@ export default function Channel() {
     }
   }
 
+  const setPlayerVolume = (value: number) => {
+    const next = Math.max(0, Math.min(1, value))
+    updateSettings({ playerVolume: next })
+    const video = videoRef.current
+    if (video) video.volume = next
+  }
+
+  const toggleFullscreen = async () => {
+    const video = videoRef.current
+    if (!video) return
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+      } else {
+        await video.requestFullscreen()
+      }
+    } catch {
+      return
+    }
+  }
+
   const jumpLive = () => {
     playback.jumpLive()
   }
@@ -1619,6 +1710,18 @@ export default function Channel() {
     setHlsUrl('')
     setRetryKey(k => k + 1)
   }
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    video.volume = settings.playerVolume
+  }, [settings.playerVolume, hlsUrl])
+
+  useEffect(() => {
+    const onFullscreenChange = () => setIsFullscreen(document.fullscreenElement === videoRef.current)
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
 
   useEffect(() => {
     autoRetryAttemptsRef.current = 0
@@ -1674,8 +1777,13 @@ export default function Channel() {
     ? 'grid min-h-[180px] flex-1 place-items-center bg-black transition-[flex,height] duration-200'
     : `grid min-h-[170px] shrink-0 place-items-center bg-black transition-[flex,height] duration-200 ${compactPlayerHeightClass}`
   const playerFrameClass = settings.videoFit === 'fill' || isTheater
-    ? 'relative h-full w-full min-h-0 overflow-hidden bg-black'
-    : 'relative aspect-video h-full max-h-full max-w-full overflow-hidden bg-black'
+    ? 'group relative h-full w-full min-h-0 overflow-hidden bg-black'
+    : 'group relative aspect-video h-full max-h-full max-w-full overflow-hidden bg-black'
+  const lastLiveAgo = details.data?.startedAt
+    ? relativeTime(details.data.startedAt)
+    : details.data?.updatedAt
+      ? relativeTime(details.data.updatedAt / 1000)
+      : ''
   const showBottomPanel = !isTheater || detailsExpanded
   const overlayState = startupOverlayState({
     playbackError,
@@ -1782,6 +1890,7 @@ export default function Channel() {
                             <span className="rounded bg-zinc-700/80 px-3 py-1 text-sm font-black uppercase tracking-wide text-white shadow-lg">Offline</span>
                             <div className="mt-3 text-lg font-black text-white">{details.data?.displayName || channelLogin}</div>
                             {details.data?.category ? <div className="mt-1 text-sm font-semibold text-zinc-400">Last seen playing {details.data.category}</div> : null}
+                            {lastLiveAgo ? <div className="mt-1 text-sm font-semibold text-zinc-500">Last live {lastLiveAgo}</div> : null}
                           </div>
                         </div>
                       </div>
@@ -1888,36 +1997,42 @@ export default function Channel() {
                       onClick={() => setIsTheater(value => !value)}
                       title={isTheater ? 'Exit theater mode' : 'Theater mode'}
                       aria-label={isTheater ? 'Exit theater mode' : 'Theater mode'}
-                      className="absolute bottom-3 right-3 z-20 rounded border border-white/15 bg-black/75 px-3 py-2 text-xs font-black uppercase text-white shadow-xl shadow-black/40 transition hover:border-violet-200/60 hover:bg-violet-500/30"
+                      className="absolute bottom-3 right-3 z-20 rounded border border-white/15 bg-black/75 px-3 py-2 text-xs font-black uppercase text-white opacity-0 shadow-xl shadow-black/40 transition hover:border-violet-200/60 hover:bg-violet-500/30 group-hover:opacity-100"
                     >
                       {isTheater ? 'Shrink' : 'Theater'}
                     </button>
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+                      <LivePlayerControls
+                        playbackState={playbackState}
+                        metrics={playback.metrics}
+                        requestedQuality={requestedQuality}
+                        loadedQuality={loadedQuality}
+                        renditions={activeRenditions}
+                        latencyMode={playback.effectiveLatencyMode}
+                        latencyModeAuto={playback.effectiveLatencyMode !== settings.playbackLatencyMode}
+                        videoFit={settings.videoFit}
+                        bottomDensity={settings.bottomDensity}
+                        muted={muted}
+                        volume={settings.playerVolume}
+                        isFullscreen={isFullscreen}
+                        backend={streamSession?.workerBackend ?? diagnostics.data?.workerBackend}
+                        startupMs={streamSession?.startupMs ?? diagnostics.data?.startupMs}
+                        fallbackAttempted={streamSession?.fallbackAttempted || Boolean(diagnostics.data?.fallbackAttempts)}
+                        detailsExpanded={detailsExpanded}
+                        onTogglePlay={togglePlay}
+                        onMuted={setMuted}
+                        onVolume={setPlayerVolume}
+                        onToggleFullscreen={() => void toggleFullscreen()}
+                        onJumpLive={jumpLive}
+                        onQuality={setPreferredQuality}
+                        onLatencyMode={setPlaybackLatencyMode}
+                        onVideoFit={setVideoFit}
+                        onBottomDensity={setBottomDensity}
+                        onDetailsExpanded={setDetailsExpanded}
+                      />
+                    </div>
                   </div>
                 </div>
-                <LivePlayerControls
-                  playbackState={playbackState}
-                  metrics={playback.metrics}
-                  requestedQuality={requestedQuality}
-                  loadedQuality={loadedQuality}
-                  renditions={activeRenditions}
-                  latencyMode={playback.effectiveLatencyMode}
-                  latencyModeAuto={playback.effectiveLatencyMode !== settings.playbackLatencyMode}
-                  videoFit={settings.videoFit}
-                  bottomDensity={settings.bottomDensity}
-                  muted={muted}
-                  backend={streamSession?.workerBackend ?? diagnostics.data?.workerBackend}
-                  startupMs={streamSession?.startupMs ?? diagnostics.data?.startupMs}
-                  fallbackAttempted={streamSession?.fallbackAttempted || Boolean(diagnostics.data?.fallbackAttempts)}
-                  detailsExpanded={detailsExpanded}
-                  onTogglePlay={togglePlay}
-                  onMuted={setMuted}
-                  onJumpLive={jumpLive}
-                  onQuality={setPreferredQuality}
-                  onLatencyMode={setPlaybackLatencyMode}
-                  onVideoFit={setVideoFit}
-                  onBottomDensity={setBottomDensity}
-                  onDetailsExpanded={setDetailsExpanded}
-                />
               </div>
               <div className={`min-h-0 overflow-y-auto transition-[flex,max-height,opacity] duration-200 ${showBottomPanel ? (isTheater && detailsExpanded ? 'min-h-0 flex-1' : 'flex-1') : 'max-h-0 flex-none overflow-hidden opacity-0'}`}>
                 <ChannelMeta

@@ -460,10 +460,19 @@ export default function Directory() {
               ))}
             </div>
           ) : (
-            <div className="grid min-h-72 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-center">
-              <div>
-                <div className="text-lg font-black text-white">Nothing live here yet</div>
-                <div className="mt-1 text-sm text-zinc-400">Try a different search or category.</div>
+            <div className="grid min-h-80 place-items-center rounded-lg border border-white/10 bg-white/[0.04] px-6 text-center">
+              <div className="max-w-md">
+                <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-3xl">
+                  📡
+                </div>
+                <div className="text-lg font-black text-white">No channels match right now</div>
+                <div className="mt-2 text-sm leading-6 text-zinc-400">
+                  {query
+                    ? `Nothing turned up for "${query}". Try another spelling or browse a category.`
+                    : selectedCategory
+                      ? `No live streams in ${selectedCategory.name} at the moment — check back soon or pick another category.`
+                      : 'Live channels will appear here when metadata finishes loading.'}
+                </div>
               </div>
             </div>
           )}
