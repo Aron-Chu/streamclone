@@ -45,13 +45,14 @@ Setup can clone the scraper for you. Never commit `PROXY_*` credentials — use 
 
 ---
 
-## Commands
+## Stack control
 
-| Task | Command |
-|------|---------|
-| Stop stack | `scripts\stop-streamclone.ps1` or **Stop Streamclone** |
-| Health check | `make smoke` |
-| Validate `.env` | `make validate-env` |
-| Re-setup | `make down` then `make setup` |
+| Goal | End users | Developers |
+|------|-----------|------------|
+| Pause (keep data) | **Stop Streamclone** launcher | `make down` or `scripts/stop-streamclone.ps1` |
+| Resume | **Start Streamclone** launcher | `make start` |
+| Remove volumes only | — | `make down-clean` |
+| Complete removal | **Uninstall Streamclone** launcher | `scripts/uninstall-streamclone.ps1` |
+| Re-test install (keep folder) | — | `scripts/reset-local-install.ps1 -RemoveVolumes` |
 
 Deployment hardening: [security.md](security.md)

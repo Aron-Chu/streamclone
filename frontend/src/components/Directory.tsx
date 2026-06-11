@@ -6,6 +6,7 @@ import { useAuth } from '../auth'
 import { normalizeBrowserOriginUrl } from '../config'
 import { useHlsPlayback } from '../playback'
 import { useThemeEffect, useUiSettings } from '../settings'
+import BrandLogo from './BrandLogo'
 import ChannelRail from './ChannelRail'
 import LocalTokenImportButton from './LocalTokenImportButton'
 import SettingsButton from './SettingsPanel'
@@ -370,11 +371,7 @@ export default function Directory() {
                 Menu
               </button>
               <Link to="/" className="flex items-center gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-lg bg-violet-500 text-lg font-black text-white shadow-lg shadow-violet-950/40">7</span>
-                <div>
-                  <div className="text-lg font-black tracking-tight">Streamclone</div>
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Live directory</div>
-                </div>
+                <BrandLogo subtitle="Live directory" />
               </Link>
               </div>
               <div className="flex items-center gap-2 lg:hidden">

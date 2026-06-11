@@ -31,6 +31,8 @@ services:
   frontend:
     image: ghcr.io/aron-chu/streamclone/frontend:${IMAGE_TAG:-latest}
     build: !reset null
+    # Pre-built image already includes nginx config — no host bind mounts in release bundles.
+    volumes: !reset []
 
   clipper:
     image: ghcr.io/aron-chu/streamclone/clipper:${IMAGE_TAG:-latest}

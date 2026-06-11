@@ -26,10 +26,14 @@ case "$ACTION" in
     exec bash "$ROOT/scripts/start-streamclone.sh"
     ;;
   stop)
+    echo "Stopping Docker stack (config and data are kept)..."
     exec bash "$ROOT/scripts/stop-streamclone.sh"
     ;;
+  uninstall)
+    exec bash "$ROOT/scripts/uninstall-streamclone.sh" --install-dir "$ROOT"
+    ;;
   *)
-    echo "Usage: install-streamclone-launcher.sh install|start|stop" >&2
+    echo "Usage: install-streamclone-launcher.sh install|start|stop|uninstall" >&2
     exit 1
     ;;
 esac

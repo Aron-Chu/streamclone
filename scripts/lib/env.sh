@@ -188,6 +188,27 @@ env_generate_secrets() {
   fi
 }
 
+env_release_version_tag() {
+  local version_file="$ENV_REPO_ROOT/VERSION"
+  [ -f "$version_file" ] || return 1
+  local tag
+  tag="$(tr -d '[:space:]' <"$version_file")"
+  [ -n "$tag" ] || return 1
+  printf '%s' "$tag"
+}
+
+env_apply_release_image_tag() {
+  local outfile="$1"
+  local current
+  current="$(env_read_value "$outfile" IMAGE_TAG 2>/dev/null || true)"
+  [ -n "$current" ] && return 0
+  local tag
+  tag="$(env_release_version_tag || true)"
+  [ -n "$tag" ] || return 0
+  env_set_key "$outfile" IMAGE_TAG "$tag"
+  env_set_key "$outfile" STREAMCLONE_USE_IMAGES 1
+}
+
 env_synthesize() {
   local profile="${1:-core}"
   local outfile="${2:-$ENV_REPO_ROOT/.env}"
@@ -205,6 +226,7 @@ env_synthesize() {
   env_merge_files "$outfile" "${sources[@]}"
   env_set_key "$outfile" STREAMCLONE_PROFILE "$profile"
   env_generate_secrets "$outfile"
+  env_apply_release_image_tag "$outfile"
 }
 
 env_read_value() {

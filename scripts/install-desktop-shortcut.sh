@@ -9,7 +9,7 @@ LAUNCHERS="$ROOT/launchers"
 mkdir -p "$LAUNCHERS"
 
 if [ -d "$REPO_LAUNCHERS" ]; then
-  for f in install-streamclone-launcher.sh "Install Streamclone.command" "Start Streamclone.command" "Stop Streamclone.command"; do
+  for f in install-streamclone-launcher.sh "Install Streamclone.command" "Start Streamclone.command" "Stop Streamclone.command" "Uninstall Streamclone.command"; do
     [ -f "$REPO_LAUNCHERS/$f" ] && cp "$REPO_LAUNCHERS/$f" "$LAUNCHERS/$f"
   done
   chmod +x "$LAUNCHERS"/*.sh "$LAUNCHERS"/*.command 2>/dev/null || true

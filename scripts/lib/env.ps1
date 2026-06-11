@@ -119,6 +119,25 @@ function Invoke-EnvGenerateSecrets {
     }
 }
 
+function Get-EnvReleaseVersionTag {
+    $root = Get-EnvRepoRoot
+    $versionFile = Join-Path $root 'VERSION'
+    if (-not (Test-Path $versionFile)) { return $null }
+    $tag = (Get-Content $versionFile -Raw).Trim()
+    if ([string]::IsNullOrWhiteSpace($tag)) { return $null }
+    return $tag
+}
+
+function Invoke-EnvApplyReleaseImageTag {
+    param([string]$EnvFile)
+    $current = Read-EnvKeyValueFile -Path $EnvFile
+    if (-not [string]::IsNullOrWhiteSpace($current['IMAGE_TAG'])) { return }
+    $tag = Get-EnvReleaseVersionTag
+    if (-not $tag) { return }
+    Set-EnvFileValue -Path $EnvFile -Key 'IMAGE_TAG' -Value $tag
+    Set-EnvFileValue -Path $EnvFile -Key 'STREAMCLONE_USE_IMAGES' -Value '1'
+}
+
 function Repair-FrontendDockerEntrypointLf {
     $path = Join-Path (Get-EnvRepoRoot) 'frontend\docker-entrypoint.d\40-streamclone-config.sh'
     if (-not (Test-Path $path)) { return }
@@ -143,6 +162,7 @@ function Invoke-EnvSynthesize {
     Merge-EnvFiles -OutFile $OutFile -Sources $sources
     Set-EnvFileValue -Path $OutFile -Key 'STREAMCLONE_PROFILE' -Value $Profile
     Invoke-EnvGenerateSecrets -EnvFile $OutFile
+    Invoke-EnvApplyReleaseImageTag -EnvFile $OutFile
 }
 
 function Get-EnvScraperSiblingPath {

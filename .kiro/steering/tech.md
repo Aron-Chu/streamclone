@@ -28,7 +28,9 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - Backend tests: `make test`
 - Backend vet: `make vet`
 - Full stack: `make up`
-- Stop stack: `make down`
+- Stop stack (keep data): `make down` or `scripts/stop-streamclone.ps1` / **Stop Streamclone** launcher
+- Remove volumes only: `make down-clean`
+- Complete uninstall: `scripts/uninstall-streamclone.ps1` / **Uninstall Streamclone** launcher
 - Migrations: `make migrate`
 - Instant local Twitch login: `make twitch-local-auth`
 - Frontend dev from WSL: `cd /mnt/c/Users/Aron/twitch-7tv-clone/frontend && npm run dev -- --host 127.0.0.1 --port 5174`

@@ -67,6 +67,10 @@ Services validate client inputs (channel names, pagination, upload type/size), u
 
 Known local-dev gaps (acceptable on localhost, not for public deploy): permissive CORS on Go services, unauthenticated video/analytics control APIs, default compose credentials.
 
+## Local uninstall
+
+**Uninstall Streamclone** (launcher or `scripts/uninstall-streamclone.ps1`) deletes the local `.env` and generated secrets on disk only. It does not remove anything from GitHub or remote services. Use it before decommissioning a machine or sharing a PC.
+
 ## Repository hygiene
 
 Do not commit compiled binaries, `__pycache__`, Playwright debug artifacts, or machine-local MCP config. Use `scripts/purge-history-junk.sh` to rewrite history and drop large dev binaries from older commits (requires coordinated force-push).

@@ -17,7 +17,8 @@ foreach ($name in @(
     'install-streamclone-launcher.ps1',
     'Install Streamclone.cmd',
     'Start Streamclone.cmd',
-    'Stop Streamclone.cmd'
+    'Stop Streamclone.cmd',
+    'Uninstall Streamclone.cmd'
 )) {
     $src = Join-Path $repoLaunchers $name
     if (-not (Test-Path $src)) { $src = Join-Path $PSScriptRoot $name }
@@ -29,7 +30,7 @@ foreach ($name in @(
     }
 }
 
-foreach ($name in @('Start Streamclone.cmd', 'Stop Streamclone.cmd')) {
+foreach ($name in @('Start Streamclone.cmd', 'Stop Streamclone.cmd', 'Uninstall Streamclone.cmd')) {
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) $name
     if (-not (Test-Path $src)) { $src = Join-Path $repoLaunchers $name }
     if (Test-Path $src) {
