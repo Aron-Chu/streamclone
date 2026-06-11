@@ -73,6 +73,51 @@ function Invoke-ProfileServiceUp {
     return $output
 }
 
+function Invoke-SyncClipperAuth {
+    Set-Location $Root
+    if (-not (Test-Path $envPath)) {
+        throw 'Missing .env — run scripts/setup.ps1 first.'
+    }
+    if (-not (Sync-ClipperAuthFromRuntime -Root $Root -EnvFile $envPath)) {
+        return @{ ok = $true; merged = $false; message = 'no runtime clipper auth file yet' }
+    }
+
+    $script:envValues = Read-EnvKeyValueFile -Path $envPath
+    $useImages = ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1') -or (-not [string]::IsNullOrWhiteSpace($envValues['IMAGE_TAG']))
+    $profile = [string]$envValues['STREAMCLONE_PROFILE']
+    if ([string]::IsNullOrWhiteSpace($profile)) { $profile = 'core' }
+
+    $clipperRunning = $false
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $psResult = Invoke-EnvDockerCaptured -Arguments @('ps', '--filter', 'name=streamclone-clipper', '--format', '{{.Names}}')
+        if ($psResult.ExitCode -eq 0 -and $psResult.Output) {
+            $clipperRunning = $true
+        }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+
+    $log = ''
+    if ($clipperRunning -or $profile -in @('clipper', 'full')) {
+        $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile -UseImages:$useImages
+        $result = Invoke-EnvDockerCaptured -Arguments ($composeArgs + @('up', '-d', '--no-deps', '--force-recreate', 'clipper'))
+        $log = ($result.Output -join [Environment]::NewLine).Trim()
+        if ($result.ExitCode -ne 0) {
+            throw "clipper recreate failed: $log"
+        }
+    }
+
+    return @{
+        ok = $true
+        merged = $true
+        recreated = ($clipperRunning -or $profile -in @('clipper', 'full'))
+        message = 'clipper credentials merged from sign-in'
+        log = $log
+    }
+}
+
 Set-Content -Path $PidFile -Value $PID -NoNewline
 
 $listener = [System.Net.HttpListener]::new()
@@ -111,6 +156,16 @@ try {
                 $service = $Matches[1]
                 $log = Invoke-ProfileServiceUp -Service $service
                 Write-JsonResponse -Response $response -StatusCode 200 -Body @{ ok = $true; service = $service; message = 'started'; log = $log }
+                continue
+            }
+
+            if ($request.HttpMethod -eq 'POST' -and $path -eq '/sync-clipper-auth') {
+                if (-not (Test-SetupControlAuthorized -Request $request)) {
+                    Write-JsonResponse -Response $response -StatusCode 401 -Body @{ ok = $false; error = 'unauthorized' }
+                    continue
+                }
+                $result = Invoke-SyncClipperAuth
+                Write-JsonResponse -Response $response -StatusCode 200 -Body $result
                 continue
             }
 

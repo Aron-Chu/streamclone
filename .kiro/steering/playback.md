@@ -84,6 +84,7 @@ Go does not download HLS segments in-process. Segment fetch and transmux are del
 
 | Knob | Default | Effect |
 |------|---------|--------|
+| `STREAM_WORKER_BACKENDS` | `direct_hls,streamlink` | `direct_hls` first for ~2–4s relay start; `streamlink` first waits 15s probe timeout before fallback |
 | `latency_mode` on start | `stable` if omitted | Coordinates streamlink live-edge with browser hls.js mode |
 | `playbackLatencyMode` (UI) | `fast` | Browser buffer policy; may auto-downgrade on stalls |
 | `STREAMLINK_HLS_LIVE_EDGE` | `2` | Fallback when start request omits `latency_mode` |

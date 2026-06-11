@@ -52,6 +52,8 @@ docs/images/directory-frames/
 docs/images/channel-frames/
 docs/images/qa/
 deploy/tmp-*
+deploy/env/oauth-bundle.env
+runtime/clipper-twitch.env
 # local output / scratch
 *.bin
 tmp-*.bin

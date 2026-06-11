@@ -169,6 +169,8 @@ function Invoke-EnvSynthesize {
     )
     $releaseBundle = Join-Path $root 'deploy\env\release-bundle.env'
     if (Test-Path $releaseBundle) { $sources += $releaseBundle }
+    $oauthBundle = Join-Path $root 'deploy\env\oauth-bundle.env'
+    if (Test-Path $oauthBundle) { $sources += $oauthBundle }
     $local = Join-Path $root '.env.local'
     if (Test-Path $local) { $sources += $local }
     Merge-EnvFiles -OutFile $OutFile -Sources $sources
@@ -298,6 +300,36 @@ function Invoke-EnvDockerCaptured {
             $proc.Dispose()
         }
     }
+}
+
+function Sync-ClipperAuthFromRuntime {
+    param(
+        [string]$Root = (Get-EnvRepoRoot),
+        [string]$EnvFile = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($EnvFile)) {
+        $EnvFile = Join-Path $Root '.env'
+    }
+    $syncFile = Join-Path $Root 'runtime\clipper-twitch.env'
+    if (-not (Test-Path $syncFile)) {
+        return $false
+    }
+    $syncValues = Read-EnvKeyValueFile -Path $syncFile
+    $updated = $false
+    foreach ($key in @('CLIPPER_TWITCH_CLIENT_ID', 'CLIPPER_TWITCH_USER_ACCESS_TOKEN', 'CLIPPER_TWITCH_REFRESH_TOKEN')) {
+        $value = [string]$syncValues[$key]
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            Set-EnvFileValue -Path $EnvFile -Key $key -Value $value
+            $updated = $true
+        }
+    }
+    if ($updated) {
+        $oauthId = (Read-EnvKeyValueFile -Path $EnvFile)['TWITCH_OAUTH_CLIENT_ID']
+        if (-not [string]::IsNullOrWhiteSpace($oauthId) -and [string]::IsNullOrWhiteSpace($syncValues['CLIPPER_TWITCH_CLIENT_ID'])) {
+            Set-EnvFileValue -Path $EnvFile -Key 'CLIPPER_TWITCH_CLIENT_ID' -Value $oauthId
+        }
+    }
+    return $updated
 }
 
 function Get-TwitchCliConfigPath {

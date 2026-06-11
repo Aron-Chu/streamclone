@@ -83,7 +83,7 @@ function Wait-StreamcloneStackReadyWithProgress {
         [int]$TimeoutSec = 300,
         [int]$IntervalSec = 3
     )
-    Set-InstallProgress -Title 'Waiting for services' -Detail 'Containers are starting...'
+    Set-InstallProgress -Title 'Waiting for services' -Detail 'First install: 3-8 min while images download and frontend becomes healthy.'
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
         Set-InstallProgress -Title 'Waiting for services' -Detail (Get-StreamcloneContainerSummary)

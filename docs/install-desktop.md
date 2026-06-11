@@ -2,7 +2,7 @@
 
 **Need:** [Docker Desktop](https://docs.docker.com/desktop/) (running). **Not needed:** Git, Go, Node, Twitch login (for watching).
 
-Open **`http://localhost:8090/`** when running. Use that URL only — not raw ports like `:8081`.
+Open **`http://localhost:8090/`** when running. Use that URL only — not raw ports like `:8081`. There is no separate welcome page: first launch shows a dismissible **Stack status** overlay on the live directory with optional service start buttons.
 
 ### System requirements
 
@@ -43,10 +43,22 @@ Reinstalls and **Start** use `--pull missing` so already-downloaded images are n
 |------|----------------|---------------------|---------------|-----------------|
 | **Core Watch** | Setup.exe / default install | **~383 MB** core GHCR images at `v0.1.4-rc1` (+ third-party on first compose up) | Docker Desktop running | Directory, live playback, chat, emotes, Helix/VOD stream history, TwitchTracker **summary** stats (avg/peak on stream rows) |
 | **Analytics** | `setup.ps1 -Profile scraper` or compose `--profile scraper` | + scraper image (builds from sibling repo; **not** published to GHCR) | Clone [`streamclone-scraper`](https://github.com/Aron-Chu/streamclone-scraper) beside this repo | Minute-level viewer charts on Analytics, reliable TwitchTracker sync |
-| **Clip Studio** | `--profile clipper` | + ~1 GB `clipper` image | Twitch CLI + device login (`make twitch-local-auth`) | Clip Studio at `/studio` |
-| **Full** | both profiles | Analytics + Clip Studio sizes combined | Scraper sibling + Twitch CLI | All optional features |
+| **Clip Studio** | `--profile clipper` or **Start Clip Studio** in Stack status | + ~1 GB `clipper` image | Optional **Sign in** on localhost (no Twitch CLI) | Clip Studio at `/studio` |
+| **Full** | both profiles | Analytics + Clip Studio sizes combined | Scraper sibling; sign-in for clips | All optional features |
 
-If you only use Setup.exe, expect **Core Watch** behavior: Analytics pages show stream lists and session stats, but **per-minute charts stay empty** until you add the Analytics (scraper) tier.
+### Optional Twitch sign-in (chat send, follows, Clip Studio)
+
+**Not required to watch.** When you want to send chat or use Clip Studio:
+
+1. Open **`http://localhost:8090/`** (localhost only — not a tunnel URL).
+2. Click **Sign in (optional)** in the header.
+3. Approve on the Twitch tab — Streamclone signs you in automatically.
+
+**You do not need Twitch CLI.** Official releases include a bundled Twitch OAuth app when the maintainer configures release secrets. Developers can copy `deploy/env/oauth-bundle.env.example` → `oauth-bundle.env` with their own [Twitch Developer](https://dev.twitch.tv/console/apps) app (no redirect URL required).
+
+After sign-in, clip credentials sync to Clip Studio automatically when that tier is enabled.
+
+If you only use Setup.exe, expect **Core Watch** behavior: Analytics pages show stream lists and session stats, but **per-minute charts stay empty** until you add the Analytics (scraper) tier. Use **Start Analytics** in the first-run overlay, the **Stack status** header button, or the banner on Analytics when the scraper is offline.
 
 ---
 
@@ -77,7 +89,10 @@ Windows may show **"Unknown Publisher"** — click **Run** or **More info → Ru
 | **Install Streamclone.cmd** | Same as Setup.exe (without wizard UI) | Yes | Creates fresh volumes |
 | **Start Streamclone.cmd** | Start stack → open directory | Yes | Yes |
 | **Stop Streamclone.cmd** | Stop containers (pause) | Yes | Yes |
+| **Manage Streamclone.cmd** | Menu: status, repair (re-pull + restart), logs, uninstall | Yes | Repair keeps volumes |
 | **Uninstall** (see below) | Remove everything — volumes, `.env`, shortcuts, install folder | **No** | **No** |
+
+**Manage Streamclone** is the support console when something feels stuck: option **4 Repair** re-pulls GHCR images and recreates containers without wiping your database. First repair on a new PC can take several minutes (same as first install pull).
 
 **Stop** = pause. Your `.env`, install folder, and database/MinIO volumes stay on disk. Run **Start** to resume.
 
@@ -112,6 +127,20 @@ All paths stop Docker, delete volumes and `.env`, remove Desktop shortcuts, and 
 | **Uninstall** | Complete teardown |
 
 Nothing is uploaded to GitHub. Images come from **`ghcr.io/aron-chu/streamclone/*`** (published on each `v*` release).
+
+---
+
+## First open and optional services
+
+Install and **Start** open **`http://localhost:8090/`** (the live directory). There is no separate welcome page.
+
+- **First visit:** a blurred overlay welcomes you with **Browse live streams** (primary action) and optional **Analytics (scraper)** / **Clip Studio (clipper)** status cards.
+- **Stack status:** header button on the directory, Analytics, and Clip Studio reopens that panel anytime.
+- **Analytics without scraper:** open a channel → Analytics — use **Start Analytics** in the banner or Stack status (requires **Start Streamclone** so setup-control is running).
+- **Clip Studio without clipper:** same pattern with **Start Clip Studio** on the error screen or Stack status.
+- Legacy `/welcome` URLs redirect to `/` and show the overlay once.
+
+Core Watch does not require scraper or clipper. Minute-level charts and Clip Studio are optional tiers — see [options.md](options.md).
 
 ---
 

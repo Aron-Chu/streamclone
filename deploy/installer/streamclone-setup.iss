@@ -51,6 +51,7 @@ Source: "icon.ico"; DestDir: "{app}\deploy\installer"; Flags: ignoreversion
 [Icons]
 Name: "{autoprograms}\{#MyAppName}\Start Streamclone"; Filename: "{app}\Start Streamclone.cmd"; WorkingDir: "{app}"
 Name: "{autoprograms}\{#MyAppName}\Stop Streamclone"; Filename: "{app}\Stop Streamclone.cmd"; WorkingDir: "{app}"
+Name: "{autoprograms}\{#MyAppName}\Manage Streamclone"; Filename: "{app}\Manage Streamclone.cmd"; WorkingDir: "{app}"
 Name: "{autoprograms}\{#MyAppName}\Uninstall Streamclone"; Filename: "{uninstallexe}"
 
 [Code]

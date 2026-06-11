@@ -75,6 +75,7 @@ func main() {
 		DevTokenImportEnabled: cfg.TwitchDevTokenImport,
 		CookieSecret:          cfg.AuthCookieSecret,
 		CookieSameSite:        cfg.AuthCookieSameSite,
+		ClipperAuthSyncPath:   cfg.ClipperAuthSyncPath,
 	}, logger)
 	sender := ircconn.NewSenderManager(cfg.Upstream.TwitchIRCURL, authHandler, logger)
 	h := hub.New(mgr, ps, cfg.ClientSendQueue, 500, logger).WithAuth(authHandler, sender)

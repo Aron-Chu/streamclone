@@ -33,8 +33,10 @@ import {
   type GameSegment,
 } from '../api'
 
-import { coreMinuteChartsNeedScraper, SCRAPER_SETUP_DOC_URL } from '../setupProfile'
+import { coreMinuteChartsNeedScraper } from '../setupProfile'
 import { CHART_THEME, hexToRgba, legendDotStyle } from './analytics/chartTheme'
+import OptionalServicesPanel, { CoreMinuteChartsNotice } from './OptionalServicesPanel'
+import StackStatusButton from './StackStatusButton'
 import {
   emoteCountForProvider,
   emoteProviderLabel,
@@ -1303,28 +1305,6 @@ function areaPath(
   }
 
   return path
-}
-
-function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean }) {
-  return (
-    <div className={compact ? 'mt-2 text-left' : 'max-w-md'}>
-      <div className={`font-black text-zinc-100 ${compact ? 'text-[11px]' : 'text-base'}`}>
-        Minute charts need Analytics tier
-      </div>
-      <p className={`mt-1 font-semibold text-zinc-500 ${compact ? 'text-[10px] leading-4' : 'text-sm'}`}>
-        Core Watch includes Helix/VOD stream lists and TwitchTracker summary stats (avg/peak).
-        Per-minute viewer, chat, and emote charts require the optional scraper profile.
-      </p>
-      <a
-        href={SCRAPER_SETUP_DOC_URL}
-        target="_blank"
-        rel="noreferrer"
-        className={`mt-2 inline-block font-bold text-violet-300 underline decoration-violet-400/30 underline-offset-2 transition hover:text-violet-200 ${compact ? 'text-[10px]' : 'text-xs'}`}
-      >
-        Scraper setup guide →
-      </a>
-    </div>
-  )
 }
 
 function AnalyticsChart({
@@ -3346,7 +3326,7 @@ export default function Analytics() {
         <header className="flex flex-col gap-3 border-b border-white/10 pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-xs font-black uppercase text-zinc-500">
-              <Link to="/" className="rounded bg-white/10 px-2 py-1 text-zinc-200 transition hover:bg-white/15">Streamclone</Link>
+              <Link to="/" className="rounded bg-white/10 px-2 py-1 text-zinc-200 transition hover:bg-white/15">Live directory</Link>
               <Link to={`/c/${encodeURIComponent(login)}`} className="rounded bg-violet-400/15 px-2 py-1 text-violet-100 transition hover:bg-violet-400/25">{login}</Link>
               <span className={`rounded px-2 py-1 ${detail?.state === 'live' ? 'bg-red-500/15 text-red-100' : 'bg-white/10 text-zinc-300'}`}>{detail?.state || 'loading'}</span>
             </div>
@@ -3363,6 +3343,7 @@ export default function Analytics() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <StackStatusButton />
             <button
               type="button"
               onClick={handleRefresh}
@@ -3374,6 +3355,10 @@ export default function Analytics() {
             <SourcePills sources={detail?.sources} />
           </div>
         </header>
+
+        {setupQuery.data?.services.scraper === 'offline' ? (
+          <OptionalServicesPanel variant="banner" focus="scraper" channelLogin={login} />
+        ) : null}
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-6">
           <StatCard label="Current" value={count(stream?.currentViewers)} tone="text-cyan-300/90" />

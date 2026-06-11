@@ -79,8 +79,8 @@ if (-not $SkipTwitch) {
             }
         }
     } else {
-        Write-Host 'Twitch CLI: not found — https://github.com/twitchdev/twitch-cli'
-        Write-Host '  Clip Studio / chat OAuth need it; core viewing works without login.'
+        Write-Host 'Twitch CLI: not found (optional)'
+        Write-Host '  Use Sign in (optional) in the app at http://localhost:8090 — no CLI required.'
     }
 }
 
