@@ -1,6 +1,6 @@
 module streamclone
 
-go 1.25.0
+go 1.25.11
 
 require (
 	github.com/caarlos0/env/v11 v11.4.1
