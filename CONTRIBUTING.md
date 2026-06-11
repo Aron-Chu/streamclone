@@ -20,6 +20,8 @@ Legacy one-liner: `make bootstrap` still works (core profile only).
 ## Tests before PR
 
 ```sh
+make install-hooks   # once per clone
+make security-scan   # gitleaks + validate-env
 go test ./... && go vet ./...
 cd frontend && npm ci && npm run build
 make smoke          # stack must be up
@@ -28,7 +30,9 @@ make smoke-ui       # adds Playwright smoke-core
 
 ## CI
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml): backend, frontend build, docker image builds, **smoke-core** (no scraper).
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml): **gitleaks** secret scan, backend (incl. govulncheck), frontend build (incl. npm audit), docker image builds, **smoke-core** (no scraper).
+
+See [`docs/security.md`](docs/security.md) for deployment hardening, dev-token import caveats, and the pre-PR security checklist.
 
 [`.github/workflows/smoke-scraper.yml`](.github/workflows/smoke-scraper.yml): nightly / manual scraper profile smoke.
 

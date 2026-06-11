@@ -46,6 +46,10 @@ coverage/
 docs/images/.sync-frames/
 docs/images/.sync-load-frames/
 docs/images/.tt-scrape-frames/
+docs/images/sync-load-frames/
+docs/images/tt-scrape-frames/
+docs/images/directory-frames/
+docs/images/channel-frames/
 docs/images/qa/
 deploy/tmp-*
 # local output / scratch

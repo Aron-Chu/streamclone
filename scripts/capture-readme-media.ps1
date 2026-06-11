@@ -62,6 +62,7 @@ if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
 
 Remove-Item Env:DOCS_ANALYTICS_STREAM -ErrorAction SilentlyContinue
 $env:DOCS_SKIP_SYNC = $skipSync
+$env:DOCS_GIFS_ONLY = '1'
 
 Push-Location frontend
 try {
@@ -76,6 +77,7 @@ try {
 }
 
 Write-Host ""
-Write-Host "Saved to docs/images/ - open README preview (Ctrl+Shift+V) to verify."
-Write-Host "Analytics load GIFs: scripts/capture-readme-media.ps1 -AnalyticsOnly -ResetPostgres"
-Write-Host "Manual override: save Win+Shift+S shots as docs/images/<name>.png at 1920x1080 browser width."
+Write-Host "Saved README media to docs/images/:"
+Write-Host "  directory.gif, channel.gif, analytics-sync-load.gif"
+Write-Host "  image.png — finished analytics chart (manual screenshot or -WithResult)"
+Write-Host "Analytics sync GIF only: scripts/capture-readme-media.ps1 -AnalyticsOnly [-ResetPostgres]"

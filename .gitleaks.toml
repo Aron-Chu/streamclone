@@ -1,0 +1,17 @@
+title = "streamclone gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known dev templates and Twitch public web client ID (not a private secret)"
+paths = [
+  '''(?i)\.env\.example$''',
+  '''(?i)\.env\.dev$''',
+  '''(?i)internal/config/config\.go$''',
+  '''(?i)internal/upstream/upstream\.go$''',
+  '''(?i)deploy/docker-compose\.yml$''',
+  '''(?i)deploy/docker-compose\.observability\.yml$''',
+  '''(?i)deploy/FREE_DEPLOYMENT\.md$''',
+  '''(?i)tools/data/data_mcp\.py$''',
+]

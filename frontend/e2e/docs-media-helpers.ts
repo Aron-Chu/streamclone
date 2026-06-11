@@ -45,6 +45,65 @@ async function shot(page: Page, outDir: string, fileName: string) {
   })
 }
 
+async function captureSimpleGif(
+  page: Page,
+  outDir: string,
+  opts: {
+    gifName: string
+    framesSubdir: string
+    frameCount?: number
+    intervalMs?: number
+    setup: () => Promise<void>
+  },
+) {
+  await opts.setup()
+  const framesDir = path.join(outDir, opts.framesSubdir)
+  fs.mkdirSync(framesDir, { recursive: true })
+  for (const file of fs.readdirSync(framesDir)) {
+    if (file.endsWith('.png')) fs.unlinkSync(path.join(framesDir, file))
+  }
+
+  const frameCount = opts.frameCount ?? 12
+  const intervalMs = opts.intervalMs ?? 450
+  for (let index = 0; index < frameCount; index += 1) {
+    await captureSyncFrame(page, framesDir, index)
+    if (index < frameCount - 1) {
+      await page.waitForTimeout(intervalMs)
+    }
+  }
+  assembleGif(outDir, framesDir, frameCount, opts.gifName)
+}
+
+export async function captureDirectoryGif(page: Page, outDir: string) {
+  await captureSimpleGif(page, outDir, {
+    gifName: 'directory.gif',
+    framesSubdir: 'directory-frames',
+    frameCount: 14,
+    intervalMs: 400,
+    setup: async () => {
+      await waitForDirectoryReady(page)
+    },
+  })
+}
+
+export async function captureChannelGif(page: Page, outDir: string) {
+  await captureSimpleGif(page, outDir, {
+    gifName: 'channel.gif',
+    framesSubdir: 'channel-frames',
+    frameCount: 16,
+    intervalMs: 500,
+    setup: async () => {
+      const streamLink = await pickLiveChannelLink(page)
+      const href = await streamLink.getAttribute('href')
+      const login = href?.replace(/^\/c\//, '').split('/')[0] ?? channelLogin
+      const finishReady = watchChannelNavigation(page, login)
+      await streamLink.click()
+      await page.waitForURL(/\/c\//, { timeout: 60_000 })
+      await finishReady()
+    },
+  })
+}
+
 export async function captureDirectory(page: Page, outDir: string) {
   await waitForDirectoryReady(page)
   await shot(page, outDir, 'directory.png')
@@ -288,7 +347,9 @@ function assembleGif(outDir: string, framesDir: string, frameCount: number, gifN
   const framerate = frameCount >= 16 ? '2' : '1.5'
   try {
     if (process.env.DOCS_FFMPEG === 'docker') {
-      const mount = outDir.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`)
+      const mount = process.platform === 'win32'
+        ? outDir
+        : outDir.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`)
       execSync(
         `docker run --rm -v "${mount}:/data" jrottenberg/ffmpeg:4.4-alpine -y -framerate ${framerate} -i /data/${framesSubdirName(framesDir)}/frame-%02d.png -vf "${vf}" /data/${gifName}`,
         { stdio: 'pipe', shell: true },
@@ -368,7 +429,7 @@ async function capturePhaseGif(page: Page, outDir: string, opts: PhaseGifOptions
     const elapsedSinceCapture = Date.now() - lastCaptureAt
 
     if (phaseAllowed && (frameIndex === 0 || phaseChanged || elapsedSinceCapture >= 2000)) {
-      const panelVisible = await page.getByText(/Sync progress|Syncing chart data|Scraping TwitchTracker/i).first().isVisible().catch(() => false)
+      const panelVisible = await page.getByText(SYNC_PANEL_TEXT).first().isVisible().catch(() => false)
       if (!panelVisible && frameIndex > 0) {
         await page.waitForTimeout(800)
         continue
@@ -392,6 +453,15 @@ async function capturePhaseGif(page: Page, outDir: string, opts: PhaseGifOptions
   assembleGif(outDir, framesDir, frameIndex, opts.gifName)
 }
 
+const SYNC_PANEL_TEXT = /Sync progress|Syncing chart data|Scraping viewer timeline|Viewers \(TwitchTracker\)|Historical VOD indexing|VOD Chat Fetch/i
+
+async function analyticsStreamState(streamId: string): Promise<string | null> {
+  const res = await fetch(`${BASE}/v1/analytics/streams/${encodeURIComponent(streamId)}`)
+  if (!res.ok) return null
+  const body = await res.json() as { state?: string }
+  return body.state ?? null
+}
+
 async function fetchDocsSyncTarget(): Promise<{ streamId: string; vodId?: string; slug: string }> {
   if (process.env.DOCS_GIF_SYNC_STREAM?.trim()) {
     const streamId = process.env.DOCS_GIF_SYNC_STREAM.trim()
@@ -400,10 +470,19 @@ async function fetchDocsSyncTarget(): Promise<{ streamId: string; vodId?: string
 
   const historyRes = await fetch(`${BASE}/v1/channels/${encodeURIComponent(channelLogin)}/streams/history?period=all`)
   const history = await historyRes.json() as { items?: StreamHistoryItem[] }
-  const pick = (history.items ?? [])
+  const candidates = (history.items ?? [])
     .filter(item => item.id && /^\d+$/.test(item.id))
     .filter(item => (item.durationMinutes ?? 0) >= 90 && (item.durationMinutes ?? 0) <= 240)
-    .sort((a, b) => (b.durationMinutes ?? 0) - (a.durationMinutes ?? 0))[0]
+    .sort((a, b) => (b.durationMinutes ?? 0) - (a.durationMinutes ?? 0))
+
+  for (const item of candidates) {
+    const state = await analyticsStreamState(item.id)
+    if (state === 'not_collected') {
+      return { streamId: item.id, vodId: item.videoId, slug: item.id }
+    }
+  }
+
+  const pick = candidates[0]
     ?? (history.items ?? []).find(item => item.id && /^\d+$/.test(item.id))
 
   if (pick?.id) {
@@ -412,11 +491,34 @@ async function fetchDocsSyncTarget(): Promise<{ streamId: string; vodId?: string
   return docsFallbackTarget()
 }
 
-async function waitForSyncPanel(page: Page, timeoutMs = 90_000) {
-  await page.getByText(/Sync progress|Syncing chart data|Scraping TwitchTracker/i).first().waitFor({
+async function waitForSyncActive(streamId: string, timeoutMs = 90_000) {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    const status = await getSyncStatus(streamId)
+    if (status) return status
+    await new Promise(r => setTimeout(r, 400))
+  }
+  throw new Error(`Sync did not start for stream ${streamId}`)
+}
+
+async function waitForSyncPanel(page: Page, timeoutMs = 120_000) {
+  await page.getByText(SYNC_PANEL_TEXT).first().waitFor({
     state: 'visible',
     timeout: timeoutMs,
   })
+}
+
+async function beginSyncCapture(page: Page, target: { streamId: string; vodId?: string; slug: string }, opts: { viewersOnly?: boolean; forceChat?: boolean }) {
+  await startSync(target.streamId, target.vodId, opts)
+  await waitForSyncActive(target.streamId, 60_000)
+  await openAnalyticsStream(page, target.slug)
+  await hideClipperNoise(page)
+  const panel = page.getByText(SYNC_PANEL_TEXT).first()
+  if (!await panel.isVisible().catch(() => false)) {
+    await page.reload()
+    await hideClipperNoise(page)
+  }
+  await waitForSyncPanel(page)
 }
 
 async function clickSyncIfIdle(page: Page) {
@@ -426,7 +528,7 @@ async function clickSyncIfIdle(page: Page) {
   }
 }
 
-/** Capture two README load GIFs: TwitchTracker scrape first, then initial sync (no finished charts). */
+/** Capture README sync-load GIF. Finished chart is docs/images/image.png (manual or -WithResult). */
 export async function captureAnalyticsMedia(page: Page, outDir: string) {
   await prepareScreenshotViewport(page)
   await hideClipperNoise(page)
@@ -434,38 +536,10 @@ export async function captureAnalyticsMedia(page: Page, outDir: string) {
   console.log(`docs sync target: ${target.streamId} vod=${target.vodId ?? 'auto'}`)
 
   await waitForSyncIdle(target.streamId, 30_000)
-
-  // 1) TwitchTracker scrape — viewers-only sync before any chart exists
-  await startSync(target.streamId, target.vodId, { viewersOnly: true })
-  await openAnalyticsStream(page, target.slug)
-  await waitForSyncPanel(page)
-  await capturePhaseGif(page, outDir, {
-    gifName: 'analytics-tt-scrape.gif',
-    framesSubdir: '.tt-scrape-frames',
-    streamId: target.streamId,
-    includePhases: ['starting', 'scraping_tracker', 'parsing_tracker'],
-    stopAfterPhases: ['parsing_tracker'],
-    minFrames: 10,
-    maxDurationMs: 180_000,
-    maxChartPaths: 1,
-  })
-
-  await waitForSyncIdle(target.streamId, 180_000)
-  await page.reload()
-  await hideClipperNoise(page)
-
-  // 2) Initial sync load — force chat re-index, stop before chart fills in
-  await openAnalyticsStream(page, target.slug)
-  await clickSyncIfIdle(page)
-  await startSync(target.streamId, target.vodId, { forceChat: true })
-  await waitForSyncPanel(page).catch(async () => {
-    await clickSyncIfIdle(page)
-    await waitForSyncPanel(page)
-  })
-
+  await beginSyncCapture(page, target, { forceChat: true })
   await capturePhaseGif(page, outDir, {
     gifName: 'analytics-sync-load.gif',
-    framesSubdir: '.sync-load-frames',
+    framesSubdir: 'sync-load-frames',
     streamId: target.streamId,
     includePhases: ['starting', 'scraping_tracker', 'parsing_tracker', 'resolving_vod', 'fetching_comments', 'writing_rollups'],
     stopAfterPhases: ['resolving_vod', 'fetching_comments'],
@@ -474,21 +548,24 @@ export async function captureAnalyticsMedia(page: Page, outDir: string) {
     maxChartPaths: 2,
   })
 
-  // 3) Finish sync, then capture static PNGs (instant chart + streams list — not in GIFs)
-  await waitForSyncIdle(target.streamId, 600_000)
-  const active = await getSyncStatus(target.streamId)
-  if (active) {
-    await pollSyncStatus(target.streamId, 900_000)
+  if (process.env.DOCS_CAPTURE_RESULT === '1') {
+    await waitForSyncIdle(target.streamId, 900_000)
+    const active = await getSyncStatus(target.streamId)
+    if (active) {
+      await pollSyncStatus(target.streamId, 900_000)
+    }
+    await page.reload()
+    await hideClipperNoise(page)
+    await openAnalyticsStream(page, target.slug)
+    await waitForFullChartData(page, 180_000)
+    await page.getByText(/Syncing chart data/i).waitFor({ state: 'hidden', timeout: 120_000 }).catch(() => undefined)
+    await shot(page, outDir, 'image.png')
   }
-  await startSync(target.streamId, target.vodId, { forceChat: true })
-  await waitForSyncIdle(target.streamId, 900_000)
-  await page.reload()
-  await hideClipperNoise(page)
-  await openAnalyticsStream(page, target.slug)
-  await waitForFullChartData(page, 180_000)
-  await page.getByText(/Syncing chart data/i).waitFor({ state: 'hidden', timeout: 120_000 }).catch(() => undefined)
-  await captureAnalyticsChart(page, outDir)
-  await captureAnalyticsStreamsList(page, outDir)
+}
+
+export async function captureAnalyticsGifs(page: Page, outDir: string) {
+  process.env.DOCS_GIFS_ONLY = '1'
+  await captureAnalyticsMedia(page, outDir)
 }
 
 export async function captureDirectoryCategory(page: Page, outDir: string) {

@@ -15,6 +15,7 @@ Read this file first. Load **one** domain steering doc, then use the code graph 
 | Local Twitch auth | `.kiro/steering/local-auth.md` | — |
 | Emotes / 7TV / FFZ | `.kiro/steering/emote-pipeline.md` | — |
 | Windows / Docker localhost | `.kiro/steering/windows-dev.md` | — |
+| Security / secrets / deploy hardening | `docs/security.md` | — |
 | Scraper / CDP Bypass / Cloudflare | `.kiro/steering/windows-dev.md`, `.kiro/specs/scraper-optimization-notes.md`, `streamclone-scraper/main.py` | — |
 | Full feature specs | `.kiro/specs/<feature>/` | Use for planning, not every bugfix |
 
@@ -54,7 +55,8 @@ If the graph is missing or stale, run `make codegraph` before debugging cross-pa
 4. Summarize API/job payloads in prose — do not paste full JSON into chat.
 5. Narrow tests first (`go test ./internal/analytics/...`, `clipper-test`), then broader suites when crossing packages.
 6. Debug mode / instrumentation only when the failure is unknown — not for routine fixes.
-7. Git commits use [Conventional Commits](https://www.conventionalcommits.org/) — see `CONTRIBUTING.md` (`type(scope): summary`).
+7. Before PRs that touch auth, compose, clipper, or env: read `docs/security.md`; run `make security-scan` when changing secrets-related paths.
+8. Git commits use [Conventional Commits](https://www.conventionalcommits.org/) — see `CONTRIBUTING.md` (`type(scope): summary`).
 
 ## Layout
 

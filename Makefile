@@ -22,7 +22,7 @@ CODEGRAPH_DB ?= .codegraph/streamclone.kuzu
 # Services that read TWITCH_OAUTH_* / session env at container create time (restart is not enough).
 ENV_RELOAD_SERVICES ?= chat metadata analytics emote
 
-.PHONY: env ensure-oauth ensure-clipper-auth refresh-auth rebuild app stop restart up down down-clean ps ports migrate logs obs-up obs-down obs-logs obs-config test vet build tidy twitch twitch-debug twitch-version twitch-configure twitch-sync twitch-token twitch-local-auth clipper-test clipper-run clipper-restart codegraph-install codegraph codegraph-mcp docs-screenshots docs-media frontend-build frontend-restart frontend-logs up-scraper up-full bootstrap setup setup-core setup-full validate-env smoke smoke-ui install-hooks reload-env reload-env-if-stale scraper-reload scraper-check scraper-preflight scraper-warm preflight-deps start stop-user
+.PHONY: env ensure-oauth ensure-clipper-auth refresh-auth rebuild app stop restart up down down-clean ps ports migrate logs obs-up obs-down obs-logs obs-config test vet build tidy twitch twitch-debug twitch-version twitch-configure twitch-sync twitch-token twitch-local-auth clipper-test clipper-run clipper-restart codegraph-install codegraph codegraph-mcp docs-screenshots docs-media frontend-build frontend-restart frontend-logs up-scraper up-full bootstrap setup setup-core setup-full validate-env security-scan smoke smoke-ui install-hooks reload-env reload-env-if-stale scraper-reload scraper-check scraper-preflight scraper-warm preflight-deps start stop-user
 
 preflight-deps:
 	@bash scripts/preflight-deps.sh --install-hints
@@ -257,3 +257,6 @@ smoke-ui:
 install-hooks:
 	@command -v pre-commit >/dev/null 2>&1 || { echo "Install pre-commit: pip install pre-commit"; exit 1; }
 	pre-commit install
+
+security-scan:
+	@bash scripts/security-scan.sh
