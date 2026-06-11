@@ -67,106 +67,13 @@ function Test-PortFree {
     }
 }
 
-function Invoke-ExternalWithTimeout {
-    param(
-        [string]$FilePath,
-        [string]$Arguments = '',
-        [int]$TimeoutSec = 5
-    )
-    $output = [System.Collections.ArrayList]::new()
-    $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $FilePath
-    $psi.Arguments = $Arguments
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $proc = [System.Diagnostics.Process]::new()
-    $proc.StartInfo = $psi
-    $handler = [System.Diagnostics.DataReceivedEventHandler]{
-        param($sender, $eventArgs)
-        if ($null -ne $eventArgs.Data) { [void]$output.Add($eventArgs.Data) }
-    }
-    $proc.add_OutputDataReceived($handler)
-    $proc.add_ErrorDataReceived($handler)
-    try {
-        [void]$proc.Start()
-        $proc.BeginOutputReadLine()
-        $proc.BeginErrorReadLine()
-        $timedOut = -not $proc.WaitForExit($TimeoutSec * 1000)
-        if ($timedOut) {
-            try { $proc.Kill() } catch { }
-        }
-        return [pscustomobject]@{
-            TimedOut = $timedOut
-            Output   = @($output)
-            ExitCode = if ($timedOut) { 124 } else { [int]$proc.ExitCode }
-        }
-    } finally {
-        $proc.remove_OutputDataReceived($handler)
-        $proc.remove_ErrorDataReceived($handler)
-        $proc.Dispose()
-    }
-}
-
-function Invoke-DockerCapturedWithTimeout {
-    param(
-        [string[]]$Arguments,
-        [int]$TimeoutSec = 15
-    )
-    $docker = Get-EnvDockerExe
-    if (-not $docker) {
-        return [pscustomobject]@{
-            ExitCode = 127
-            TimedOut = $false
-            Output   = @('Docker CLI not found')
-        }
-    }
-
-    $output = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
-    $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $docker
-    $psi.Arguments = Join-EnvProcessArguments -Arguments $Arguments
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-
-    $proc = [System.Diagnostics.Process]::new()
-    $proc.StartInfo = $psi
-    $handler = [System.Diagnostics.DataReceivedEventHandler]{
-        param($sender, $eventArgs)
-        if ($null -ne $eventArgs.Data) { [void]$output.Add($eventArgs.Data) }
-    }
-    $proc.add_OutputDataReceived($handler)
-    $proc.add_ErrorDataReceived($handler)
-    try {
-        [void]$proc.Start()
-        $proc.BeginOutputReadLine()
-        $proc.BeginErrorReadLine()
-        $timedOut = -not $proc.WaitForExit($TimeoutSec * 1000)
-        if ($timedOut) {
-            try { $proc.Kill() } catch { }
-        }
-        return [pscustomobject]@{
-            ExitCode = if ($timedOut) { 124 } else { [int]$proc.ExitCode }
-            TimedOut = $timedOut
-            Output   = @($output)
-        }
-    } finally {
-        $proc.remove_OutputDataReceived($handler)
-        $proc.remove_ErrorDataReceived($handler)
-        $proc.Dispose()
-    }
-}
-
 function Invoke-DockerInfoWithTimeout {
     param([int]$TimeoutSec = 15)
-    return Invoke-DockerCapturedWithTimeout -Arguments @('info') -TimeoutSec $TimeoutSec
+    return Invoke-EnvDockerCapturedWithTimeout -Arguments @('info') -TimeoutSec $TimeoutSec
 }
 
 function Get-DockerContextName {
-    $result = Invoke-DockerCapturedWithTimeout -Arguments @('context', 'show') -TimeoutSec 10
+    $result = Invoke-EnvDockerCapturedWithTimeout -Arguments @('context', 'show') -TimeoutSec 10
     if ($result.TimedOut -or $result.ExitCode -ne 0) { return '' }
     return (($result.Output | Select-Object -First 1) -as [string]).Trim()
 }
@@ -237,7 +144,7 @@ if (-not $dockerExe) {
 
     if ($engineRunning) {
         try {
-            $compose = Invoke-DockerCapturedWithTimeout -Arguments @('compose', 'version') -TimeoutSec 10
+            $compose = Invoke-EnvDockerCapturedWithTimeout -Arguments @('compose', 'version') -TimeoutSec 10
             if ($compose.ExitCode -ne 0) { throw 'compose missing' }
             Write-Check ok 'Docker Compose v2 available'
         } catch {
@@ -265,7 +172,7 @@ if (-not $dockerExe) {
 if ($IsWindows -or $env:OS -match 'Windows') {
     $wsl = Get-Command wsl -ErrorAction SilentlyContinue
     if ($wsl) {
-        $wslResult = Invoke-ExternalWithTimeout -FilePath $wsl.Source -Arguments '-l -v' -TimeoutSec 5
+        $wslResult = Invoke-EnvCapturedProcess -FilePath $wsl.Source -ArgumentList @('-l', '-v') -TimeoutSec 5
         if ($wslResult.TimedOut) {
             Write-Check warn 'WSL status check timed out (5s) - if Docker is slow, run: wsl --shutdown'
             $warnings++
@@ -282,7 +189,7 @@ if ($IsWindows -or $env:OS -match 'Windows') {
 if (Test-PortFree -Port 8090) {
     Write-Check ok 'Port 8090 is free (Streamclone proxy)'
 } else {
-    Write-Check warn 'Port 8090 is already in use - another app or old Streamclone stack may be running'
+    Write-Check warn 'Port 8090 is in use — Streamclone may already be running (this is OK)'
     $warnings++
 }
 

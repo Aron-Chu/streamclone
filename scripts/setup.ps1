@@ -43,12 +43,18 @@ if (-not $NonInteractive) {
 
 Write-Host "Profile: $Profile"
 
-    if (-not $SkipPreflight) {
+if (-not $SkipPreflight) {
+    try {
         Test-EnvPreflightDocker
         Write-Host 'Docker: ok'
-    } else {
-        Write-Host 'Docker: preflight already checked'
+    } catch {
+        Write-Host "Docker check failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host 'Start Docker Desktop, then run Check Streamclone.cmd in your install folder.' -ForegroundColor Yellow
+        exit 1
     }
+} else {
+    Write-Host 'Docker: preflight skipped'
+}
 
 $envFile = Join-Path (Get-Location) '.env'
 Invoke-EnvSynthesize -Profile $Profile -OutFile $envFile
@@ -122,14 +128,20 @@ if (-not $NoUp) {
     if ($UseImages) {
         Write-Host 'Pulling Docker images...'
         $code = Invoke-EnvDocker -Arguments ($composeArgs + @('pull'))
-        if ($code -ne 0) { exit $code }
+        if ($code -ne 0) {
+            Write-Host "docker compose pull failed (exit $code). Check Docker Desktop and network." -ForegroundColor Red
+            exit $code
+        }
         $upArgs = @('up', '-d', '--remove-orphans', '--pull', 'missing')
     } else {
         $upArgs = @('up', '-d', '--remove-orphans', '--build')
     }
     Write-Host "Starting stack (profile: $Profile)..."
     $code = Invoke-EnvDocker -Arguments ($composeArgs + $upArgs)
-    if ($code -ne 0) { exit $code }
+    if ($code -ne 0) {
+        Write-Host "docker compose up failed (exit $code)." -ForegroundColor Red
+        exit $code
+    }
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'reload-env-if-stale.ps1') -EnvFile $envFile 2>$null
     if ($Profile -in @('clipper', 'full')) {
         & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-clipper-auth.ps1') -EnvFile $envFile 2>$null

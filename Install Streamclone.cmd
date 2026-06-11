@@ -11,10 +11,12 @@ echo    2. Pull Docker images and start the stack (~3-5 min)
 echo    3. Add Start/Stop shortcuts to your Desktop
 echo    4. Open http://localhost:8090/ in your browser
 echo.
+echo  If setup fails, run Check Streamclone.cmd in this folder first.
+echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launchers\install-streamclone-launcher.ps1" -Action install -LauncherRoot "%~dp0."
 if errorlevel 1 (
   echo.
-  echo Setup failed. Fix any errors above and try again.
+  echo Setup failed. Run Check Streamclone.cmd for details.
   pause
   exit /b 1
 )
