@@ -14,6 +14,8 @@ Open **`http://localhost:8090/welcome`** when running. Use that URL only — not
 2. From **[GitHub Releases](https://github.com/Aron-Chu/streamclone/releases/latest)**, download **`Install Streamclone.cmd`** only
 3. Double-click it — downloads the release, sets up Docker, adds Desktop shortcuts, and **opens the welcome page**
 
+Windows may show **"Unknown Publisher"** — click **Run**. Streamclone is not code-signed yet (no `.exe` installer).
+
 Takes **~3–5 minutes** (pulls pre-built images; no local compile).
 
 **Alternative:** download `streamclone-*-windows.zip`, extract, then run **`Install Streamclone.cmd`** inside the folder (same result; you unzip manually).

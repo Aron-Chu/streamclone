@@ -12,9 +12,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-& (Join-Path $PSScriptRoot 'preflight-deps.ps1') -InstallHints
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
 if ($Release) {
     if (-not $PSBoundParameters.ContainsKey('UseImages')) { $UseImages = $true }
     if (-not $PSBoundParameters.ContainsKey('NonInteractive')) { $NonInteractive = $true }
@@ -25,12 +22,25 @@ if ($Release) {
     $dlArgs = @{ InstallDir = $Dir }
     if ($Version) { $dlArgs['Version'] = $Version }
     & (Join-Path $PSScriptRoot 'lib\release-download.ps1') @dlArgs
-} elseif (Test-Path (Join-Path $Dir '.git')) {
-    Write-Host "Updating existing checkout at $Dir..."
-    git -C $Dir pull --ff-only
 } else {
-    Write-Host "Cloning Streamclone to $Dir..."
-    git clone https://github.com/Aron-Chu/streamclone.git $Dir
+    & (Join-Path $PSScriptRoot 'preflight-deps.ps1') -InstallHints
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    if (Test-Path (Join-Path $Dir '.git')) {
+        Write-Host "Updating existing checkout at $Dir..."
+        git -C $Dir pull --ff-only
+    } else {
+        Write-Host "Cloning Streamclone to $Dir..."
+        git clone https://github.com/Aron-Chu/streamclone.git $Dir
+    }
+}
+
+if ($Release) {
+    $preflight = Join-Path $Dir 'scripts\preflight-deps.ps1'
+    if (Test-Path $preflight) {
+        & $preflight -InstallHints
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
 }
 
 $setupArgs = @{

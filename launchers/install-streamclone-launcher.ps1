@@ -61,9 +61,9 @@ function Invoke-StreamcloneInstall {
     }
 
     Write-Host 'Step 1/4: Downloading latest release...' -ForegroundColor Cyan
-    $tempInstall = Join-Path $env:TEMP 'streamclone-install.ps1'
-    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Aron-Chu/streamclone/master/scripts/install.ps1' -OutFile $tempInstall -UseBasicParsing
-    & $tempInstall -Release -NonInteractive -DesktopShortcut
+    $tempBootstrap = Join-Path $env:TEMP 'streamclone-bootstrap.ps1'
+    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Aron-Chu/streamclone/master/scripts/bootstrap-windows-install.ps1' -OutFile $tempBootstrap -UseBasicParsing
+    & $tempBootstrap -InstallDir (Join-Path $env:USERPROFILE 'streamclone')
 }
 
 $root = Get-StreamcloneRoot -LauncherRoot $LauncherRoot
