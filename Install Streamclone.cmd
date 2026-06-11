@@ -6,7 +6,7 @@ echo  ---------------------
 echo  Requires Docker Desktop (running).
 echo  Installs to: %USERPROFILE%\streamclone
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launchers\install-streamclone-launcher.ps1" -Action install -LauncherRoot "%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launchers\install-streamclone-launcher.ps1" -Action install -LauncherRoot "%~dp0."
 if errorlevel 1 (
   echo.
   echo Install failed. Fix any errors above and try again.

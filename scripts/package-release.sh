@@ -58,7 +58,7 @@ cat >"$STAGE/README-quickstart.md" <<'EOF'
 
 Stop: **Stop Streamclone.cmd** (Windows) or **Stop Streamclone.command** (macOS)
 
-Full guide: https://github.com/Aron-Chu/streamclone/blob/main/docs/install-desktop.md
+Full guide: https://github.com/Aron-Chu/streamclone/blob/master/docs/install-desktop.md
 EOF
 
 chmod +x "$STAGE/scripts"/*.sh 2>/dev/null || true

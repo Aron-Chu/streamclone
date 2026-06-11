@@ -10,6 +10,8 @@ Operating this software may violate the Terms of Service of Twitch, 7TV, and oth
 
 Viewer-facing read endpoints (directory, stream start, anonymous chat listening) and the emote asset CDN remain available without a first-party account. Sending real chat messages uses Twitch OAuth, stores Twitch tokens server-side in Redis, and sends through an authenticated IRC connection for the logged-in Twitch user. The app does not maintain its own username/password account system.
 
+Viewer-facing APIs are read-only and unauthenticated by design.
+
 ## Curator / Admin API
 
 The Emote Service exposes a curator API for managing the emote database. All write/admin endpoints require `Authorization: Bearer <CURATOR_API_TOKEN>`. **Set a strong token before exposing the service outside localhost.** Deploying with the default `change-me` is a security defect.
@@ -63,7 +65,11 @@ Never commit: `.env` (except templates), `clipper-data/`, `*.sqlite`, `.cursor/m
 
 Services validate client inputs (channel names, pagination, upload type/size), use parameterised SQL, pass subprocess arguments as argv slices (never shell strings), and render chat as plain text — not innerHTML.
 
-Known local-dev gaps (acceptable on localhost, not for public deploy): permissive CORS on Go services, unauthenticated video/analytics control APIs, default compose credentials. See the [Streamclone Security Audit](https://github.com/Aron-Chu/streamclone) plan for the full findings table.
+Known local-dev gaps (acceptable on localhost, not for public deploy): permissive CORS on Go services, unauthenticated video/analytics control APIs, default compose credentials.
+
+## Repository hygiene
+
+Do not commit compiled binaries, `__pycache__`, Playwright debug artifacts, or machine-local MCP config. Use `scripts/purge-history-junk.sh` to rewrite history and drop large dev binaries from older commits (requires coordinated force-push).
 
 ## GitHub settings
 

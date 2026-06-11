@@ -22,7 +22,10 @@ foreach ($name in @(
     $src = Join-Path $repoLaunchers $name
     if (-not (Test-Path $src)) { $src = Join-Path $PSScriptRoot $name }
     if (Test-Path $src) {
-        Copy-Item -Path $src -Destination (Join-Path $targetLaunchers $name) -Force
+        $dest = Join-Path $targetLaunchers $name
+        if ((Resolve-Path -LiteralPath $src).Path -ne (Resolve-Path -LiteralPath $dest -ErrorAction SilentlyContinue).Path) {
+            Copy-Item -Path $src -Destination $dest -Force
+        }
     }
 }
 
@@ -30,7 +33,10 @@ foreach ($name in @('Start Streamclone.cmd', 'Stop Streamclone.cmd')) {
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) $name
     if (-not (Test-Path $src)) { $src = Join-Path $repoLaunchers $name }
     if (Test-Path $src) {
-        Copy-Item -Path $src -Destination (Join-Path $Root $name) -Force
+        $dest = Join-Path $Root $name
+        if ((Resolve-Path -LiteralPath $src).Path -ne (Resolve-Path -LiteralPath $dest -ErrorAction SilentlyContinue).Path) {
+            Copy-Item -Path $src -Destination $dest -Force
+        }
     }
 }
 

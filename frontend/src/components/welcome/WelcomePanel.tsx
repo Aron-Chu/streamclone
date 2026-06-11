@@ -167,7 +167,7 @@ export default function WelcomePanel({ onDismiss, compact = false }: WelcomePane
         </ul>
         {setup.data?.setupGuideUrl ? (
           <a
-            href={setup.data.setupGuideUrl.replace('/blob/main/docs/getting-started.md', '/blob/main/docs/install-desktop.md')}
+            href={setup.data.setupGuideUrl}
             target="_blank"
             rel="noreferrer"
             className="mt-3 inline-flex rounded border border-violet-300/30 bg-violet-400/10 px-3 py-2 text-xs font-black text-violet-100 transition hover:bg-violet-400/20"

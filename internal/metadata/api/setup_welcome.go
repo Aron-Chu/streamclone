@@ -66,7 +66,7 @@ func (h *Handler) setupWelcome(w http.ResponseWriter, r *http.Request) {
 		Services:      services,
 		Incomplete:    incomplete,
 		ShowWelcome:   incomplete,
-		SetupGuideURL: "https://github.com/Aron-Chu/streamclone/blob/main/docs/getting-started.md",
+		SetupGuideURL: "https://github.com/Aron-Chu/streamclone/blob/master/docs/install-desktop.md",
 	})
 }
 

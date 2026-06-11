@@ -122,7 +122,7 @@ You still need this repo (or a release bundle) for compose files, Caddy, and mig
 ### Tier 3 — Installer script
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Aron-Chu/streamclone/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Aron-Chu/streamclone/master/scripts/install.sh | bash
 ```
 
 Options: `--profile full`, `--dir ~/streamclone`, `--use-images`, `--non-interactive`.

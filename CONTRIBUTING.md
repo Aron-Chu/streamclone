@@ -32,9 +32,9 @@ make smoke-ui       # adds Playwright smoke-core
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): **gitleaks** secret scan, backend (incl. govulncheck), frontend build (incl. npm audit), docker image builds, **smoke-core** (no scraper).
 
-See [`docs/security.md`](docs/security.md) for deployment hardening, dev-token import caveats, and the pre-PR security checklist.
-
 [`.github/workflows/smoke-scraper.yml`](.github/workflows/smoke-scraper.yml): nightly / manual scraper profile smoke.
+
+See [`docs/security.md`](docs/security.md) for deployment hardening, dev-token import caveats, and the pre-PR security checklist.
 
 ## Secrets — never commit
 

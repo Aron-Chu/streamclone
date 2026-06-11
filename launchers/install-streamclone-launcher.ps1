@@ -7,11 +7,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($LauncherRoot) {
+    $LauncherRoot = $LauncherRoot.TrimEnd('\', '/')
+}
 
 function Get-StreamcloneRoot {
     param([string]$LauncherRoot)
+    $LauncherRoot = $LauncherRoot.TrimEnd('\', '/')
     $candidates = @(
-        $LauncherRoot.TrimEnd('\'),
+        $LauncherRoot,
         (Split-Path -Parent $LauncherRoot.TrimEnd('\')),
         (Join-Path $env:USERPROFILE 'streamclone')
     )
@@ -45,7 +49,7 @@ function Invoke-StreamcloneInstall {
 
     $tempInstall = Join-Path $env:TEMP 'streamclone-install.ps1'
     Write-Host 'Downloading installer...'
-    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Aron-Chu/streamclone/main/scripts/install.ps1' -OutFile $tempInstall -UseBasicParsing
+    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Aron-Chu/streamclone/master/scripts/install.ps1' -OutFile $tempInstall -UseBasicParsing
     & $tempInstall -Release -NonInteractive -DesktopShortcut
 }
 

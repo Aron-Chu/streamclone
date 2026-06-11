@@ -15,7 +15,7 @@ case "$ACTION" in
     if [ ! -f "$INSTALL_SH" ]; then
       echo "Downloading installer..."
       tmp="$(mktemp)"
-      curl -fsSL -o "$tmp" https://raw.githubusercontent.com/Aron-Chu/streamclone/main/scripts/install.sh
+      curl -fsSL -o "$tmp" https://raw.githubusercontent.com/Aron-Chu/streamclone/master/scripts/install.sh
       bash "$tmp" --release --non-interactive --use-images --desktop-shortcut
       rm -f "$tmp"
     else

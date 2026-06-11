@@ -6,7 +6,7 @@ echo  ---------------------
 echo  Requires Docker Desktop (running).
 echo  Installs to: %USERPROFILE%\streamclone
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $ErrorActionPreference='Stop'; $tempInstall=Join-Path $env:TEMP 'streamclone-install.ps1'; Write-Host 'Downloading installer...'; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Aron-Chu/streamclone/main/scripts/install.ps1' -OutFile $tempInstall -UseBasicParsing; & $tempInstall -Release -NonInteractive -DesktopShortcut }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $ErrorActionPreference='Stop'; $tempInstall=Join-Path $env:TEMP 'streamclone-install.ps1'; Write-Host 'Downloading installer...'; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Aron-Chu/streamclone/master/scripts/install.ps1' -OutFile $tempInstall -UseBasicParsing; & $tempInstall -Release -NonInteractive -DesktopShortcut }"
 if errorlevel 1 (
   echo.
   echo Install failed. Fix any errors above and try again.
