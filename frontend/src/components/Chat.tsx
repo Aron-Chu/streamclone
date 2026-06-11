@@ -156,14 +156,6 @@ function StatusPill({ label, tone }: { label: string; tone: 'ok' | 'warn' | 'err
   return <span className={`rounded px-2 py-1 text-[11px] font-black uppercase ${classes}`}>{label}</span>
 }
 
-function LatencyChip({ label, value, title }: { label: string; value: number | null; title: string }) {
-  return (
-    <span title={title} className="rounded border border-white/10 bg-white/[0.045] px-1.5 py-0.5">
-      {label} {formatMs(value)}
-    </span>
-  )
-}
-
 function StatLine({ label, stat }: { label: string; stat: LatencySummary }) {
   return (
     <div className="grid grid-cols-[70px_repeat(5,minmax(0,1fr))] gap-2 rounded border border-white/10 bg-white/[0.035] px-2 py-1.5 text-[11px] font-bold text-zinc-400">
@@ -264,11 +256,6 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
   const channelState = useChatStore(s => s.channelState)
   const lastError = useChatStore(s => s.lastError)
   const emoteRevision = useChatStore(s => s.emoteRevision)
-  const chatLatencyMs = useChatStore(s => s.chatLatencyMs)
-  const sourceLatencyMs = useChatStore(s => s.sourceLatencyMs)
-  const relayLatencyMs = useChatStore(s => s.relayLatencyMs)
-  const browserLatencyMs = useChatStore(s => s.browserLatencyMs)
-  const lastEchoLatencyMs = useChatStore(s => s.lastEchoLatencyMs)
   const latencyStats = useChatStore(s => s.latencyStats)
   const sendMessage = useChatStore(s => s.sendMessage)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -306,7 +293,7 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
     })
   }
 
-  const jumpLabel = newMessages > 0 ? `${newMessages} new` : 'Jump to bottom'
+  const jumpLabel = newMessages > 0 ? `↓ ${newMessages} new message${newMessages === 1 ? '' : 's'}` : 'Jump to bottom'
 
   useEffect(() => {
     const prev = lastCountRef.current
@@ -430,13 +417,8 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
     <div className="flex h-full min-h-0 flex-col bg-[#111117] text-white">
       <div className="flex items-center justify-between border-b border-white/10 px-3 py-2.5">
         <div>
-          <div className="text-sm font-black">Live chat</div>
-          <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] font-semibold text-zinc-400">
-            <LatencyChip label="total" value={chatLatencyMs} title="Browser receive time minus Twitch chat timestamp" />
-            <LatencyChip label="source" value={sourceLatencyMs} title="Twitch chat timestamp to local relay receive time" />
-            <LatencyChip label="relay" value={relayLatencyMs} title="Local relay receive time to local relay send time" />
-            <LatencyChip label="browser" value={browserLatencyMs} title="Local relay send time to browser receive time" />
-            <LatencyChip label="echo" value={lastEchoLatencyMs} title="Your sent message until it appears live" />
+          <div className="text-sm font-black">Live Chat</div>
+          <div className="mt-1 text-[11px] font-semibold text-zinc-500">
             <span title={emotes?.error}>{emoteLabel(emotes, emoteRevision)}</span>
           </div>
         </div>
@@ -484,8 +466,17 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
           {messages.length === 0 ? (
             <div className="grid h-full place-items-center px-6 text-center">
               <div>
-                <div className="text-sm font-black text-zinc-200">Waiting for the next message</div>
-                <div className="mt-1 text-xs font-medium text-zinc-500">{connectionState === 'open' ? 'Subscribed and listening live. This view does not backfill earlier chat history.' : 'Connecting to chat.'}</div>
+                <div className="text-sm font-black text-zinc-200">No messages yet</div>
+                <div className="mt-1 text-xs font-medium leading-5 text-zinc-500">
+                  {connectionState === 'open'
+                    ? 'Listening live — new messages appear here. Chat does not backfill earlier history.'
+                    : 'Connecting to live chat…'}
+                </div>
+                {!isAuthenticated ? (
+                  <div className="mt-3 text-xs font-semibold text-violet-200">
+                    Log in from the header to send messages in this channel.
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : (
@@ -496,7 +487,7 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
         {!isPinned ? (
           <button
             onClick={scrollToBottom}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded bg-violet-500 px-3 py-1.5 text-xs font-black text-white shadow-xl shadow-black/40 transition hover:bg-violet-400"
+            className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border border-violet-200/30 bg-violet-500 px-4 py-2 text-xs font-black text-white shadow-xl shadow-black/50 transition hover:bg-violet-400"
           >
             {jumpLabel}
           </button>

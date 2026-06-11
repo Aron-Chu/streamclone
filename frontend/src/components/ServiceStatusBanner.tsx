@@ -74,9 +74,9 @@ export default function ServiceStatusBanner() {
           return
         }
       }
-      setError('Scraper is still starting. Check Docker Desktop and retry in a minute.')
+      setError('Analytics is still starting. Check Docker Desktop and retry in a minute.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to start scraper.')
+      setError(err instanceof Error ? err.message : 'Unable to start Analytics.')
     } finally {
       setStarting(false)
     }
@@ -87,7 +87,7 @@ export default function ServiceStatusBanner() {
       <div className="mb-4 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2.5 sm:px-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs font-semibold leading-5 text-cyan-50/90 sm:text-sm">
-            Core Watch is active — minute-level viewer charts need the optional Analytics (scraper) tier.
+            Viewer charts need Analytics setup — optional charts and VOD chat load from a second profile.
           </p>
           <div className="flex shrink-0 items-center gap-2">
             <a
@@ -115,9 +115,17 @@ export default function ServiceStatusBanner() {
     <div className="mb-4 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2.5 sm:px-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs font-semibold leading-5 text-amber-50/90 sm:text-sm">
-          Viewer chart sync is paused — the scraper is not running.
+          Viewer charts are paused — Analytics is not running.
         </p>
         <div className="flex shrink-0 items-center gap-2">
+          <a
+            href={SCRAPER_SETUP_DOC_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded border border-amber-200/30 bg-amber-300/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-amber-50 transition hover:bg-amber-300/25"
+          >
+            Setup guide
+          </a>
           {controlReady ? (
             <button
               type="button"
@@ -125,7 +133,7 @@ export default function ServiceStatusBanner() {
               disabled={starting}
               className="rounded border border-amber-200/30 bg-amber-300/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-amber-50 transition hover:bg-amber-300/25 disabled:opacity-50"
             >
-              {starting ? 'Starting…' : 'Start scraper'}
+              {starting ? 'Starting…' : 'Start Analytics'}
             </button>
           ) : null}
           <button

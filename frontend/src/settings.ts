@@ -12,6 +12,7 @@ export type BottomDensityMode = 'comfortable' | 'dense'
 export interface UiSettings {
   previewAutoplay: boolean
   previewMuted: boolean
+  playerVolume: number
   theme: ThemeName
   railSections: {
     live: boolean
@@ -31,6 +32,7 @@ const storageKey = 'streamclone:ui-settings'
 const defaults: UiSettings = {
   previewAutoplay: true,
   previewMuted: true,
+  playerVolume: 0.8,
   theme: 'obsidian',
   railSections: { live: true, offline: true, top: true },
   emoteProviders: ['seventv', 'twitch'],
@@ -54,9 +56,13 @@ function loadSettings(): UiSettings {
         : defaults.playbackLatencyMode
     const videoFit = parsed.videoFit === 'fill' ? 'fill' : defaults.videoFit
     const bottomDensity = parsed.bottomDensity === 'dense' ? 'dense' : defaults.bottomDensity
+    const playerVolume = typeof parsed.playerVolume === 'number' && Number.isFinite(parsed.playerVolume)
+      ? Math.max(0, Math.min(1, parsed.playerVolume))
+      : defaults.playerVolume
     return {
       ...defaults,
       ...parsed,
+      playerVolume,
       railSections: { ...defaults.railSections, ...parsed.railSections },
       emoteProviders: providers.length ? providers : defaults.emoteProviders,
       preferredQuality,
