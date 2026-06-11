@@ -146,41 +146,6 @@ export default function WelcomePanel({ onDismiss, compact = false }: WelcomePane
         </p>
       </div>
 
-      <section className="rounded-lg border border-violet-400/25 bg-violet-500/10 p-4">
-        <div className="text-sm font-black text-violet-50">Prefer not to use a terminal?</div>
-        <p className="mt-2 text-xs font-semibold leading-5 text-violet-100/85">
-          After you clone or extract the repo, you do not need to type commands. Use the double-click launchers in the repo folder
-          (or Desktop shortcuts after install).
-        </p>
-        <ul className="mt-3 space-y-2 text-xs font-semibold text-violet-50/90">
-          {typeof navigator !== 'undefined' && /win/i.test(navigator.userAgent) ? (
-            <>
-              <li><span className="font-black text-white">First time:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">Install Streamclone.cmd</code> — setup, shortcuts, and this page opens automatically.</li>
-              <li><span className="font-black text-white">Every day:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">Start Streamclone.cmd</code> — starts Docker and opens this page.</li>
-              <li><span className="font-black text-white">Pause:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">Stop Streamclone.cmd</code> — stops containers but keeps your install and data.</li>
-              <li><span className="font-black text-white">Remove everything:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">Uninstall Streamclone.cmd</code> in the install folder (not on Desktop).</li>
-            </>
-          ) : (
-            <>
-              <li><span className="font-black text-white">First time:</span> open <code className="rounded bg-black/25 px-1 py-0.5">launchers/Install Streamclone.command</code></li>
-              <li><span className="font-black text-white">Every day:</span> double-click <code className="rounded bg-black/25 px-1 py-0.5">launchers/Start Streamclone.command</code></li>
-              <li><span className="font-black text-white">Pause:</span> <code className="rounded bg-black/25 px-1 py-0.5">launchers/Stop Streamclone.command</code></li>
-              <li><span className="font-black text-white">Remove everything:</span> <code className="rounded bg-black/25 px-1 py-0.5">launchers/Uninstall Streamclone.command</code></li>
-            </>
-          )}
-        </ul>
-        {setup.data?.setupGuideUrl ? (
-          <a
-            href={setup.data.setupGuideUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-3 inline-flex rounded border border-violet-300/30 bg-violet-400/10 px-3 py-2 text-xs font-black text-violet-100 transition hover:bg-violet-400/20"
-          >
-            Desktop install guide
-          </a>
-        ) : null}
-      </section>
-
       <div className="flex flex-wrap items-center gap-2">
         <span className="rounded border border-white/10 bg-white/[0.06] px-2.5 py-1 text-[11px] font-black uppercase text-zinc-300">
           Profile {profile}
@@ -228,6 +193,60 @@ export default function WelcomePanel({ onDismiss, compact = false }: WelcomePane
           busy={starting === 'clipper'}
         />
       </div>
+
+      <section className="rounded-lg border border-violet-400/25 bg-violet-500/10 p-4">
+        <div className="text-sm font-black text-violet-50">Desktop shortcuts</div>
+        <p className="mt-2 text-xs font-semibold leading-5 text-violet-100/85">
+          No terminal needed. Use the shortcuts on your Desktop next time, or the launchers in your install folder.
+        </p>
+        <ul className="mt-3 space-y-2 text-xs font-semibold text-violet-50/90">
+          {typeof navigator !== 'undefined' && /win/i.test(navigator.userAgent) ? (
+            <>
+              <li>
+                <span className="font-black text-white">Open:</span>{' '}
+                <code className="rounded bg-black/25 px-1 py-0.5">Start Streamclone.cmd</code> on Desktop
+                <span className="text-violet-100/70"> - starts Docker and opens this page</span>
+              </li>
+              <li>
+                <span className="font-black text-white">Pause:</span>{' '}
+                <code className="rounded bg-black/25 px-1 py-0.5">Stop Streamclone.cmd</code> on Desktop
+                <span className="text-violet-100/70"> - stops containers, keeps your data</span>
+              </li>
+              <li>
+                <span className="font-black text-white">Remove all:</span>{' '}
+                <code className="rounded bg-black/25 px-1 py-0.5">Uninstall Streamclone.cmd</code> in your install folder
+                <span className="text-violet-100/70"> - usually </span>
+                <code className="rounded bg-black/25 px-1 py-0.5">%USERPROFILE%\streamclone</code>
+              </li>
+            </>
+          ) : (
+            <>
+              <li>
+                <span className="font-black text-white">Open:</span>{' '}
+                <code className="rounded bg-black/25 px-1 py-0.5">Streamclone Start.command</code> in ~/Applications
+              </li>
+              <li>
+                <span className="font-black text-white">Pause:</span>{' '}
+                <code className="rounded bg-black/25 px-1 py-0.5">Streamclone Stop.command</code>
+              </li>
+              <li>
+                <span className="font-black text-white">Remove all:</span>{' '}
+                <code className="rounded bg-black/25 px-1 py-0.5">launchers/Uninstall Streamclone.command</code> in ~/streamclone
+              </li>
+            </>
+          )}
+        </ul>
+        {setup.data?.setupGuideUrl ? (
+          <a
+            href={setup.data.setupGuideUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 inline-flex rounded border border-violet-300/30 bg-violet-400/10 px-3 py-2 text-xs font-black text-violet-100 transition hover:bg-violet-400/20"
+          >
+            Full install guide
+          </a>
+        ) : null}
+      </section>
 
       <div className="flex flex-wrap items-center gap-3">
         <Link
