@@ -11,18 +11,18 @@ import (
 )
 
 const (
-	gqlVideoCommentsSHA256     = "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"
-	vodCommentsMaxCount        = 200000
-	vodCommentsProgressEvery   = 200
-	vodCommentsParallelMaxFail = 3
-	vodGQLSegmentLargeVOD         = 300 // 5-minute segments for long VODs
-	vodGQLSegmentDenseVOD         = 120 // 2-minute segments for very high comment volume
-	vodGQLHotSegmentPageThreshold = 50  // split hot segments after this many pages
-	vodGQLLargeVODDurationSec     = 4 * 3600
-	vodGQLDenseCommentsThreshold  = 50_000
+	gqlVideoCommentsSHA256           = "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"
+	vodCommentsMaxCount              = 200000
+	vodCommentsProgressEvery         = 200
+	vodCommentsParallelMaxFail       = 3
+	vodGQLSegmentLargeVOD            = 300 // 5-minute segments for long VODs
+	vodGQLSegmentDenseVOD            = 120 // 2-minute segments for very high comment volume
+	vodGQLHotSegmentPageThreshold    = 50  // split hot segments after this many pages
+	vodGQLLargeVODDurationSec        = 4 * 3600
+	vodGQLDenseCommentsThreshold     = 50_000
 	vodGQLVeryDenseCommentsThreshold = 250_000
-	vodGQLCommentsPerHourDense    = 12_000
-	vodGQLCommentsPerHourVeryDense = 30_000
+	vodGQLCommentsPerHourDense       = 12_000
+	vodGQLCommentsPerHourVeryDense   = 30_000
 )
 
 type gqlRateCoordinator struct {
@@ -163,25 +163,25 @@ func vodChatAlignSeconds(streamStart, vodCreated time.Time) int {
 }
 
 type vodCommentsFetchState struct {
-	streamID        string
-	login           string
-	videoID         string
-	vodDurationSec  int
-	chatAlignSec    int
-	fetchMode       string
-	concurrency     int
-	commentsMap     map[int][]string
-	deduper         gqlCommentDeduper
-	shardedComments gqlCommentsMap
-	commentsCount   *atomic.Int64
-	segmentsMu      sync.Mutex
-	segments        *[]gqlSegmentProgress
-	coord           *gqlRateCoordinator
-	pages           *atomic.Int64
-	rollupStartFn   func() time.Time
-	onSegmentDone   func(seg gqlSegmentProgress)
-	report          func(force bool)
-	saveParallel    func(force bool)
+	streamID         string
+	login            string
+	videoID          string
+	vodDurationSec   int
+	chatAlignSec     int
+	fetchMode        string
+	concurrency      int
+	commentsMap      map[int][]string
+	deduper          gqlCommentDeduper
+	shardedComments  gqlCommentsMap
+	commentsCount    *atomic.Int64
+	segmentsMu       sync.Mutex
+	segments         *[]gqlSegmentProgress
+	coord            *gqlRateCoordinator
+	pages            *atomic.Int64
+	rollupStartFn    func() time.Time
+	onSegmentDone    func(seg gqlSegmentProgress)
+	report           func(force bool)
+	saveParallel     func(force bool)
 	hotPageThreshold int
 }
 
@@ -258,7 +258,7 @@ func effectiveGQLSegmentSeconds(configured, denseSec, vodDurationSec int, estima
 			return minInt(configured, denseSec)
 		}
 		if perHour >= vodGQLCommentsPerHourDense {
-			return minInt(configured, minInt(denseSec*2, vodGQLSegmentLargeVOD))
+			return minInt(configured, denseSec)
 		}
 	}
 	return configured
