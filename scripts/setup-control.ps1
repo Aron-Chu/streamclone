@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# Local-only HTTP helper so the welcome/status UI can start optional compose profiles.
+# Local-only HTTP helper so the directory status UI can start optional compose profiles.
 param(
     [int]$Port = 9191,
     [string]$PidFile = ''
@@ -12,6 +12,11 @@ if ([string]::IsNullOrWhiteSpace($PidFile)) {
 }
 
 . (Join-Path $PSScriptRoot 'lib\env.ps1')
+. (Join-Path $PSScriptRoot 'lib\stack-progress.ps1')
+
+$envPath = Join-Path $Root '.env'
+$envValues = if (Test-Path $envPath) { Read-EnvKeyValueFile -Path $envPath } else { @{} }
+$setupControlToken = [string]$envValues['SETUP_CONTROL_TOKEN']
 
 function Write-JsonResponse {
     param(
@@ -29,6 +34,16 @@ function Write-JsonResponse {
     $Response.Close()
 }
 
+function Test-SetupControlAuthorized {
+    param([System.Net.HttpListenerRequest]$Request)
+    if ([string]::IsNullOrWhiteSpace($setupControlToken)) {
+        return $false
+    }
+    $provided = $Request.Headers['X-Streamclone-Setup-Token']
+    if ([string]::IsNullOrWhiteSpace($provided)) { return $false }
+    return ($provided -eq $setupControlToken)
+}
+
 function Invoke-ProfileServiceUp {
     param(
         [ValidateSet('scraper', 'clipper')]
@@ -36,7 +51,7 @@ function Invoke-ProfileServiceUp {
     )
 
     Set-Location $Root
-    if (-not (Test-Path (Join-Path $Root '.env'))) {
+    if (-not (Test-Path $envPath)) {
         throw 'Missing .env — run scripts/setup.ps1 first.'
     }
 
@@ -48,18 +63,14 @@ function Invoke-ProfileServiceUp {
         }
     }
 
-    $composeArgs = @(
-        'compose', '--env-file', '.env',
-        '-f', 'deploy/docker-compose.yml',
-        '-f', 'deploy/docker-compose.local-tunnel.yml',
-        '--profile', $profile,
-        'up', '-d', '--remove-orphans', $Service
-    )
-    $output = & docker @composeArgs 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
+    $useImages = ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1') -or (-not [string]::IsNullOrWhiteSpace($envValues['IMAGE_TAG']))
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile -UseImages:$useImages
+    $result = Invoke-EnvDockerCaptured -Arguments ($composeArgs + @('up', '-d', '--remove-orphans', $Service))
+    $output = ($result.Output -join [Environment]::NewLine).Trim()
+    if ($result.ExitCode -ne 0) {
         throw "docker compose failed: $output"
     }
-    return $output.Trim()
+    return $output
 }
 
 Set-Content -Path $PidFile -Value $PID -NoNewline
@@ -80,7 +91,7 @@ try {
         if ($request.HttpMethod -eq 'OPTIONS') {
             $response.Headers.Add('Access-Control-Allow-Origin', '*')
             $response.Headers.Add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            $response.Headers.Add('Access-Control-Allow-Headers', 'Content-Type')
+            $response.Headers.Add('Access-Control-Allow-Headers', 'Content-Type, X-Streamclone-Setup-Token')
             $response.StatusCode = 204
             $response.Close()
             continue
@@ -93,6 +104,10 @@ try {
             }
 
             if ($request.HttpMethod -eq 'POST' -and $path -match '^/start/(scraper|clipper)$') {
+                if (-not (Test-SetupControlAuthorized -Request $request)) {
+                    Write-JsonResponse -Response $response -StatusCode 401 -Body @{ ok = $false; error = 'unauthorized' }
+                    continue
+                }
                 $service = $Matches[1]
                 $log = Invoke-ProfileServiceUp -Service $service
                 Write-JsonResponse -Response $response -StatusCode 200 -Body @{ ok = $true; service = $service; message = 'started'; log = $log }

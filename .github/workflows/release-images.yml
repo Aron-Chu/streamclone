@@ -130,3 +130,152 @@ jobs:
             dist/streamclone-${{ steps.ver.outputs.value }}.tar.gz
             launchers/Install Streamclone.cmd
           fail_on_unmatched_files: true
+
+  windows-installer:
+    name: Build Windows Setup.exe
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+        shell: pwsh
+
+      - name: Resolve bundle version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release bundle
+        env:
+          VERSION: ${{ steps.ver.outputs.value }}
+        shell: bash
+        run: bash scripts/package-release.sh
+
+      - name: Build Setup.exe
+        shell: pwsh
+        run: ./scripts/build-windows-installer.ps1 -Version ${{ steps.ver.outputs.value }}
+
+      - name: Upload Setup.exe to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.value }}
+          files: dist/Streamclone-Setup-*.exe
+          fail_on_unmatched_files: true
+
+  release-smoke:
+    name: Release image smoke
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve image tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "ref=refs/tags/${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            echo "ref=${{ github.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=latest" >> "$GITHUB_OUTPUT"
+            echo "ref=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.ref || github.sha }}
+
+      - name: Assert IMAGE_TAG matches git tag
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.value }}"
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            GIT_TAG="${GITHUB_REF#refs/tags/}"
+            if [ "$TAG" != "$GIT_TAG" ]; then
+              echo "Resolved IMAGE_TAG ($TAG) != git tag ($GIT_TAG)" >&2
+              exit 1
+            fi
+          fi
+          # package-release.sh pins IMAGE_TAG to VERSION — same convention here
+          VERSION="$TAG"
+          test "IMAGE_TAG=$VERSION" = "IMAGE_TAG=$TAG"
+          echo "IMAGE_TAG=$TAG matches release bundle convention"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: cp .env.dev .env
+
+      - name: Validate release compose
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.value }}
+        run: |
+          docker compose --env-file .env.dev \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            -f deploy/docker-compose.release.yml config
+
+      - name: Pull core GHCR images
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.value }}
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.dev \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            -f deploy/docker-compose.release.yml \
+            pull metadata video chat analytics emote frontend
+
+      - name: Start core stack from release images
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.value }}
+        run: |
+          docker compose --env-file .env.dev \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            -f deploy/docker-compose.release.yml \
+            up -d --pull always
+
+      - name: Wait for health endpoints
+        run: bash scripts/smoke-core.sh
+
+      - name: Dump compose state on failure
+        if: failure()
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.value }}
+        run: |
+          docker compose --env-file .env.dev \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            -f deploy/docker-compose.release.yml ps
+          docker compose --env-file .env.dev \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            -f deploy/docker-compose.release.yml logs
+
+      - name: Stop stack
+        if: always()
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.value }}
+        run: |
+          docker compose --env-file .env.dev \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            -f deploy/docker-compose.release.yml down -v

@@ -9,6 +9,7 @@ import { useThemeEffect, useUiSettings } from '../settings'
 import BrandLogo from './BrandLogo'
 import ChannelRail from './ChannelRail'
 import LocalTokenImportButton from './LocalTokenImportButton'
+import ServiceStatusBanner from './ServiceStatusBanner'
 import SettingsButton from './SettingsPanel'
 
 const W = 440
@@ -411,6 +412,7 @@ export default function Directory() {
             </div>
           </div>
         </header>
+        <ServiceStatusBanner />
 
         <section className="flex flex-1 flex-col gap-6 py-6">
           {!query && !selectedCategory ? <RandomLiveHero /> : null}

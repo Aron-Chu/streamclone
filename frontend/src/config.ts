@@ -9,6 +9,7 @@ type RuntimeConfig = {
   clipperToken?: string
   maxRetainedMessages?: string | number
   streamcloneProfile?: string
+  setupControlToken?: string
   devTokenImportEnabled?: string | boolean
 }
 
@@ -63,3 +64,4 @@ export const CLIPPER_TOKEN = String(runtime.clipperToken ?? import.meta.env.VITE
 export const MAX_RETAINED_MESSAGES = Number(runtime.maxRetainedMessages ?? import.meta.env.VITE_MAX_RETAINED_MESSAGES ?? 250)
 export const STREAMCLONE_PROFILE = String(runtime.streamcloneProfile ?? import.meta.env.VITE_STREAMCLONE_PROFILE ?? 'core').toLowerCase()
 export const DEV_TOKEN_IMPORT_ENABLED = String(runtime.devTokenImportEnabled ?? import.meta.env.VITE_TWITCH_DEV_TOKEN_IMPORT_ENABLED ?? 'false') === 'true'
+export const SETUP_CONTROL_TOKEN = String(runtime.setupControlToken ?? import.meta.env.VITE_SETUP_CONTROL_TOKEN ?? '')

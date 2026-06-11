@@ -7,6 +7,8 @@ param(
     [int]$Runs = 3
 )
 
+$env:STREAMCLONE_NO_BROWSER = '1'
+
 function Measure-Endpoint {
     param(
         [string]$Label,

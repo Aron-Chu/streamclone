@@ -23,6 +23,7 @@ import {
   getTwitchDayClips,
   getClipperTwitchStatus,
   triggerClipperManual,
+  getSetupWelcome,
   type AnalyticsStream,
   type AnalyticsStreamDetail,
   type AnalyticsTopEmote,
@@ -32,6 +33,7 @@ import {
   type GameSegment,
 } from '../api'
 
+import { coreMinuteChartsNeedScraper, SCRAPER_SETUP_DOC_URL } from '../setupProfile'
 import { CHART_THEME, hexToRgba, legendDotStyle } from './analytics/chartTheme'
 import {
   emoteCountForProvider,
@@ -1303,6 +1305,28 @@ function areaPath(
   return path
 }
 
+function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className={compact ? 'mt-2 text-left' : 'max-w-md'}>
+      <div className={`font-black text-zinc-100 ${compact ? 'text-[11px]' : 'text-base'}`}>
+        Minute charts need Analytics tier
+      </div>
+      <p className={`mt-1 font-semibold text-zinc-500 ${compact ? 'text-[10px] leading-4' : 'text-sm'}`}>
+        Core Watch includes Helix/VOD stream lists and TwitchTracker summary stats (avg/peak).
+        Per-minute viewer, chat, and emote charts require the optional scraper profile.
+      </p>
+      <a
+        href={SCRAPER_SETUP_DOC_URL}
+        target="_blank"
+        rel="noreferrer"
+        className={`mt-2 inline-block font-bold text-violet-300 underline decoration-violet-400/30 underline-offset-2 transition hover:text-violet-200 ${compact ? 'text-[10px]' : 'text-xs'}`}
+      >
+        Scraper setup guide →
+      </a>
+    </div>
+  )
+}
+
 function AnalyticsChart({
   detail,
   selectedEmotes,
@@ -1321,6 +1345,7 @@ function AnalyticsChart({
   canSync = false,
   isLive = false,
   notInAnalyticsDb = false,
+  coreMinuteChartsBlocked = false,
 }: {
   detail?: AnalyticsStreamDetail;
   selectedEmotes: Set<string>;
@@ -1339,6 +1364,7 @@ function AnalyticsChart({
   canSync?: boolean;
   isLive?: boolean;
   notInAnalyticsDb?: boolean;
+  coreMinuteChartsBlocked?: boolean;
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const [expandedScale, setExpandedScale] = useState(true)
@@ -1632,6 +1658,13 @@ function AnalyticsChart({
   }
 
   if (!canRenderChart) {
+    if (coreMinuteChartsBlocked) {
+      return (
+        <div className="grid min-h-80 place-items-center rounded border border-white/10 bg-[#0d0d12]/50 backdrop-blur-md px-4 text-center">
+          <CoreMinuteChartsNotice />
+        </div>
+      )
+    }
     const isTwitchTracker = detail?.sources?.some(s => s.source === 'twitchtracker')
     const canShowSync = canSync || detail?.state === 'historical' || isTwitchTracker
     return (
@@ -1735,7 +1768,7 @@ function AnalyticsChart({
         </div>
         <div className="flex items-center gap-3">
           <div className="text-xs font-bold text-zinc-500">{clock(hoverPoint?.minuteTs)} · viewers {count(hoverPoint ? viewerValue(hoverPoint) : null)} · chat {count(hoverPoint?.chatCount)} · emotes {count(hoverPoint ? minuteEmoteTotal(hoverPoint) : null)}</div>
-          {canSync && (!hasChatData || needsViewerResync) ? (
+          {canSync && !coreMinuteChartsBlocked && (!hasChatData || needsViewerResync) ? (
             <button
               type="button"
               onClick={onSync}
@@ -2312,6 +2345,7 @@ function StreamSidebar({
   syncing,
   syncedOnly,
   onSyncedOnlyChange,
+  coreMinuteChartsBlocked = false,
 }: {
   login: string
   streams: AnalyticsStream[]
@@ -2323,6 +2357,7 @@ function StreamSidebar({
   syncing?: boolean
   syncedOnly?: boolean
   onSyncedOnlyChange?: (value: boolean) => void
+  coreMinuteChartsBlocked?: boolean
 }) {
   const dateCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -2416,13 +2451,20 @@ function StreamSidebar({
                       title={
                         hasMinuteData
                           ? 'Minute-level viewer, chat, and emote rollups are synced for charts.'
-                          : 'Session stats only (duration, title). Use Sync chat/emotes on the stream detail page for minute charts.'
+                          : coreMinuteChartsBlocked
+                            ? 'Session stats only. Minute charts require the Analytics (scraper) tier.'
+                            : 'Session stats only (duration, title). Use Sync chat/emotes on the stream detail page for minute charts.'
                       }
                     >
                       {hasMinuteData ? 'Synced' : 'Stats only'}
                     </span>
                   </div>
-                  {!hasMinuteData && isActive && onSync ? (
+                  {!hasMinuteData && isActive && coreMinuteChartsBlocked ? (
+                    <div className="mt-1.5">
+                      <CoreMinuteChartsNotice compact />
+                    </div>
+                  ) : null}
+                  {!hasMinuteData && isActive && onSync && !coreMinuteChartsBlocked ? (
                     <button
                       type="button"
                       onClick={e => {
@@ -2874,6 +2916,20 @@ export default function Analytics() {
     enabled: Boolean(login),
     refetchInterval: 30000,
   })
+
+  const setupQuery = useQuery({
+    queryKey: ['setup-welcome'],
+    queryFn: getSetupWelcome,
+    staleTime: 60_000,
+  })
+
+  const coreMinuteChartsBlocked = useMemo(
+    () => coreMinuteChartsNeedScraper(
+      setupQuery.data?.profile ?? 'core',
+      setupQuery.data?.services.scraper ?? 'offline',
+    ),
+    [setupQuery.data],
+  )
 
   const historyQuery = useQuery({
     queryKey: ['channel-stream-history', login, 'all'],
@@ -3349,10 +3405,11 @@ export default function Analytics() {
               isLiveView={!streamId}
               liveState={detail?.state}
               onPrefetchStream={prefetchStreamDetail}
-              onSync={handleSync}
+              onSync={coreMinuteChartsBlocked ? undefined : handleSync}
               syncing={syncing}
               syncedOnly={syncedOnlyFilter}
               onSyncedOnlyChange={setSyncedOnlyFilter}
+              coreMinuteChartsBlocked={coreMinuteChartsBlocked}
             />
           </aside>
           <section className="min-w-0 space-y-4">
@@ -3372,8 +3429,9 @@ export default function Analytics() {
               refreshing={refreshing}
               loading={detailQuery.isLoading && !historicalStream}
               games={gamesQuery.data ?? []}
-              canSync={Boolean(streamId) || needsSync}
+              canSync={!coreMinuteChartsBlocked && (Boolean(streamId) || needsSync)}
               isLive={detail?.state === 'live'}
+              coreMinuteChartsBlocked={coreMinuteChartsBlocked}
             />
             <SelectedMomentPanel
               rollup={selectedRollup}

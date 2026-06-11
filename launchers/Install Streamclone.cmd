@@ -10,7 +10,7 @@ echo  This will:
 echo    1. Download the latest release
 echo    2. Create config and secrets
 echo    3. Pull Docker images and start the stack (~3-5 min)
-echo    4. Add Start/Stop shortcuts and open the welcome page
+echo    4. Add Start/Stop shortcuts and open the directory
 echo.
 echo  Windows may show "Unknown Publisher" - click Run. We are not code-signed yet.
 echo.

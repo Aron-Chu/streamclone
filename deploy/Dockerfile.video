@@ -6,11 +6,9 @@ COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/app ./cmd/video \
     && CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
 
-FROM python:3.12-slim
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir streamlink
+FROM python:3.12-alpine
+RUN apk add --no-cache ca-certificates ffmpeg \
+    && pip install --no-cache-dir streamlink==8.4.0
 COPY --from=build /out/app /app
 COPY --from=build /out/healthcheck /healthcheck
 EXPOSE 8080

@@ -181,6 +181,7 @@ services:
       VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}
       STREAMCLONE_PROFILE: ${STREAMCLONE_PROFILE:-core}
       TWITCH_DEV_TOKEN_IMPORT_ENABLED: ${TWITCH_DEV_TOKEN_IMPORT_ENABLED:-false}
+      SETUP_CONTROL_TOKEN: ${SETUP_CONTROL_TOKEN:-}
     ports: ["5174:80"]
     volumes:
       - ../frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro

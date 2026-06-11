@@ -6,6 +6,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 VERSION="${VERSION:-}"
+if [ -z "$VERSION" ] && [ -f "$ROOT/VERSION" ]; then
+  VERSION="$(tr -d '[:space:]' <"$ROOT/VERSION")"
+fi
 if [ -z "$VERSION" ]; then
   if git describe --tags --exact-match >/dev/null 2>&1; then
     VERSION="$(git describe --tags --exact-match)"
@@ -33,8 +36,10 @@ copy_tree "$ROOT/deploy" "$STAGE/deploy"
 copy_tree "$ROOT/scripts" "$STAGE/scripts"
 copy_tree "$ROOT/migrations" "$STAGE/migrations"
 copy_tree "$ROOT/launchers" "$STAGE/launchers"
+cp "$ROOT/VERSION" "$STAGE/VERSION"
 cp "$ROOT/.env.dev" "$STAGE/.env.dev"
 cp "$ROOT/.env.example" "$STAGE/.env.example"
+cp "$ROOT/LICENSE" "$STAGE/LICENSE"
 cp "$ROOT/Install Streamclone.cmd" "$STAGE/Install Streamclone.cmd"
 cp "$ROOT/Start Streamclone.cmd" "$STAGE/Start Streamclone.cmd"
 cp "$ROOT/Stop Streamclone.cmd" "$STAGE/Stop Streamclone.cmd"
@@ -53,9 +58,9 @@ cat >"$STAGE/README-quickstart.md" <<'EOF'
 # Streamclone quick start
 
 1. Install Docker Desktop and start it.
-2. First time: double-click **Install Streamclone.cmd** (~3–5 min)
+2. First time: run **Streamclone-Setup-*.exe** from [Releases](https://github.com/Aron-Chu/streamclone/releases/latest), or double-click **Install Streamclone.cmd** (~3–5 min)
 3. Every day: double-click **Start Streamclone.cmd**
-4. Open http://localhost:8090/welcome
+4. Open http://localhost:8090/
 
 Stop (pause, keep data): **Stop Streamclone.cmd** / **Stop Streamclone.command**
 
@@ -80,5 +85,35 @@ rm -f "$ROOT/dist/streamclone-${VERSION}-windows.zip" "$ROOT/dist/streamclone-${
   tar -czf "$ROOT/dist/streamclone-${VERSION}.tar.gz" .
 )
 
+INSTALLER_SHA=""
+INSTALLER_PATH="$ROOT/dist/Streamclone-Setup-${VERSION}.exe"
+if [ -f "$INSTALLER_PATH" ]; then
+  if command -v sha256sum >/dev/null 2>&1; then
+    INSTALLER_SHA="$(sha256sum "$INSTALLER_PATH" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    INSTALLER_SHA="$(shasum -a 256 "$INSTALLER_PATH" | awk '{print $1}')"
+  fi
+fi
+
+MANIFEST="$ROOT/dist/release-manifest.json"
+cat >"$MANIFEST" <<EOF
+{
+  "appVersion": "$VERSION",
+  "imageTag": "$VERSION",
+  "composeFiles": [
+    "deploy/docker-compose.yml",
+    "deploy/docker-compose.local-tunnel.yml",
+    "deploy/docker-compose.release.yml"
+  ],
+  "bundlePath": "dist/streamclone-${VERSION}",
+  "installer": {
+    "path": "dist/Streamclone-Setup-${VERSION}.exe",
+    "sha256": "$INSTALLER_SHA"
+  },
+  "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+
 echo "Created:"
 ls -la "$ROOT/dist/streamclone-${VERSION}"* 2>/dev/null || ls -la "$ROOT/dist/"
+echo "Release manifest: $MANIFEST"

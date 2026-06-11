@@ -6,8 +6,8 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /emote ./cmd/emote \
     && CGO_ENABLED=0 go build -o /healthcheck ./cmd/healthcheck
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends libvips-tools ca-certificates && rm -rf /var/lib/apt/lists/*
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates vips-tools
 COPY --from=builder /emote /emote
 COPY --from=builder /healthcheck /healthcheck
 ENTRYPOINT ["/emote"]

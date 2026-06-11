@@ -67,6 +67,12 @@ jobs:
           docker compose --env-file .env \
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml config
+      - name: Validate release compose overlay
+        run: |
+          IMAGE_TAG=v0.1.4 docker compose --env-file .env \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            -f deploy/docker-compose.release.yml config
       - name: Validate observability compose
         run: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml config
       - name: Build metadata image

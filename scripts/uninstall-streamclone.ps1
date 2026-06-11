@@ -3,18 +3,39 @@ param(
     [string]$InstallDir = '',
     [switch]$NonInteractive,
     [switch]$PruneImages,
-    [switch]$KeepInstallDir
+    [switch]$KeepInstallDir,
+    [string]$ProgressFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'lib\env.ps1')
+
+function Set-UninstallProgress {
+    param(
+        [string]$Title,
+        [string]$Detail = '',
+        [string]$Status = 'running'
+    )
+    if (-not $ProgressFile) { return }
+    @(
+        "TITLE=$Title"
+        "DETAIL=$Detail"
+        "STATUS=$Status"
+    ) | Set-Content -LiteralPath $ProgressFile -Encoding UTF8
+}
+
+function Complete-UninstallProgress {
+    param([int]$ExitCode = 0)
+    Set-UninstallProgress -Title 'Uninstall complete' -Detail '' -Status "done|$ExitCode"
+}
 
 function Get-StreamcloneInstallRoot {
     param([string]$Hint)
     $candidates = @()
     if ($Hint) { $candidates += $Hint.TrimEnd('\', '/') }
+    $candidates += (Join-Path $env:USERPROFILE 'streamclone')
     $scriptRoot = Split-Path -Parent $PSScriptRoot
     $candidates += $scriptRoot
-    $candidates += (Join-Path $env:USERPROFILE 'streamclone')
     foreach ($candidate in $candidates) {
         if (Test-Path (Join-Path $candidate 'scripts\start-streamclone.ps1')) {
             return (Resolve-Path -LiteralPath $candidate).Path
@@ -89,7 +110,8 @@ function Invoke-StreamcloneComposeDown {
     $ErrorActionPreference = 'Continue'
     try {
         Write-Host 'Stopping Docker stack...' -ForegroundColor Cyan
-        & docker @composeArgs @downArgs 2>&1 | ForEach-Object { Write-Host $_ }
+        $result = Invoke-EnvDockerCaptured -Arguments ($composeArgs + $downArgs)
+        foreach ($line in $result.Output) { Write-Host $line }
         $composeArgsNoProfiles = @(
             'compose', '--env-file', '.env',
             '-f', 'deploy/docker-compose.yml',
@@ -98,7 +120,8 @@ function Invoke-StreamcloneComposeDown {
         if (Test-StreamcloneUseReleaseImages -Root $Root) {
             $composeArgsNoProfiles += '-f', 'deploy/docker-compose.release.yml'
         }
-        & docker @composeArgsNoProfiles @downArgs 2>&1 | ForEach-Object { Write-Host $_ }
+        $result = Invoke-EnvDockerCaptured -Arguments ($composeArgsNoProfiles + $downArgs)
+        foreach ($line in $result.Output) { Write-Host $line }
     } finally {
         $ErrorActionPreference = $prev
     }
@@ -148,15 +171,14 @@ function Remove-StreamcloneImages {
         [string]$Tag
     )
     if (-not $Tag) {
-        $versionFile = Join-Path $Root 'VERSION'
-        if (Test-Path $versionFile) {
-            $Tag = (Get-Content $versionFile -Raw).Trim()
-        }
         $envFile = Join-Path $Root '.env'
-        if (-not $Tag -and (Test-Path $envFile)) {
-            . (Join-Path $PSScriptRoot 'lib\env.ps1')
+        if (Test-Path $envFile) {
             $vals = Read-EnvKeyValueFile -Path $envFile
             $Tag = $vals['IMAGE_TAG']
+        }
+        $versionFile = Join-Path $Root 'VERSION'
+        if (-not $Tag -and (Test-Path $versionFile)) {
+            $Tag = (Get-Content $versionFile -Raw).Trim()
         }
     }
     if (-not $Tag) { $Tag = 'latest' }
@@ -168,7 +190,7 @@ function Remove-StreamcloneImages {
     try {
         foreach ($repo in $repos) {
             $image = "ghcr.io/aron-chu/streamclone/${repo}:$Tag"
-            & docker image rm -f $image 2>&1 | Out-Null
+            Invoke-EnvDockerCaptured -Arguments @('image', 'rm', '-f', $image) | Out-Null
         }
     } finally {
         $ErrorActionPreference = $prev
@@ -188,50 +210,69 @@ Remove-Item -LiteralPath '$escaped' -Recurse -Force -ErrorAction SilentlyContinu
     Write-Host "Scheduled removal of install folder: $Root" -ForegroundColor Yellow
 }
 
-$root = Get-StreamcloneInstallRoot -Hint $InstallDir
+try {
+    $root = Get-StreamcloneInstallRoot -Hint $InstallDir
 
-Write-Host ''
-Write-Host 'Streamclone — Complete uninstall' -ForegroundColor Red
-Write-Host '================================' -ForegroundColor Red
-Write-Host "Install folder: $root"
-Write-Host ''
-Write-Host 'This will:'
-Write-Host '  - Stop all Streamclone Docker containers'
-Write-Host '  - Delete Docker volumes (database, MinIO, clipper data)'
-Write-Host '  - Remove .env and local secrets'
-Write-Host '  - Remove Desktop / macOS shortcuts'
-if ($PruneImages) {
-    Write-Host '  - Remove downloaded ghcr.io/aron-chu/streamclone images'
-}
-if (-not $KeepInstallDir) {
-    Write-Host '  - Delete the install folder'
-}
-Write-Host ''
-
-if (-not $NonInteractive) {
-    $ans = Read-Host 'Type YES to continue'
-    if ($ans -ne 'YES') {
-        Write-Host 'Uninstall cancelled.' -ForegroundColor Yellow
-        exit 0
+    if (-not $ProgressFile) {
+        Write-Host ''
+        Write-Host 'Streamclone — Complete uninstall' -ForegroundColor Red
+        Write-Host '================================' -ForegroundColor Red
+        Write-Host "Install folder: $root"
+        Write-Host ''
+        Write-Host 'This will:'
+        Write-Host '  - Stop all Streamclone Docker containers'
+        Write-Host '  - Delete Docker volumes (database, MinIO, clipper data)'
+        Write-Host '  - Remove .env and local secrets'
+        Write-Host '  - Remove Desktop / macOS shortcuts'
+        if ($PruneImages) {
+            Write-Host '  - Remove downloaded ghcr.io/aron-chu/streamclone images'
+        }
+        if (-not $KeepInstallDir) {
+            Write-Host '  - Delete the install folder'
+        }
+        Write-Host ''
     }
-}
 
-Stop-StreamcloneControlProcess -Root $root
-Invoke-StreamcloneComposeDown -Root $root -Volumes
+    if (-not $NonInteractive -and -not $ProgressFile) {
+        $ans = Read-Host 'Type YES to continue'
+        if ($ans -ne 'YES') {
+            Write-Host 'Uninstall cancelled.' -ForegroundColor Yellow
+            exit 0
+        }
+    }
 
-if ($PruneImages) {
-    Remove-StreamcloneImages -Root $root
-}
+    Set-UninstallProgress -Title 'Stopping Streamclone' -Detail 'Shutting down background processes.'
+    Stop-StreamcloneControlProcess -Root $root
 
-Remove-StreamcloneConfigFiles -Root $root
-Remove-StreamcloneDesktopShortcuts
-Remove-StreamcloneMacShortcuts
+    Set-UninstallProgress -Title 'Removing Docker stack' -Detail 'Stopping containers and deleting volumes.'
+    Invoke-StreamcloneComposeDown -Root $root -Volumes
 
-if ($KeepInstallDir) {
-    Write-Host ''
-    Write-Host "Uninstall complete (install folder kept): $root" -ForegroundColor Green
-} else {
-    Remove-InstallDirectoryDeferred -Root $root
-    Write-Host ''
-    Write-Host 'Uninstall complete. Install folder will be removed shortly.' -ForegroundColor Green
+    if ($PruneImages) {
+        Set-UninstallProgress -Title 'Removing Docker images' -Detail 'Pruning ghcr.io/aron-chu/streamclone images.'
+        Remove-StreamcloneImages -Root $root
+    }
+
+    Set-UninstallProgress -Title 'Removing local data' -Detail 'Deleting secrets, shortcuts, and config.'
+    Remove-StreamcloneConfigFiles -Root $root
+    Remove-StreamcloneDesktopShortcuts
+    Remove-StreamcloneMacShortcuts
+
+    if ($KeepInstallDir) {
+        if (-not $ProgressFile) {
+            Write-Host ''
+            Write-Host "Uninstall complete (install folder kept): $root" -ForegroundColor Green
+        }
+    } else {
+        Remove-InstallDirectoryDeferred -Root $root
+        if (-not $ProgressFile) {
+            Write-Host ''
+            Write-Host 'Uninstall complete. Install folder will be removed shortly.' -ForegroundColor Green
+        }
+    }
+
+    Complete-UninstallProgress -ExitCode 0
+} catch {
+    Set-UninstallProgress -Title 'Uninstall failed' -Detail $_.Exception.Message -Status 'done|1'
+    if (-not $ProgressFile) { throw }
+    exit 1
 }

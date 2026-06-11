@@ -1,4 +1,4 @@
-import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN } from './config'
+import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN, SETUP_CONTROL_TOKEN } from './config'
 import type { ClipPeriod, PlaybackLatencyMode, StatsPeriod } from './settings'
 
 export class ApiError extends Error {
@@ -781,14 +781,19 @@ export const getSetupWelcome = (): Promise<SetupWelcome> =>
 export const getSetupControlHealth = (): Promise<SetupControlHealth> =>
   fetch('/v1/setup-control/health').then(r => json<SetupControlHealth>(r))
 
-export const startSetupService = (service: 'scraper' | 'clipper'): Promise<SetupControlStartResponse> =>
-  fetch(`/v1/setup-control/start/${service}`, { method: 'POST' }).then(async r => {
+export const startSetupService = (service: 'scraper' | 'clipper'): Promise<SetupControlStartResponse> => {
+  const headers: Record<string, string> = {}
+  if (SETUP_CONTROL_TOKEN) {
+    headers['X-Streamclone-Setup-Token'] = SETUP_CONTROL_TOKEN
+  }
+  return fetch(`/v1/setup-control/start/${service}`, { method: 'POST', headers }).then(async r => {
     const body = await r.json().catch(() => ({})) as SetupControlStartResponse
     if (!r.ok) {
       throw new ApiError(body.error || r.statusText, r.status)
     }
     return body
   })
+}
 
 export const getAuthDebug = (): Promise<AuthDebug> =>
   fetch(`${CHAT_HTTP}/v1/auth/debug`, { credentials: 'include' }).then(r => json<AuthDebug>(r))

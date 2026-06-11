@@ -33,8 +33,32 @@ func TestSetupWelcomeCoreProfile(t *testing.T) {
 	if resp.Services.Clipper != "offline" {
 		t.Fatalf("clipper = %q, want offline without running service", resp.Services.Clipper)
 	}
+	if resp.Incomplete {
+		t.Fatalf("core profile should be complete when optional services are not required")
+	}
+	if resp.ShowWelcome {
+		t.Fatalf("showWelcome should be false")
+	}
+}
+
+func TestSetupWelcomeScraperProfileOffline(t *testing.T) {
+	h := New(nil, nil).WithSetupWelcome(SetupWelcomeOptions{
+		Profile: "scraper",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/setup/welcome", nil)
+	rec := httptest.NewRecorder()
+	h.setupWelcome(rec, req)
+
+	var resp setupWelcomeResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Profile != "scraper" {
+		t.Fatalf("profile = %q, want scraper", resp.Profile)
+	}
 	if !resp.Incomplete {
-		t.Fatalf("expected incomplete when optional services are offline")
+		t.Fatalf("scraper profile should be incomplete when scraper is offline")
 	}
 }
 

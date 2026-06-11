@@ -10,14 +10,14 @@ Self-hosted Twitch-style directory with HLS playback, analytics, and optional Cl
 
 **Prerequisites:** [Docker Desktop](https://docs.docker.com/desktop/) running.
 
-1. Download **`Install Streamclone.cmd`** from **[latest release](https://github.com/Aron-Chu/streamclone/releases/latest)**
-2. Double-click it (~3–5 min) — sets up Docker, opens **`http://localhost:8090/welcome`**
+1. Download **`Streamclone-Setup-*.exe`** (or **`Install Streamclone.cmd`**) from **[latest release](https://github.com/Aron-Chu/streamclone/releases/latest)**
+2. Run the installer (~3–5 min) — sets up Docker, opens **`http://localhost:8090/`**
 3. Next time: double-click **`Start Streamclone`** on your Desktop
 4. Pause: **`Stop Streamclone`** · Remove everything: **`Uninstall Streamclone`**
 
 | Platform | Install | Daily | Pause | Uninstall |
 |----------|---------|-------|-------|-----------|
-| Windows | `Install Streamclone.cmd` | `Start Streamclone.cmd` | `Stop Streamclone.cmd` | `Uninstall Streamclone.cmd` |
+| Windows | `Streamclone-Setup-*.exe` or `Install Streamclone.cmd` | `Start Streamclone.cmd` | `Stop Streamclone.cmd` | Settings → Apps, or `Uninstall Streamclone.cmd` |
 | macOS | `launchers/Install Streamclone.command` | `launchers/Start Streamclone.command` | `launchers/Stop Streamclone.command` | `launchers/Uninstall Streamclone.command` |
 | Developers | `git clone` + `make setup` | `make start` | `make down` | `scripts/uninstall-streamclone.ps1` |
 
@@ -59,4 +59,4 @@ PostgreSQL + Redis behind the Go services.
 
 ## License
 
-MIT — [LICENSE](LICENSE). Not affiliated with Twitch or 7TV; compliance is your responsibility.
+Apache License 2.0 (open source) — [LICENSE](LICENSE). Not affiliated with Twitch or 7TV; compliance is your responsibility.
