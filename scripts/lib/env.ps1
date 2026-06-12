@@ -240,6 +240,16 @@ function Join-EnvProcessArguments {
     return ($parts -join ' ')
 }
 
+function Get-EnvProcessWorkingDirectory {
+    try {
+        $location = Get-Location
+        if ($location.Provider.Name -eq 'FileSystem' -and $location.ProviderPath) {
+            return $location.ProviderPath
+        }
+    } catch { }
+    return [System.Environment]::CurrentDirectory
+}
+
 function Invoke-EnvDocker {
     param([string[]]$Arguments)
     $docker = Get-EnvDockerExe
@@ -252,6 +262,7 @@ function Invoke-EnvDocker {
     $psi.Arguments = Join-EnvProcessArguments -Arguments $Arguments
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
+    $psi.WorkingDirectory = Get-EnvProcessWorkingDirectory
     $proc = [System.Diagnostics.Process]::Start($psi)
     $proc.WaitForExit()
     return [int]$proc.ExitCode
@@ -270,6 +281,7 @@ function Invoke-EnvCapturedProcess {
         $psi.Arguments = Join-EnvProcessArguments -Arguments $ArgumentList
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
+        $psi.WorkingDirectory = Get-EnvProcessWorkingDirectory
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
 
