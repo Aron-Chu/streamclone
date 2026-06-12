@@ -129,7 +129,7 @@ if (-not $NoUp) {
     if ($UseImages) {
         Write-Host 'Pulling Docker images (~1.5 GB, 3-8 min on first install)...' -ForegroundColor Cyan
         Write-Host ''
-        $pullResult = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs -OutputMode interactive
+        $pullResult = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs -OutputMode summary
         $pullTail = @($pullResult.Output | Select-Object -Last 40)
         $code = [int]$pullResult.ExitCode
         if ($code -ne 0) {
