@@ -238,7 +238,7 @@ try {
         $ans = Read-Host 'Type YES to continue'
         if ($ans -ne 'YES') {
             Write-Host 'Uninstall cancelled.' -ForegroundColor Yellow
-            exit 0
+            exit 2
         }
     }
 

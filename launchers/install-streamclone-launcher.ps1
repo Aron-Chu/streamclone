@@ -176,6 +176,7 @@ switch ($Action) {
             throw "Streamclone not installed at $root."
         }
         & $uninstallPs1 -InstallDir $root
+        exit $LASTEXITCODE
     }
     'manage' {
         $managerPs1 = Join-Path $root 'scripts\streamclone-manager.ps1'
