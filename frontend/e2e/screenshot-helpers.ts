@@ -19,7 +19,7 @@ export async function waitForDirectoryReady(page: Page, timeout = DEFAULT_TIMEOU
   await page.goto('/')
   await Promise.all([streamsResponse, categoriesResponse])
 
-  await page.getByRole('heading', { level: 1 }).waitFor({ state: 'visible', timeout })
+  await page.getByRole('heading', { name: 'Live channels', level: 1 }).waitFor({ state: 'visible', timeout })
 
   await page.waitForFunction(() => {
     const skeletonCards = document.querySelectorAll('.aspect-video.animate-pulse')
