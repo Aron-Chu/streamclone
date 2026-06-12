@@ -37,6 +37,9 @@ test('/welcome redirect triggers onboarding overlay once', async ({ page }) => {
 
 test('channel route loads player shell or structured offline state', async ({ page }) => {
   test.setTimeout(120_000)
+  await page.addInitScript((key) => {
+    window.localStorage.setItem(key, '1')
+  }, ONBOARDING_DISMISSED_KEY)
   await waitForDirectoryReady(page)
 
   const streamLink = await pickLiveChannelLink(page)
