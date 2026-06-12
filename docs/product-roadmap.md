@@ -343,9 +343,9 @@ Deferred v0.1.5 items and UX gaps from [product steering](../.kiro/steering/prod
 
 | Feature | What | Why vs Twitch | Deps / files | Tier | Status |
 |---------|------|---------------|--------------|------|--------|
-| Live viewer sparkline | Mini chart in channel header from live collector or Helix polls | At-a-glance trend; Twitch shows point-in-time count only | analytics live API, `Channel.tsx` | Core / Analytics | **Deferred v0.1.5** |
-| Follow / unfollow button | Wire UI to existing follow API | Local follow list without leaving app | `getFollowed` in `api.ts`, `Channel.tsx` | Core | **Deferred v0.1.5** |
-| Import Twitch follow list on sign-in | Populate ChannelRail from Helix follows | Faster onboarding for authenticated users | `ChannelRail.tsx`, Helix | Core | **Greenfield** |
+| Live viewer sparkline | Mini chart in channel header from live collector or Helix polls | At-a-glance trend; Twitch shows point-in-time count only | analytics live API, `Channel.tsx` | Core / Analytics | **Done** — `MiniViewerSparkline` |
+| Follow / unfollow button | Wire UI to existing follow API | Local follow list without leaving app | `getFollowed` in `api.ts`, `Channel.tsx` | Core | **Done** — migration 000011 + metadata API |
+| Import Twitch follow list on sign-in | Populate ChannelRail from Helix follows | Faster onboarding for authenticated users | `ChannelRail.tsx`, Helix | Core | **Already partial** — Helix follows merged when signed in; no Postgres import on login |
 | Custom directory lists | Pin channels, hide categories, "my roster" separate from Twitch follows | Personal curation | metadata + frontend | Core | **Greenfield** |
 | Raid / host visualization | Parse IRC USERNOTICE; timeline marker on analytics chart | Moment context Twitch buries in chat | `internal/chat/parse`, `Analytics.tsx` | Core / Analytics | **Greenfield** |
 | Hype train / sub train detection | Chat pattern detector → clipper triggers | Auto-highlight moments | chat parse, clipper webhook | Analytics / Clipper | **Greenfield** (spec: live-clipper requirements) |
@@ -390,15 +390,15 @@ Current `PlaybackLatencyMode` values in [`settings.ts`](../frontend/src/settings
 
 [`playback.ts`](../frontend/src/playback.ts) implements `hlsLatencyConfig`, automatic downgrade via `onLatencyDowngrade`, and `latencyModeLabel` for UI. Twitch "Low Latency" is opaque; Streamclone should expose **why** a downgrade happened (buffer starved, segment gap, relay stall).
 
-### B.7 Follow API (Deferred v0.1.5 — wire UI)
+### B.7 Follow API (shipped — local list + Helix rail merge)
 
-Backend/API groundwork is **thinner than previously stated** (verified 2026-06):
+Local follow list is **shipped** (verified 2026-06):
 
-- `getFollowedChannels` (read-only) exists in [`frontend/src/api.ts`](../frontend/src/api.ts); `ChannelRail.tsx` consumes it.
-- **No follow/unfollow mutations exist** in `api.ts` or the metadata service.
-- Twitch removed the Helix follow/unfollow write endpoints (2021), so this must be a **local follow list** (new metadata table + endpoints), not a Helix passthrough.
+- `migrations/000011_local_follows` + metadata `POST/DELETE /v1/channels/{login}/follow` + `GET /v1/followed`
+- `followChannel` / `unfollowChannel` in [`frontend/src/api.ts`](../frontend/src/api.ts); Follow button on [`Channel.tsx`](../frontend/src/components/Channel.tsx)
+- When signed in, `getFollowedChannels` merges Helix `/v1/me/followed` with local follows for the channel rail
 
-**Gap:** channel page lacks follow/unfollow control, and the backend write path doesn't exist yet. **Why vs Twitch:** local follow list can diverge from Twitch follows (custom roster backlog B.2). **Deps:** new metadata follow table + API, frontend mutation + button. **Tier:** Core. **Effort:** Medium (was misfiled as Low).
+**Remaining gap:** import Helix follows into Postgres on sign-in (K#47 partial). Twitch Helix follow/unfollow write endpoints were removed (2021); Streamclone uses a **local roster** that can diverge from Twitch.
 
 ---
 
@@ -678,7 +678,7 @@ Adopting [emote-tokenizer-roadmap](../.kiro/specs/emote-tokenizer-roadmap.md) re
 | Stream schedule inference | "Usually live Tue/Thu 7pm" from historical `started_at` | Viewer planning | analytics history aggregation | Core / Analytics | **Greenfield** |
 | Category analytics | Aggregate stats across directory by game | Trend discovery | metadata + analytics | Analytics | **Greenfield** |
 | Local live notifications | Desktop toast / webhook when followed channel goes live | No Twitch push dependency | metadata poller, OS integration | Core | **Greenfield** |
-| Import follows on sign-in | Helix follows → ChannelRail | See Section B.2 | `ChannelRail.tsx` | Core | **Greenfield** |
+| Import follows on sign-in | Helix follows → ChannelRail | See Section B.7 | `ChannelRail.tsx` | Core | **Already partial** |
 | Block list / NSFW | Local filtering | See Section B.4 | settings | Core | **Greenfield** |
 
 ### F.1 Metadata service capabilities (extend)
@@ -964,7 +964,7 @@ Users are responsible for Twitch Terms of Service, developer agreement, and thir
 | 44 | Resource governor (relays/jobs/scraper) | M | M | Ops | P2 | Already partial — `MAX_CONCURRENT_RELAYS` cap; jobs/scraper caps pending |
 | 45 | Stream autopsy PDF/markdown report | M | H | Analytics | P3 | Greenfield |
 | 46 | Personal watch history (local) | M | M | Core | P3 | Greenfield |
-| 47 | Import Twitch follows on sign-in | M | L | Core | P2 | Greenfield |
+| 47 | Import Twitch follows on sign-in | M | L | Core | P2 | Already partial — Helix follows merged into channel rail when signed in (`getTwitchFollowedChannels` + `getFollowedChannels`); no Postgres import on login yet |
 | 48 | Installer CI cold-path smoke on VM | H | H | Core | P1 | Greenfield |
 
 ### Impact × Effort quick reference
@@ -1120,9 +1120,9 @@ Channel compare + scheduled sync ──► after single-stream workflow + scrape
 From [install-benchmark-and-revamp-audit.md](./install-benchmark-and-revamp-audit.md) — track until shipped:
 
 - [ ] In-player VOD playback
-- [ ] Follow button on channel page
-- [ ] Live viewer sparkline on channel header
-- [ ] VOD chat replay without scraper profile (user-facing)
+- [x] Follow button on channel page
+- [x] Live viewer sparkline on channel header
+- [x] VOD chat replay without scraper profile (user-facing)
 - [x] ~~Fix `benchmark-hls-start.ps1` manifest path (`index.m3u8`)~~ — script already probes `index.m3u8` first
 - [ ] Fix nested `preflight-deps.ps1` capture in benchmark scripts
 - [x] ~~Ensure `release-smoke` runs on `workflow_dispatch` RC tags~~ — done in workflow revamp
