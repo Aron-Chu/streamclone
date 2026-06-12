@@ -27,6 +27,7 @@ $Script:StreamcloneBootstrapOverlayPaths = @(
     'scripts/install-setup-progress.ps1',
     'scripts/streamclone-manager.ps1',
     'scripts/check-streamclone.ps1',
+    'scripts/setup-control.ps1',
     'scripts/install-desktop-shortcut.ps1',
     'scripts/preflight-deps.ps1',
     'scripts/start-streamclone.ps1',
