@@ -325,6 +325,32 @@ function Invoke-EnvDockerCaptured {
     return Invoke-EnvCapturedProcess -FilePath $docker -ArgumentList $Arguments
 }
 
+function Invoke-EnvDockerComposePullWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
+        [int]$MaxAttempts = 3,
+        [int]$RetryDelaySec = 10
+    )
+    $last = $null
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $last = Invoke-EnvDockerCaptured -Arguments ($ComposeArgs + @('pull'))
+        if ($last.ExitCode -eq 0) {
+            if ($attempt -gt 1) {
+                Write-Host "docker compose pull succeeded on attempt $attempt." -ForegroundColor Green
+            }
+            return $last
+        }
+        if ($attempt -lt $MaxAttempts) {
+            Write-Host "docker compose pull failed (attempt $attempt/$MaxAttempts, exit $($last.ExitCode)). Retrying in ${RetryDelaySec}s..." -ForegroundColor Yellow
+            if ($last.Output) {
+                $last.Output | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkYellow }
+            }
+            Start-Sleep -Seconds $RetryDelaySec
+        }
+    }
+    return $last
+}
+
 function Invoke-EnvDockerCapturedWithTimeout {
     param(
         [string[]]$Arguments,
