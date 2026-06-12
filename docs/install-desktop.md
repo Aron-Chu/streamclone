@@ -109,7 +109,7 @@ Windows may show **"Unknown Publisher"** — click **Run** or **More info → Ru
 | **Start menu → Streamclone → Uninstall Streamclone** | Same uninstall wizard |
 | **`Uninstall Streamclone.cmd`** in the install folder | Type `YES` in the terminal |
 
-All paths stop Docker, delete volumes and `.env`, remove Desktop shortcuts, and delete `%USERPROFILE%\streamclone`. The **Setup.exe uninstall wizard** shows in-app progress (no extra CMD window). Docker images stay cached for faster reinstall; optional advanced: `powershell -File scripts\uninstall-streamclone.ps1 -PruneImages`.
+All paths stop Docker, delete volumes and `.env`, remove Desktop shortcuts, and delete `%USERPROFILE%\streamclone`. Interactive uninstall asks whether to also remove downloaded Streamclone Docker images. Keep images for faster reinstall/repair; remove images to reclaim disk space or simulate a first-time install. Advanced non-interactive image cleanup: `powershell -File scripts\uninstall-streamclone.ps1 -PruneImages`.
 
 ---
 

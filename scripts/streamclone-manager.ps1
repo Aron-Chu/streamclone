@@ -141,9 +141,7 @@ function Show-ManagerMenu {
                 Invoke-EnvDocker -Arguments ($composeArgs + @('logs', '--tail', '80'))
             }
             '6' {
-                $prune = Read-Host 'Also remove downloaded Docker images? [y/N]'
-                if ($prune -match '^[Yy]') { Invoke-ManagerUninstall -PruneImages }
-                else { Invoke-ManagerUninstall }
+                Invoke-ManagerUninstall
                 return
             }
             '7' { return }
