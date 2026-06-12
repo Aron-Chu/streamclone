@@ -68,7 +68,7 @@ function Invoke-ManagerRepair {
 
     Write-Host 'Pulling Docker images (~1.5 GB, 3-8 min on first install)...' -ForegroundColor Cyan
     Write-Host ''
-    $pull = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs -OutputMode summary
+    $pull = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs -OutputMode friendly
     if ($pull.ExitCode -ne 0) {
         throw "docker compose pull failed: $($pull.Output -join [Environment]::NewLine)"
     }

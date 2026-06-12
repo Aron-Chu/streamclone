@@ -347,11 +347,92 @@ function Test-StreamcloneDockerPullDisplayLine {
     return $true
 }
 
+function Get-StreamcloneComposePullImageCount {
+    param([string[]]$ComposeArgs)
+    $result = Invoke-EnvDockerCaptured -Arguments ($ComposeArgs + @('config', '--images'))
+    if ($result.ExitCode -ne 0 -or -not $result.Output) { return 13 }
+    $count = @($result.Output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+    if ($count -lt 1) { return 13 }
+    return $count
+}
+
+function Write-StreamcloneFriendlyPullBanner {
+    Write-Host ''
+    Write-Host 'Downloading Streamclone images (~1.5 GB)...' -ForegroundColor Cyan
+    Write-Host 'First install usually takes 3-8 minutes. Please wait.' -ForegroundColor DarkGray
+    Write-Host ''
+}
+
+function Write-StreamcloneFriendlyPullBar {
+    param(
+        [int]$Percent,
+        [string]$Status = 'Downloading'
+    )
+    $pct = [math]::Max(0, [math]::Min(100, $Percent))
+    $width = 30
+    $filled = [math]::Floor($width * $pct / 100.0)
+    if ($filled -lt 0) { $filled = 0 }
+    if ($filled -gt $width) { $filled = $width }
+    $bar = ('=' * $filled) + ('>' * [math]::Min(1, $width - $filled)) + (' ' * [math]::Max(0, $width - $filled - 1))
+    $label = $Status
+    if ($label.Length -gt 36) { $label = $label.Substring(0, 33) + '...' }
+    Write-Host ("`r  [{0}] {1,3}%  {2,-36}" -f $bar, $pct, $label) -NoNewline
+}
+
+function Update-StreamcloneFriendlyPullFromLine {
+    param(
+        [string]$Line,
+        [hashtable]$State
+    )
+    $text = "$Line".Trim()
+    if ($text -eq '') { return }
+
+    if ($text -match '\[\+\]\s+Pulling\s+(\d+)/(\d+)') {
+        $current = [int]$matches[1]
+        $total = [int]$matches[2]
+        if ($total -gt 0) {
+            $State.total = $total
+            $State.pulled = $current
+            $State.percent = [math]::Min(99, [math]::Floor(100.0 * $current / $total))
+            $State.status = "Image $current of $total"
+        }
+        return
+    }
+
+    if ($text -match '(?:streamclone-)?([A-Za-z0-9_.-]+)\s+Pulled\b') {
+        $State.pulled = [math]::Min($State.total, $State.pulled + 1)
+        $State.status = "Finished $($matches[1])"
+        if ($State.total -gt 0) {
+            $State.percent = [math]::Min(99, [math]::Floor(100.0 * $State.pulled / $State.total))
+        }
+        return
+    }
+
+    if ($text -match 'already up to date|Image is up to date') {
+        $State.pulled = [math]::Min($State.total, $State.pulled + 1)
+        $State.status = 'Image up to date'
+        if ($State.total -gt 0) {
+            $State.percent = [math]::Min(99, [math]::Floor(100.0 * $State.pulled / $State.total))
+        }
+        return
+    }
+
+    if ($text -match 'Pulling|Downloading') {
+        $now = Get-Date
+        if (($now - $State.lastBump).TotalSeconds -ge 4 -and $State.percent -lt 90) {
+            $State.percent = [math]::Min(90, $State.percent + 1)
+            $State.lastBump = $now
+            $State.status = 'Downloading layers'
+        }
+    }
+}
+
 function Invoke-EnvDockerStreaming {
     param(
         [Parameter(Mandatory = $true)][string[]]$Arguments,
         [scriptblock]$OnLine = $null,
-        [ValidateSet('interactive', 'capture', 'summary')][string]$OutputMode = 'capture'
+        [ValidateSet('interactive', 'capture', 'summary', 'friendly')][string]$OutputMode = 'capture',
+        [hashtable]$FriendlyState = $null
     )
     $docker = Get-EnvDockerExe
     if (-not $docker) {
@@ -378,7 +459,13 @@ function Invoke-EnvDockerStreaming {
                 if ($line -eq '') { return }
                 [void]$lines.Add($line)
                 $display = $true
-                if ($OutputMode -eq 'summary') {
+                if ($OutputMode -eq 'friendly') {
+                    $display = $false
+                    if ($FriendlyState) {
+                        Update-StreamcloneFriendlyPullFromLine -Line $line -State $FriendlyState
+                        Write-StreamcloneFriendlyPullBar -Percent $FriendlyState.percent -Status $FriendlyState.status
+                    }
+                } elseif ($OutputMode -eq 'summary') {
                     $display = Test-StreamcloneDockerPullDisplayLine -Line $line
                     if (-not $display) {
                         $now = Get-Date
@@ -394,6 +481,10 @@ function Invoke-EnvDockerStreaming {
                 if ($OnLine) {
                     try { & $OnLine $line } catch { }
                 }
+            }
+            if ($OutputMode -eq 'friendly' -and $FriendlyState) {
+                Write-StreamcloneFriendlyPullBar -Percent 100 -Status 'Download complete'
+                Write-Host ''
             }
             $code = if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 0 }
             if (-not $? -and $code -eq 0) { $code = 1 }
@@ -415,14 +506,27 @@ function Invoke-EnvDockerComposePullWithRetry {
         [int]$MaxAttempts = 3,
         [int]$RetryDelaySec = 10,
         [scriptblock]$OnLine = $null,
-        [ValidateSet('interactive', 'capture', 'summary')][string]$OutputMode = 'summary'
+        [ValidateSet('interactive', 'capture', 'summary', 'friendly')][string]$OutputMode = 'friendly'
     )
     $last = $null
+    $friendlyState = $null
+    if ($OutputMode -eq 'friendly') {
+        $friendlyState = @{
+            total   = (Get-StreamcloneComposePullImageCount -ComposeArgs $ComposeArgs)
+            pulled  = 0
+            percent = 0
+            status  = 'Starting'
+            lastBump = [DateTime]::MinValue
+        }
+        Write-StreamcloneFriendlyPullBanner
+        Write-StreamcloneFriendlyPullBar -Percent 0 -Status 'Starting'
+    }
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         if ($attempt -gt 1) {
+            Write-Host ''
             Write-Host "Retrying docker compose pull (attempt $attempt/$MaxAttempts)..." -ForegroundColor Yellow
         }
-        $last = Invoke-EnvDockerStreaming -Arguments ($ComposeArgs + @('pull')) -OnLine $OnLine -OutputMode $OutputMode
+        $last = Invoke-EnvDockerStreaming -Arguments ($ComposeArgs + @('pull')) -OnLine $OnLine -OutputMode $OutputMode -FriendlyState $friendlyState
         if ($last.ExitCode -eq 0) {
             if ($attempt -gt 1) {
                 Write-Host "docker compose pull succeeded on attempt $attempt." -ForegroundColor Green
