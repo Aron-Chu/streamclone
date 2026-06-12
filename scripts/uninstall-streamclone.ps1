@@ -3,6 +3,7 @@ param(
     [string]$InstallDir = '',
     [switch]$NonInteractive,
     [switch]$PruneImages,
+    [switch]$SkipImagePrompt,
     [switch]$KeepInstallDir,
     [string]$ProgressFile = ''
 )
@@ -213,6 +214,16 @@ Remove-Item -LiteralPath '$escaped' -Recurse -Force -ErrorAction SilentlyContinu
 
 try {
     $root = Get-StreamcloneInstallRoot -Hint $InstallDir
+    $removeImages = $PruneImages.IsPresent
+
+    if (-not $removeImages -and -not $SkipImagePrompt -and -not $NonInteractive -and -not $ProgressFile) {
+        Write-Host ''
+        Write-Host 'Docker image cleanup' -ForegroundColor Cyan
+        Write-Host 'Streamclone images are safe to keep cached for faster reinstall/repair.'
+        Write-Host 'Remove them only when you want to reclaim disk space or simulate a first-time install.'
+        $pruneAns = Read-Host 'Also remove downloaded Streamclone Docker images? [y/N]'
+        $removeImages = ($pruneAns -match '^[Yy]')
+    }
 
     if (-not $ProgressFile) {
         Write-Host ''
@@ -225,8 +236,10 @@ try {
         Write-Host '  - Delete Docker volumes (database, MinIO, clipper data)'
         Write-Host '  - Remove .env and local secrets'
         Write-Host '  - Remove Desktop / macOS shortcuts'
-        if ($PruneImages) {
+        if ($removeImages) {
             Write-Host '  - Remove downloaded ghcr.io/aron-chu/streamclone images'
+        } else {
+            Write-Host '  - Keep cached Docker images for faster reinstall'
         }
         if (-not $KeepInstallDir) {
             Write-Host '  - Delete the install folder'
@@ -248,7 +261,7 @@ try {
     Set-UninstallProgress -Title 'Removing Docker stack' -Detail 'Stopping containers and deleting volumes.'
     Invoke-StreamcloneComposeDown -Root $root -Volumes
 
-    if ($PruneImages) {
+    if ($removeImages) {
         Set-UninstallProgress -Title 'Removing Docker images' -Detail 'Pruning ghcr.io/aron-chu/streamclone images.'
         Remove-StreamcloneImages -Root $root
     }
