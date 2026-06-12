@@ -319,6 +319,15 @@ export interface SetupControlStartResponse {
   log?: string
 }
 
+export interface SetupControlStartStatus {
+  ok: boolean
+  service: 'scraper' | 'clipper'
+  percent: number
+  phase: string
+  detail: string
+  lines?: string[]
+}
+
 export interface HostDiagnosticsContainer {
   name: string
   status: string
@@ -839,6 +848,9 @@ function setupControlStartError(status: number, body: SetupControlStartResponse)
   }
   return new ApiError(body.error || 'Unable to start service', status, body.error, status >= 500)
 }
+
+export const getSetupStartStatus = (service: 'scraper' | 'clipper'): Promise<SetupControlStartStatus> =>
+  fetch(`/v1/setup-control/start/${service}/status`).then(r => json<SetupControlStartStatus>(r))
 
 export const startSetupService = (service: 'scraper' | 'clipper'): Promise<SetupControlStartResponse> => {
   const headers: Record<string, string> = {}

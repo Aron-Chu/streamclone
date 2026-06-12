@@ -125,6 +125,10 @@ function Start-ProfileServiceUpAsync {
     }
 
     $logFile = Join-Path $Root ".streamclone-start-$Service.log"
+    $errLog = "${logFile}.err"
+    foreach ($path in @($logFile, $errLog)) {
+        if (Test-Path $path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+    }
     $args = $composeArgs + @('up', '-d', '--remove-orphans', $Service)
 
     $proc = Start-Process -FilePath $docker `
@@ -132,9 +136,74 @@ function Start-ProfileServiceUpAsync {
         -WorkingDirectory $Root `
         -WindowStyle Hidden `
         -RedirectStandardOutput $logFile `
-        -RedirectStandardError $logFile `
+        -RedirectStandardError $errLog `
         -PassThru
     return "compose start initiated (pid $($proc.Id)); see $logFile"
+}
+
+function Get-StreamcloneProfileStartStatus {
+    param(
+        [ValidateSet('scraper', 'clipper')]
+        [string]$Service
+    )
+
+    $logFile = Join-Path $Root ".streamclone-start-$Service.log"
+    $errLog = "${logFile}.err"
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($path in @($logFile, $errLog)) {
+        if (-not (Test-Path $path)) { continue }
+        foreach ($line in (Get-Content -LiteralPath $path -Tail 10 -ErrorAction SilentlyContinue)) {
+            $trimmed = "$line".Trim()
+            if ($trimmed -and -not ($trimmed -match '^[a-f0-9]{12}\s')) {
+                [void]$lines.Add($trimmed)
+            }
+        }
+    }
+
+    $detail = if ($lines.Count -gt 0) { $lines[$lines.Count - 1] } else { 'Preparing Docker compose...' }
+    $blob = ($lines -join ' ').ToLowerInvariant()
+    $percent = 15
+    $phase = 'Starting service'
+
+    if ($blob -match 'cloning|clone') {
+        $percent = 20
+        $phase = 'Downloading scraper repo'
+    }
+    if ($blob -match 'pulling|pull complete|downloading|extracting|pulled') {
+        $percent = 45
+        $phase = 'Pulling container image'
+    }
+    if ($blob -match 'created|starting|recreat|container') {
+        $percent = 70
+        $phase = 'Creating containers'
+    }
+    if ($blob -match 'error|failed|denied|cannot') {
+        $percent = 5
+        $phase = 'Docker reported an error'
+    }
+
+    $nameFilter = if ($Service -eq 'scraper') { 'streamclone-scraper' } else { 'streamclone-clipper' }
+    $ps = Invoke-EnvDockerCaptured -Arguments @('ps', '--filter', "name=$nameFilter", '--format', '{{.Status}}')
+    if ($ps.ExitCode -eq 0 -and $ps.Output) {
+        $status = ($ps.Output | Select-Object -First 1).Trim()
+        if ($status -match 'Up') {
+            $percent = [math]::Max($percent, 82)
+            $phase = 'Container is up'
+            $detail = $status
+        }
+        if ($status -match 'healthy') {
+            $percent = 92
+            $phase = 'Waiting for API health'
+        }
+    }
+
+    return @{
+        service = $Service
+        percent = $percent
+        phase   = $phase
+        detail  = $detail
+        lines   = @($lines.ToArray() | Select-Object -Last 5)
+    }
 }
 
 function Invoke-SyncClipperAuth {
@@ -215,6 +284,20 @@ try {
             if ($request.HttpMethod -eq 'GET' -and $path -eq '/diagnostics') {
                 $report = Get-StreamcloneDiagnostics -Root $Root
                 Write-JsonResponse -Response $response -StatusCode 200 -Body $report
+                continue
+            }
+
+            if ($request.HttpMethod -eq 'GET' -and $path -match '^/start/(scraper|clipper)/status$') {
+                $service = $Matches[1]
+                $status = Get-StreamcloneProfileStartStatus -Service $service
+                Write-JsonResponse -Response $response -StatusCode 200 -Body @{
+                    ok      = $true
+                    service = $status.service
+                    percent = $status.percent
+                    phase   = $status.phase
+                    detail  = $status.detail
+                    lines   = $status.lines
+                }
                 continue
             }
 

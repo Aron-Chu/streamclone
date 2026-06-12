@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { profileNeedsScraper, SCRAPER_SETUP_DOC_URL } from '../setupProfile'
-import { useOptionalServices } from '../hooks/useOptionalServices'
+import { useOptionalServices, type ServiceStartProgress } from '../hooks/useOptionalServices'
 
 type ServiceStatus = 'ready' | 'offline' | 'checking'
 
@@ -46,6 +46,25 @@ export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean 
   )
 }
 
+function ServiceStartProgressBar({ progress }: { progress: ServiceStartProgress }) {
+  const width = Math.max(0, Math.min(100, progress.percent))
+  return (
+    <div className="mb-3 rounded-lg border border-violet-400/25 bg-violet-500/10 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-black uppercase tracking-wide text-violet-100">
+        <span>{progress.phase}</span>
+        <span>{width}%</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-black/40">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-violet-500 to-cyan-400 transition-all duration-500 ease-out"
+          style={{ width: `${width}%` }}
+        />
+      </div>
+      <p className="mt-2 text-[11px] font-semibold leading-4 text-violet-100/80">{progress.detail}</p>
+    </div>
+  )
+}
+
 function ServiceCard({
   title,
   detail,
@@ -54,6 +73,7 @@ function ServiceCard({
   onAction,
   busy,
   error,
+  progress,
 }: {
   title: string
   detail: string
@@ -62,6 +82,7 @@ function ServiceCard({
   onAction?: () => void
   busy?: boolean
   error?: string | null
+  progress?: ServiceStartProgress | null
 }) {
   const good = status === 'ready'
   const checking = status === 'checking'
@@ -76,6 +97,7 @@ function ServiceCard({
         </span>
       </div>
       <p className="mb-3 text-xs font-semibold leading-5 text-zinc-400">{detail}</p>
+      {progress ? <ServiceStartProgressBar progress={progress} /> : null}
       {error ? (
         <div className="mb-3 rounded border border-red-300/20 bg-red-500/10 px-2 py-1.5 text-xs font-semibold text-red-100">
           {error}
@@ -118,6 +140,7 @@ export default function OptionalServicesPanel({
     scraperOffline,
     clipperOffline,
     starting,
+    startProgress,
     actionError,
     startService,
     refreshStatus,
@@ -238,6 +261,10 @@ export default function OptionalServicesPanel({
         </button>
       </div>
 
+      {startProgress ? (
+        <ServiceStartProgressBar progress={startProgress} />
+      ) : null}
+
       {actionError ? (
         <div className="rounded border border-amber-300/20 bg-amber-400/10 p-3 text-xs font-semibold text-amber-100">
           {actionError}
@@ -258,6 +285,7 @@ export default function OptionalServicesPanel({
             actionLabel="Start Analytics"
             onAction={() => void startService('scraper')}
             busy={starting === 'scraper'}
+            progress={startProgress?.service === 'scraper' ? startProgress : null}
           />
         ) : null}
         {showClipper ? (
@@ -268,6 +296,7 @@ export default function OptionalServicesPanel({
             actionLabel="Start Clip Studio"
             onAction={() => void startService('clipper')}
             busy={starting === 'clipper'}
+            progress={startProgress?.service === 'clipper' ? startProgress : null}
           />
         ) : null}
       </div>
