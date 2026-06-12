@@ -240,5 +240,5 @@ if ($Json) {
     }
 }
 
-if ($errors -gt 0) { [Environment]::Exit(1) }
-[Environment]::Exit(0)
+if ($errors -gt 0) { exit 1 }
+exit 0
