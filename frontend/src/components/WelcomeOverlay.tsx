@@ -23,6 +23,7 @@ export default function WelcomeOverlay() {
 
   useEffect(() => {
     if (!showOnboarding) return
+    setForcedOpen(true)
     navigate('.', { replace: true, state: {} })
   }, [showOnboarding, navigate])
 

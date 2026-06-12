@@ -7,21 +7,18 @@ test('home directory loads', async ({ page }) => {
     window.localStorage.setItem(key, '1')
   }, ONBOARDING_DISMISSED_KEY)
   await waitForDirectoryReady(page)
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Live channels', level: 1 })).toBeVisible()
   await expect(page.locator('a[href^="/c/"]').first()).toBeVisible()
 })
 
 test('welcome overlay appears on first visit and dismisses', async ({ page }) => {
-  await page.addInitScript((key) => {
-    window.localStorage.removeItem(key)
-  }, ONBOARDING_DISMISSED_KEY)
-
   await page.goto('/')
   await expect(page.getByRole('button', { name: 'Browse live streams' })).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('a[href^="/c/"]').first()).toBeVisible()
 
   await page.getByRole('button', { name: 'Not now' }).click()
   await expect(page.getByRole('button', { name: 'Browse live streams' })).toBeHidden()
+  await expect(page.evaluate((key) => window.localStorage.getItem(key), ONBOARDING_DISMISSED_KEY)).resolves.toBe('1')
 
   await page.reload()
   await expect(page.getByRole('button', { name: 'Browse live streams' })).toBeHidden()
