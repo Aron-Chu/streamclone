@@ -126,7 +126,12 @@ class TwitchClient:
                 return TwitchError("clip_restricted", message)
             return TwitchError("forbidden", message)
         if status == 404:
-            if "live" in lower or "online" in lower or "broadcaster" in lower:
+            if (
+                "offline" in lower
+                or "not live" in lower
+                or "no live" in lower
+                or "not currently live" in lower
+            ):
                 return TwitchError("offline", message)
             return TwitchError("not_found", message)
         return TwitchError("twitch_http_error", f"Helix returned {status}: {message}")
