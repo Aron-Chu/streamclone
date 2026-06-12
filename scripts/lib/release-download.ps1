@@ -21,7 +21,7 @@ try {
             $pct = [math]::Min(100, [math]::Floor(100.0 * $Read / $Total))
             if ($pct -ne $script:lastPct) {
                 $script:lastPct = $pct
-                Write-Host ("Downloading… {0}%" -f $pct) -ForegroundColor Cyan
+                Write-Host ("Downloading... {0}%" -f $pct) -ForegroundColor Cyan
             }
         }
     }
@@ -41,7 +41,7 @@ try {
 }
 
 if (-not (Test-Path (Join-Path $InstallDir 'VERSION'))) {
-    throw "Release extract failed — VERSION missing in $InstallDir"
+    throw "Release extract failed - VERSION missing in $InstallDir"
 }
 
 Write-Host "Installed release bundle to $InstallDir"

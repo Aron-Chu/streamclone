@@ -51,10 +51,10 @@ function Write-StreamcloneVersionNotice {
     if ($versions.imageTag) { $parts += "Images $($versions.imageTag)" }
     if ($versions.latestRelease) { $parts += "Latest $($versions.latestRelease)" }
     if ($parts.Count -gt 0) {
-        Write-Host ("Version: " + ($parts -join ' · ')) -ForegroundColor DarkGray
+        Write-Host ("Version: " + ($parts -join ' | ')) -ForegroundColor DarkGray
     }
     if (Test-StreamcloneUpgradeNeeded -Root $Root) {
-        Write-Host 'Update available — run Manage Streamclone → Update (or Install to sync).' -ForegroundColor Yellow
+        Write-Host 'Update available - run Manage Streamclone -> Update (or Install to sync).' -ForegroundColor Yellow
     }
 }
 
@@ -85,7 +85,7 @@ function Invoke-StreamcloneInstall {
 
         if (Test-StreamcloneWebOk -and $hasEnv) {
             if (Test-StreamcloneUpgradeNeeded -Root $root) {
-                Write-Host 'Upgrade needed — syncing images before start...' -ForegroundColor Yellow
+                Write-Host 'Upgrade needed - syncing images before start...' -ForegroundColor Yellow
                 if (-not (Invoke-StreamclonePreflight -Root $root)) { exit 1 }
                 Invoke-StreamcloneUpgrade -Root $root
             } else {
@@ -104,7 +104,7 @@ function Invoke-StreamcloneInstall {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\ensure-setup-control.ps1') -Root $root
                 Start-Process 'http://localhost:8090/'
             }
-            Write-Host 'Optional Analytics and Clip Studio: open app → Stack status → Start Analytics / Clip Studio.' -ForegroundColor DarkGray
+            Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
             return
         }
 
@@ -137,7 +137,7 @@ function Invoke-StreamcloneInstall {
                 Write-Host "Setup error: $($_.Exception.Message)" -ForegroundColor Red
                 $startPs1 = Join-Path $root 'scripts\start-streamclone.ps1'
                 if ((Test-Path (Join-Path $root '.env')) -and (Test-Path $startPs1)) {
-                    Write-Host 'Config exists — trying Start Streamclone as recovery...' -ForegroundColor Yellow
+                    Write-Host 'Config exists - trying Start Streamclone as recovery...' -ForegroundColor Yellow
                     & $startPs1
                     if ($LASTEXITCODE -eq 0 -and (Test-StreamcloneWebOk)) {
                         Write-Host 'Recovery start succeeded.' -ForegroundColor Green
@@ -160,7 +160,7 @@ function Invoke-StreamcloneInstall {
             }
         } else {
             if (Test-StreamcloneUpgradeNeeded -Root $root) {
-                Write-Host 'Upgrade needed — syncing IMAGE_TAG and pulling images...' -ForegroundColor Yellow
+                Write-Host 'Upgrade needed - syncing IMAGE_TAG and pulling images...' -ForegroundColor Yellow
                 Invoke-StreamcloneUpgrade -Root $root
             } else {
                 Write-Host 'Already configured - starting stack...' -ForegroundColor Yellow
@@ -186,7 +186,7 @@ function Invoke-StreamcloneInstall {
                 Start-Process 'http://localhost:8090/'
             }
         }
-        Write-Host 'Optional Analytics and Clip Studio: open app → Stack status → Start Analytics / Clip Studio.' -ForegroundColor DarkGray
+        Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
         return
     }
 

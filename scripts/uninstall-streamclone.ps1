@@ -78,7 +78,7 @@ function Invoke-StreamcloneComposeDown {
     )
     $envFile = Join-Path $Root '.env'
     if (-not (Test-Path $envFile)) {
-        Write-Host 'No .env — skipping compose down.' -ForegroundColor Yellow
+        Write-Host 'No .env - skipping compose down.' -ForegroundColor Yellow
         return
     }
 
@@ -238,14 +238,14 @@ try {
         $pruneAns = Read-Host 'Also remove downloaded Streamclone Docker images? [y/N]'
         $removeImages = ($pruneAns -match '^[Yy]')
         if ($removeImages) {
-            $baseAns = Read-Host 'Also remove base images (postgres, redis, caddy, …)? [y/N]'
+            $baseAns = Read-Host 'Also remove base images (postgres, redis, caddy, ...)? [y/N]'
             $removeBase = ($baseAns -match '^[Yy]')
         }
     }
 
     if (-not $ProgressFile) {
         Write-Host ''
-        Write-Host 'Streamclone — Complete uninstall' -ForegroundColor Red
+        Write-Host 'Streamclone - Complete uninstall' -ForegroundColor Red
         Write-Host '================================' -ForegroundColor Red
         Write-Host "Install folder: $root"
         Write-Host ''

@@ -47,7 +47,7 @@ function Get-StreamcloneContainerSummary {
             elseif ($state -match 'Exited \(0\)') { "$name done" }
             else { "$name $state" }
         }
-        return ($parts -join ' · ')
+        return ($parts -join ' | ')
     } finally {
         $ErrorActionPreference = $prev
     }
@@ -144,7 +144,7 @@ try {
     if (-not $freshInstall) {
         if (Test-StreamcloneUpgradeNeeded -Root $InstallDir) {
             $versions = Get-StreamcloneInstallVersions -Root $InstallDir
-            Set-InstallProgress -Title 'Updating Streamclone' -Detail "Syncing images to $($versions.bundleVersion)…"
+            Set-InstallProgress -Title 'Updating Streamclone' -Detail "Syncing images to $($versions.bundleVersion)..."
             $onUpgradeLine = {
                 param($line)
                 $text = "$line".Trim()
@@ -157,7 +157,7 @@ try {
             Invoke-StreamcloneUpgrade -Root $InstallDir -OnLine $onUpgradeLine
             if (-not (Wait-StreamcloneStackReadyWithProgress)) { throw 'services did not become ready after upgrade' }
         } else {
-            Set-InstallProgress -Title 'Starting Streamclone' -Detail 'Already configured — bringing stack online.'
+            Set-InstallProgress -Title 'Starting Streamclone' -Detail 'Already configured - bringing stack online.'
             $composeArgs = Get-StreamcloneComposeArgs -Root $InstallDir -Profile core -UseImages
             $code = Invoke-EnvDocker -Arguments ($composeArgs + @('up', '-d', '--remove-orphans', '--pull', 'missing'))
             if ($code -ne 0) { throw 'docker compose up failed' }
@@ -192,7 +192,7 @@ try {
     if ($env:STREAMCLONE_NO_BROWSER -ne '1') {
         Start-Process 'http://localhost:8090/'
     }
-    Write-Host 'Optional Analytics and Clip Studio: open app → Stack status → Start Analytics / Clip Studio.' -ForegroundColor DarkGray
+    Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
     Complete-InstallProgress -ExitCode 0
     exit 0
 } catch {

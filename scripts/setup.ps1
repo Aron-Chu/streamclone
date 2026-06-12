@@ -79,7 +79,7 @@ if (-not $SkipTwitch) {
                 Write-Host '  synced TWITCH_OAUTH_CLIENT_ID/SECRET'
             }
         } else {
-            Write-Host '  twitch configure not run yet — skip or run: twitch configure'
+            Write-Host '  twitch configure not run yet - skip or run: twitch configure'
             if (-not $NonInteractive -and ($Profile -eq 'clipper' -or $Profile -eq 'full')) {
                 $cfg = Read-Host 'Run twitch configure now? [y/N]'
                 if ($cfg -match '^[yY]') { & twitch configure }
@@ -87,7 +87,7 @@ if (-not $SkipTwitch) {
         }
     } else {
         Write-Host 'Twitch CLI: not found (optional)'
-        Write-Host '  Use Sign in (optional) in the app at http://localhost:8090 — no CLI required.'
+        Write-Host '  Use Sign in (optional) in the app at http://localhost:8090 - no CLI required.'
     }
 }
 
@@ -143,7 +143,7 @@ if (-not $NoUp) {
             $pullTail | Select-Object -Last 15 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkRed }
             Write-Host "Full pull log: $pullLog" -ForegroundColor Yellow
             $coreStatus = Get-StreamcloneCoreImageStatus -Root (Get-Location)
-            Write-Host "$($coreStatus.present)/$($coreStatus.total) core images present — run Start Streamclone to resume." -ForegroundColor Yellow
+            Write-Host "$($coreStatus.present)/$($coreStatus.total) core images present - run Start Streamclone to resume." -ForegroundColor Yellow
             Write-Host 'If images partially downloaded, try Start Streamclone.cmd or re-run Install.' -ForegroundColor Yellow
             exit $code
         }

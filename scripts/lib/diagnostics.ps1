@@ -94,10 +94,10 @@ function Get-StreamcloneDiagnostics {
     }
 
     if ($upgradeNeeded) {
-        [void]$suggestions.Add('Run Manage Streamclone → Update to sync Docker images with the bundle version.')
+        [void]$suggestions.Add('Run Manage Streamclone -> Update to sync Docker images with the bundle version.')
     }
     if ($coreImages -and $coreImages.present -lt $coreImages.total) {
-        [void]$suggestions.Add("$($coreImages.present)/$($coreImages.total) core images downloaded — run Start Streamclone to resume.")
+        [void]$suggestions.Add("$($coreImages.present)/$($coreImages.total) core images downloaded - run Start Streamclone to resume.")
     }
 
     $containers = @()
