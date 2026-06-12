@@ -58,19 +58,23 @@ function Invoke-DockerComposePullWithProgress {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $result = Invoke-EnvDockerCaptured -Arguments ($ComposeArgs + @('pull'))
+        $result = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $ComposeArgs
         $pullOutput = $result.Output
         $pullExitCode = $result.ExitCode
         $pullOutput | ForEach-Object {
             $line = "$_".Trim()
-            if ($line -match 'Pulling|Pull complete|Downloaded|Image is up to date|✔|✓') {
+            if ($line -match 'Pulling|Pull complete|Downloaded|Image is up to date|✔|✓|Retrying|attempt') {
                 $short = $line
                 if ($short.Length -gt 90) { $short = $short.Substring(0, 87) + '...' }
                 Set-InstallProgress -Title 'Pulling Docker images' -Detail $short
             }
         }
         if ($pullExitCode -ne 0) {
-            throw "docker compose pull failed (exit $pullExitCode)"
+            $logsDir = Join-Path $InstallDir 'logs'
+            New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+            $pullLog = Join-Path $logsDir 'setup-pull.log'
+            @($pullOutput) | Set-Content -LiteralPath $pullLog -Encoding UTF8
+            throw "docker compose pull failed after retries (exit $pullExitCode). Log: $pullLog. Try Start Streamclone.cmd once images partially download."
         }
     } finally {
         $ErrorActionPreference = $prev

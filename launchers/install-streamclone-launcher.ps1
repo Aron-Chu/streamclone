@@ -103,12 +103,28 @@ function Invoke-StreamcloneInstall {
             } catch {
                 Write-Host ''
                 Write-Host "Setup error: $($_.Exception.Message)" -ForegroundColor Red
-                Write-Host 'Run Check Streamclone.cmd in your install folder for a full diagnostic.' -ForegroundColor Yellow
-                if (Test-Path $checkPs1) {
-                    Write-Host ''
-                    & $checkPs1 -InstallDir $root
+                $startPs1 = Join-Path $root 'scripts\start-streamclone.ps1'
+                if ((Test-Path (Join-Path $root '.env')) -and (Test-Path $startPs1)) {
+                    Write-Host 'Config exists — trying Start Streamclone as recovery...' -ForegroundColor Yellow
+                    & $startPs1
+                    if ($LASTEXITCODE -eq 0 -and (Test-StreamcloneWebOk)) {
+                        Write-Host 'Recovery start succeeded.' -ForegroundColor Green
+                    } else {
+                        Write-Host 'Recovery start did not complete. Run Check Streamclone.cmd in your install folder.' -ForegroundColor Yellow
+                        if (Test-Path $checkPs1) {
+                            Write-Host ''
+                            & $checkPs1 -InstallDir $root
+                        }
+                        exit 1
+                    }
+                } else {
+                    Write-Host 'Run Check Streamclone.cmd in your install folder for a full diagnostic.' -ForegroundColor Yellow
+                    if (Test-Path $checkPs1) {
+                        Write-Host ''
+                        & $checkPs1 -InstallDir $root
+                    }
+                    exit 1
                 }
-                exit 1
             }
         } else {
             Write-Host 'Already configured - starting stack...' -ForegroundColor Yellow

@@ -9,6 +9,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Repo = 'Aron-Chu/streamclone'
+$MasterRawBase = "https://raw.githubusercontent.com/$Repo/master"
 
 function Get-ReleaseZipMeta {
     param([string]$Tag)
@@ -65,6 +66,30 @@ function Prepare-InstallDirectory {
     }
 }
 
+function Update-BootstrapInstallScriptsFromMaster {
+    param([string]$Dir)
+    $overlayPaths = @(
+        'scripts/setup.ps1',
+        'scripts/lib/env.ps1',
+        'scripts/install-setup-progress.ps1',
+        'launchers/install-streamclone-launcher.ps1'
+    )
+    $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
+    foreach ($rel in $overlayPaths) {
+        $dest = Join-Path $Dir ($rel -replace '/', '\')
+        $destDir = Split-Path $dest -Parent
+        if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+        try {
+            $url = "$MasterRawBase/$rel"
+            Invoke-WebRequest -Uri $url -OutFile $dest -Headers $headers -UseBasicParsing
+        } catch {
+            Write-Host "  script overlay skipped: $rel ($($_.Exception.Message))" -ForegroundColor DarkYellow
+        }
+    }
+}
+
 Write-Host 'Step 1/4: Downloading latest release...' -ForegroundColor Cyan
 $meta = Get-ReleaseZipMeta -Tag $Version
 Write-Host "  $($meta.Name) ($($meta.Tag))"
@@ -77,6 +102,7 @@ if (-not $Force -and $localVersion -eq $meta.Tag -and (Test-Path $launcher)) {
         Write-Host ''
         Write-Host "  Already on $($meta.Tag) and running at http://localhost:8090/" -ForegroundColor Green
         Write-Host '  Skipping re-download. Refreshing shortcuts...' -ForegroundColor Yellow
+        Update-BootstrapInstallScriptsFromMaster -Dir $InstallDir
         & $launcher -Action install -LauncherRoot $InstallDir
         exit $LASTEXITCODE
     }
@@ -104,6 +130,7 @@ try {
         Get-ChildItem $nested -Force | Move-Item -Destination $InstallDir -Force
         Remove-Item -Recurse -Force $nested
     }
+    Update-BootstrapInstallScriptsFromMaster -Dir $InstallDir
     if ($savedEnv) {
         Set-Content -Path (Join-Path $InstallDir '.env') -Value $savedEnv -NoNewline
         Write-Host '  Preserved existing .env configuration' -ForegroundColor DarkGray

@@ -127,9 +127,19 @@ if (-not $NoUp) {
     Repair-FrontendDockerEntrypointLf
     if ($UseImages) {
         Write-Host 'Pulling Docker images...'
-        $code = Invoke-EnvDocker -Arguments ($composeArgs + @('pull'))
+        $pullResult = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs
+        $pullTail = @($pullResult.Output | Select-Object -Last 40)
+        $code = [int]$pullResult.ExitCode
         if ($code -ne 0) {
-            Write-Host "docker compose pull failed (exit $code). Check Docker Desktop and network." -ForegroundColor Red
+            $logsDir = Join-Path (Get-Location) 'logs'
+            New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+            $pullLog = Join-Path $logsDir 'setup-pull.log'
+            @($pullResult.Output) | Set-Content -LiteralPath $pullLog -Encoding UTF8
+            Write-Host "docker compose pull failed after retries (exit $code). Check Docker Desktop and network." -ForegroundColor Red
+            Write-Host 'Last docker compose lines:' -ForegroundColor Yellow
+            $pullTail | Select-Object -Last 15 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkRed }
+            Write-Host "Full pull log: $pullLog" -ForegroundColor Yellow
+            Write-Host 'If images partially downloaded, try Start Streamclone.cmd or re-run Install.' -ForegroundColor Yellow
             exit $code
         }
         $upArgs = @('up', '-d', '--remove-orphans', '--pull', 'missing')
