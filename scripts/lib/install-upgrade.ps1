@@ -23,8 +23,13 @@ $Script:StreamcloneBootstrapOverlayPaths = @(
     'scripts/setup.ps1',
     'scripts/lib/env.ps1',
     'scripts/lib/install-upgrade.ps1',
+    'scripts/lib/diagnostics.ps1',
     'scripts/install-setup-progress.ps1',
     'scripts/streamclone-manager.ps1',
+    'scripts/check-streamclone.ps1',
+    'scripts/preflight-deps.ps1',
+    'scripts/start-streamclone.ps1',
+    'scripts/bootstrap-windows-install.ps1',
     'launchers/install-streamclone-launcher.ps1'
 )
 
@@ -119,10 +124,10 @@ function Sync-StreamcloneImageTag {
         $Tag = (Get-StreamcloneInstallVersions -Root $Root).bundleVersion
     }
     if ([string]::IsNullOrWhiteSpace($Tag)) {
-        throw 'Cannot sync IMAGE_TAG — VERSION file missing and no tag specified.'
+        throw 'Cannot sync IMAGE_TAG - VERSION file missing and no tag specified.'
     }
     if (-not (Test-Path $EnvFile)) {
-        throw "Cannot sync IMAGE_TAG — missing $EnvFile"
+        throw "Cannot sync IMAGE_TAG - missing $EnvFile"
     }
     Set-EnvFileValue -Path $EnvFile -Key 'IMAGE_TAG' -Value $Tag
     Set-EnvFileValue -Path $EnvFile -Key 'STREAMCLONE_USE_IMAGES' -Value '1'
@@ -291,7 +296,7 @@ function Sync-StreamcloneReleaseBundle {
         }
 
         if (-not (Test-Path (Join-Path $sourceRoot 'VERSION'))) {
-            throw "Release extract failed — VERSION missing in archive."
+            throw "Release extract failed - VERSION missing in archive."
         }
 
         $files = Get-ChildItem -LiteralPath $sourceRoot -Recurse -Force -File
@@ -313,7 +318,7 @@ function Sync-StreamcloneReleaseBundle {
     }
 
     if (-not (Test-Path (Join-Path $InstallDir 'VERSION'))) {
-        throw "Release merge failed — VERSION missing in $InstallDir"
+        throw "Release merge failed - VERSION missing in $InstallDir"
     }
 }
 
@@ -357,7 +362,7 @@ function Invoke-StreamcloneReleaseDownloadWithProgress {
             $pct = [math]::Min(100, [math]::Floor(100.0 * $Read / $Total))
             if ($pct -ne $script:lastPct) {
                 $script:lastPct = $pct
-                Write-Host ("Downloading… {0}%" -f $pct) -ForegroundColor Cyan
+                Write-Host ("Downloading... {0}%" -f $pct) -ForegroundColor Cyan
             }
         } elseif ($OnProgress) {
             & $OnProgress $Read $Total
@@ -408,7 +413,7 @@ function Invoke-StreamcloneUpgrade {
         $TargetTag = (Get-StreamcloneInstallVersions -Root $Root).bundleVersion
     }
     if ([string]::IsNullOrWhiteSpace($TargetTag)) {
-        throw 'Cannot upgrade — VERSION file missing.'
+        throw 'Cannot upgrade - VERSION file missing.'
     }
 
     Sync-StreamcloneImageTag -Root $Root -Tag $TargetTag

@@ -119,7 +119,7 @@ function Start-DockerDesktopIfStopped {
     if (-not $started) { return $false }
 
     if (-not $Quiet -and -not $Json) {
-        Write-Host 'Waiting for Docker Desktop…' -ForegroundColor Yellow
+        Write-Host 'Waiting for Docker Desktop...' -ForegroundColor Yellow
     }
     $deadline = (Get-Date).AddSeconds($WaitSec)
     while ((Get-Date) -lt $deadline) {
@@ -240,7 +240,7 @@ if ($IsWindows -or $env:OS -match 'Windows') {
 if (Test-PortFree -Port 8090) {
     Write-Check ok 'Port 8090 is free (Streamclone proxy)'
 } else {
-    Write-Check warn 'Port 8090 is in use — Streamclone may already be running (this is OK)'
+    Write-Check warn 'Port 8090 is in use - Streamclone may already be running (this is OK)'
     $warnings++
 }
 
@@ -284,7 +284,7 @@ if ($engineRunning -and $resolvedTag) {
             if ($InstallHints) {
                 Write-Check fail $msg
                 $errors++
-                Add-BlockedReason 'GHCR packages not reachable — set packages Public or docker login ghcr.io'
+                Add-BlockedReason 'GHCR packages not reachable - set packages Public or docker login ghcr.io'
                 Write-Host '  Set GHCR packages Public or run: docker login ghcr.io' -ForegroundColor DarkGray
             } else {
                 Write-Check warn $msg

@@ -28,7 +28,7 @@ function Write-ManagerBanner {
     if ($versions.bundleVersion) {
         $line = "Bundle $($versions.bundleVersion)"
         if ($versions.imageTag -and ($versions.imageTag -ne $versions.bundleVersion)) {
-            $line += " · Images $($versions.imageTag)"
+            $line += " | Images $($versions.imageTag)"
         }
         Write-Host $line -ForegroundColor DarkGray
     }
@@ -73,7 +73,7 @@ function Show-ManagerStatus {
 function Invoke-ManagerRepair {
     Get-ManagerInstallRoot
     if (-not (Test-Path (Join-Path $Root '.env'))) {
-        throw 'Missing .env — run setup first (Install Streamclone or Setup.exe).'
+        throw 'Missing .env - run setup first (Install Streamclone or Setup.exe).'
     }
 
     Write-Host 'Repair will:' -ForegroundColor Cyan
@@ -90,7 +90,7 @@ function Invoke-ManagerRepair {
     }
 
     & (Join-Path $PSScriptRoot 'preflight-deps.ps1') -InstallHints
-    if ($LASTEXITCODE -ne 0) { throw 'Preflight failed — start Docker Desktop and retry.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Preflight failed - start Docker Desktop and retry.' }
 
     $profile = Get-StreamcloneProfileFromRoot -Root $Root
     $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile
@@ -115,7 +115,7 @@ function Invoke-ManagerRepair {
 function Invoke-ManagerUpdate {
     Get-ManagerInstallRoot
     if (-not (Test-Path (Join-Path $Root '.env'))) {
-        throw 'Missing .env — run setup first (Install Streamclone or Setup.exe).'
+        throw 'Missing .env - run setup first (Install Streamclone or Setup.exe).'
     }
 
     if (-not (Test-StreamcloneUpgradeNeeded -Root $Root)) {
@@ -134,7 +134,7 @@ function Invoke-ManagerUpdate {
     }
 
     & (Join-Path $PSScriptRoot 'preflight-deps.ps1') -InstallHints
-    if ($LASTEXITCODE -ne 0) { throw 'Preflight failed — start Docker Desktop and retry.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Preflight failed - start Docker Desktop and retry.' }
 
     Invoke-StreamcloneUpgrade -Root $Root
 }
@@ -240,7 +240,7 @@ function Get-StreamcloneContainerSummary {
             elseif ($state -match 'Exited \(0\)') { "$name done" }
             else { "$name $state" }
         }
-        return ($parts -join ' · ')
+        return ($parts -join ' | ')
     } finally {
         $ErrorActionPreference = $prev
     }

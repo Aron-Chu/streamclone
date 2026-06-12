@@ -51,7 +51,7 @@ try {
         @{ Name = 'Stop Streamclone.lnk'; Target = Join-Path $Root 'Stop Streamclone.cmd'; Desc = 'Stop all Streamclone Docker containers' }
         @{ Name = 'Manage Streamclone.lnk'; Target = Join-Path $Root 'Manage Streamclone.cmd'; Desc = 'Repair, update, status, logs, and uninstall' }
         @{ Name = 'Check Streamclone.lnk'; Target = Join-Path $Root 'Check Streamclone.cmd'; Desc = 'Diagnose Docker, images, and web UI (no changes)' }
-        @{ Name = 'Uninstall Streamclone.lnk'; Target = Join-Path $Root 'Uninstall Streamclone.cmd'; Desc = 'Complete uninstall — stops Docker, removes data and shortcuts' }
+        @{ Name = 'Uninstall Streamclone.lnk'; Target = Join-Path $Root 'Uninstall Streamclone.cmd'; Desc = 'Complete uninstall - stops Docker, removes data and shortcuts' }
     )) {
         $lnk = Join-Path $desktop $pair.Name
         $sc = $shell.CreateShortcut($lnk)

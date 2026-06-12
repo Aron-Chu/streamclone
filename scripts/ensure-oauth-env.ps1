@@ -53,7 +53,7 @@ $cli = Read-KeyValueFile -Path $CliConfig
 $clientId = $cli['CLIENTID']
 $clientSecret = $cli['CLIENTSECRET']
 if ([string]::IsNullOrWhiteSpace($clientId) -or [string]::IsNullOrWhiteSpace($clientSecret)) {
-    Write-Host "ensure-oauth-env: twitch-cli config missing CLIENTID/CLIENTSECRET — run twitch configure"
+    Write-Host "ensure-oauth-env: twitch-cli config missing CLIENTID/CLIENTSECRET - run twitch configure"
     exit 1
 }
 

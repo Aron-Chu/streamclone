@@ -33,7 +33,7 @@ if (-not $Json) {
     if ($report.imageTag) { $versionParts += "Images $($report.imageTag)" }
     if ($report.latestRelease) { $versionParts += "Latest $($report.latestRelease)" }
     if ($versionParts.Count -gt 0) {
-        $versionLine = $versionParts -join ' · '
+        $versionLine = $versionParts -join ' | '
         if ($report.upgradeNeeded) {
             $versionLine += ' (update available)'
             Write-Host $versionLine -ForegroundColor Yellow

@@ -44,13 +44,13 @@ if (-not $UseImages.IsPresent) {
 $envFile = Join-Path $Root '.env'
 if (-not $SkipSetup -and -not (Test-Path $envFile)) {
     Write-Host ''
-    Write-Host "First run — running setup (profile: $Profile)..." -ForegroundColor Cyan
+    Write-Host "First run - running setup (profile: $Profile)..." -ForegroundColor Cyan
     $setupArgs = @{ Profile = $Profile; NonInteractive = $true }
     if ($pullImages) { $setupArgs['UseImages'] = $true }
     & (Join-Path $PSScriptRoot 'setup.ps1') @setupArgs
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } elseif (-not (Test-Path $envFile)) {
-    throw "Missing .env — run: powershell -File scripts/setup.ps1"
+    throw "Missing .env - run: powershell -File scripts/setup.ps1"
 } else {
     Write-Host "Starting Streamclone (profile: $Profile)..." -ForegroundColor Cyan
     if ($pullImages) {
