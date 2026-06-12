@@ -340,7 +340,10 @@ function Invoke-EnvDockerCaptured {
 function Test-StreamcloneDockerPullDisplayLine {
     param([string]$Line)
     $text = "$Line".Trim()
-    if ($text -match '^[a-f0-9]{12} (Downloading|Extracting|Verifying)') { return $false }
+    if ($text -eq '') { return $false }
+    # Layer progress spam (no TTY when launched from Install .cmd via PowerShell).
+    if ($text -match '^[a-f0-9]{12}\s') { return $false }
+    if ($text -match '^[a-f0-9]{64}\s') { return $false }
     return $true
 }
 
@@ -369,6 +372,7 @@ function Invoke-EnvDockerStreaming {
             $code = if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 0 }
             if (-not $? -and $code -eq 0) { $code = 1 }
         } else {
+            $lastLayerHint = [DateTime]::MinValue
             & $docker @Arguments 2>&1 | ForEach-Object {
                 $line = "$_".TrimEnd()
                 if ($line -eq '') { return }
@@ -376,6 +380,13 @@ function Invoke-EnvDockerStreaming {
                 $display = $true
                 if ($OutputMode -eq 'summary') {
                     $display = Test-StreamcloneDockerPullDisplayLine -Line $line
+                    if (-not $display) {
+                        $now = Get-Date
+                        if (($now - $lastLayerHint).TotalSeconds -ge 8) {
+                            Write-Host '  Downloading image layers...' -ForegroundColor DarkGray
+                            $lastLayerHint = $now
+                        }
+                    }
                 }
                 if ($display) {
                     Write-Host $line
@@ -404,7 +415,7 @@ function Invoke-EnvDockerComposePullWithRetry {
         [int]$MaxAttempts = 3,
         [int]$RetryDelaySec = 10,
         [scriptblock]$OnLine = $null,
-        [ValidateSet('interactive', 'capture', 'summary')][string]$OutputMode = 'interactive'
+        [ValidateSet('interactive', 'capture', 'summary')][string]$OutputMode = 'summary'
     )
     $last = $null
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
