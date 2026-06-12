@@ -37,6 +37,17 @@ function Test-SetupControlEnvStale {
     return ((Get-Item $envFile).LastWriteTimeUtc -gt $proc.StartTime.ToUniversalTime())
 }
 
+function Test-SetupControlScriptStale {
+    param([string]$StalePidFile)
+    if (-not (Test-Path $StalePidFile)) { return $false }
+    if (-not (Test-Path $controlScript)) { return $false }
+    $raw = (Get-Content $StalePidFile -Raw).Trim()
+    if ($raw -notmatch '^\d+$') { return $true }
+    $proc = Get-Process -Id ([int]$raw) -ErrorAction SilentlyContinue
+    if (-not $proc) { return $true }
+    return ((Get-Item $controlScript).LastWriteTimeUtc -gt $proc.StartTime.ToUniversalTime())
+}
+
 function Stop-StaleSetupControl {
     param([string]$StalePidFile)
     if (-not (Test-Path $StalePidFile)) { return }
@@ -51,7 +62,7 @@ function Stop-StaleSetupControl {
 }
 
 if (Test-SetupControlHealth -HealthPort $Port) {
-    if (-not (Test-SetupControlEnvStale -StalePidFile $pidFile)) {
+    if (-not (Test-SetupControlEnvStale -StalePidFile $pidFile) -and -not (Test-SetupControlScriptStale -StalePidFile $pidFile)) {
         return
     }
     Stop-StaleSetupControl -StalePidFile $pidFile

@@ -86,6 +86,15 @@ $null = $LASTEXITCODE
 & (Join-Path $PSScriptRoot 'lib\wait-stack.ps1')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+if (Test-Path (Join-Path $Root 'VERSION')) {
+    . (Join-Path $PSScriptRoot 'lib\install-upgrade.ps1')
+    try {
+        Update-StreamcloneBootstrapOverlayFromMaster -Dir $Root
+    } catch {
+        Write-Host "  script refresh skipped: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+}
+
 $controlPidFile = Join-Path $Root '.streamclone-setup-control.pid'
 $controlScript = Join-Path $PSScriptRoot 'setup-control.ps1'
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root $Root
