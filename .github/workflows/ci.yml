@@ -116,9 +116,11 @@ jobs:
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
             up -d --build
-      - name: Install Playwright browsers
+      - name: Install frontend deps and Playwright browsers
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
       - name: Wait for health endpoints and UI smoke
         run: bash scripts/smoke-core.sh --ui
       - name: Check metrics endpoints
