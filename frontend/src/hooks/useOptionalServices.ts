@@ -50,7 +50,8 @@ export function useOptionalServices() {
     setStarting(service)
     try {
       await startSetupService(service)
-      for (let attempt = 0; attempt < 15; attempt++) {
+      const maxAttempts = service === 'clipper' ? 45 : 30
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise(resolve => window.setTimeout(resolve, 2000))
         await queryClient.invalidateQueries({ queryKey: ['setup-welcome'] })
         const latest = queryClient.getQueryData<SetupWelcome>(['setup-welcome'])

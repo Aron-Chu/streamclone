@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"streamclone/internal/emote/dict"
+	"streamclone/internal/emote/flags"
 	"streamclone/internal/emote/objstore"
 	"streamclone/internal/emote/store"
 	"streamclone/internal/metadata/helix"
@@ -93,9 +94,10 @@ type sevenTVSet struct {
 }
 
 type sevenTVEmote struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Data struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Flags int    `json:"flags"`
+	Data  struct {
 		Animated bool `json:"animated"`
 		Flags    int  `json:"flags"`
 	} `json:"data"`
@@ -286,6 +288,43 @@ func (s *Seeder) fetchSevenTVUser(ctx context.Context, twitchID string) (*sevenT
 	return &u, nil
 }
 
+func sevenTVZeroWidth(em sevenTVEmote) bool {
+	return flags.FromSevenTV(em.Flags, em.Data.Flags)
+}
+
+func remoteEmoteFlags(em remoteEmote) int {
+	return flags.Pack(em.ZeroWidth, em.Animated)
+}
+
+func (s *Seeder) SyncSevenTVEmoteFlags(ctx context.Context, twitchID string) (int, error) {
+	u, err := s.fetchSevenTVUser(ctx, twitchID)
+	if err != nil {
+		return 0, err
+	}
+	if u.EmoteSet == nil {
+		return 0, nil
+	}
+	updated := 0
+	for _, em := range u.EmoteSet.Emotes {
+		existing, err := s.st.GetProviderEmote(ctx, string(ProviderSevenTV), em.ID)
+		if err != nil {
+			continue
+		}
+		want := remoteEmoteFlags(remoteEmote{
+			ZeroWidth: sevenTVZeroWidth(em),
+			Animated:  em.Data.Animated,
+		})
+		if existing.Flags == want {
+			continue
+		}
+		if err := s.st.UpdateEmoteFlags(ctx, existing.ID, want); err != nil {
+			return updated, err
+		}
+		updated++
+	}
+	return updated, nil
+}
+
 func (s *Seeder) seedSevenTVUser(ctx context.Context, twitchID, setID string, u *sevenTVUser) (int, error) {
 	if u.EmoteSet == nil {
 		return 0, nil
@@ -301,11 +340,18 @@ func (s *Seeder) seedSevenTVUser(ctx context.Context, twitchID, setID string, u 
 			SourceURL:       fmt.Sprintf("%s/emote/%s/4x.webp", s.cdnURL, em.ID),
 			MimeType:        "image/webp",
 			Animated:        em.Data.Animated,
-			ZeroWidth:       em.Data.Flags&1 != 0,
+			ZeroWidth:       sevenTVZeroWidth(em),
 		})
 	}
 	sortRemoteEmotes(emotes)
-	return s.importRemoteEmotesToSet(ctx, setID, emotes)
+	count, err := s.importRemoteEmotesToSet(ctx, setID, emotes)
+	if err != nil {
+		return count, err
+	}
+	if _, err := s.SyncSevenTVEmoteFlags(ctx, twitchID); err != nil && s.log != nil {
+		s.log.Warn("sync 7tv zero-width flags", "twitch_id", twitchID, "err", err)
+	}
+	return count, nil
 }
 
 func (s *Seeder) seedFFZ(ctx context.Context, login, twitchID, setID string) (int, error) {
@@ -436,7 +482,11 @@ func (s *Seeder) fetchFFZURL(ctx context.Context, url string) (*ffzResponse, err
 }
 
 func (s *Seeder) importRemoteEmote(ctx context.Context, em remoteEmote) (string, bool, error) {
+	wantFlags := remoteEmoteFlags(em)
 	if existing, err := s.st.GetProviderEmote(ctx, string(em.Provider), em.ProviderEmoteID); err == nil {
+		if existing.Flags != wantFlags {
+			_ = s.st.UpdateEmoteFlags(ctx, existing.ID, wantFlags)
+		}
 		if existing.Status != 1 && existing.SourceHash != "" {
 			_, _ = s.st.InsertJob(ctx, existing.ID, existing.SourceHash)
 		}
@@ -464,13 +514,7 @@ func (s *Seeder) importRemoteEmote(ctx context.Context, em remoteEmote) (string,
 		return "", false, err
 	}
 
-	flags := 0
-	if em.ZeroWidth {
-		flags |= 1
-	}
-	if em.Animated {
-		flags |= 2
-	}
+	flags := wantFlags
 	mimeType := em.MimeType
 	if mimeType == "" {
 		mimeType = strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
@@ -585,7 +629,7 @@ func (s *Seeder) rebuildChannelDictionary(ctx context.Context, login string) err
 		entries = append(entries, dict.EmoteEntry{
 			Name:      e.Name,
 			EmoteID:   e.EmoteID,
-			ZeroWidth: e.Flags&1 != 0,
+			ZeroWidth: flags.IsZeroWidth(e.Flags),
 			Provider:  e.Provider,
 		})
 	}

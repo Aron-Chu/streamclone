@@ -18,6 +18,12 @@ $envPath = Join-Path $Root '.env'
 $envValues = if (Test-Path $envPath) { Read-EnvKeyValueFile -Path $envPath } else { @{} }
 $setupControlToken = [string]$envValues['SETUP_CONTROL_TOKEN']
 
+function Sync-SetupControlTokenFromEnv {
+    if (-not (Test-Path $envPath)) { return }
+    $script:envValues = Read-EnvKeyValueFile -Path $envPath
+    $script:setupControlToken = [string]$envValues['SETUP_CONTROL_TOKEN']
+}
+
 function Write-JsonResponse {
     param(
         [System.Net.HttpListenerResponse]$Response,
@@ -36,6 +42,7 @@ function Write-JsonResponse {
 
 function Test-SetupControlAuthorized {
     param([System.Net.HttpListenerRequest]$Request)
+    Sync-SetupControlTokenFromEnv
     if ([string]::IsNullOrWhiteSpace($setupControlToken)) {
         return $false
     }
@@ -79,6 +86,48 @@ function Invoke-ProfileServiceUp {
         throw "docker compose failed: $output"
     }
     return $output
+}
+
+function Start-ProfileServiceUpAsync {
+    param(
+        [ValidateSet('scraper', 'clipper')]
+        [string]$Service
+    )
+
+    Set-Location $Root
+    if (-not (Test-Path $envPath)) {
+        throw 'Missing .env — run scripts/setup.ps1 first.'
+    }
+
+    Sync-SetupControlTokenFromEnv
+
+    if ($Service -eq 'scraper') {
+        $sibling = Get-EnvScraperSiblingPath
+        $hasRepo = (Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile'))
+        if (-not $hasRepo) {
+            Write-Host "Cloning streamclone-scraper to $sibling ..."
+            $parent = Split-Path -Parent $sibling
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            $clone = Invoke-EnvCapturedProcess -FilePath 'git' -ArgumentList @('clone', 'https://github.com/Aron-Chu/streamclone-scraper.git', $sibling) -TimeoutSec 300
+            if ($clone.ExitCode -ne 0) {
+                $log = ($clone.Output -join [Environment]::NewLine).Trim()
+                throw "Could not clone streamclone-scraper: $log"
+            }
+        }
+    }
+
+    $useImages = ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1') -or (-not [string]::IsNullOrWhiteSpace($envValues['IMAGE_TAG']))
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $Service -UseImages:$useImages
+    $docker = Get-EnvDockerExe
+    if (-not $docker) {
+        throw "Docker is required. Install Docker Desktop and ensure 'docker.exe' is on PATH."
+    }
+
+    $logFile = Join-Path $Root ".streamclone-start-$Service.log"
+    $args = $composeArgs + @('up', '-d', '--remove-orphans', $Service)
+
+    $proc = Start-Process -FilePath $docker -ArgumentList (Join-EnvProcessArguments -Arguments $args) -WorkingDirectory $Root -WindowStyle Hidden -PassThru
+    return "compose start initiated (pid $($proc.Id)); see $logFile"
 }
 
 function Invoke-SyncClipperAuth {
@@ -162,8 +211,8 @@ try {
                     continue
                 }
                 $service = $Matches[1]
-                $log = Invoke-ProfileServiceUp -Service $service
-                Write-JsonResponse -Response $response -StatusCode 200 -Body @{ ok = $true; service = $service; message = 'started'; log = $log }
+                $log = Start-ProfileServiceUpAsync -Service $service
+                Write-JsonResponse -Response $response -StatusCode 200 -Body @{ ok = $true; service = $service; message = 'starting'; log = $log }
                 continue
             }
 

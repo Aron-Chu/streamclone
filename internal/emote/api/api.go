@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"streamclone/internal/emote/dict"
+	"streamclone/internal/emote/flags"
 	"streamclone/internal/emote/objstore"
 	"streamclone/internal/emote/seeder"
 	"streamclone/internal/emote/store"
@@ -178,7 +179,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 			if req.Alias != nil {
 				name = *req.Alias
 			}
-			_ = h.d.AddEmote(r.Context(), channel.Login, name, emote.ID, emote.Flags&1 != 0)
+			_ = h.d.AddEmote(r.Context(), channel.Login, name, emote.ID, flags.IsZeroWidth(emote.Flags))
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -320,6 +321,11 @@ func (h *Handler) ensureEmotes(ctx context.Context, login, twitchID string, prov
 		return resp, http.StatusAccepted, nil
 	}
 	if channelKnown && activeSetLoaded && len(providersToSeed) == 0 {
+		if h.seed != nil && providerListIncludes(providers, seeder.ProviderSevenTV) {
+			if _, err := h.seed.SyncSevenTVEmoteFlags(ctx, twitchID); err != nil && h.log != nil {
+				h.log.Warn("sync 7tv zero-width flags", "login", login, "twitch_id", twitchID, "err", err)
+			}
+		}
 		dictStarted := time.Now()
 		if err := h.rebuildChannelDictionary(ctx, login); err != nil {
 			return ensureResponse{}, http.StatusInternalServerError, err
@@ -341,6 +347,15 @@ func (h *Handler) ensureEmotes(ctx context.Context, login, twitchID string, prov
 	resp.Benchmark.SeedMs = time.Since(seedStarted).Milliseconds()
 	resp.Benchmark.EnsureMs = time.Since(started).Milliseconds()
 	return resp, http.StatusAccepted, nil
+}
+
+func providerListIncludes(providers []seeder.Provider, want seeder.Provider) bool {
+	for _, provider := range providers {
+		if provider == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) providersNeedingRefresh(ctx context.Context, login, twitchID string, providers []seeder.Provider) ([]seeder.Provider, error) {
@@ -622,7 +637,7 @@ func (h *Handler) rebuildChannelDictionary(ctx context.Context, login string) er
 		entries = append(entries, dict.EmoteEntry{
 			Name:      e.Name,
 			EmoteID:   e.EmoteID,
-			ZeroWidth: e.Flags&1 != 0,
+			ZeroWidth: flags.IsZeroWidth(e.Flags),
 			Provider:  e.Provider,
 		})
 	}
@@ -759,7 +774,7 @@ func (h *Handler) setActiveSet(w http.ResponseWriter, r *http.Request) {
 				entries = append(entries, dict.EmoteEntry{
 					Name:      e.Name,
 					EmoteID:   e.EmoteID,
-					ZeroWidth: e.Flags&1 != 0,
+					ZeroWidth: flags.IsZeroWidth(e.Flags),
 				})
 			}
 			_ = h.d.Rebuild(r.Context(), channel.Login, entries)
@@ -800,7 +815,7 @@ func (h *Handler) listChannelEmotes(w http.ResponseWriter, r *http.Request) {
 			Name:     e.Name,
 			EmoteID:  e.EmoteID,
 			URL:      h.d.EmoteURL(e.EmoteID, "1x"),
-			ZW:       e.Flags&1 != 0,
+			ZW:       flags.IsZeroWidth(e.Flags),
 			Provider: e.Provider,
 		})
 	}

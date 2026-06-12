@@ -201,6 +201,7 @@ function Remove-InstallDirectoryDeferred {
     param([string]$Root)
     $escaped = $Root.Replace("'", "''")
     $cleanup = @"
+Set-Location `$env:TEMP
 Start-Sleep -Seconds 2
 Remove-Item -LiteralPath '$escaped' -Recurse -Force -ErrorAction SilentlyContinue
 "@

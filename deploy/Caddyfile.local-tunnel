@@ -74,6 +74,11 @@
 		uri strip_prefix /v1/setup-control
 		reverse_proxy host.docker.internal:9191 {
 			header_up X-Forwarded-Proto http
+			transport http {
+				read_timeout 15m
+				write_timeout 15m
+				response_header_timeout 15m
+			}
 		}
 	}
 
