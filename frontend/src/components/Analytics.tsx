@@ -2921,14 +2921,20 @@ function SelectedMomentPanel({
     ? `https://www.twitch.tv/videos/${vodId}?t=${offsetStr}`
     : undefined
 
+  const canClipLive = isLiveView && channelLive !== false
+
   const handleCreateClip = async () => {
     if (!rollup) return
     setClipStatus('loading')
     setClipError('')
     try {
-      if (isLiveView && channelLive === false) {
+      if (!canClipLive) {
         setClipStatus('error')
-        setClipError('Channel is not live right now. Clip moments from the live view require an active broadcast.')
+        setClipError(
+          isLiveView
+            ? 'Channel is not live right now. Clip moments from the live view require an active broadcast.'
+            : 'Past-stream moments cannot use Twitch clip creation while the channel is offline. Use Jump into VOD to watch this moment — live-only clipping will be replaced with VOD export later.',
+        )
         return
       }
       if (!isLiveView && !vodId) {
@@ -3038,23 +3044,34 @@ function SelectedMomentPanel({
           )}
 
           <div>
-            <button
-              type="button"
-              onClick={handleCreateClip}
-              disabled={clipStatus === 'loading'}
-              className={`flex items-center gap-2 rounded px-4 py-2 text-xs font-black transition ${
-                clipStatus === 'loading'
-                  ? 'bg-zinc-800 text-zinc-400 border border-white/5 cursor-wait'
-                  : clipStatus === 'success'
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-cyan-600 text-white hover:bg-cyan-700 shadow-lg shadow-cyan-600/20'
-              }`}
-            >
-              {clipStatus === 'loading' && <span>Queuing Clip...</span>}
-              {clipStatus === 'success' && <span>✓ Clip Queued!</span>}
-              {clipStatus === 'error' && <span>Retry Clip</span>}
-              {clipStatus === 'idle' && <span>Clip Moment</span>}
-            </button>
+            {canClipLive ? (
+              <button
+                type="button"
+                onClick={handleCreateClip}
+                disabled={clipStatus === 'loading'}
+                className={`flex items-center gap-2 rounded px-4 py-2 text-xs font-black transition ${
+                  clipStatus === 'loading'
+                    ? 'bg-zinc-800 text-zinc-400 border border-white/5 cursor-wait'
+                    : clipStatus === 'success'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-cyan-600 text-white hover:bg-cyan-700 shadow-lg shadow-cyan-600/20'
+                }`}
+              >
+                {clipStatus === 'loading' && <span>Queuing Clip...</span>}
+                {clipStatus === 'success' && <span>✓ Clip Queued!</span>}
+                {clipStatus === 'error' && <span>Retry Clip</span>}
+                {clipStatus === 'idle' && <span>Clip Live Moment</span>}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled
+                title="Twitch clip creation only works while the channel is live. Use Jump into VOD for past stream moments."
+                className="flex items-center gap-2 rounded border border-white/10 bg-zinc-900 px-4 py-2 text-xs font-black text-zinc-500 cursor-not-allowed"
+              >
+                Clip requires live channel
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -3090,7 +3107,7 @@ export default function Analytics() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
   const [activeClipsTab, setActiveClipsTab] = useState<'edits' | 'twitch'>('edits')
-  const [rightPanelTab, setRightPanelTab] = useState<'moments' | 'emotes' | 'clips' | 'sync'>('moments')
+  const [rightPanelTab, setRightPanelTab] = useState<'emotes' | 'clips' | 'sync'>('emotes')
   const [syncedOnlyFilter, setSyncedOnlyFilter] = useState(false)
 
   const isLiveRoute = !streamId
@@ -3247,6 +3264,13 @@ export default function Analytics() {
     }
     return undefined
   }, [streamId, matchedStream, streamsQuery.isLoading, historyQuery.isLoading])
+
+  useEffect(() => {
+    setSyncing(false)
+    setSyncError(null)
+    setSyncNotice(null)
+    setSyncStatus(null)
+  }, [targetQueryStreamId])
 
   const prefetchStreamDetail = useCallback((id: string) => {
     if (!login || !id) return
@@ -3432,12 +3456,23 @@ export default function Analytics() {
       const status = await getSyncStatus(targetQueryStreamId).catch(() => null)
       if (cancelled) return
       const detailSyncing = detailQuery.data?.state === 'syncing'
+      const statusTerminal = Boolean(
+        status
+        && (status.phase === 'completed' || status.phase === 'failed' || status.stale),
+      )
       const statusActive = Boolean(
         status
+        && !statusTerminal
         && status.phase !== 'completed'
         && status.phase !== 'failed'
         && !status.stale,
       )
+      if (statusTerminal) {
+        if (detailSyncing) {
+          void detailQuery.refetch()
+        }
+        return
+      }
       if (!detailSyncing && !statusActive) return
       setSyncing(true)
       setRightPanelTab('sync')
@@ -3791,11 +3826,17 @@ export default function Analytics() {
               isLiveView={isLiveRoute}
               channelLive={detail?.state === 'live'}
             />
+            <MomentReviewPanel
+              rollups={detail?.rollups ?? []}
+              selectedRollup={selectedRollup}
+              onSelectRollup={setSelectedRollup}
+              topEmotesCatalog={detail?.topEmotes}
+            />
           </section>
           <aside className="space-y-4">
             <div className="rounded border border-white/10 bg-white/[0.035] overflow-hidden">
               <div className="flex border-b border-white/10 text-[10px] font-black uppercase bg-white/[0.015]">
-                {(['moments', 'emotes', 'clips', 'sync'] as const).map(tab => (
+                {(['emotes', 'clips', 'sync'] as const).map(tab => (
                   <button
                     key={tab}
                     type="button"
@@ -3806,20 +3847,11 @@ export default function Analytics() {
                         : 'text-zinc-500 hover:text-zinc-300'
                     }`}
                   >
-                    {tab === 'moments' ? 'Moments' : tab === 'emotes' ? 'Emotes' : tab === 'clips' ? 'Clips' : 'Sync'}
+                    {tab === 'emotes' ? 'Emotes' : tab === 'clips' ? 'Clips' : 'Sync'}
                   </button>
                 ))}
               </div>
               <div className="p-0">
-                {rightPanelTab === 'moments' ? (
-                  <MomentReviewPanel
-                    rollups={detail?.rollups ?? []}
-                    selectedRollup={selectedRollup}
-                    onSelectRollup={setSelectedRollup}
-                    topEmotesCatalog={detail?.topEmotes}
-                    embedded
-                  />
-                ) : null}
                 {rightPanelTab === 'emotes' ? (
                   <TopEmoteTable emotes={detail?.topEmotes ?? []} selected={chartEmoteKeys} onSelect={toggleSelected} embedded />
                 ) : null}

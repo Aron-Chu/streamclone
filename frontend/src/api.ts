@@ -1267,7 +1267,14 @@ export function describeClipperFailure(job: Pick<ClipperJob, 'failure_code' | 'e
     case 'clip_not_ready':
       return 'Twitch created the clip but it was not ready before the poll timeout. Use Retry — the worker resumes from the existing clip ID without creating a duplicate.'
     case 'offline':
-      return 'The channel was offline when clip creation was attempted. Clip moments from live analytics require the broadcaster to be live; for past streams, ensure the VOD is available.'
+    case 'not_found':
+      if (job.error_message?.toLowerCase().includes('offline')) {
+        return 'Twitch only creates clips from live broadcasts. For past stream moments, use Jump into VOD — VOD-based clipping in Clip Studio is not available yet.'
+      }
+      if (job.failure_code === 'offline') {
+        return 'The channel was offline when clip creation was attempted. Clip moments from live analytics require the broadcaster to be live; for past streams, use Jump into VOD.'
+      }
+      return job.error_message || 'Clip request failed (channel may be offline or unavailable).'
     case 'job_failed':
     case 'transcribe_failed':
     case 'render_failed':
