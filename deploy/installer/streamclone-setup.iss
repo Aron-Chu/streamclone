@@ -313,7 +313,7 @@ begin
     'This will:' + #13#10 +
     '  - Stop all Docker containers' + #13#10 +
     '  - Delete database and MinIO data (volumes)' + #13#10 +
-    '  - Remove secrets and Desktop shortcuts (Start, Stop, Manage, Check, Uninstall)' + #13#10 +
+    '  - Remove secrets and the Desktop shortcut (Streamclone.lnk)' + #13#10 +
     '  - Remove the install folder' + #13#10#13#10 +
     'Docker images are kept by default for faster reinstall.' + #13#10 +
     'Settings → Apps runs full Docker teardown; use Manage → Reset config to keep volumes.',

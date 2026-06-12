@@ -127,10 +127,9 @@ foreach ($p in (Get-EnvComposeProfiles -Profile $Profile)) {
 if (-not $NoUp) {
     Repair-FrontendDockerEntrypointLf
     if ($UseImages) {
-        Write-Host 'Pulling Docker images...'
-        Write-Host '  First install downloads about 1.5 GB. Docker progress appears below (3-8 min on a cold pull).' -ForegroundColor DarkCyan
+        Write-Host 'Pulling Docker images (~1.5 GB, 3-8 min on first install)...' -ForegroundColor Cyan
         Write-Host ''
-        $pullResult = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs
+        $pullResult = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs -OutputMode interactive
         $pullTail = @($pullResult.Output | Select-Object -Last 40)
         $code = [int]$pullResult.ExitCode
         if ($code -ne 0) {

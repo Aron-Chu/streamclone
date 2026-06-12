@@ -404,7 +404,8 @@ function Invoke-StreamcloneUpgrade {
         [string]$Root = '',
         [string]$TargetTag = '',
         [scriptblock]$OnLine = $null,
-        [int]$WaitTimeoutSec = 300
+        [int]$WaitTimeoutSec = 300,
+        [ValidateSet('interactive', 'capture', 'summary')][string]$PullOutputMode = 'interactive'
     )
     if ([string]::IsNullOrWhiteSpace($Root)) {
         $Root = Get-EnvRepoRoot
@@ -424,7 +425,9 @@ function Invoke-StreamcloneUpgrade {
     $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile
 
     Write-Host "Upgrading Streamclone images to $TargetTag..." -ForegroundColor Cyan
-    $pull = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs -OnLine $OnLine
+    Write-Host 'Pulling Docker images (~1.5 GB, 3-8 min on first install)...' -ForegroundColor Cyan
+    Write-Host ''
+    $pull = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs -OnLine $OnLine -OutputMode $PullOutputMode
     if ($pull.ExitCode -ne 0) {
         throw "docker compose pull failed (exit $($pull.ExitCode))."
     }

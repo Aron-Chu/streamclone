@@ -68,7 +68,7 @@ If you only use Setup.exe, expect **Core Watch** behavior: Analytics pages show 
 
 1. Start **Docker Desktop** (wait until Running)
 2. From **[GitHub Releases](https://github.com/Aron-Chu/streamclone/releases/latest)**, download **`Streamclone-Setup-v*.exe`**
-3. Run the installer — wizard extracts files to `%USERPROFILE%\streamclone`, sets up Docker, adds shortcuts, and **opens the directory**
+3. Run the installer — wizard extracts files to `%USERPROFILE%\streamclone`, sets up Docker, adds a **Streamclone** Desktop shortcut, and **opens the directory**
 
 Takes **~3–8 minutes** (pulls pre-built images; no local compile).
 
@@ -87,28 +87,33 @@ Windows may show **"Unknown Publisher"** — click **Run** or **More info → Ru
 
 ### Lifecycle
 
+After install, your Desktop has **one shortcut**: **Streamclone** (custom icon). It opens **Manage Streamclone** — a menu for start, stop, diagnostics, repair, update, logs, and uninstall. Individual `.cmd` launchers remain in `%USERPROFILE%\streamclone\` for power users.
+
 | Launcher | What it does | Keeps install folder? | Keeps data volumes? |
 |----------|----------------|----------------------|---------------------|
-| **Streamclone-Setup.exe** | First-time setup — wizard, config, pull images, shortcuts, open directory | Yes | Creates fresh volumes |
+| **Streamclone-Setup.exe** | First-time setup — wizard, config, pull images, Desktop shortcut, open directory | Yes | Creates fresh volumes |
 | **Install Streamclone.cmd** | Same as Setup.exe (without wizard UI) | Yes | Creates fresh volumes |
+| **Streamclone** (Desktop shortcut) | Opens **Manage Streamclone** menu | Yes | Yes |
 | **Check Streamclone.cmd** | Diagnostic — Docker, containers, http://localhost:8090/ (no changes) | Yes | Yes |
 | **Start Streamclone.cmd** | Start stack → open directory | Yes | Yes |
 | **Stop Streamclone.cmd** | Stop containers (pause) | Yes | Yes |
 | **Manage Streamclone.cmd** | Menu: status, repair (re-pull + restart), **update** (sync IMAGE_TAG), logs, uninstall submenu | Yes | Repair/update keep volumes |
-| **Uninstall** (see below) | Remove everything — volumes, `.env`, shortcuts, install folder | **No** | **No** |
+| **Uninstall** (see below) | Remove everything — volumes, `.env`, shortcut, install folder | **No** | **No** |
 
-**Manage Streamclone** is the support console when something feels stuck: option **4 Repair** re-pulls GHCR images and recreates containers without wiping your database. Option **5 Update** syncs `IMAGE_TAG` to the bundle version when an upgrade is available. First repair on a new PC can take several minutes (same as first install pull).
+**Manage Streamclone** is the support console when something feels stuck: option **3 Status / diagnostics** runs the same checks as **Check Streamclone.cmd**. Option **4 Repair** re-pulls GHCR images and recreates containers without wiping your database. Option **5 Update** syncs `IMAGE_TAG` to the bundle version when an upgrade is available. Repair and fresh install show **native Docker pull progress** in the terminal (in-place bars, not hundreds of layer lines).
+
+**Setup.exe** uses a filtered pull summary in the wizard UI (no layer spam in the progress panel). Interactive `.cmd` / Manager paths use Docker's native TTY progress bars.
 
 ### What each action does
 
 | Action | What it does | Keeps data? |
 |--------|----------------|-------------|
-| **Install** / **Setup.exe** | First-time setup or re-install merge — config, pull images, shortcuts | Yes (merge preserves `.env` on upgrade) |
+| **Install** / **Setup.exe** | First-time setup or re-install merge — config, pull images, Desktop shortcut | Yes (merge preserves `.env` on upgrade) |
 | **Start** | Start stack and open browser | Yes |
 | **Manage → Repair** | Re-pull images + recreate containers | Yes (volumes kept) |
 | **Manage → Update** | Sync `IMAGE_TAG` to bundle `VERSION`, pull, recreate | Yes |
 | **Manage → Reset config** | Stop stack, remove `.env` only — volumes kept | Yes (database/MinIO volumes) |
-| **Uninstall** | Full teardown — volumes, secrets, shortcuts, install folder | **No** |
+| **Uninstall** | Full teardown — volumes, secrets, Desktop shortcut, install folder | **No** |
 | **Check** | Read-only diagnostics (Docker, images, web UI) | Yes |
 
 **Settings → Apps → Uninstall** runs the same full Docker teardown as **`Uninstall Streamclone.cmd`** (not a light remove). Use **Manage → Reset config** when you only want to regenerate `.env` without losing database data.
@@ -123,7 +128,7 @@ Windows may show **"Unknown Publisher"** — click **Run** or **More info → Ru
 | **Start menu → Streamclone → Uninstall Streamclone** | Same uninstall wizard |
 | **`Uninstall Streamclone.cmd`** in the install folder | Type `YES` in the terminal |
 
-All paths stop Docker, delete volumes and `.env`, remove Desktop shortcuts, and delete `%USERPROFILE%\streamclone`. Interactive uninstall asks whether to also remove downloaded Streamclone Docker images. Keep images for faster reinstall/repair; remove images to reclaim disk space or simulate a first-time install. Advanced non-interactive image cleanup: `powershell -File scripts\uninstall-streamclone.ps1 -PruneImages`.
+All paths stop Docker, delete volumes and `.env`, remove the Desktop shortcut, and delete `%USERPROFILE%\streamclone`. Interactive uninstall asks whether to also remove downloaded Streamclone Docker images. Keep images for faster reinstall/repair; remove images to reclaim disk space or simulate a first-time install. Advanced non-interactive image cleanup: `powershell -File scripts\uninstall-streamclone.ps1 -PruneImages`.
 
 ---
 

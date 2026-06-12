@@ -337,10 +337,18 @@ function Invoke-EnvDockerCaptured {
     return Invoke-EnvCapturedProcess -FilePath $docker -ArgumentList $Arguments
 }
 
+function Test-StreamcloneDockerPullDisplayLine {
+    param([string]$Line)
+    $text = "$Line".Trim()
+    if ($text -match '^[a-f0-9]{12} (Downloading|Extracting|Verifying)') { return $false }
+    return $true
+}
+
 function Invoke-EnvDockerStreaming {
     param(
         [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [scriptblock]$OnLine = $null
+        [scriptblock]$OnLine = $null,
+        [ValidateSet('interactive', 'capture', 'summary')][string]$OutputMode = 'capture'
     )
     $docker = Get-EnvDockerExe
     if (-not $docker) {
@@ -356,17 +364,29 @@ function Invoke-EnvDockerStreaming {
     $wd = Get-EnvProcessWorkingDirectory
     Push-Location $wd
     try {
-        & $docker @Arguments 2>&1 | ForEach-Object {
-            $line = "$_".TrimEnd()
-            if ($line -eq '') { return }
-            Write-Host $line
-            [void]$lines.Add($line)
-            if ($OnLine) {
-                try { & $OnLine $line } catch { }
+        if ($OutputMode -eq 'interactive') {
+            & $docker @Arguments
+            $code = if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 0 }
+            if (-not $? -and $code -eq 0) { $code = 1 }
+        } else {
+            & $docker @Arguments 2>&1 | ForEach-Object {
+                $line = "$_".TrimEnd()
+                if ($line -eq '') { return }
+                [void]$lines.Add($line)
+                $display = $true
+                if ($OutputMode -eq 'summary') {
+                    $display = Test-StreamcloneDockerPullDisplayLine -Line $line
+                }
+                if ($display) {
+                    Write-Host $line
+                }
+                if ($OnLine) {
+                    try { & $OnLine $line } catch { }
+                }
             }
+            $code = if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 0 }
+            if (-not $? -and $code -eq 0) { $code = 1 }
         }
-        $code = if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 0 }
-        if (-not $? -and $code -eq 0) { $code = 1 }
     } finally {
         Pop-Location
         $ErrorActionPreference = $prev
@@ -383,14 +403,15 @@ function Invoke-EnvDockerComposePullWithRetry {
         [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
         [int]$MaxAttempts = 3,
         [int]$RetryDelaySec = 10,
-        [scriptblock]$OnLine = $null
+        [scriptblock]$OnLine = $null,
+        [ValidateSet('interactive', 'capture', 'summary')][string]$OutputMode = 'interactive'
     )
     $last = $null
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         if ($attempt -gt 1) {
             Write-Host "Retrying docker compose pull (attempt $attempt/$MaxAttempts)..." -ForegroundColor Yellow
         }
-        $last = Invoke-EnvDockerStreaming -Arguments ($ComposeArgs + @('pull')) -OnLine $OnLine
+        $last = Invoke-EnvDockerStreaming -Arguments ($ComposeArgs + @('pull')) -OnLine $OnLine -OutputMode $OutputMode
         if ($last.ExitCode -eq 0) {
             if ($attempt -gt 1) {
                 Write-Host "docker compose pull succeeded on attempt $attempt." -ForegroundColor Green

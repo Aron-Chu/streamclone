@@ -43,26 +43,38 @@ foreach ($name in @('Start Streamclone.cmd', 'Stop Streamclone.cmd', 'Manage Str
     }
 }
 
+$legacyShortcutNames = @(
+    'Start Streamclone.lnk',
+    'Stop Streamclone.lnk',
+    'Manage Streamclone.lnk',
+    'Check Streamclone.lnk',
+    'Uninstall Streamclone.lnk'
+)
+
 try {
     $shell = New-Object -ComObject WScript.Shell
     $desktop = [Environment]::GetFolderPath('Desktop')
-    foreach ($pair in @(
-        @{ Name = 'Start Streamclone.lnk'; Target = Join-Path $Root 'Start Streamclone.cmd'; Desc = 'Start Streamclone and open http://localhost:8090/' }
-        @{ Name = 'Stop Streamclone.lnk'; Target = Join-Path $Root 'Stop Streamclone.cmd'; Desc = 'Stop all Streamclone Docker containers' }
-        @{ Name = 'Manage Streamclone.lnk'; Target = Join-Path $Root 'Manage Streamclone.cmd'; Desc = 'Repair, update, status, logs, and uninstall' }
-        @{ Name = 'Check Streamclone.lnk'; Target = Join-Path $Root 'Check Streamclone.cmd'; Desc = 'Diagnose Docker, images, and web UI (no changes)' }
-        @{ Name = 'Uninstall Streamclone.lnk'; Target = Join-Path $Root 'Uninstall Streamclone.cmd'; Desc = 'Complete uninstall - stops Docker, removes data and shortcuts' }
-    )) {
-        $lnk = Join-Path $desktop $pair.Name
-        $sc = $shell.CreateShortcut($lnk)
-        $sc.TargetPath = $pair.Target
-        $sc.WorkingDirectory = $Root
-        $sc.Description = $pair.Desc
-        $sc.Save()
+    foreach ($legacy in $legacyShortcutNames) {
+        $legacyPath = Join-Path $desktop $legacy
+        if (Test-Path $legacyPath) {
+            Remove-Item -LiteralPath $legacyPath -Force
+            Write-Host "Removed legacy Desktop\$legacy"
+        }
     }
-    Write-Host "Desktop shortcuts created on $desktop"
+
+    $iconPath = Join-Path $Root 'deploy\installer\icon.ico'
+    $lnk = Join-Path $desktop 'Streamclone.lnk'
+    $sc = $shell.CreateShortcut($lnk)
+    $sc.TargetPath = Join-Path $Root 'Manage Streamclone.cmd'
+    $sc.WorkingDirectory = $Root
+    $sc.Description = 'Start, stop, and manage Streamclone'
+    if (Test-Path $iconPath) {
+        $sc.IconLocation = "$iconPath,0"
+    }
+    $sc.Save()
+    Write-Host "Desktop shortcut created: $lnk"
 } catch {
-    Write-Host "Could not create .lnk shortcuts (use Start/Stop .cmd in $Root): $_" -ForegroundColor Yellow
+    Write-Host "Could not create .lnk shortcut (use Manage Streamclone.cmd in $Root): $_" -ForegroundColor Yellow
 }
 
 Write-Host "Launchers: $targetLaunchers"

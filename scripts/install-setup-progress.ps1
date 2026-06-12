@@ -61,6 +61,7 @@ function Invoke-DockerComposePullWithProgress {
     try {
         $onPullLine = {
             param($line)
+            if (-not (Test-StreamcloneDockerPullDisplayLine -Line $line)) { return }
             $text = "$line".Trim()
             if ($text -match 'Pulling|Pulled|Pull complete|Download|up to date|Retrying|attempt') {
                 $short = $text
@@ -68,7 +69,7 @@ function Invoke-DockerComposePullWithProgress {
                 Set-InstallProgress -Title 'Pulling Docker images' -Detail $short
             }
         }
-        $result = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $ComposeArgs -OnLine $onPullLine
+        $result = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $ComposeArgs -OnLine $onPullLine -OutputMode summary
         $pullOutput = $result.Output
         $pullExitCode = $result.ExitCode
         if ($pullExitCode -ne 0) {
@@ -147,6 +148,7 @@ try {
             Set-InstallProgress -Title 'Updating Streamclone' -Detail "Syncing images to $($versions.bundleVersion)..."
             $onUpgradeLine = {
                 param($line)
+                if (-not (Test-StreamcloneDockerPullDisplayLine -Line $line)) { return }
                 $text = "$line".Trim()
                 if ($text -match 'Pulling|Pulled|Pull complete|Download|up to date|Recreat|Starting|Retrying|attempt') {
                     $short = $text
@@ -154,7 +156,7 @@ try {
                     Set-InstallProgress -Title 'Updating Streamclone' -Detail $short
                 }
             }
-            Invoke-StreamcloneUpgrade -Root $InstallDir -OnLine $onUpgradeLine
+            Invoke-StreamcloneUpgrade -Root $InstallDir -OnLine $onUpgradeLine -PullOutputMode summary
             if (-not (Wait-StreamcloneStackReadyWithProgress)) { throw 'services did not become ready after upgrade' }
         } else {
             Set-InstallProgress -Title 'Starting Streamclone' -Detail 'Already configured - bringing stack online.'
@@ -183,7 +185,7 @@ try {
     }
 
     if (Test-Path $shortcutPs1) {
-        Set-InstallProgress -Title 'Adding Desktop shortcuts' -Detail 'Start, Stop, Manage, Check, and Uninstall.'
+        Set-InstallProgress -Title 'Adding Desktop shortcut' -Detail 'Streamclone.lnk opens the manager menu.'
         & $shortcutPs1 -InstallDir $InstallDir
     }
 

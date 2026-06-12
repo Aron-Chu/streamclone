@@ -90,11 +90,11 @@ function Invoke-StreamcloneInstall {
                 Invoke-StreamcloneUpgrade -Root $root
             } else {
                 Write-Host 'Streamclone is already running at http://localhost:8090/' -ForegroundColor Green
-                Write-Host 'Refreshing install scripts and Desktop shortcuts.' -ForegroundColor Yellow
+                Write-Host 'Refreshing install scripts and Desktop shortcut.' -ForegroundColor Yellow
             }
             Update-StreamcloneBootstrapOverlayFromMaster -Dir $root
             if (Test-Path $shortcutPs1) {
-                Write-Host 'Step 4/4: Adding Desktop shortcuts...' -ForegroundColor Cyan
+                Write-Host 'Step 4/4: Adding Desktop shortcut...' -ForegroundColor Cyan
                 & $shortcutPs1 -InstallDir $root
             }
             $startPs1 = Join-Path $root 'scripts\start-streamclone.ps1'
@@ -172,7 +172,7 @@ function Invoke-StreamcloneInstall {
             }
         }
         if (Test-Path $shortcutPs1) {
-            Write-Host 'Step 4/4: Adding Desktop shortcuts...' -ForegroundColor Cyan
+            Write-Host 'Step 4/4: Adding Desktop shortcut...' -ForegroundColor Cyan
             & $shortcutPs1 -InstallDir $root
         }
         $startPs1 = Join-Path $root 'scripts\start-streamclone.ps1'
