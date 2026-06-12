@@ -319,6 +319,46 @@ export interface SetupControlStartResponse {
   log?: string
 }
 
+export interface HostDiagnosticsContainer {
+  name: string
+  status: string
+}
+
+export interface HostDiagnostics {
+  ok: boolean
+  healthy: boolean
+  profile: string
+  imageTag: string
+  docker: string
+  configReady: boolean
+  webOk: boolean
+  webUrl: string
+  setupControl: boolean
+  containers: HostDiagnosticsContainer[]
+  optionalServices: SetupWelcomeServices
+  scraperSibling: { path: string; present: boolean }
+  recentStartLogs: { scraper: string; clipper: string }
+  suggestions: string[]
+}
+
+export interface MetadataDiagnosticsServices {
+  metadata: SetupServiceState
+  chat: SetupServiceState
+  video: SetupServiceState
+  emote: SetupServiceState
+  analytics: SetupServiceState
+  scraper: SetupServiceState
+  clipper: SetupServiceState
+}
+
+export interface MetadataDiagnostics {
+  profile: string
+  imageTag: string
+  services: MetadataDiagnosticsServices
+  healthy: boolean
+  updatedAt: number
+}
+
 export interface AuthDebug {
   ready: boolean
   clientIdConfigured: boolean
@@ -781,6 +821,25 @@ export const getSetupWelcome = (): Promise<SetupWelcome> =>
 export const getSetupControlHealth = (): Promise<SetupControlHealth> =>
   fetch('/v1/setup-control/health').then(r => json<SetupControlHealth>(r))
 
+function setupControlStartError(status: number, body: SetupControlStartResponse): ApiError {
+  if (status === 401) {
+    return new ApiError(
+      'Setup token rejected. Close this tab, run Start Streamclone from Desktop, then try again.',
+      status,
+      body.error,
+    )
+  }
+  if (status === 502 || status === 504) {
+    return new ApiError(
+      'Install helper timed out or is unavailable. Ensure Docker Desktop is running, run Start Streamclone.cmd, then retry.',
+      status,
+      body.error,
+      true,
+    )
+  }
+  return new ApiError(body.error || 'Unable to start service', status, body.error, status >= 500)
+}
+
 export const startSetupService = (service: 'scraper' | 'clipper'): Promise<SetupControlStartResponse> => {
   const headers: Record<string, string> = {}
   if (SETUP_CONTROL_TOKEN) {
@@ -789,7 +848,7 @@ export const startSetupService = (service: 'scraper' | 'clipper'): Promise<Setup
   return fetch(`/v1/setup-control/start/${service}`, { method: 'POST', headers }).then(async r => {
     const body = await r.json().catch(() => ({})) as SetupControlStartResponse
     if (!r.ok) {
-      throw new ApiError(body.error || r.statusText, r.status)
+      throw setupControlStartError(r.status, body)
     }
     return body
   })
@@ -808,6 +867,12 @@ export const syncClipperAuthFromSignIn = (): Promise<{ ok: boolean; merged?: boo
     return body
   })
 }
+
+export const getHostDiagnostics = (): Promise<HostDiagnostics> =>
+  fetch('/v1/setup-control/diagnostics').then(r => json<HostDiagnostics>(r))
+
+export const getMetadataDiagnostics = (): Promise<MetadataDiagnostics> =>
+  fetch(`${METADATA}/v1/setup/diagnostics`).then(r => json<MetadataDiagnostics>(r))
 
 export const getAuthDebug = (): Promise<AuthDebug> =>
   fetch(`${CHAT_HTTP}/v1/auth/debug`, { credentials: 'include' }).then(r => json<AuthDebug>(r))
