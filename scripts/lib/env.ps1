@@ -337,15 +337,60 @@ function Invoke-EnvDockerCaptured {
     return Invoke-EnvCapturedProcess -FilePath $docker -ArgumentList $Arguments
 }
 
+function Invoke-EnvDockerStreaming {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [scriptblock]$OnLine = $null
+    )
+    $docker = Get-EnvDockerExe
+    if (-not $docker) {
+        return [pscustomobject]@{
+            ExitCode = 127
+            Output   = @('Docker is required. Install Docker Desktop and ensure docker.exe is on PATH.')
+        }
+    }
+
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $wd = Get-EnvProcessWorkingDirectory
+    Push-Location $wd
+    try {
+        & $docker @Arguments 2>&1 | ForEach-Object {
+            $line = "$_".TrimEnd()
+            if ($line -eq '') { return }
+            Write-Host $line
+            [void]$lines.Add($line)
+            if ($OnLine) {
+                try { & $OnLine $line } catch { }
+            }
+        }
+        $code = if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 0 }
+        if (-not $? -and $code -eq 0) { $code = 1 }
+    } finally {
+        Pop-Location
+        $ErrorActionPreference = $prev
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $code
+        Output   = @($lines.ToArray())
+    }
+}
+
 function Invoke-EnvDockerComposePullWithRetry {
     param(
         [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
         [int]$MaxAttempts = 3,
-        [int]$RetryDelaySec = 10
+        [int]$RetryDelaySec = 10,
+        [scriptblock]$OnLine = $null
     )
     $last = $null
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        $last = Invoke-EnvDockerCaptured -Arguments ($ComposeArgs + @('pull'))
+        if ($attempt -gt 1) {
+            Write-Host "Retrying docker compose pull (attempt $attempt/$MaxAttempts)..." -ForegroundColor Yellow
+        }
+        $last = Invoke-EnvDockerStreaming -Arguments ($ComposeArgs + @('pull')) -OnLine $OnLine
         if ($last.ExitCode -eq 0) {
             if ($attempt -gt 1) {
                 Write-Host "docker compose pull succeeded on attempt $attempt." -ForegroundColor Green

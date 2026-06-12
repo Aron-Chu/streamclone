@@ -3,6 +3,7 @@
 
 . (Join-Path $PSScriptRoot 'env.ps1')
 . (Join-Path $PSScriptRoot 'stack-progress.ps1')
+. (Join-Path $PSScriptRoot 'install-upgrade.ps1')
 
 function Test-StreamcloneHostServiceHealth {
     param([string]$Url)
@@ -51,13 +52,12 @@ function Get-StreamcloneDiagnostics {
     $envFile = Join-Path $Root '.env'
     $envValues = if (Test-Path $envFile) { Read-EnvKeyValueFile -Path $envFile } else { @{} }
     $profile = Get-StreamcloneProfileFromRoot -Root $Root
-    $imageTag = [string]$envValues['IMAGE_TAG']
+    $versions = Get-StreamcloneInstallVersions -Root $Root -FetchLatest
+    $imageTag = $versions.imageTag
     if ([string]::IsNullOrWhiteSpace($imageTag)) {
-        $versionFile = Join-Path $Root 'VERSION'
-        if (Test-Path $versionFile) {
-            $imageTag = (Get-Content $versionFile -Raw).Trim()
-        }
+        $imageTag = $versions.bundleVersion
     }
+    $upgradeNeeded = Test-StreamcloneUpgradeNeeded -Root $Root
 
     $configReady = Test-Path $envFile
     if (-not $configReady) {
@@ -80,6 +80,24 @@ function Get-StreamcloneDiagnostics {
         } else {
             $dockerState = 'running'
         }
+    }
+
+    $coreImages = $null
+    if ($dockerState -eq 'running' -and $imageTag) {
+        $status = Get-StreamcloneCoreImageStatus -Root $Root -Tag $imageTag
+        $coreImages = @{
+            present = $status.present
+            total   = $status.total
+            missing = @($status.missing)
+            tag     = $imageTag
+        }
+    }
+
+    if ($upgradeNeeded) {
+        [void]$suggestions.Add('Run Manage Streamclone → Update to sync Docker images with the bundle version.')
+    }
+    if ($coreImages -and $coreImages.present -lt $coreImages.total) {
+        [void]$suggestions.Add("$($coreImages.present)/$($coreImages.total) core images downloaded — run Start Streamclone to resume.")
     }
 
     $containers = @()
@@ -138,7 +156,11 @@ function Get-StreamcloneDiagnostics {
         ok               = $true
         healthy          = $healthy
         profile          = $profile
+        bundleVersion    = $versions.bundleVersion
         imageTag         = $imageTag
+        latestRelease    = $versions.latestRelease
+        upgradeNeeded    = $upgradeNeeded
+        coreImages       = $coreImages
         docker           = $dockerState
         configReady      = $configReady
         webOk            = $webOk

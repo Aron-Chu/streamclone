@@ -9,26 +9,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Repo = 'Aron-Chu/streamclone'
-$MasterRawBase = "https://raw.githubusercontent.com/$Repo/master"
 
-function Get-ReleaseZipMeta {
-    param([string]$Tag)
-    $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
-    if ($Tag) {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag" -Headers $headers
-    } else {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers $headers
-    }
-    $asset = $release.assets | Where-Object { $_.name -like '*-windows.zip' } | Select-Object -First 1
-    if (-not $asset) {
-        throw "No windows.zip asset in release $($release.tag_name)"
-    }
-    return @{
-        Url  = $asset.browser_download_url
-        Tag  = $release.tag_name
-        Name = $asset.name
-    }
-}
+. (Join-Path $PSScriptRoot 'lib\install-upgrade.ps1')
 
 function Test-StreamcloneWebOk {
     try {
@@ -39,108 +21,62 @@ function Test-StreamcloneWebOk {
     }
 }
 
-function Get-LocalInstallVersion {
+function Test-StreamcloneInstalledAt {
     param([string]$Dir)
-    $versionFile = Join-Path $Dir 'VERSION'
-    if (-not (Test-Path $versionFile)) { return '' }
-    return (Get-Content $versionFile -Raw).Trim()
-}
-
-function Prepare-InstallDirectory {
-    param([string]$Dir)
-    Set-Location $env:TEMP
-    if (-not (Test-Path -LiteralPath $Dir)) {
-        New-Item -ItemType Directory -Path $Dir -Force | Out-Null
-        return
-    }
-    try {
-        Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop
-        New-Item -ItemType Directory -Path $Dir -Force | Out-Null
-        return
-    } catch { }
-    Get-ChildItem -LiteralPath $Dir -Force -ErrorAction SilentlyContinue |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    $remaining = @(Get-ChildItem -LiteralPath $Dir -Force -ErrorAction SilentlyContinue).Count
-    if ($remaining -gt 0) {
-        throw "Cannot replace install folder ($Dir) - $remaining item(s) still in use. Close File Explorer windows and terminals open in that folder, then retry."
-    }
-}
-
-function Update-BootstrapInstallScriptsFromMaster {
-    param([string]$Dir)
-    $overlayPaths = @(
-        'scripts/setup.ps1',
-        'scripts/lib/env.ps1',
-        'scripts/install-setup-progress.ps1',
-        'launchers/install-streamclone-launcher.ps1'
-    )
-    $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
-    foreach ($rel in $overlayPaths) {
-        $dest = Join-Path $Dir ($rel -replace '/', '\')
-        $destDir = Split-Path $dest -Parent
-        if (-not (Test-Path $destDir)) {
-            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-        }
-        try {
-            $url = "$MasterRawBase/$rel"
-            Invoke-WebRequest -Uri $url -OutFile $dest -Headers $headers -UseBasicParsing
-        } catch {
-            Write-Host "  script overlay skipped: $rel ($($_.Exception.Message))" -ForegroundColor DarkYellow
-        }
-    }
+    return (Test-Path (Join-Path $Dir 'scripts\start-streamclone.ps1'))
 }
 
 Write-Host 'Step 1/4: Downloading latest release...' -ForegroundColor Cyan
-$meta = Get-ReleaseZipMeta -Tag $Version
+$meta = Get-StreamcloneReleaseZipMeta -Version $Version -Repo $Repo
 Write-Host "  $($meta.Name) ($($meta.Tag))"
 
-$localVersion = Get-LocalInstallVersion -Dir $InstallDir
 $launcher = Join-Path $InstallDir 'launchers\install-streamclone-launcher.ps1'
+$versions = if (Test-StreamcloneInstalledAt -Dir $InstallDir) {
+    Get-StreamcloneInstallVersions -Root $InstallDir -FetchLatest
+} else {
+    $null
+}
 
-if (-not $Force -and $localVersion -eq $meta.Tag -and (Test-Path $launcher)) {
+if (-not $Force -and $versions -and $versions.bundleVersion -eq $meta.Tag -and (Test-Path $launcher)) {
     if (Test-StreamcloneWebOk -and (Test-Path (Join-Path $InstallDir '.env'))) {
         Write-Host ''
         Write-Host "  Already on $($meta.Tag) and running at http://localhost:8090/" -ForegroundColor Green
-        Write-Host '  Skipping re-download. Refreshing shortcuts...' -ForegroundColor Yellow
-        Update-BootstrapInstallScriptsFromMaster -Dir $InstallDir
+        Write-Host '  Refreshing install scripts and shortcuts...' -ForegroundColor Yellow
+        if ($versions.bundleVersion -ne $versions.imageTag) {
+            Write-Host "  Note: bundle $($versions.bundleVersion) but images $($versions.imageTag) — run Manage → Update." -ForegroundColor Yellow
+        }
+        Update-StreamcloneBootstrapOverlayFromMaster -Dir $InstallDir -Repo $Repo
         & $launcher -Action install -LauncherRoot $InstallDir
         exit $LASTEXITCODE
     }
 }
 
-$savedEnv = $null
-$savedProfile = $null
-$savedEnvLocal = $null
-if (Test-Path $InstallDir) {
-    $envPath = Join-Path $InstallDir '.env'
-    $profilePath = Join-Path $InstallDir '.streamclone-profile'
-    $envLocalPath = Join-Path $InstallDir '.env.local'
-    if (Test-Path $envPath) { $savedEnv = Get-Content $envPath -Raw }
-    if (Test-Path $profilePath) { $savedProfile = Get-Content $profilePath -Raw }
-    if (Test-Path $envLocalPath) { $savedEnvLocal = Get-Content $envLocalPath -Raw }
-}
-
+$existingInstall = Test-StreamcloneInstalledAt -Dir $InstallDir
 $tempZip = Join-Path ([System.IO.Path]::GetTempPath()) "streamclone-$([Guid]::NewGuid().N).zip"
 try {
-    Invoke-WebRequest -Uri $meta.Url -OutFile $tempZip -UseBasicParsing
-    Prepare-InstallDirectory -Dir $InstallDir
-    Expand-Archive -Path $tempZip -DestinationPath $InstallDir -Force
-    $nested = Join-Path $InstallDir ("streamclone-" + $meta.Tag)
-    if ((Test-Path $nested) -and -not (Test-Path (Join-Path $InstallDir 'VERSION'))) {
-        Get-ChildItem $nested -Force | Move-Item -Destination $InstallDir -Force
-        Remove-Item -Recurse -Force $nested
+    $lastPct = -1
+    Invoke-StreamcloneReleaseDownload -Url $meta.Url -OutFile $tempZip -OnProgress {
+        param($Read, $Total)
+        if ($Total -gt 0) {
+            $pct = [math]::Min(100, [math]::Floor(100.0 * $Read / $Total))
+            if ($pct -ne $script:lastPct) {
+                $script:lastPct = $pct
+                Write-Host ("  Downloading… {0}%" -f $pct) -ForegroundColor DarkCyan
+            }
+        }
     }
-    Update-BootstrapInstallScriptsFromMaster -Dir $InstallDir
-    if ($savedEnv) {
-        Set-Content -Path (Join-Path $InstallDir '.env') -Value $savedEnv -NoNewline
-        Write-Host '  Preserved existing .env configuration' -ForegroundColor DarkGray
+
+    if ($existingInstall) {
+        Write-Host '  Merging release into existing install (preserving .env and data)...' -ForegroundColor DarkGray
+        Sync-StreamcloneReleaseBundle -ZipPath $tempZip -InstallDir $InstallDir -ExpectedTag $meta.Tag
+    } else {
+        if (-not (Test-Path -LiteralPath $InstallDir)) {
+            New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+        }
+        Sync-StreamcloneReleaseBundle -ZipPath $tempZip -InstallDir $InstallDir -ExpectedTag $meta.Tag
     }
-    if ($savedProfile) {
-        Set-Content -Path (Join-Path $InstallDir '.streamclone-profile') -Value $savedProfile -NoNewline
-    }
-    if ($savedEnvLocal) {
-        Set-Content -Path (Join-Path $InstallDir '.env.local') -Value $savedEnvLocal -NoNewline
-    }
+
+    Update-StreamcloneBootstrapOverlayFromMaster -Dir $InstallDir -Repo $Repo
 } finally {
     Remove-Item -Force $tempZip -ErrorAction SilentlyContinue
 }
@@ -149,7 +85,11 @@ if (-not (Test-Path (Join-Path $InstallDir 'VERSION'))) {
     throw "Release extract failed - VERSION missing in $InstallDir"
 }
 
-Write-Host "  Extracted to $InstallDir" -ForegroundColor Green
+$newVersions = Get-StreamcloneInstallVersions -Root $InstallDir
+Write-Host "  Extracted to $InstallDir (bundle $($newVersions.bundleVersion))" -ForegroundColor Green
+if ($newVersions.imageTag -and ($newVersions.bundleVersion -ne $newVersions.imageTag)) {
+    Write-Host "  Images still on $($newVersions.imageTag) — Install will sync on setup." -ForegroundColor Yellow
+}
 
 $launcher = Join-Path $InstallDir 'launchers\install-streamclone-launcher.ps1'
 if (-not (Test-Path $launcher)) {

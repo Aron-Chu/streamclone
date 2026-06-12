@@ -55,8 +55,12 @@ compose_down() {
   local env_file="$root/.env"
   [ -f "$env_file" ] || return 0
   cd "$root"
-  # shellcheck source=scripts/lib/env.sh
-  . "$(dirname "$0")/lib/env.sh"
+
+  local stop_script="$root/scripts/stop-streamclone.sh"
+  if [ -f "$stop_script" ]; then
+    bash "$stop_script" 2>/dev/null || true
+    sleep 2
+  fi
 
   local -a compose_args=(compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml)
   if use_release_images "$root"; then
@@ -126,7 +130,8 @@ for name in .env .streamclone-profile .streamclone-setup-control.pid; do
 done
 
 APPS_DIR="${HOME}/Applications"
-for name in "Streamclone Start.command" "Streamclone Stop.command" "Streamclone Install.command"; do
+for name in "Streamclone Start.command" "Streamclone Stop.command" "Streamclone Install.command" \
+  "Streamclone Manage.command" "Streamclone Check.command" "Streamclone Uninstall.command"; do
   if [ -e "$APPS_DIR/$name" ]; then
     rm -f "$APPS_DIR/$name"
     echo "Removed $APPS_DIR/$name"
@@ -145,3 +150,4 @@ fi
 ) &
 echo ""
 echo "Uninstall complete. Install folder will be removed shortly."
+echo "If $ROOT remains, close terminals/File Explorer in that folder and delete manually."

@@ -58,6 +58,7 @@ Name: "{autoprograms}\{#MyAppName}\Uninstall Streamclone"; Filename: "{uninstall
 var
   ProgressFile: string;
   PruneImagesOnUninstall: Boolean;
+  PruneBaseImagesOnUninstall: Boolean;
 
 function DockerLooksReady: Boolean;
 var
@@ -73,6 +74,21 @@ begin
   if FileExists(DockerExe) then
     Result := Exec(DockerExe, 'info', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
       and (ResultCode = 0);
+end;
+
+function TryStartDockerViaPreflight: Boolean;
+var
+  ResultCode: Integer;
+  PreflightScript: string;
+begin
+  Result := False;
+  PreflightScript := ExpandConstant('{src}\scripts\preflight-deps.ps1');
+  if not FileExists(PreflightScript) then
+    Exit;
+  Result := Exec(PowerShellExe,
+    '-NoProfile -ExecutionPolicy Bypass -File "' + PreflightScript + '" -Quiet -TryStartDocker',
+    ExpandConstant('{src}'), SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    and (ResultCode = 0);
 end;
 
 function PowerShellExe: string;
@@ -144,6 +160,8 @@ begin
     '" -NonInteractive -KeepInstallDir -ProgressFile "' + ProgressFile + '"';
   if PruneImagesOnUninstall then
     Params := Params + ' -PruneImages';
+  if PruneBaseImagesOnUninstall then
+    Params := Params + ' -PruneBaseImages';
 
   WizardForm.ProgressGauge.Style := npbstMarquee;
   WizardForm.StatusLabel.Caption := 'Removing Streamclone...';
@@ -257,6 +275,9 @@ begin
 
   if not DockerLooksReady then
   begin
+    TryStartDockerViaPreflight;
+    if DockerLooksReady then
+      Exit;
     if WizardSilent then
     begin
       Result := False;
@@ -286,20 +307,27 @@ end;
 function InitializeUninstall: Boolean;
 begin
   PruneImagesOnUninstall := False;
+  PruneBaseImagesOnUninstall := False;
   Result := MsgBox(
     'Uninstall Streamclone?' + #13#10#13#10 +
     'This will:' + #13#10 +
     '  - Stop all Docker containers' + #13#10 +
     '  - Delete database and MinIO data (volumes)' + #13#10 +
-    '  - Remove secrets and Desktop shortcuts' + #13#10 +
+    '  - Remove secrets and Desktop shortcuts (Start, Stop, Manage, Check, Uninstall)' + #13#10 +
     '  - Remove the install folder' + #13#10#13#10 +
-    'Docker images are kept by default for faster reinstall.',
+    'Docker images are kept by default for faster reinstall.' + #13#10 +
+    'Settings → Apps runs full Docker teardown; use Manage → Reset config to keep volumes.',
     mbConfirmation, MB_YESNO) = IDYES;
   if Result then
     PruneImagesOnUninstall := MsgBox(
       'Also remove downloaded Streamclone Docker images?' + #13#10#13#10 +
       'Choose Yes to reclaim disk space or simulate a first-time install.' + #13#10 +
       'Choose No for faster reinstall or repair later.',
+      mbConfirmation, MB_YESNO) = IDYES;
+  if Result and PruneImagesOnUninstall then
+    PruneBaseImagesOnUninstall := MsgBox(
+      'Also remove base images (postgres, redis, minio, caddy, mediamtx)?' + #13#10#13#10 +
+      'Choose No to keep them for other Docker projects.',
       mbConfirmation, MB_YESNO) = IDYES;
 end;
 

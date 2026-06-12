@@ -7,37 +7,34 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Get-LatestReleaseAssetUrl {
-    param([string]$Suffix)
-    $headers = @{ 'User-Agent' = 'streamclone-install' }
-    if ($Version) {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/tags/$Version" -Headers $headers
-    } else {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers $headers
-    }
-    $asset = $release.assets | Where-Object { $_.name -like "*$Suffix" } | Select-Object -First 1
-    if (-not $asset) {
-        throw "No release asset matching *$Suffix in release $($release.tag_name)"
-    }
-    return @{ Url = $asset.browser_download_url; Tag = $release.tag_name; Name = $asset.name }
-}
+. (Join-Path $PSScriptRoot 'install-upgrade.ps1')
 
-$meta = Get-LatestReleaseAssetUrl -Suffix '-windows.zip'
+$meta = Get-StreamcloneReleaseZipMeta -Version $Version -Repo $Repo
 Write-Host "Downloading $($meta.Name) ($($meta.Tag))..."
 
 $tempZip = Join-Path ([System.IO.Path]::GetTempPath()) "streamclone-$([Guid]::NewGuid().N).zip"
 try {
-    Invoke-WebRequest -Uri $meta.Url -OutFile $tempZip -UseBasicParsing
-    if (Test-Path $InstallDir) {
-        Remove-Item -Recurse -Force $InstallDir
+    $lastPct = -1
+    Invoke-StreamcloneReleaseDownload -Url $meta.Url -OutFile $tempZip -OnProgress {
+        param($Read, $Total)
+        if ($Total -gt 0) {
+            $pct = [math]::Min(100, [math]::Floor(100.0 * $Read / $Total))
+            if ($pct -ne $script:lastPct) {
+                $script:lastPct = $pct
+                Write-Host ("Downloading… {0}%" -f $pct) -ForegroundColor Cyan
+            }
+        }
     }
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-    Expand-Archive -Path $tempZip -DestinationPath $InstallDir -Force
-    # Legacy archives nested streamclone-<tag>/ — hoist if needed.
-    $nested = Join-Path $InstallDir ("streamclone-" + $meta.Tag)
-    if ((Test-Path $nested) -and -not (Test-Path (Join-Path $InstallDir 'VERSION'))) {
-        Get-ChildItem $nested -Force | Move-Item -Destination $InstallDir -Force
-        Remove-Item -Recurse -Force $nested
+
+    $existing = Test-Path (Join-Path $InstallDir 'scripts\start-streamclone.ps1')
+    if ($existing) {
+        Sync-StreamcloneReleaseBundle -ZipPath $tempZip -InstallDir $InstallDir -ExpectedTag $meta.Tag
+    } else {
+        if (Test-Path $InstallDir) {
+            Remove-Item -Recurse -Force $InstallDir
+        }
+        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+        Sync-StreamcloneReleaseBundle -ZipPath $tempZip -InstallDir $InstallDir -ExpectedTag $meta.Tag
     }
 } finally {
     Remove-Item -Force $tempZip -ErrorAction SilentlyContinue

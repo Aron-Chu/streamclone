@@ -70,7 +70,7 @@ If you only use Setup.exe, expect **Core Watch** behavior: Analytics pages show 
 2. From **[GitHub Releases](https://github.com/Aron-Chu/streamclone/releases/latest)**, download **`Streamclone-Setup-v*.exe`**
 3. Run the installer — wizard extracts files to `%USERPROFILE%\streamclone`, sets up Docker, adds shortcuts, and **opens the directory**
 
-Takes **~3–5 minutes** (pulls pre-built images; no local compile).
+Takes **~3–8 minutes** (pulls pre-built images; no local compile).
 
 Windows may show **"Unknown Publisher"** — click **Run** or **More info → Run anyway**. Streamclone is open source but not code-signed yet (signing removes that warning).
 
@@ -94,10 +94,24 @@ Windows may show **"Unknown Publisher"** — click **Run** or **More info → Ru
 | **Check Streamclone.cmd** | Diagnostic — Docker, containers, http://localhost:8090/ (no changes) | Yes | Yes |
 | **Start Streamclone.cmd** | Start stack → open directory | Yes | Yes |
 | **Stop Streamclone.cmd** | Stop containers (pause) | Yes | Yes |
-| **Manage Streamclone.cmd** | Menu: status, repair (re-pull + restart), logs, uninstall | Yes | Repair keeps volumes |
+| **Manage Streamclone.cmd** | Menu: status, repair (re-pull + restart), **update** (sync IMAGE_TAG), logs, uninstall submenu | Yes | Repair/update keep volumes |
 | **Uninstall** (see below) | Remove everything — volumes, `.env`, shortcuts, install folder | **No** | **No** |
 
-**Manage Streamclone** is the support console when something feels stuck: option **4 Repair** re-pulls GHCR images and recreates containers without wiping your database. First repair on a new PC can take several minutes (same as first install pull).
+**Manage Streamclone** is the support console when something feels stuck: option **4 Repair** re-pulls GHCR images and recreates containers without wiping your database. Option **5 Update** syncs `IMAGE_TAG` to the bundle version when an upgrade is available. First repair on a new PC can take several minutes (same as first install pull).
+
+### What each action does
+
+| Action | What it does | Keeps data? |
+|--------|----------------|-------------|
+| **Install** / **Setup.exe** | First-time setup or re-install merge — config, pull images, shortcuts | Yes (merge preserves `.env` on upgrade) |
+| **Start** | Start stack and open browser | Yes |
+| **Manage → Repair** | Re-pull images + recreate containers | Yes (volumes kept) |
+| **Manage → Update** | Sync `IMAGE_TAG` to bundle `VERSION`, pull, recreate | Yes |
+| **Manage → Reset config** | Stop stack, remove `.env` only — volumes kept | Yes (database/MinIO volumes) |
+| **Uninstall** | Full teardown — volumes, secrets, shortcuts, install folder | **No** |
+| **Check** | Read-only diagnostics (Docker, images, web UI) | Yes |
+
+**Settings → Apps → Uninstall** runs the same full Docker teardown as **`Uninstall Streamclone.cmd`** (not a light remove). Use **Manage → Reset config** when you only want to regenerate `.env` without losing database data.
 
 **Stop** = pause. Your `.env`, install folder, and database/MinIO volumes stay on disk. Run **Start** to resume.
 
@@ -191,5 +205,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for tests and PR workflow. Optional fe
 | Git-clone build too slow | Use **Setup.exe** or the **release ZIP** |
 | Frontend fails on release ZIP | Fixed in v0.1.1+ (`docker-compose.release.yml` — no host nginx mount) |
 | Start from scratch | Run **Uninstall**, then **Setup.exe** or **Install** again |
-| Install feels slow | Normal on first run (large `video`/`emote` images). Use wired network; second Start is much faster |
+| Install feels slow | Normal on first run (~3–8 min; large `video`/`emote` images). Use wired network; second Start is much faster |
 | Setup.exe stuck on "Pulling Docker images" | Normal on first install (~1.5 GB). Ensure Docker Desktop is running and network is stable |
