@@ -104,7 +104,8 @@ Write-Host ''
 Write-Host 'Streamclone is running at http://localhost:8090' -ForegroundColor Green
 Write-Host 'Stop:  powershell -File scripts/stop-streamclone.ps1'
 if ($Profile -in @('clipper', 'full')) {
-    Write-Host 'Clips: powershell -File scripts/twitch-auth.ps1 -Action local-auth  (one-time Twitch login)'
+    Write-Host 'Clips: open http://localhost:8090 and click Sign in (optional) (one-time Twitch login)'
+    Write-Host '      or: powershell -File scripts/twitch-auth.ps1 -Action local-auth  (Twitch CLI)'
 }
 
 if (-not $NoBrowser) {

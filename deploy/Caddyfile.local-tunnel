@@ -3,7 +3,7 @@
 
 	@chat_local {
 		host localhost 127.0.0.1
-		path /v1/auth* /v1/me /v1/logout /v1/followed /v1/ws
+		path /v1/auth* /v1/me /v1/me/followed /v1/logout /v1/ws
 	}
 	reverse_proxy @chat_local chat:8080 {
 		header_up X-Forwarded-Proto http
@@ -11,7 +11,7 @@
 	}
 
 	@chat {
-		path /v1/auth* /v1/me /v1/logout /v1/followed /v1/ws
+		path /v1/auth* /v1/me /v1/me/followed /v1/logout /v1/ws
 	}
 	reverse_proxy @chat chat:8080 {
 		header_up X-Forwarded-Proto https

@@ -123,6 +123,14 @@ class Store:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN moment_context TEXT")
             except sqlite3.OperationalError:
                 pass
+            try:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN editor_project TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN preview_path TEXT")
+            except sqlite3.OperationalError:
+                pass
             self._conn.commit()
 
     def upsert_watched_channel(self, login: str, broadcaster_id: str = "") -> dict[str, Any]:

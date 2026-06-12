@@ -438,6 +438,11 @@ func normalizeProviders(raw []string) ([]seeder.Provider, error) {
 				seen[seeder.ProviderFFZ] = struct{}{}
 				providers = append(providers, seeder.ProviderFFZ)
 			}
+		case "bttv", "betterttv":
+			if _, ok := seen[seeder.ProviderBTTV]; !ok {
+				seen[seeder.ProviderBTTV] = struct{}{}
+				providers = append(providers, seeder.ProviderBTTV)
+			}
 		case "":
 		default:
 			return nil, fmt.Errorf("unsupported emote provider %q", item)

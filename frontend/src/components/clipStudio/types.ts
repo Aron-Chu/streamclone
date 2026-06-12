@@ -11,7 +11,7 @@ import type {
 export type PreviewMode = 'source' | 'final'
 export type FormatPreset = 'tiktok' | 'youtube' | 'youtube_short' | 'instagram_reel' | 'twitter'
 export type RenderStatus = 'idle' | 'rendering' | 'success' | 'failed'
-export type InspectorTab = 'template' | 'layout' | 'captions' | 'export'
+export type InspectorTab = 'layout' | 'captions' | 'export'
 
 export interface ClipStudioState {
   job: ClipperJob

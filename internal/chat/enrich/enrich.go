@@ -3,6 +3,7 @@ package enrich
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -11,9 +12,12 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"streamclone/internal/chat/batch"
+	"streamclone/internal/chat/parse"
 	"streamclone/internal/chat/tokenize"
 	"streamclone/internal/metrics"
 )
+
+const twitchNativeEmoteURL = "https://static-cdn.jtvnw.net/emoticons/v2/%s/default/dark/1.0"
 
 type Enricher struct {
 	rdb      *redis.Client
@@ -42,11 +46,49 @@ func (e *Enricher) Invalidate(channel string) {
 	e.mu.Unlock()
 }
 
-func (e *Enricher) Tokenize(channel, text string) []batch.Fragment {
+func (e *Enricher) Tokenize(channel, text string, native []parse.EmoteRange) []batch.Fragment {
 	started := time.Now()
-	fragments := e.ensure(channel).Tokenize(text)
+	var fragments []batch.Fragment
+	if len(native) == 0 {
+		fragments = e.ensure(channel).Tokenize(text)
+	} else {
+		fragments = e.tokenizeWithNative(channel, text, native)
+	}
 	metrics.TokenizeSeconds.Observe(time.Since(started).Seconds())
 	return fragments
+}
+
+func (e *Enricher) tokenizeWithNative(channel, text string, native []parse.EmoteRange) []batch.Fragment {
+	runes := []rune(text)
+	dict := e.ensure(channel)
+	var frags []batch.Fragment
+	cursor := 0
+
+	for _, em := range native {
+		if em.Start < cursor || em.Start >= len(runes) {
+			continue
+		}
+		end := em.End + 1
+		if end > len(runes) {
+			end = len(runes)
+		}
+		if cursor < em.Start {
+			frags = append(frags, dict.Tokenize(string(runes[cursor:em.Start]))...)
+		}
+		name := string(runes[em.Start:end])
+		frags = append(frags, batch.Fragment{
+			T:        "emote",
+			C:        name,
+			U:        fmt.Sprintf(twitchNativeEmoteURL, em.ID),
+			ID:       em.ID,
+			Provider: "twitch",
+		})
+		cursor = end
+	}
+	if cursor < len(runes) {
+		frags = append(frags, dict.Tokenize(string(runes[cursor:]))...)
+	}
+	return frags
 }
 
 func (e *Enricher) ensure(channel string) *tokenize.ChannelDict {

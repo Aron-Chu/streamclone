@@ -1,4 +1,3 @@
-import { useMemo, useState } from 'react'
 import { CAPTION_EMOJIS, CaptionRichText } from '../../captionTokens'
 import type {
   CaptionEffect,
@@ -63,36 +62,10 @@ interface ClipInspectorProps {
 }
 
 const TABS: { id: InspectorTab; label: string }[] = [
-  { id: 'template', label: 'Template' },
   { id: 'layout', label: 'Layout' },
   { id: 'captions', label: 'Captions' },
   { id: 'export', label: 'Export' },
 ]
-
-const TEMPLATE_PREVIEW_COLORS: Record<string, string> = {
-  tiktok_pop: 'linear-gradient(135deg,#fbbf24,#ef4444)',
-  gaming_punch: 'linear-gradient(135deg,#22d3ee,#6366f1)',
-  cinematic: 'linear-gradient(135deg,#1e293b,#475569)',
-  clean_vertical: 'linear-gradient(135deg,#a78bfa,#ec4899)',
-  subtitle_bar: 'linear-gradient(135deg,#0f172a,#334155)',
-  stacked_reaction: 'linear-gradient(135deg,#f97316,#8b5cf6)',
-  karaoke_highlight: 'linear-gradient(135deg,#fde047,#a855f7)',
-  react_cam: 'linear-gradient(135deg,#06b6d4,#f43f5e)',
-  minimal_subs: 'linear-gradient(135deg,#18181b,#3f3f46)',
-  hype_moment: 'linear-gradient(135deg,#ef4444,#eab308)',
-  podcast_clip: 'linear-gradient(135deg,#334155,#94a3b8)',
-  streamer_rant: 'linear-gradient(135deg,#dc2626,#7c2d12)',
-  hype_zoom: 'linear-gradient(135deg,#fde047,#f97316)',
-  meme_impact: 'linear-gradient(135deg,#4ade80,#166534)',
-  podcast_clean: 'linear-gradient(135deg,#94a3b8,#1e293b)',
-  horror_vignette: 'linear-gradient(135deg,#450a0a,#18181b)',
-  sports_energy: 'linear-gradient(135deg,#38bdf8,#dc2626)',
-  minimal_white: 'linear-gradient(135deg,#f4f4f5,#d4d4d8)',
-  vtuber_pastel: 'linear-gradient(135deg,#fbcfe8,#c4b5fd)',
-  rage_clip: 'linear-gradient(135deg,#ef4444,#7f1d1d)',
-  news_lower_third: 'linear-gradient(135deg,#1d4ed8,#0f172a)',
-  slowmo_cinematic: 'linear-gradient(135deg,#312e81,#64748b)',
-}
 
 const CAPTION_EFFECTS: { id: CaptionEffect; label: string }[] = [
   { id: 'none', label: 'None' },
@@ -105,21 +78,6 @@ const CAPTION_EFFECTS: { id: CaptionEffect; label: string }[] = [
 export function ClipInspector(props: ClipInspectorProps) {
   const hookScore = hookStrengthScore(props.job.moment_context)
   const reachLabel = predictedReachLabel(hookScore)
-  const [templateSearch, setTemplateSearch] = useState('')
-  const [templateFormatFilter, setTemplateFormatFilter] = useState<'all' | FormatPreset>('all')
-
-  const filteredTemplates = useMemo(() => {
-    const query = templateSearch.trim().toLowerCase()
-    return props.templates.filter(t => {
-      const matchesSearch = !query
-        || t.name.toLowerCase().includes(query)
-        || t.id.toLowerCase().includes(query)
-        || t.description.toLowerCase().includes(query)
-        || t.caption_preset.toLowerCase().includes(query)
-      const matchesFormat = templateFormatFilter === 'all' || t.format_preset === templateFormatFilter
-      return matchesSearch && matchesFormat
-    })
-  }, [props.templates, templateSearch, templateFormatFilter])
 
   const selectedCaption = props.selectedCaptionIndex !== null
     ? props.captions[props.selectedCaptionIndex] ?? null
@@ -128,7 +86,7 @@ export function ClipInspector(props: ClipInspectorProps) {
   const emoteInsertIndex = props.emojiTargetIndex ?? props.selectedCaptionIndex
 
   return (
-    <aside className="clip-inspector">
+    <aside className="clip-inspector flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="clip-inspector-tabs">
         {TABS.map(tab => (
           <button
@@ -143,55 +101,6 @@ export function ClipInspector(props: ClipInspectorProps) {
       </div>
 
       <div className="clip-inspector-body">
-        {props.activeTab === 'template' && (
-          <>
-            <div className="clip-studio-section-title">Visual templates</div>
-            <div className="template-filter-bar">
-              <input
-                type="search"
-                className="template-search-input"
-                placeholder="Search templates..."
-                value={templateSearch}
-                onChange={e => setTemplateSearch(e.target.value)}
-              />
-              <select
-                className="template-filter-select"
-                value={templateFormatFilter}
-                onChange={e => setTemplateFormatFilter(e.target.value as 'all' | FormatPreset)}
-              >
-                <option value="all">All formats</option>
-                <option value="tiktok">TikTok</option>
-                <option value="youtube_short">YT Shorts</option>
-                <option value="instagram_reel">IG Reel</option>
-                <option value="youtube">YouTube</option>
-                <option value="twitter">X</option>
-              </select>
-            </div>
-            {filteredTemplates.length === 0 ? (
-              <p className="clip-studio-caption-hint">No templates match your filters.</p>
-            ) : (
-            <div className="template-tile-grid">
-              {filteredTemplates.map(t => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`template-tile ${props.selectedTemplateId === t.id ? 'active' : ''}`}
-                  onClick={() => props.onApplyTemplate(t)}
-                  title={t.description}
-                >
-                  <span
-                    className="template-tile-preview"
-                    style={{ background: TEMPLATE_PREVIEW_COLORS[t.id] || 'linear-gradient(135deg,#27272a,#52525b)' }}
-                  />
-                  <span className="template-tile-name">{t.name}</span>
-                  <span className="template-tile-meta">{t.caption_preset}</span>
-                </button>
-              ))}
-            </div>
-            )}
-          </>
-        )}
-
         {props.activeTab === 'layout' && (
           <>
             <div className="clip-studio-section-title">Video layout</div>

@@ -15,16 +15,17 @@ $errors = 0
 $warnings = 0
 $blockedReasons = [System.Collections.Generic.List[string]]::new()
 $summary = [ordered]@{
-    blocked    = $false
-    ok         = $true
-    errors     = 0
-    warnings   = 0
-    reason     = ''
-    context    = ''
-    engine     = ''
-    ghcr       = 'skipped'
-    coreImages = $null
-    checks     = @()
+    blocked             = $false
+    ok                  = $true
+    errors              = 0
+    warnings            = 0
+    reason              = ''
+    context             = ''
+    engine              = ''
+    dockerEngineRunning = $false
+    ghcr                = 'skipped'
+    coreImages          = $null
+    checks              = @()
 }
 
 . (Join-Path $PSScriptRoot 'lib\env.ps1')
@@ -186,11 +187,13 @@ if (-not $dockerExe) {
             Write-Check ok 'Docker engine is running'
             $engineRunning = $true
             $summary.engine = 'running'
+            $summary.dockerEngineRunning = $true
         }
     } else {
         Write-Check ok 'Docker engine is running'
         $engineRunning = $true
         $summary.engine = 'running'
+        $summary.dockerEngineRunning = $true
     }
 
     if ($engineRunning) {
@@ -248,10 +251,10 @@ if (Test-PortFree -Port 8090) {
 if (Get-Command twitch -ErrorAction SilentlyContinue) {
     Write-Check ok 'Twitch CLI found (optional - Clip Studio / chat login)'
 } else {
-    Write-Check warn 'Twitch CLI not found - core viewing works without it; clips need it later'
+    Write-Check warn 'Twitch CLI not found - optional; use Sign in at http://localhost:8090 for Clip Studio'
     $warnings++
     if ($InstallHints) {
-        Write-Host '  Install: https://github.com/twitchdev/twitch-cli#installation' -ForegroundColor DarkGray
+        Write-Host '  Developers: https://github.com/twitchdev/twitch-cli#installation' -ForegroundColor DarkGray
     }
 }
 

@@ -52,6 +52,33 @@ function Test-SetupControlAuthorized {
     return ($provided -eq $setupControlToken)
 }
 
+function Test-ScraperUseImagesFromEnv {
+    return ([string]$envValues['SCRAPER_USE_IMAGES'] -eq '1')
+}
+
+function Ensure-ScraperSiblingRepo {
+    if (Test-ScraperUseImagesFromEnv) {
+        return
+    }
+    $sibling = Get-EnvScraperSiblingPath
+    $hasRepo = (Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile'))
+    if ($hasRepo) { return }
+    Write-Host "Cloning streamclone-scraper to $sibling ..."
+    $parent = Split-Path -Parent $sibling
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    $clone = Invoke-EnvCapturedProcess -FilePath 'git' -ArgumentList @('clone', 'https://github.com/Aron-Chu/streamclone-scraper.git', $sibling) -TimeoutSec 300
+    if ($clone.ExitCode -ne 0) {
+        $log = ($clone.Output -join [Environment]::NewLine).Trim()
+        throw "Could not clone streamclone-scraper: $log"
+    }
+}
+
+function Get-SetupControlUseImages {
+    return (Test-ScraperUseImagesFromEnv) -or
+        ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1') -or
+        (-not [string]::IsNullOrWhiteSpace($envValues['IMAGE_TAG']))
+}
+
 function Invoke-ProfileServiceUp {
     param(
         [ValidateSet('scraper', 'clipper')]
@@ -65,23 +92,15 @@ function Invoke-ProfileServiceUp {
 
     $profile = $Service
     if ($Service -eq 'scraper') {
-        $sibling = Get-EnvScraperSiblingPath
-        $hasRepo = (Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile'))
-        if (-not $hasRepo) {
-            Write-Host "Cloning streamclone-scraper to $sibling ..."
-            $parent = Split-Path -Parent $sibling
-            New-Item -ItemType Directory -Path $parent -Force | Out-Null
-            $clone = Invoke-EnvCapturedProcess -FilePath 'git' -ArgumentList @('clone', 'https://github.com/Aron-Chu/streamclone-scraper.git', $sibling) -TimeoutSec 300
-            if ($clone.ExitCode -ne 0) {
-                $log = ($clone.Output -join [Environment]::NewLine).Trim()
-                throw "Could not clone streamclone-scraper: $log"
-            }
-        }
+        Ensure-ScraperSiblingRepo
     }
 
-    $useImages = ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1') -or (-not [string]::IsNullOrWhiteSpace($envValues['IMAGE_TAG']))
+    $useImages = Get-SetupControlUseImages
     $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile -UseImages:$useImages
-    $result = Invoke-EnvDockerCaptured -Arguments ($composeArgs + @('up', '-d', '--remove-orphans', $Service))
+    $upArgs = @('up', '-d', '--remove-orphans')
+    if ($useImages) { $upArgs += '--pull', 'missing' }
+    $upArgs += $Service
+    $result = Invoke-EnvDockerCaptured -Arguments ($composeArgs + $upArgs)
     $output = ($result.Output -join [Environment]::NewLine).Trim()
     if ($result.ExitCode -ne 0) {
         throw "docker compose failed: $output"
@@ -103,21 +122,10 @@ function Start-ProfileServiceUpAsync {
     Sync-SetupControlTokenFromEnv
 
     if ($Service -eq 'scraper') {
-        $sibling = Get-EnvScraperSiblingPath
-        $hasRepo = (Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile'))
-        if (-not $hasRepo) {
-            Write-Host "Cloning streamclone-scraper to $sibling ..."
-            $parent = Split-Path -Parent $sibling
-            New-Item -ItemType Directory -Path $parent -Force | Out-Null
-            $clone = Invoke-EnvCapturedProcess -FilePath 'git' -ArgumentList @('clone', 'https://github.com/Aron-Chu/streamclone-scraper.git', $sibling) -TimeoutSec 300
-            if ($clone.ExitCode -ne 0) {
-                $log = ($clone.Output -join [Environment]::NewLine).Trim()
-                throw "Could not clone streamclone-scraper: $log"
-            }
-        }
+        Ensure-ScraperSiblingRepo
     }
 
-    $useImages = ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1') -or (-not [string]::IsNullOrWhiteSpace($envValues['IMAGE_TAG']))
+    $useImages = Get-SetupControlUseImages
     $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $Service -UseImages:$useImages
     $docker = Get-EnvDockerExe
     if (-not $docker) {
@@ -129,7 +137,9 @@ function Start-ProfileServiceUpAsync {
     foreach ($path in @($logFile, $errLog)) {
         if (Test-Path $path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
     }
-    $args = $composeArgs + @('up', '-d', '--remove-orphans', $Service)
+    $args = $composeArgs + @('up', '-d', '--remove-orphans')
+    if ($useImages) { $args += '--pull', 'missing' }
+    $args += $Service
 
     $proc = Start-Process -FilePath $docker `
         -ArgumentList (Join-EnvProcessArguments -Arguments $args) `
@@ -138,7 +148,35 @@ function Start-ProfileServiceUpAsync {
         -RedirectStandardOutput $logFile `
         -RedirectStandardError $errLog `
         -PassThru
+    if ($Service -eq 'scraper') {
+        Start-ScraperCamoufoxWarmupAsync | Out-Null
+    }
     return "compose start initiated (pid $($proc.Id)); see $logFile"
+}
+
+function Start-ScraperCamoufoxWarmupAsync {
+    $warmupLog = Join-Path $Root '.streamclone-scraper-warmup.log'
+    $warmupErr = "${warmupLog}.err"
+    foreach ($path in @($warmupLog, $warmupErr)) {
+        if (Test-Path $path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+    }
+    $preflight = Join-Path $Root 'scripts\scraper-preflight.ps1'
+    if (-not (Test-Path $preflight)) {
+        return 'scraper-preflight.ps1 missing — run scripts/warm-camoufox-profile.ps1 manually if viewer sync fails'
+    }
+    $psExe = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
+    Start-Process -FilePath $psExe `
+        -ArgumentList @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', $preflight
+        ) `
+        -WorkingDirectory $Root `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $warmupLog `
+        -RedirectStandardError $warmupErr `
+        | Out-Null
+    return 'Camoufox warmup probe started (scraper-preflight). If Cloudflare blocks, run scripts/warm-camoufox-profile.ps1 once.'
 }
 
 function Get-StreamcloneProfileStartStatus {
@@ -169,6 +207,16 @@ function Get-StreamcloneProfileStartStatus {
         $percent = 20
         $phase = 'Downloading scraper repo'
     }
+    if ($blob -match '(\d+\.?\d*)\s*mb\s*/\s*(\d+\.?\d*)\s*mb') {
+        $doneMb = [double]$Matches[1]
+        $totalMb = [double]$Matches[2]
+        if ($totalMb -gt 0) {
+            $ratio = [math]::Min(1.0, $doneMb / $totalMb)
+            $percent = [math]::Max($percent, [int](25 + (40 * $ratio)))
+            $phase = 'Building scraper image'
+            $detail = ('{0:N0} MB / {1:N0} MB downloaded' -f $doneMb, $totalMb)
+        }
+    }
     if ($blob -match 'pulling|pull complete|downloading|extracting|pulled') {
         $percent = 45
         $phase = 'Pulling container image'
@@ -197,12 +245,50 @@ function Get-StreamcloneProfileStartStatus {
         }
     }
 
+    $warmup = $null
+    if ($Service -eq 'scraper') {
+        $warmupLog = Join-Path $Root '.streamclone-scraper-warmup.log'
+        $warmupErr = "${warmupLog}.err"
+        $warmupLines = [System.Collections.Generic.List[string]]::new()
+        foreach ($path in @($warmupLog, $warmupErr)) {
+            if (-not (Test-Path $path)) { continue }
+            foreach ($line in (Get-Content -LiteralPath $path -Tail 6 -ErrorAction SilentlyContinue)) {
+                $trimmed = "$line".Trim()
+                if ($trimmed) { [void]$warmupLines.Add($trimmed) }
+            }
+        }
+        if ($warmupLines.Count -gt 0) {
+            $warmupBlob = ($warmupLines -join ' ').ToLowerInvariant()
+            if ($warmupBlob -match 'camoufox scrape ok|meta#ecs') {
+                $warmup = 'Camoufox profile warm — TwitchTracker probe ok'
+                if ($percent -lt 96) { $percent = 96 }
+                if ($phase -eq 'Container is up' -or $phase -eq 'Waiting for API health') {
+                    $phase = 'Warming Camoufox profile'
+                }
+            } elseif ($warmupBlob -match 'cloudflare|warm the camoufox profile') {
+                $warmup = 'Cloudflare blocked — run scripts/warm-camoufox-profile.ps1 once, then retry sync'
+            } elseif ($warmupBlob -match 'waiting for scraper|scraper healthy') {
+                $warmup = 'Probing Camoufox / TwitchTracker…'
+                if ($percent -ge 82 -and $percent -lt 94) {
+                    $percent = 94
+                    $phase = 'Warming Camoufox profile'
+                    $detail = $warmupLines[$warmupLines.Count - 1]
+                }
+            } else {
+                $warmup = $warmupLines[$warmupLines.Count - 1]
+            }
+        } elseif ($percent -ge 82) {
+            $warmup = 'Camoufox warmup queued after container start'
+        }
+    }
+
     return @{
         service = $Service
         percent = $percent
         phase   = $phase
         detail  = $detail
         lines   = @($lines.ToArray() | Select-Object -Last 5)
+        warmup  = $warmup
     }
 }
 
@@ -241,6 +327,8 @@ function Invoke-SyncClipperAuth {
             throw "clipper recreate failed: $log"
         }
     }
+
+    Invoke-EnsureFrontendClipperConfig -EnvFile $envPath | Out-Null
 
     return @{
         ok = $true
@@ -281,6 +369,27 @@ try {
                 continue
             }
 
+            if ($request.HttpMethod -eq 'GET' -and $path -eq '/endpoints') {
+                Write-JsonResponse -Response $response -StatusCode 200 -Body @{
+                    ok = $true
+                    service = 'setup-control'
+                    endpoints = @(
+                        @{ method = 'GET'; path = '/health'; auth = $false; description = 'Daemon health probe' }
+                        @{ method = 'GET'; path = '/diagnostics'; auth = $false; description = 'Host + compose diagnostics for the directory UI' }
+                        @{ method = 'GET'; path = '/endpoints'; auth = $false; description = 'This route list' }
+                        @{ method = 'GET'; path = '/start/scraper/status'; auth = $false; description = 'Async scraper profile start progress' }
+                        @{ method = 'GET'; path = '/start/clipper/status'; auth = $false; description = 'Async clipper profile start progress' }
+                        @{ method = 'POST'; path = '/start/scraper'; auth = $true; description = 'Start analytics scraper compose profile' }
+                        @{ method = 'POST'; path = '/start/clipper'; auth = $true; description = 'Start clipper compose profile' }
+                        @{ method = 'POST'; path = '/sync-clipper-auth'; auth = $true; description = 'Merge signed-in Twitch tokens into clipper env' }
+                    )
+                    scripts = @(
+                        @{ name = 'backup-streamclone.ps1'; path = 'scripts/backup-streamclone.ps1'; description = 'Dump Postgres + MinIO backup instructions' }
+                    )
+                }
+                continue
+            }
+
             if ($request.HttpMethod -eq 'GET' -and $path -eq '/diagnostics') {
                 $report = Get-StreamcloneDiagnostics -Root $Root
                 Write-JsonResponse -Response $response -StatusCode 200 -Body $report
@@ -297,6 +406,7 @@ try {
                     phase   = $status.phase
                     detail  = $status.detail
                     lines   = $status.lines
+                    warmup  = $status.warmup
                 }
                 continue
             }
@@ -308,7 +418,16 @@ try {
                 }
                 $service = $Matches[1]
                 $log = Start-ProfileServiceUpAsync -Service $service
-                Write-JsonResponse -Response $response -StatusCode 200 -Body @{ ok = $true; service = $service; message = 'starting'; log = $log }
+                $warmup = if ($service -eq 'scraper') {
+                    'Camoufox warmup probe started in background (scraper-preflight). Manual CF pass: scripts/warm-camoufox-profile.ps1'
+                } else { $null }
+                Write-JsonResponse -Response $response -StatusCode 200 -Body @{
+                    ok      = $true
+                    service = $service
+                    message = 'starting'
+                    log     = $log
+                    warmup  = $warmup
+                }
                 continue
             }
 

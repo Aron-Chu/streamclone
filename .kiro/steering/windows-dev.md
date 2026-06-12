@@ -77,8 +77,34 @@ powershell -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action local-a
 docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml up -d --force-recreate clipper
 ```
 
+## Setup-control (port 9191)
+
+Host-side HTTP helper for install wizard, **Start Analytics**, and optional clipper start. Not a Docker container.
+
+- **Started by:** `scripts/ensure-setup-control.ps1` (called from `setup.ps1`, `start-streamclone.ps1`, install launcher).
+- **PID file:** `.streamclone-setup-control.pid` in repo root — written on start, removed on stop/uninstall (`scripts/stop-streamclone.ps1`, `scripts/uninstall-streamclone.ps1`).
+- **Proxied:** Caddy `/v1/setup-control/*` → `host.docker.internal:9191`.
+
+**Symptom:** **Start Analytics** or install wizard does nothing; UI shows `installHelperReady: false`.
+
+**Check:**
+
+```powershell
+curl.exe http://127.0.0.1:9191/health
+curl.exe http://localhost:8090/v1/setup-control/health
+```
+
+**Fix:** run **Start Streamclone** once, or:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/ensure-setup-control.ps1
+```
+
+If `.env` changed after setup-control started, `ensure-setup-control.ps1` restarts the daemon when the PID file is stale.
+
 ## Task checklist
 
 - Read this file when localhost behaves differently from `docker ps` / container logs.
 - Prefer `curl.exe http://localhost:8090/...` for probes on Windows PowerShell.
+- If optional services or install wizard fail, check setup-control on `:9191` before blaming Docker.
 - After `.env` / OAuth changes, run `make reload-env` (or `make twitch-sync`, which calls it). `docker compose restart` does **not** reload `env_file`; affected services: `chat`, `metadata`, `analytics`, `emote`, and `clipper` when using Clip Studio. `make app` / `make up` run `ensure-oauth` + `reload-env-if-stale` to catch drift (e.g. `.env` has OAuth but `emote` container was created without it).

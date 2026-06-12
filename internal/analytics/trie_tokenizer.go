@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"streamclone/internal/chat/batch"
+	"streamclone/internal/chat/parse"
 	"streamclone/internal/chat/tokenize"
 )
 
@@ -9,7 +10,7 @@ type TrieTokenizer struct {
 	Trie *tokenize.Trie
 }
 
-func (t *TrieTokenizer) Tokenize(_ string, text string) []batch.Fragment {
+func (t *TrieTokenizer) Tokenize(_ string, text string, _ []parse.EmoteRange) []batch.Fragment {
 	if t == nil || t.Trie == nil {
 		return []batch.Fragment{{T: "text", C: text}}
 	}

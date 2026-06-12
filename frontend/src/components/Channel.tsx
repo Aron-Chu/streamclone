@@ -1,28 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ApiError,
   ensureChannelEmotes,
+  followChannel,
   getChannel,
   getChannelBadges,
   getChannelDetails,
   getChannelEmotes,
   getChannelInsights,
   getAnalyticsLive,
+  getFollowedChannels,
+  getLocalFollowedChannels,
   getStreamDiagnostics,
   keepaliveStream,
   startStream,
   stopStream,
+  unfollowChannel,
   watchAnalyticsChannel,
 } from '../api'
-import type { AnalyticsTopEmote, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat } from '../api'
+import type { AnalyticsMinuteRollup, AnalyticsTopEmote, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat } from '../api'
 import { useAuth } from '../auth'
 import { useChatStore } from '../chatStore'
 import { normalizeBrowserOriginUrl } from '../config'
 import { useHlsPlayback, type PlaybackMetrics, type PlaybackState } from '../playback'
 import { useThemeEffect, useUiSettings, type BottomDensityMode, type ClipPeriod, type PlaybackLatencyMode, type StatsPeriod, type VideoFitMode } from '../settings'
+import { autoHighStableQuality, defaultQualityOptions, requestQuality } from '../streamQuality'
 import { emoteLoadPercent, formatEmoteProviderProgress, sortChannelEmotesByUsage } from '../emoteUtils'
 import BrandLogo from './BrandLogo'
 import Chat, { type ChatEmoteStatus } from './Chat'
@@ -36,6 +41,8 @@ type ChannelTab = 'about' | 'stats' | 'clips' | 'vods' | 'diagnostics' | 'emotes
 const emoteProviderOptions: Array<{ id: EmoteProvider; label: string }> = [
   { id: 'seventv', label: '7TV' },
   { id: 'twitch', label: 'Twitch' },
+  { id: 'ffz', label: 'FFZ' },
+  { id: 'bttv', label: 'BTTV' },
 ]
 
 const periodOptions: Array<{ id: ClipPeriod; label: string }> = [
@@ -46,9 +53,6 @@ const periodOptions: Array<{ id: ClipPeriod; label: string }> = [
   { id: 'all', label: 'All' },
 ]
 
-const autoHighStableQuality = 'auto-high-stable'
-const autoHighStableChain = '720p60,720p,1080p60,1080p,best'
-const defaultQualityOptions = [autoHighStableQuality, 'best', '1080p60', '1080p', '720p60', '720p', '480p', '360p']
 
 type QualityMenuOption = {
   value: string
@@ -61,10 +65,6 @@ function qualityLabel(value: string) {
   if (value === autoHighStableQuality) return '720p fast'
   if (value === 'best') return 'Best / source'
   return value
-}
-
-function requestQuality(value: string) {
-  return value === autoHighStableQuality ? autoHighStableChain : value
 }
 
 async function resolvePlayableHlsUrl(rawUrl: string) {
@@ -888,6 +888,65 @@ function LivePlayerControls({
   )
 }
 
+function MiniViewerSparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return null
+  const max = Math.max(...values, 1)
+  const coords = values.map((value, index) => {
+    const x = values.length === 1 ? 0 : (index / (values.length - 1)) * 100
+    const y = 24 - (value / max) * 20
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  return (
+    <svg viewBox="0 0 100 26" className="mt-1 h-6 w-full max-w-[120px]" aria-hidden>
+      <polyline fill="none" stroke="rgba(34,211,238,.35)" strokeWidth="6" strokeLinecap="round" points={coords} />
+      <polyline fill="none" stroke="rgb(34,211,238)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={coords} />
+    </svg>
+  )
+}
+
+function viewerSparklineValues(rollups: AnalyticsMinuteRollup[] | undefined) {
+  if (!rollups?.length) return []
+  return rollups.slice(-20).map(rollup => rollup.viewerMax || rollup.viewerLatest || rollup.viewerAvg || 0)
+}
+
+function FollowButton({ login }: { login: string }) {
+  const queryClient = useQueryClient()
+  const followed = useQuery({
+    queryKey: ['followed'],
+    queryFn: getFollowedChannels,
+    retry: false,
+    staleTime: 30_000,
+  })
+  const localFollowed = useQuery({
+    queryKey: ['followed', 'local'],
+    queryFn: getLocalFollowedChannels,
+    retry: false,
+    staleTime: 30_000,
+  })
+  const isLocalFollowing = localFollowed.data?.some(channel => channel.login === login) ?? false
+  const isTwitchFollowing = followed.data?.some(channel => channel.login === login) ?? false
+  const isFollowing = isLocalFollowing || isTwitchFollowing
+  const twitchOnly = isTwitchFollowing && !isLocalFollowing
+  const mutation = useMutation({
+    mutationFn: () => (isLocalFollowing ? unfollowChannel(login) : followChannel(login)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['followed'] })
+      queryClient.invalidateQueries({ queryKey: ['followed', 'local'] })
+    },
+  })
+  return (
+    <button
+      type="button"
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending || twitchOnly}
+      title={twitchOnly ? 'Following on Twitch — use Twitch to unfollow' : undefined}
+      className={`rounded px-3 py-1 text-xs font-black uppercase tracking-wide transition disabled:opacity-60 ${isFollowing ? 'border border-white/15 bg-white/10 text-zinc-100 hover:bg-white/15' : 'bg-violet-500 text-white hover:bg-violet-400'}`}
+    >
+      {mutation.isPending ? 'Saving…' : isFollowing ? 'Following' : 'Follow'}
+    </button>
+  )
+}
+
 function ChannelMetaSkeleton({ dense }: { dense: boolean }) {
   return (
     <section className={`border-t border-white/10 bg-[#0d0d12] ${dense ? 'px-3 py-3 lg:px-4' : 'px-4 py-4 lg:px-6'}`}>
@@ -926,6 +985,7 @@ function ChannelMeta({
   quality,
   listeners,
   dense,
+  viewerTrend,
 }: {
   login: string
   details?: ChannelDetails
@@ -933,6 +993,7 @@ function ChannelMeta({
   quality: string
   listeners: number | null
   dense: boolean
+  viewerTrend?: number[]
 }) {
   if (detailsLoading && !details) {
     return <ChannelMetaSkeleton dense={dense} />
@@ -948,6 +1009,7 @@ function ChannelMeta({
             <span className={`rounded px-2 py-0.5 text-[11px] font-black uppercase tracking-wide text-white ${details?.isLive ? 'bg-red-600' : 'bg-zinc-600'}`}>
               {details?.isLive ? 'Live' : 'Offline'}
             </span>
+            <FollowButton login={login} />
             {details?.category ? <span className="rounded border border-white/10 bg-white/[0.06] px-2 py-0.5 text-xs font-bold text-zinc-200">{details.category}</span> : null}
             {details?.startedAt ? <span className="text-xs font-semibold text-zinc-500">Started {relativeTime(details.startedAt)}</span> : null}
           </div>
@@ -969,6 +1031,7 @@ function ChannelMeta({
           <div className={`rounded border border-white/10 bg-white/[0.055] ${dense ? 'px-2.5 py-2' : 'px-3 py-2'}`} title="Live viewer count from Twitch metadata (sidebar uses the same value when this channel is open)">
             <div className="text-[11px] uppercase text-zinc-500">Viewers</div>
             <div className="mt-0.5 text-sm text-white">{fullCount(details?.viewers)}</div>
+            {details?.isLive ? <MiniViewerSparkline values={viewerTrend ?? []} /> : null}
           </div>
           <div className={`rounded border border-white/10 bg-white/[0.055] ${dense ? 'px-2.5 py-2' : 'px-3 py-2'}`}>
             <div className="text-[11px] uppercase text-zinc-500">Relay</div>
@@ -1500,7 +1563,7 @@ export default function Channel() {
     queryFn: () => getAnalyticsLive(channelLogin),
     enabled: Boolean(channelLogin),
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: query => (query.state.data?.state === 'live' ? 30_000 : 60_000),
   })
 
   useEffect(() => {
@@ -1758,6 +1821,10 @@ export default function Channel() {
     [emotePreview.data, liveAnalytics.data?.topEmotes],
   )
   const headerTitle = useMemo(() => details.data?.displayName || channelLogin || 'Channel', [channelLogin, details.data?.displayName])
+  const viewerTrend = useMemo(
+    () => (details.data?.isLive ? viewerSparklineValues(liveAnalytics.data?.rollups) : []),
+    [details.data?.isLive, liveAnalytics.data?.rollups],
+  )
   const railViewerOverrides = useMemo(() => {
     if (!channelLogin || details.data?.viewers == null) return undefined
     return { [channelLogin]: details.data.viewers }
@@ -2042,6 +2109,7 @@ export default function Channel() {
                   quality={loadedQuality}
                   listeners={listeners}
                   dense={isDenseBottom}
+                  viewerTrend={viewerTrend}
                 />
                 <ChannelTabs
                   activeTab={activeTab}

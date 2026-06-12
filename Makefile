@@ -22,7 +22,7 @@ CODEGRAPH_DB ?= .codegraph/streamclone.kuzu
 # Services that read TWITCH_OAUTH_* / session env at container create time (restart is not enough).
 ENV_RELOAD_SERVICES ?= chat metadata analytics emote
 
-.PHONY: env ensure-oauth ensure-clipper-auth refresh-auth rebuild app stop restart up down down-clean ps ports migrate logs obs-up obs-down obs-logs obs-config test vet build tidy twitch twitch-debug twitch-version twitch-configure twitch-sync twitch-token twitch-local-auth clipper-test clipper-run clipper-restart codegraph-install codegraph codegraph-mcp docs-screenshots docs-media frontend-build frontend-restart frontend-logs up-scraper up-full bootstrap setup setup-core setup-full validate-env security-scan smoke smoke-ui install-hooks reload-env reload-env-if-stale scraper-reload scraper-check scraper-preflight scraper-warm preflight-deps start stop-user
+.PHONY: env ensure-oauth ensure-clipper-auth ensure-frontend-config refresh-auth rebuild app stop restart up down down-clean ps ports migrate logs obs-up obs-down obs-logs obs-config test vet build tidy twitch twitch-debug twitch-version twitch-configure twitch-sync twitch-token twitch-local-auth clipper-test clipper-run clipper-restart codegraph-install codegraph codegraph-mcp docs-screenshots docs-media frontend-build frontend-restart frontend-logs up-scraper up-full bootstrap setup setup-core setup-full validate-env security-scan smoke smoke-ui install-hooks reload-env reload-env-if-stale scraper-reload scraper-check scraper-preflight scraper-warm preflight-deps start stop-user
 
 preflight-deps:
 	@bash scripts/preflight-deps.sh --install-hints
@@ -46,6 +46,9 @@ ensure-oauth: env
 # Validate/refresh clipper user token and force-recreate clipper when .env drifted (restart is not enough).
 ensure-clipper-auth: env
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-clipper-auth.ps1 -EnvFile $(ENV_FILE) || true
+
+ensure-frontend-config: env
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-frontend-config.ps1 -EnvFile $(ENV_FILE) || true
 
 # Sync OAuth app creds, reload stale Go services, refresh clipper token when possible.
 refresh-auth: env ensure-oauth reload-env-if-stale ensure-clipper-auth
@@ -176,7 +179,6 @@ twitch: env
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action sync-env -EnvFile $(ENV_FILE); \
 		$(COMPOSE_FULL) up -d --no-deps --force-recreate chat metadata analytics emote local-proxy; \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action local-auth -Scopes "$(TWITCH_SCOPES)" -ChatHttp "$(TWITCH_LOCAL_AUTH_URL)"; \
-		$(COMPOSE_FULL) up -d --no-deps --force-recreate clipper; \
 	elif [ "$(TWITCH_ACTION)" = "refresh-clipper-token" ]; then \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action refresh-clipper-token -EnvFile $(ENV_FILE); \
 		$(COMPOSE_FULL) up -d --force-recreate clipper; \

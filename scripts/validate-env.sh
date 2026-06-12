@@ -92,8 +92,13 @@ require_nonempty PUBLIC_ORIGIN "Set PUBLIC_ORIGIN=http://localhost:8090 for loca
 require_nonempty FRONTEND_ORIGIN "Set FRONTEND_ORIGIN=http://localhost:8090"
 
 dev_import="$(env_read_value "$ENV_FILE" TWITCH_DEV_TOKEN_IMPORT_ENABLED || true)"
-if [ "$dev_import" != "true" ]; then
-  warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true" "Run make setup (core profile sets this for in-app local token import)"
+use_images="$(env_read_value "$ENV_FILE" STREAMCLONE_USE_IMAGES || true)"
+if [ "$use_images" = "1" ]; then
+  if [ "$dev_import" = "true" ]; then
+    warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED=true on a release install" "Dev-only token import should stay false in releases (docs/security.md)"
+  fi
+elif [ "$dev_import" != "true" ]; then
+  warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true" "Run make setup (.env.dev sets this for in-app local token import)"
 fi
 
 oauth_id="$(env_read_value "$ENV_FILE" TWITCH_OAUTH_CLIENT_ID || true)"
@@ -132,7 +137,7 @@ case "$PROFILE" in
     fi
     token="$(env_read_value "$ENV_FILE" CLIPPER_TWITCH_USER_ACCESS_TOKEN || true)"
     if [ -z "$token" ]; then
-      warn "CLIPPER_TWITCH_USER_ACCESS_TOKEN is empty" "Run make twitch-local-auth after stack is up"
+      warn "CLIPPER_TWITCH_USER_ACCESS_TOKEN is empty" "Click Sign in (optional) at http://localhost:8090, or run make twitch-local-auth with Twitch CLI"
     fi
     client="$(env_read_value "$ENV_FILE" CLIPPER_TWITCH_CLIENT_ID || true)"
     oauth="$(env_read_value "$ENV_FILE" TWITCH_OAUTH_CLIENT_ID || true)"

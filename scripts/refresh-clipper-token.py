@@ -4,31 +4,12 @@ from __future__ import annotations
 import json
 import re
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LOG_PATH = ROOT / "debug-b00004.log"
-
-
-def agent_log(message: str, data: dict, hypothesis_id: str = "H1", run_id: str = "refresh") -> None:
-    payload = {
-        "sessionId": "b00004",
-        "timestamp": int(time.time() * 1000),
-        "location": "refresh-clipper-token.py",
-        "message": message,
-        "data": data,
-        "hypothesisId": hypothesis_id,
-        "runId": run_id,
-    }
-    try:
-        with LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, default=str) + "\n")
-    except OSError:
-        pass
 
 
 def read_kv(path: Path) -> dict[str, str]:
@@ -126,17 +107,6 @@ def main() -> int:
     current = env.get("CLIPPER_TWITCH_USER_ACCESS_TOKEN") or cli.get("ACCESSTOKEN") or ""
 
     before = validate_token(current)
-    agent_log(
-        "clipper token refresh start",
-        {
-            "before_ok": before.get("ok"),
-            "before_prefix": current[:4] if len(current) >= 4 else "",
-            "before_len": len(current),
-            "has_refresh_token": bool(refresh_token),
-            "has_client_secret": bool(client_secret),
-        },
-        hypothesis_id="H1-H7",
-    )
 
     if before.get("ok"):
         print(json.dumps({"status": "already_valid", "expires_in": before.get("expires_in")}))
@@ -160,7 +130,6 @@ def main() -> int:
     refreshed = refresh_access_token(client_id, client_secret, refresh_token)
     access_token = str(refreshed.get("access_token") or "")
     if not access_token:
-        agent_log("clipper token refresh failed", refreshed, hypothesis_id="H7")
         print(json.dumps({"status": "refresh_failed", **refreshed}))
         return 1
 
@@ -173,18 +142,6 @@ def main() -> int:
         write_env_value(cli_config_path(), "REFRESHTOKEN", str(refreshed["refresh_token"]))
 
     after = validate_token(access_token)
-    agent_log(
-        "clipper token refresh finished",
-        {
-            "after_ok": after.get("ok"),
-            "after_prefix": access_token[:4] if len(access_token) >= 4 else "",
-            "after_len": len(access_token),
-            "has_clips_edit": "clips:edit" in (after.get("scopes") or []),
-            "expires_in": after.get("expires_in"),
-        },
-        hypothesis_id="H1",
-        run_id="post-refresh",
-    )
 
     result = {
         "status": "refreshed" if after.get("ok") else "refreshed_but_invalid",

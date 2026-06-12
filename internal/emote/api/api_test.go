@@ -147,9 +147,23 @@ func TestEnsureChannelEmotesBadProvider(t *testing.T) {
 		return ensureResponse{}, 0, nil
 	}}
 
-	rec := postEnsure(h, "leeonbeeon", `{"twitch_id":"670388028","providers":["bttv"]}`)
+	rec := postEnsure(h, "leeonbeeon", `{"twitch_id":"670388028","providers":["foo"]}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestEnsureChannelEmotesAcceptsBTTV(t *testing.T) {
+	h := &Handler{ensure: func(_ context.Context, _ string, _ string, providers []seeder.Provider) (ensureResponse, int, error) {
+		if len(providers) != 1 || providers[0] != seeder.ProviderBTTV {
+			t.Fatalf("unexpected providers: %+v", providers)
+		}
+		return makeEnsureResponse("processing", 0, 10, providers), http.StatusAccepted, nil
+	}}
+
+	rec := postEnsure(h, "leeonbeeon", `{"twitch_id":"670388028","providers":["bttv"]}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 }
 

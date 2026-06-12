@@ -1,30 +1,15 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
-Set-Location (Split-Path $PSScriptRoot -Parent)
+$Root = Split-Path $PSScriptRoot -Parent
+Set-Location $Root
 
 $runUi = $args -contains '--ui'
 
-function Wait-Url {
-    param([string]$Url, [string]$Label)
-    Write-Host "Checking $Label ($Url)..."
-    for ($i = 1; $i -le 60; $i++) {
-        try {
-            Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5 | Out-Null
-            Write-Host "  ok"
-            return
-        } catch {
-            Start-Sleep -Seconds 2
-        }
-    }
-    throw "smoke-core: $Label failed - is the stack up? Run scripts/bootstrap.ps1 or make up."
+. (Join-Path $PSScriptRoot 'lib\wait-stack.ps1')
+if (-not (Wait-StreamcloneTieredReadiness -Root $Root -SkipHLS)) {
+    Write-Host 'smoke-core: tiered readiness failed - is the stack up? Run scripts/bootstrap.ps1 or make up.' -ForegroundColor Red
+    exit 1
 }
-
-Wait-Url "http://localhost:8090/" "Caddy proxy (frontend)"
-Wait-Url "http://localhost:8081/healthz" "metadata"
-Wait-Url "http://localhost:8082/healthz" "video"
-Wait-Url "http://localhost:8083/healthz" "chat"
-Wait-Url "http://localhost:8084/healthz" "emote"
-Wait-Url "http://localhost:8086/healthz" "analytics"
 
 if ($runUi) {
     Write-Host "Running Playwright smoke-core..."

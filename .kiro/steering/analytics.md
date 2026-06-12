@@ -91,7 +91,12 @@ On **stream close**, the live collector calls Helix and `SetStreamVodID` with de
 | `tokenize_ms` | Emote tokenization for rollups |
 | `rollup_write_ms` | Postgres rollup writes |
 
-Optional fields on Redis `SyncStatus.timing` for the Analytics sync progress panel.
+Optional fields on Redis `SyncStatus.timing` surface in the **`SyncProgressPanel`** component (`Analytics.tsx`) — viewers, VOD chat fetch, and rollup/emote steps with segment grid and ETA.
+
+### Optional scraper tier / Start Analytics
+
+- Core compose profile (`deploy/env/profile-core.env`) ships analytics without the scraper service; minute-level TwitchTracker charts need the scraper profile.
+- UI **Start Analytics** (banner, Stack status, or `OptionalServicesPanel`) starts the scraper tier via host setup-control — see `.kiro/steering/windows-dev.md` if the button does nothing.
 
 ### GQL VOD comments (`fetchVODComments` / `sync_gql_parallel.go`)
 

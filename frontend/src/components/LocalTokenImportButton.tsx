@@ -110,7 +110,7 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
     let twitchTabBlocked = !twitchTabRef.current || twitchTabRef.current.closed
     if (twitchTabRef.current && !twitchTabRef.current.closed) {
       try {
-        twitchTabRef.current.location.href = started.verificationUri
+        twitchTabRef.current.location.replace(started.verificationUri)
       } catch {
         twitchTabBlocked = true
       }
@@ -145,7 +145,14 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
       return
     }
 
-    twitchTabRef.current = window.open('about:blank', '_blank', 'noopener,noreferrer')
+    // Pre-open a tab synchronously on click so popup blockers allow it, then navigate
+    // once device auth starts. Do not pass noopener here — it makes window.open return
+    // null while still opening about:blank, which we can no longer redirect.
+    const tab = window.open('about:blank', '_blank')
+    if (tab) {
+      tab.opener = null
+    }
+    twitchTabRef.current = tab
 
     try {
       await auth.claimPreparedLocalToken()
@@ -303,6 +310,7 @@ function applyAuthenticatedDeviceLogin(queryClient: ReturnType<typeof useQueryCl
   }))
   queryClient.invalidateQueries({ queryKey: ['me'] })
   queryClient.invalidateQueries({ queryKey: ['followed'] })
+  queryClient.invalidateQueries({ queryKey: ['followed', 'local'] })
   void syncClipperAuthFromSignIn().catch(() => {})
 }
 

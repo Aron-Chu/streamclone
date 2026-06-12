@@ -6,6 +6,7 @@ const PROVIDER_ROWS: { id: EmoteProvider; label: string }[] = [
   { id: 'seventv', label: '7TV' },
   { id: 'twitch', label: 'Twitch' },
   { id: 'ffz', label: 'FFZ' },
+  { id: 'bttv', label: 'BTTV' },
 ]
 
 interface EmoteScrollPickerProps {
@@ -19,10 +20,11 @@ export function EmoteScrollPicker({ emotes, onPick }: EmoteScrollPickerProps) {
       seventv: [],
       twitch: [],
       ffz: [],
+      bttv: [],
     }
     for (const emote of emotes) {
       const provider = emote.provider
-      if (provider === 'seventv' || provider === 'twitch' || provider === 'ffz') {
+      if (provider === 'seventv' || provider === 'twitch' || provider === 'ffz' || provider === 'bttv') {
         buckets[provider].push(emote)
       }
     }

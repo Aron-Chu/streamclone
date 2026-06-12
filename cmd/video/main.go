@@ -39,6 +39,7 @@ func main() {
 		HLSBase:        cfg.HLSPublicBase,
 		HLSProbeBase:   cfg.HLSInternalBase,
 		MaxStreams:     cfg.MaxConcurrentStreams,
+		MaxRelays:      cfg.MaxConcurrentRelays,
 		IdleTimeout:    cfg.StreamIdleTimeout,
 		BackendVersion: cfg.BackendVersion,
 		WorkerBackends: strings.Split(cfg.StreamWorkerBackends, ","),

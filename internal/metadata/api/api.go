@@ -54,6 +54,7 @@ type Handler struct {
 	c                   *cache.Cache
 	g                   GQLClient
 	hx                  HelixClient
+	follows             FollowStore
 	http                *http.Client
 	scrapeHTTP          *http.Client
 	twitchTrackerAPIURL string
@@ -185,6 +186,7 @@ func (h *Handler) WithRedditOptions(opts RedditOptions) *Handler {
 func (h *Handler) Mount(r *chi.Mux) {
 	r.Get("/v1/setup/welcome", h.setupWelcome)
 	r.Get("/v1/setup/diagnostics", h.setupDiagnostics)
+	r.Get("/v1/followed", h.followedList)
 	r.Get("/v1/streams", h.streams)
 	r.Get("/v1/streams/random", h.randomStream)
 	r.Get("/v1/categories", h.categories)
@@ -199,6 +201,8 @@ func (h *Handler) Mount(r *chi.Mux) {
 		r.Get("/youtube", h.channelYouTube)
 		r.Get("/insights", h.channelInsights)
 		r.Get("/streams/history", h.channelStreamHistory)
+		r.Post("/follow", h.followChannel)
+		r.Delete("/follow", h.unfollowChannel)
 	})
 }
 

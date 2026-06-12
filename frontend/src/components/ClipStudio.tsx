@@ -5,6 +5,8 @@ import {
   getClipperJob,
   getClipperJobCaptions,
   getClipperTemplates,
+  getClipperJobProject,
+  updateClipperJobProject,
   updateClipperJobCaptions,
   renderClipperJob,
   transcribeClipperJob,
@@ -31,6 +33,7 @@ import { ClipInspector } from './clipStudio/ClipInspector'
 import { ClipTimeline } from './clipStudio/ClipTimeline'
 import { JobProgressOverlay } from './clipStudio/JobProgressOverlay'
 import { StudioTopBar } from './clipStudio/StudioTopBar'
+import { StudioTemplateRail } from './clipStudio/StudioTemplateRail'
 import { VideoStage } from './clipStudio/VideoStage'
 import type { FormatPreset, InspectorTab, PreviewMode, RenderStatus } from './clipStudio/types'
 import { buildEmoteMap, buildUploadPackage, parseTimeInput, spikePositionInSource } from './clipStudio/utils'
@@ -51,7 +54,7 @@ export default function ClipStudio() {
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string; phase: 'visible' | 'exiting' } | null>(null)
   const [selectedCaptionIndex, setSelectedCaptionIndex] = useState<number | null>(null)
   const [addTextMode, setAddTextMode] = useState(false)
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('template')
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('layout')
 
   const [formatPreset, setFormatPreset] = useState<FormatPreset>('tiktok')
   const [captionPreset, setCaptionPreset] = useState<CaptionPreset>('default')
@@ -134,6 +137,22 @@ export default function ClipStudio() {
       setTrimEnd(details.job.twitch_clip_duration || details.job.source_duration || 30)
       setCaptions(caps.captions || [])
 
+      try {
+        const projectResp = await getClipperJobProject(jobId)
+        const p = projectResp.project
+        if (p.trim_start != null) setTrimStart(p.trim_start)
+        if (p.trim_end != null) setTrimEnd(p.trim_end)
+        if (p.format_preset) setFormatPreset(p.format_preset as FormatPreset)
+        if (p.caption_preset) setCaptionPreset(p.caption_preset)
+        if (p.caption_size) setCaptionSize(p.caption_size)
+        if (p.caption_position) setCaptionPosition(p.caption_position)
+        if (p.layout) setLayout(p.layout)
+        if (p.layout_split_ratio != null) setLayoutSplitRatio(p.layout_split_ratio)
+        if (p.selected_template_id !== undefined) setSelectedTemplateId(p.selected_template_id)
+      } catch {
+        // no saved project yet
+      }
+
       if (isClipperJobInProgress(details.job) || details.job.state === 'rendering' || details.job.state === 'transcribing') {
         if (details.job.state === 'rendering') setRenderStatus('rendering')
         if (details.job.state === 'transcribing') setIsTranscribing(true)
@@ -154,6 +173,27 @@ export default function ClipStudio() {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     }
   }, [loadJobData])
+
+  useEffect(() => {
+    if (!jobId || loading || error) return
+    const timer = setTimeout(() => {
+      updateClipperJobProject(jobId, {
+        trim_start: trimStart,
+        trim_end: trimEnd,
+        format_preset: formatPreset,
+        caption_preset: captionPreset,
+        caption_size: captionSize,
+        caption_position: captionPosition,
+        layout,
+        layout_split_ratio: layoutSplitRatio,
+        selected_template_id: selectedTemplateId,
+      }).catch(() => undefined)
+    }, 800)
+    return () => clearTimeout(timer)
+  }, [
+    jobId, loading, error, trimStart, trimEnd, formatPreset, captionPreset,
+    captionSize, captionPosition, layout, layoutSplitRatio, selectedTemplateId,
+  ])
 
   useEffect(() => {
     if (!job?.channel) return
@@ -490,8 +530,8 @@ export default function ClipStudio() {
 
   if (loading) {
     return (
-      <div className="clip-studio-container clip-studio-loading">
-        <p>Loading Clip Studio Editor...</p>
+      <div className="flex h-[calc(100vh-56px)] items-center justify-center bg-[#0d0d12] text-zinc-400">
+        <p className="text-sm">Loading Clip Studio…</p>
       </div>
     )
   }
@@ -501,17 +541,18 @@ export default function ClipStudio() {
       ? `/analytics/${encodeURIComponent(job.channel)}`
       : '/'
     return (
-      <div className="clip-studio-container clip-studio-loading">
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mx-auto flex min-h-[calc(100vh-56px)] max-w-2xl flex-col items-center justify-center bg-[#0d0d12] px-6 py-12 text-center">
+        <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
           <StackStatusButton />
-          <Link to="/" className="clip-studio-back-link">Live directory</Link>
+          <Link to="/studio" className="text-xs text-zinc-400 hover:text-zinc-200">Clip archive</Link>
+          <Link to="/" className="text-xs text-zinc-400 hover:text-zinc-200">Live directory</Link>
           {job?.channel ? (
-            <Link to={analyticsBack} className="clip-studio-back-link">&larr; Back to Analytics</Link>
+            <Link to={analyticsBack} className="text-xs text-cyan-400 hover:text-cyan-300">&larr; Analytics</Link>
           ) : null}
         </div>
-        <h2 className="clip-studio-error-title">Error</h2>
-        <p>{error || 'Job not found'}</p>
-        <div className="mt-4 max-w-xl">
+        <h2 className="text-lg font-bold text-rose-400">Could not open this clip</h2>
+        <p className="mt-2 text-sm text-zinc-400">{error || 'Job not found or clipper is offline.'}</p>
+        <div className="mt-6 w-full max-w-xl">
           <OptionalServicesPanel variant="banner" focus="clipper" channelLogin={job?.channel} />
         </div>
       </div>
@@ -530,10 +571,14 @@ export default function ClipStudio() {
       : ''
 
   return (
-    <div className="clip-studio-container">
+    <div className="flex h-[calc(100vh-56px)] flex-col overflow-hidden bg-[#0d0d12] text-zinc-100">
       {toast && (
         <div
-          className={`clip-studio-toast clip-studio-toast-${toast.type}${toast.phase === 'exiting' ? ' clip-studio-toast-out' : ''}`}
+          className={`fixed right-4 top-16 z-[10000] cursor-pointer rounded-lg px-4 py-2.5 text-sm font-medium shadow-xl ${
+            toast.type === 'success' ? 'border border-emerald-500/40 bg-emerald-950 text-emerald-100'
+            : toast.type === 'error' ? 'border border-rose-500/40 bg-rose-950 text-rose-100'
+            : 'border border-violet-500/40 bg-violet-950 text-violet-100'
+          }${toast.phase === 'exiting' ? ' opacity-0 transition-opacity' : ''}`}
           onClick={dismissToast}
           onAnimationEnd={handleToastAnimationEnd}
           role="status"
@@ -551,28 +596,25 @@ export default function ClipStudio() {
         canPreviewFinal={canPreviewFinal}
         sourceUrl={getClipperSourceVideoUrl(job.id)}
         finalUrl={getClipperFinalVideoUrl(job.id)}
+        previewMode={previewMode}
+        formatPreset={formatPreset}
+        renderStatus={renderStatus}
+        onPreviewModeChange={setPreviewMode}
+        onFormatPresetChange={handleFormatPresetChange}
         onExport={handleExport}
         exportDisabled={sourceUnavailable || renderStatus === 'rendering'}
       />
 
-      <div className="clip-studio-workspace">
-        <ClipDetailsPanel
-          job={job}
-          trimStart={trimStart}
-          trimEnd={trimEnd}
-          trimDuration={trimDuration}
-          captionPreset={captionPreset}
-          layout={layout}
-          captionsCount={captions.length}
-          isTranscribing={isTranscribing}
-          onToggleCaptions={handleCaptionsToggle}
-          onToggleFacecamFocus={handleFacecamToggle}
-          onCenterOnSpike={() => applyTrimWindow('payoff')}
-          onApplyDurationPreset={applyDurationPreset}
-          onOpenCaptionsTab={() => setInspectorTab('captions')}
+      <div className="flex min-h-0 flex-1">
+        <StudioTemplateRail
+          templates={templates}
+          selectedTemplateId={selectedTemplateId}
+          formatPreset={formatPreset}
+          onApplyTemplate={applyTemplate}
+          onFormatPresetChange={handleFormatPresetChange}
         />
 
-        <div className="clip-studio-center-panel">
+        <div className="flex min-w-0 flex-1 flex-col">
           <VideoStage
             videoRef={videoRef}
             videoSrc={videoSrc}
@@ -592,90 +634,105 @@ export default function ClipStudio() {
             currentTime={currentTime}
             selectedCaptionIndex={selectedCaptionIndex}
             addTextMode={addTextMode}
-            onSelectCaption={setSelectedCaptionIndex}
-            onUpdateCaption={handleUpdateCaption}
-            onAddCaptionAt={handleAddCaptionAt}
-            onFormatPresetChange={handleFormatPresetChange}
-            onPreviewModeChange={setPreviewMode}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
             onTogglePlay={togglePlay}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
+            onSelectCaption={setSelectedCaptionIndex}
+            onUpdateCaption={handleUpdateCaption}
+            onAddCaptionAt={handleAddCaptionAt}
+          />
+
+          <ClipTimeline
+            progressRef={progressRef}
+            captions={captions}
+            duration={duration}
+            currentTime={currentTime}
+            trimStart={trimStart}
+            trimEnd={trimEnd}
+            isPlaying={isPlaying}
+            job={job}
+            previewRelativeTime={previewRelativeTime}
+            previewMode={previewMode}
+            onScrub={handleScrub}
+            onTrimInput={handleTrimInput}
+            onSeekTo={seekTo}
+            onTogglePlay={togglePlay}
+            onTrimStartChange={setTrimStart}
+            onTrimEndChange={setTrimEnd}
+            onApplyTrimWindow={applyTrimWindow}
           />
         </div>
 
-        <ClipInspector
-          activeTab={inspectorTab}
-          onTabChange={setInspectorTab}
-          templates={templates}
-          selectedTemplateId={selectedTemplateId}
-          formatPreset={formatPreset}
-          captionPreset={captionPreset}
-          captionSize={captionSize}
-          captionPosition={captionPosition}
-          layout={layout}
-          layoutSplitRatio={layoutSplitRatio}
-          captions={captions}
-          activeCaption={activeCaption}
-          selectedCaptionIndex={selectedCaptionIndex}
-          addTextMode={addTextMode}
-          channelEmotes={channelEmotes}
-          job={job}
-          trimStart={trimStart}
-          trimEnd={trimEnd}
-          duration={duration}
-          sourceUnavailable={sourceUnavailable}
-          isTranscribing={isTranscribing}
-          showEmojiPicker={showEmojiPicker}
-          emojiTargetIndex={emojiTargetIndex}
-          onApplyTemplate={applyTemplate}
-          onFormatPresetChange={handleFormatPresetChange}
-          onCaptionPresetChange={handleCaptionPresetChange}
-          onCaptionSizeChange={setCaptionSize}
-          onCaptionPositionChange={setCaptionPosition}
-          onLayoutChange={setLayout}
-          onLayoutSplitRatioChange={setLayoutSplitRatio}
-          onRetranscribe={handleRetranscribe}
-          onSaveCaptions={handleSaveCaptions}
-          onAddCaptionRow={handleAddCaptionRow}
-          onCaptionTextChange={handleCaptionTextChange}
-          onCaptionTimeChange={handleCaptionTimeChange}
-          onRemoveCaptionRow={handleRemoveCaptionRow}
-          onSeekToCaption={seekTo}
-          onSelectCaption={setSelectedCaptionIndex}
-          onAddTextModeChange={setAddTextMode}
-          onCaptionEffectChange={handleCaptionEffectChange}
-          onResetCaptionPosition={handleResetCaptionPosition}
-          onEmojiPickerToggle={idx => {
-            setEmojiTargetIndex(idx)
-            setShowEmojiPicker(current => current && emojiTargetIndex === idx ? false : true)
-          }}
-          onInsertEmoji={insertEmojiIntoCaption}
-          onInsertEmote={insertEmoteIntoCaption}
-          onCopyUploadPackage={handleCopyUploadPackage}
-        />
+        <div className="flex w-[300px] shrink-0 flex-col border-l border-white/[0.08] bg-[#0d0d12]/95">
+          <ClipDetailsPanel
+            job={job}
+            trimStart={trimStart}
+            trimEnd={trimEnd}
+            trimDuration={trimDuration}
+            captionPreset={captionPreset}
+            layout={layout}
+            captionsCount={captions.length}
+            isTranscribing={isTranscribing}
+            onToggleCaptions={handleCaptionsToggle}
+            onToggleFacecamFocus={handleFacecamToggle}
+            onCenterOnSpike={() => applyTrimWindow('spike')}
+            onApplyDurationPreset={applyDurationPreset}
+            onOpenCaptionsTab={() => setInspectorTab('captions')}
+          />
+          <ClipInspector
+            activeTab={inspectorTab}
+            onTabChange={setInspectorTab}
+            templates={templates}
+            selectedTemplateId={selectedTemplateId}
+            formatPreset={formatPreset}
+            captionPreset={captionPreset}
+            captionSize={captionSize}
+            captionPosition={captionPosition}
+            layout={layout}
+            layoutSplitRatio={layoutSplitRatio}
+            captions={captions}
+            activeCaption={activeCaption}
+            selectedCaptionIndex={selectedCaptionIndex}
+            addTextMode={addTextMode}
+            channelEmotes={channelEmotes}
+            job={job}
+            trimStart={trimStart}
+            trimEnd={trimEnd}
+            duration={duration}
+            sourceUnavailable={sourceUnavailable}
+            isTranscribing={isTranscribing}
+            showEmojiPicker={showEmojiPicker}
+            emojiTargetIndex={emojiTargetIndex}
+            onApplyTemplate={applyTemplate}
+            onFormatPresetChange={handleFormatPresetChange}
+            onCaptionPresetChange={handleCaptionPresetChange}
+            onCaptionSizeChange={setCaptionSize}
+            onCaptionPositionChange={setCaptionPosition}
+            onLayoutChange={setLayout}
+            onLayoutSplitRatioChange={setLayoutSplitRatio}
+            onRetranscribe={handleRetranscribe}
+            onSaveCaptions={handleSaveCaptions}
+            onAddCaptionRow={handleAddCaptionRow}
+            onCaptionTextChange={handleCaptionTextChange}
+            onCaptionTimeChange={handleCaptionTimeChange}
+            onRemoveCaptionRow={handleRemoveCaptionRow}
+            onSeekToCaption={seekTo}
+            onSelectCaption={setSelectedCaptionIndex}
+            onAddTextModeChange={setAddTextMode}
+            onCaptionEffectChange={handleCaptionEffectChange}
+            onResetCaptionPosition={handleResetCaptionPosition}
+            onEmojiPickerToggle={idx => {
+              setEmojiTargetIndex(idx)
+              setShowEmojiPicker(current => current && emojiTargetIndex === idx ? false : true)
+            }}
+            onInsertEmoji={insertEmojiIntoCaption}
+            onInsertEmote={insertEmoteIntoCaption}
+            onCopyUploadPackage={handleCopyUploadPackage}
+          />
+        </div>
       </div>
-
-      <ClipTimeline
-        progressRef={progressRef}
-        captions={captions}
-        duration={duration}
-        currentTime={currentTime}
-        trimStart={trimStart}
-        trimEnd={trimEnd}
-        isPlaying={isPlaying}
-        job={job}
-        previewRelativeTime={previewRelativeTime}
-        previewMode={previewMode}
-        onScrub={handleScrub}
-        onTrimInput={handleTrimInput}
-        onSeekTo={seekTo}
-        onTogglePlay={togglePlay}
-        onTrimStartChange={setTrimStart}
-        onTrimEndChange={setTrimEnd}
-        onApplyTrimWindow={applyTrimWindow}
-      />
 
       <JobProgressOverlay
         job={job}

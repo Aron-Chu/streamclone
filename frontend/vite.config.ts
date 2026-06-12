@@ -41,7 +41,7 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/v1/followed': {
-        target: 'http://localhost:8083',
+        target: 'http://localhost:8081',
         changeOrigin: true,
       },
       '/v1/ws': {

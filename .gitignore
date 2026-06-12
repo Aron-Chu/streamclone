@@ -78,3 +78,6 @@ Thumbs.db
 /analytics-*.png
 /debug-mcp-*.txt
 /mcp-*.txt
+
+.gocache/
+.gomodcache/

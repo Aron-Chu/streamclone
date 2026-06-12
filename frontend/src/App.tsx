@@ -6,6 +6,7 @@ const Directory = lazy(() => import('./components/Directory'))
 const Channel = lazy(() => import('./components/Channel'))
 const Analytics = lazy(() => import('./components/Analytics'))
 const ClipStudio = lazy(() => import('./components/ClipStudio'))
+const ClipStudioIndex = lazy(() => import('./components/ClipStudioIndex'))
 
 function RouteLoadingSkeleton() {
   return (
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="/c/:login" element={<Channel />} />
           <Route path="/analytics/:login" element={<Analytics />} />
           <Route path="/analytics/:login/:streamId" element={<Analytics />} />
+          <Route path="/studio" element={<ClipStudioIndex />} />
           <Route path="/studio/:jobId" element={<ClipStudio />} />
         </Routes>
       </Suspense>

@@ -64,7 +64,7 @@ func main() {
 	st := store.New(pool)
 	d := dict.New(rdb, cfg.CDNPublicBase)
 	twitch := helix.New(cfg.TwitchAPIURL, cfg.TwitchTokenURL, cfg.TwitchOAuthClientID, cfg.TwitchOAuthClientSecret, "streamclone/emote")
-	seed := seeder.NewWithImportConcurrency(st, obj, d, logger, cfg.Upstream.SevenTVAPIURL, cfg.Upstream.SevenTVCDNURL, cfg.Upstream.FFZAPIURL, twitch, cfg.EmoteImportConcurrency)
+	seed := seeder.NewWithImportConcurrency(st, obj, d, logger, cfg.Upstream.SevenTVAPIURL, cfg.Upstream.SevenTVCDNURL, cfg.Upstream.FFZAPIURL, cfg.Upstream.BTTVAPIURL, twitch, cfg.EmoteImportConcurrency)
 	w := worker.NewWithDictionaryDebounce(st, obj, d, logger, time.Duration(cfg.EmoteDictionaryDebounceMS)*time.Millisecond)
 	workerConcurrency := cfg.EmoteWorkerConcurrency
 	if workerConcurrency < 1 {

@@ -140,7 +140,7 @@ func (c *Collector) Start(ctx context.Context) {
 	c.startOnce.Do(func() {
 		c.mu.Lock()
 		c.runCtx = ctx
-		
+
 		// Collect always-tracked logins to join IRC on startup
 		alwaysLogins := make([]string, 0, len(c.alwaysTracked))
 		for login := range c.alwaysTracked {
@@ -268,7 +268,7 @@ func (c *Collector) HandleIRCLine(line string) {
 	if streamID == "" {
 		return
 	}
-	fragments := c.enricher.Tokenize(channel, msg.Text)
+	fragments := c.enricher.Tokenize(channel, msg.Text, msg.Emotes)
 	c.addChat(streamID, msg.TS, fragments)
 }
 

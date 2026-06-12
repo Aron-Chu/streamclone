@@ -234,6 +234,12 @@ switch ($Action) {
                 throw "Clipper token was synced but Twitch validation still failed. Approve the Twitch login and run make twitch-local-auth again."
             }
         }
+
+        $ensureScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'ensure-clipper-auth.ps1'
+        if (Test-Path $ensureScript) {
+            Write-Host 'Applying clipper and frontend auth to running containers...'
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $ensureScript -EnvFile $EnvFile
+        }
     }
     'refresh-clipper-token' {
         $refreshScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'refresh-clipper-token.py'

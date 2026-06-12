@@ -46,21 +46,28 @@ export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean 
   )
 }
 
-function ServiceStartProgressBar({ progress }: { progress: ServiceStartProgress }) {
+function ServiceStartProgressBar({ progress, compact = false }: { progress: ServiceStartProgress; compact?: boolean }) {
   const width = Math.max(0, Math.min(100, progress.percent))
+  const label = progress.service === 'scraper' ? 'Analytics' : 'Clip Studio'
   return (
-    <div className="mb-3 rounded-lg border border-violet-400/25 bg-violet-500/10 p-3">
-      <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-black uppercase tracking-wide text-violet-100">
-        <span>{progress.phase}</span>
-        <span>{width}%</span>
+    <div className={`rounded-lg border border-white/10 bg-white/[0.035] ${compact ? 'p-2.5' : 'p-3'}`}>
+      <div className={`mb-2 flex items-center justify-between gap-2 font-black uppercase tracking-wide text-zinc-300 ${
+        compact ? 'text-[10px]' : 'text-[11px]'
+      }`}>
+        <span>{label} · {progress.phase}</span>
+        <span className="text-zinc-500">{width}%</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-black/40">
+      <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-violet-500 to-cyan-400 transition-all duration-500 ease-out"
+          className="h-full rounded-full bg-emerald-400/85 transition-all duration-500 ease-out"
           style={{ width: `${width}%` }}
         />
       </div>
-      <p className="mt-2 text-[11px] font-semibold leading-4 text-violet-100/80">{progress.detail}</p>
+      {progress.detail ? (
+        <p className={`mt-2 font-semibold leading-4 text-zinc-500 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
+          {progress.detail}
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -226,6 +233,11 @@ export default function OptionalServicesPanel({
             ) : null}
           </div>
         </div>
+        {startProgress ? (
+          <div className="mt-2">
+            <ServiceStartProgressBar progress={startProgress} compact />
+          </div>
+        ) : null}
         {actionError ? (
           <p className="mt-2 text-[11px] font-semibold text-amber-100/80">{actionError}</p>
         ) : null}

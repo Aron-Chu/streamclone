@@ -33,6 +33,14 @@ function Get-StreamcloneProfileFromRoot {
     return $Default
 }
 
+function Test-StreamcloneScraperUseImagesFromRoot {
+    param([string]$Root)
+    $envPath = Join-Path $Root '.env'
+    if (-not (Test-Path $envPath)) { return $false }
+    $vals = Read-EnvKeyValueFile -Path $envPath
+    return ($vals['SCRAPER_USE_IMAGES'] -eq '1')
+}
+
 function Get-StreamcloneComposeArgs {
     param(
         [string]$Root,
@@ -49,12 +57,13 @@ function Get-StreamcloneComposeArgs {
     } elseif ($NoUseImages.IsPresent) {
         $pullImages = $false
     }
+    $scraperImages = Test-StreamcloneScraperUseImagesFromRoot -Root $Root
     $args = @(
         'compose', '--env-file', (Join-Path $Root '.env'),
         '-f', (Join-Path $Root 'deploy\docker-compose.yml'),
         '-f', (Join-Path $Root 'deploy\docker-compose.local-tunnel.yml')
     )
-    if ($pullImages) {
+    if ($pullImages -or $scraperImages) {
         $args += '-f', (Join-Path $Root 'deploy\docker-compose.release.yml')
     }
     foreach ($p in (Get-EnvComposeProfiles -Profile $Profile)) {
