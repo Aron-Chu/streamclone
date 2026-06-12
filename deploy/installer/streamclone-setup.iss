@@ -57,6 +57,7 @@ Name: "{autoprograms}\{#MyAppName}\Uninstall Streamclone"; Filename: "{uninstall
 [Code]
 var
   ProgressFile: string;
+  PruneImagesOnUninstall: Boolean;
 
 function DockerLooksReady: Boolean;
 var
@@ -141,6 +142,8 @@ begin
     ExpandConstant('{app}\scripts\uninstall-streamclone.ps1') +
     '" -InstallDir "' + ExpandConstant('{app}') +
     '" -NonInteractive -KeepInstallDir -ProgressFile "' + ProgressFile + '"';
+  if PruneImagesOnUninstall then
+    Params := Params + ' -PruneImages';
 
   WizardForm.ProgressGauge.Style := npbstMarquee;
   WizardForm.StatusLabel.Caption := 'Removing Streamclone...';
@@ -282,6 +285,7 @@ end;
 
 function InitializeUninstall: Boolean;
 begin
+  PruneImagesOnUninstall := False;
   Result := MsgBox(
     'Uninstall Streamclone?' + #13#10#13#10 +
     'This will:' + #13#10 +
@@ -289,8 +293,14 @@ begin
     '  - Delete database and MinIO data (volumes)' + #13#10 +
     '  - Remove secrets and Desktop shortcuts' + #13#10 +
     '  - Remove the install folder' + #13#10#13#10 +
-    'Docker images stay cached unless you run uninstall with -PruneImages manually.',
+    'Docker images are kept by default for faster reinstall.',
     mbConfirmation, MB_YESNO) = IDYES;
+  if Result then
+    PruneImagesOnUninstall := MsgBox(
+      'Also remove downloaded Streamclone Docker images?' + #13#10#13#10 +
+      'Choose Yes to reclaim disk space or simulate a first-time install.' + #13#10 +
+      'Choose No for faster reinstall or repair later.',
+      mbConfirmation, MB_YESNO) = IDYES;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
