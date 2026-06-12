@@ -3,13 +3,16 @@ param(
     [string]$InstallDir = '',
     [switch]$NonInteractive,
     [switch]$PruneImages,
+    [switch]$PruneBaseImages,
     [switch]$SkipImagePrompt,
     [switch]$KeepInstallDir,
+    [switch]$KeepVolumes,
     [string]$ProgressFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\env.ps1')
+. (Join-Path $PSScriptRoot 'lib\install-upgrade.ps1')
 
 function Set-UninstallProgress {
     param(
@@ -51,7 +54,6 @@ function Test-StreamcloneUseReleaseImages {
     if (Test-Path (Join-Path $Root 'deploy\env\release-bundle.env')) { return $true }
     $envFile = Join-Path $Root '.env'
     if (Test-Path $envFile) {
-        . (Join-Path $PSScriptRoot 'lib\env.ps1')
         $vals = Read-EnvKeyValueFile -Path $envFile
         if ($vals['STREAMCLONE_USE_IMAGES'] -eq '1') { return $true }
     }
@@ -81,7 +83,6 @@ function Invoke-StreamcloneComposeDown {
     }
 
     Set-Location $Root
-    . (Join-Path $PSScriptRoot 'lib\env.ps1')
 
     $profile = 'core'
     $profileFile = Join-Path $Root '.streamclone-profile'
@@ -130,7 +131,13 @@ function Invoke-StreamcloneComposeDown {
 
 function Remove-StreamcloneDesktopShortcuts {
     $desktop = [Environment]::GetFolderPath('Desktop')
-    foreach ($name in @('Start Streamclone.lnk', 'Stop Streamclone.lnk')) {
+    foreach ($name in @(
+        'Start Streamclone.lnk',
+        'Stop Streamclone.lnk',
+        'Manage Streamclone.lnk',
+        'Check Streamclone.lnk',
+        'Uninstall Streamclone.lnk'
+    )) {
         $path = Join-Path $desktop $name
         if (Test-Path $path) {
             Remove-Item $path -Force
@@ -145,7 +152,10 @@ function Remove-StreamcloneMacShortcuts {
     foreach ($name in @(
         'Streamclone Start.command',
         'Streamclone Stop.command',
-        'Streamclone Install.command'
+        'Streamclone Install.command',
+        'Streamclone Manage.command',
+        'Streamclone Check.command',
+        'Streamclone Uninstall.command'
     )) {
         $path = Join-Path $appsDir $name
         if (Test-Path $path) {
@@ -184,14 +194,12 @@ function Remove-StreamcloneImages {
     }
     if (-not $Tag) { $Tag = 'latest' }
 
-    $repos = @('metadata', 'video', 'chat', 'analytics', 'emote', 'frontend', 'clipper')
     Write-Host "Pruning GHCR images (tag: $Tag)..." -ForegroundColor Cyan
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        foreach ($repo in $repos) {
-            $image = "ghcr.io/aron-chu/streamclone/${repo}:$Tag"
-            Invoke-EnvDockerCaptured -Arguments @('image', 'rm', '-f', $image) | Out-Null
+        foreach ($ref in (Get-StreamcloneCoreImageRefs -Tag $Tag)) {
+            Invoke-EnvDockerCaptured -Arguments @('image', 'rm', '-f', $ref) | Out-Null
         }
     } finally {
         $ErrorActionPreference = $prev
@@ -215,14 +223,24 @@ Remove-Item -LiteralPath '$escaped' -Recurse -Force -ErrorAction SilentlyContinu
 try {
     $root = Get-StreamcloneInstallRoot -Hint $InstallDir
     $removeImages = $PruneImages.IsPresent
+    $removeBase = $PruneBaseImages.IsPresent
 
     if (-not $removeImages -and -not $SkipImagePrompt -and -not $NonInteractive -and -not $ProgressFile) {
+        $estimate = Get-StreamcloneDockerReclaimEstimate -Root $root
+        if ($estimate.imageCount -gt 0) {
+            Write-Host ''
+            Write-Host "Streamclone Docker images: $($estimate.label) on disk ($($estimate.imageCount) image(s))." -ForegroundColor DarkGray
+        }
         Write-Host ''
         Write-Host 'Docker image cleanup' -ForegroundColor Cyan
         Write-Host 'Streamclone images are safe to keep cached for faster reinstall/repair.'
         Write-Host 'Remove them only when you want to reclaim disk space or simulate a first-time install.'
         $pruneAns = Read-Host 'Also remove downloaded Streamclone Docker images? [y/N]'
         $removeImages = ($pruneAns -match '^[Yy]')
+        if ($removeImages) {
+            $baseAns = Read-Host 'Also remove base images (postgres, redis, caddy, …)? [y/N]'
+            $removeBase = ($baseAns -match '^[Yy]')
+        }
     }
 
     if (-not $ProgressFile) {
@@ -233,11 +251,18 @@ try {
         Write-Host ''
         Write-Host 'This will:'
         Write-Host '  - Stop all Streamclone Docker containers'
-        Write-Host '  - Delete Docker volumes (database, MinIO, clipper data)'
+        if (-not $KeepVolumes) {
+            Write-Host '  - Delete Docker volumes (database, MinIO, clipper data)'
+        } else {
+            Write-Host '  - Stop containers (keep Docker volumes)'
+        }
         Write-Host '  - Remove .env and local secrets'
-        Write-Host '  - Remove Desktop / macOS shortcuts'
+        Write-Host '  - Remove Desktop / macOS shortcuts (Start, Stop, Manage, Check, Uninstall)'
         if ($removeImages) {
             Write-Host '  - Remove downloaded ghcr.io/aron-chu/streamclone images'
+            if ($removeBase) {
+                Write-Host '  - Remove base images (postgres, redis, minio, caddy, mediamtx, migrate)'
+            }
         } else {
             Write-Host '  - Keep cached Docker images for faster reinstall'
         }
@@ -258,12 +283,22 @@ try {
     Set-UninstallProgress -Title 'Stopping Streamclone' -Detail 'Shutting down background processes.'
     Stop-StreamcloneControlProcess -Root $root
 
+    $stopScript = Join-Path $PSScriptRoot 'stop-streamclone.ps1'
+    if (Test-Path $stopScript) {
+        Set-UninstallProgress -Title 'Stopping containers' -Detail 'Graceful stop before teardown.'
+        & $stopScript
+        Start-Sleep -Seconds 2
+    }
+
     Set-UninstallProgress -Title 'Removing Docker stack' -Detail 'Stopping containers and deleting volumes.'
-    Invoke-StreamcloneComposeDown -Root $root -Volumes
+    Invoke-StreamcloneComposeDown -Root $root -Volumes:(-not $KeepVolumes)
 
     if ($removeImages) {
         Set-UninstallProgress -Title 'Removing Docker images' -Detail 'Pruning ghcr.io/aron-chu/streamclone images.'
         Remove-StreamcloneImages -Root $root
+        if ($removeBase) {
+            Remove-StreamcloneBaseImages
+        }
     }
 
     Set-UninstallProgress -Title 'Removing local data' -Detail 'Deleting secrets, shortcuts, and config.'
@@ -281,6 +316,7 @@ try {
         if (-not $ProgressFile) {
             Write-Host ''
             Write-Host 'Uninstall complete. Install folder will be removed shortly.' -ForegroundColor Green
+            Write-Host "If $root remains, close terminals/File Explorer in that folder and delete manually." -ForegroundColor DarkGray
         }
     }
 

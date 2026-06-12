@@ -23,7 +23,13 @@ if ($PruneImages) { $args['PruneImages'] = $true }
 
 if ($RemoveDesktopShortcuts) {
     $desktop = [Environment]::GetFolderPath('Desktop')
-    foreach ($name in @('Start Streamclone.lnk', 'Stop Streamclone.lnk')) {
+    foreach ($name in @(
+        'Start Streamclone.lnk',
+        'Stop Streamclone.lnk',
+        'Manage Streamclone.lnk',
+        'Check Streamclone.lnk',
+        'Uninstall Streamclone.lnk'
+    )) {
         $path = Join-Path $desktop $name
         if (Test-Path $path) {
             Remove-Item $path -Force

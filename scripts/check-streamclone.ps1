@@ -21,15 +21,38 @@ function Write-StatusLine {
     Write-Host ("[{0}] {1}{2}" -f $Status.ToUpper(), $Label, $suffix) -ForegroundColor $color
 }
 
+$report = Get-StreamcloneDiagnostics -Root $InstallDir
+
 if (-not $Json) {
     Write-Host ''
     Write-Host 'Streamclone status check' -ForegroundColor Cyan
     Write-Host '------------------------'
-}
 
-$report = Get-StreamcloneDiagnostics -Root $InstallDir
+    $versionParts = @()
+    if ($report.bundleVersion) { $versionParts += "Bundle $($report.bundleVersion)" }
+    if ($report.imageTag) { $versionParts += "Images $($report.imageTag)" }
+    if ($report.latestRelease) { $versionParts += "Latest $($report.latestRelease)" }
+    if ($versionParts.Count -gt 0) {
+        $versionLine = $versionParts -join ' · '
+        if ($report.upgradeNeeded) {
+            $versionLine += ' (update available)'
+            Write-Host $versionLine -ForegroundColor Yellow
+        } else {
+            Write-Host $versionLine -ForegroundColor DarkGray
+        }
+    }
 
-if (-not $Json) {
+    if ($report.coreImages) {
+        $ci = $report.coreImages
+        $coreLabel = "$($ci.present)/$($ci.total) core images downloaded"
+        if ($ci.present -eq $ci.total) {
+            Write-StatusLine 'Core images' 'ok' $coreLabel
+        } else {
+            Write-StatusLine 'Core images' 'warn' $coreLabel
+        }
+    }
+    Write-Host ''
+
     if (Test-Path (Join-Path $InstallDir 'VERSION')) {
         $version = (Get-Content (Join-Path $InstallDir 'VERSION') -Raw).Trim()
         Write-StatusLine 'Install folder' 'ok' "$InstallDir ($version)"

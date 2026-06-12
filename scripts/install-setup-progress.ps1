@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'lib\stack-progress.ps1')
+. (Join-Path $PSScriptRoot 'lib\install-upgrade.ps1')
 
 function Set-InstallProgress {
     param(
@@ -58,17 +59,18 @@ function Invoke-DockerComposePullWithProgress {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $result = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $ComposeArgs
-        $pullOutput = $result.Output
-        $pullExitCode = $result.ExitCode
-        $pullOutput | ForEach-Object {
-            $line = "$_".Trim()
-            if ($line -match 'Pulling|Pull complete|Downloaded|Image is up to date|✔|✓|Retrying|attempt') {
-                $short = $line
+        $onPullLine = {
+            param($line)
+            $text = "$line".Trim()
+            if ($text -match 'Pulling|Pulled|Pull complete|Download|up to date|Retrying|attempt') {
+                $short = $text
                 if ($short.Length -gt 90) { $short = $short.Substring(0, 87) + '...' }
                 Set-InstallProgress -Title 'Pulling Docker images' -Detail $short
             }
         }
+        $result = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $ComposeArgs -OnLine $onPullLine
+        $pullOutput = $result.Output
+        $pullExitCode = $result.ExitCode
         if ($pullExitCode -ne 0) {
             $logsDir = Join-Path $InstallDir 'logs'
             New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
@@ -140,11 +142,27 @@ try {
 
     $freshInstall = -not (Test-Path (Join-Path $InstallDir '.env'))
     if (-not $freshInstall) {
-        Set-InstallProgress -Title 'Starting Streamclone' -Detail 'Already configured — bringing stack online.'
-        $composeArgs = Get-StreamcloneComposeArgs -Root $InstallDir -Profile core -UseImages
-        $code = Invoke-EnvDocker -Arguments ($composeArgs + @('up', '-d', '--remove-orphans', '--pull', 'missing'))
-        if ($code -ne 0) { throw 'docker compose up failed' }
-        if (-not (Wait-StreamcloneStackReadyWithProgress)) { throw 'services did not become ready' }
+        if (Test-StreamcloneUpgradeNeeded -Root $InstallDir) {
+            $versions = Get-StreamcloneInstallVersions -Root $InstallDir
+            Set-InstallProgress -Title 'Updating Streamclone' -Detail "Syncing images to $($versions.bundleVersion)…"
+            $onUpgradeLine = {
+                param($line)
+                $text = "$line".Trim()
+                if ($text -match 'Pulling|Pulled|Pull complete|Download|up to date|Recreat|Starting|Retrying|attempt') {
+                    $short = $text
+                    if ($short.Length -gt 90) { $short = $short.Substring(0, 87) + '...' }
+                    Set-InstallProgress -Title 'Updating Streamclone' -Detail $short
+                }
+            }
+            Invoke-StreamcloneUpgrade -Root $InstallDir -OnLine $onUpgradeLine
+            if (-not (Wait-StreamcloneStackReadyWithProgress)) { throw 'services did not become ready after upgrade' }
+        } else {
+            Set-InstallProgress -Title 'Starting Streamclone' -Detail 'Already configured — bringing stack online.'
+            $composeArgs = Get-StreamcloneComposeArgs -Root $InstallDir -Profile core -UseImages
+            $code = Invoke-EnvDocker -Arguments ($composeArgs + @('up', '-d', '--remove-orphans', '--pull', 'missing'))
+            if ($code -ne 0) { throw 'docker compose up failed' }
+            if (-not (Wait-StreamcloneStackReadyWithProgress)) { throw 'services did not become ready' }
+        }
     } else {
         Set-InstallProgress -Title 'Creating configuration' -Detail 'Generating secrets and .env file.'
         & $setupPs1 -Profile core -NonInteractive -UseImages -NoUp -NoSmoke -SkipPreflight
@@ -165,7 +183,7 @@ try {
     }
 
     if (Test-Path $shortcutPs1) {
-        Set-InstallProgress -Title 'Creating shortcuts' -Detail 'Adding Start and Stop to your Desktop.'
+        Set-InstallProgress -Title 'Adding Desktop shortcuts' -Detail 'Start, Stop, Manage, Check, and Uninstall.'
         & $shortcutPs1 -InstallDir $InstallDir
     }
 
@@ -174,6 +192,7 @@ try {
     if ($env:STREAMCLONE_NO_BROWSER -ne '1') {
         Start-Process 'http://localhost:8090/'
     }
+    Write-Host 'Optional Analytics and Clip Studio: open app → Stack status → Start Analytics / Clip Studio.' -ForegroundColor DarkGray
     Complete-InstallProgress -ExitCode 0
     exit 0
 } catch {

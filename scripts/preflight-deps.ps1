@@ -6,7 +6,8 @@ param(
     [Alias('JsonSummary')]
     [switch]$Json,
     [string]$ImageTag = '',
-    [int]$DockerInfoTimeoutSec = 15
+    [int]$DockerInfoTimeoutSec = 15,
+    [switch]$TryStartDocker
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,18 +15,20 @@ $errors = 0
 $warnings = 0
 $blockedReasons = [System.Collections.Generic.List[string]]::new()
 $summary = [ordered]@{
-    blocked  = $false
-    ok       = $true
-    errors   = 0
-    warnings = 0
-    reason   = ''
-    context  = ''
-    engine   = ''
-    ghcr     = 'skipped'
-    checks   = @()
+    blocked    = $false
+    ok         = $true
+    errors     = 0
+    warnings   = 0
+    reason     = ''
+    context    = ''
+    engine     = ''
+    ghcr       = 'skipped'
+    coreImages = $null
+    checks     = @()
 }
 
 . (Join-Path $PSScriptRoot 'lib\env.ps1')
+. (Join-Path $PSScriptRoot 'lib\install-upgrade.ps1')
 
 function Write-Check {
     param([string]$Status, [string]$Message)
@@ -93,6 +96,40 @@ function Resolve-PreflightImageTag {
     return 'latest'
 }
 
+function Start-DockerDesktopIfStopped {
+    param([int]$WaitSec = 120)
+    $info = Invoke-DockerInfoWithTimeout -TimeoutSec 5
+    if (-not $info.TimedOut -and $info.ExitCode -eq 0) { return $true }
+
+    $paths = @()
+    if ($env:ProgramFiles) {
+        $paths += Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
+    }
+    if (${env:ProgramFiles(x86)}) {
+        $paths += Join-Path ${env:ProgramFiles(x86)} 'Docker\Docker\Docker Desktop.exe'
+    }
+    $started = $false
+    foreach ($path in ($paths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)) {
+        try {
+            Start-Process -FilePath $path | Out-Null
+            $started = $true
+            break
+        } catch { }
+    }
+    if (-not $started) { return $false }
+
+    if (-not $Quiet -and -not $Json) {
+        Write-Host 'Waiting for Docker Desktop…' -ForegroundColor Yellow
+    }
+    $deadline = (Get-Date).AddSeconds($WaitSec)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 3
+        $info = Invoke-DockerInfoWithTimeout -TimeoutSec 8
+        if (-not $info.TimedOut -and $info.ExitCode -eq 0) { return $true }
+    }
+    return $false
+}
+
 if (-not $Quiet -and -not $Json) {
     Write-Host ''
     Write-Host 'Streamclone - dependency check' -ForegroundColor Cyan
@@ -127,15 +164,29 @@ if (-not $dockerExe) {
     Write-Check ok 'Docker CLI found'
     $info = Invoke-DockerInfoWithTimeout -TimeoutSec $DockerInfoTimeoutSec
     if ($info.TimedOut) {
+        if ($TryStartDocker -and (Start-DockerDesktopIfStopped)) {
+            $info = Invoke-DockerInfoWithTimeout -TimeoutSec $DockerInfoTimeoutSec
+        }
+    }
+    if ($info.TimedOut) {
         Write-Check fail "Docker Desktop Linux engine not responding (timed out after ${DockerInfoTimeoutSec}s)"
         $errors++
         Add-BlockedReason 'Docker Desktop Linux engine not responding'
         $summary.engine = 'timeout'
     } elseif ($info.ExitCode -ne 0) {
-        Write-Check fail 'Docker is installed but not running - start Docker Desktop'
-        $errors++
-        Add-BlockedReason 'Docker Desktop is not running'
-        $summary.engine = 'stopped'
+        if ($TryStartDocker -and (Start-DockerDesktopIfStopped)) {
+            $info = Invoke-DockerInfoWithTimeout -TimeoutSec $DockerInfoTimeoutSec
+        }
+        if ($info.ExitCode -ne 0) {
+            Write-Check fail 'Docker is installed but not running - start Docker Desktop'
+            $errors++
+            Add-BlockedReason 'Docker Desktop is not running'
+            $summary.engine = 'stopped'
+        } else {
+            Write-Check ok 'Docker engine is running'
+            $engineRunning = $true
+            $summary.engine = 'running'
+        }
     } else {
         Write-Check ok 'Docker engine is running'
         $engineRunning = $true
@@ -220,8 +271,50 @@ try {
     $warnings++
 }
 
-# GHCR reachability is measured by benchmark-ghcr-pull.ps1. Keep preflight local
-# so install/restart benchmarks are not blocked by registry-specific failures.
+$resolvedTag = Resolve-PreflightImageTag -Requested $ImageTag
+if ($engineRunning -and $resolvedTag) {
+    $ghcrState = Test-StreamcloneGhcrManifestReachable -Tag $resolvedTag
+    $summary.ghcr = $ghcrState
+    switch ($ghcrState) {
+        'ok' {
+            Write-Check ok "GHCR manifest reachable (metadata:$resolvedTag)"
+        }
+        'blocked' {
+            $msg = "GHCR blocked or tag missing (metadata:$resolvedTag)"
+            if ($InstallHints) {
+                Write-Check fail $msg
+                $errors++
+                Add-BlockedReason 'GHCR packages not reachable — set packages Public or docker login ghcr.io'
+                Write-Host '  Set GHCR packages Public or run: docker login ghcr.io' -ForegroundColor DarkGray
+            } else {
+                Write-Check warn $msg
+                $warnings++
+                Write-Host '  Set GHCR packages Public or run: docker login ghcr.io' -ForegroundColor DarkGray
+            }
+        }
+        default {
+            Write-Check warn "GHCR manifest check inconclusive (metadata:$resolvedTag)"
+            $warnings++
+        }
+    }
+
+    $coreStatus = Get-StreamcloneCoreImageStatus -Root (Split-Path -Parent $PSScriptRoot) -Tag $resolvedTag
+    $summary.coreImages = @{
+        present = $coreStatus.present
+        total   = $coreStatus.total
+        missing = @($coreStatus.missing)
+        tag     = $resolvedTag
+    }
+    if ($coreStatus.present -lt $coreStatus.total) {
+        Write-Check warn "$($coreStatus.present)/$($coreStatus.total) core images present locally (tag: $resolvedTag)"
+        $warnings++
+        if ($InstallHints) {
+            Write-Host '  Run Start Streamclone to resume partial downloads.' -ForegroundColor DarkGray
+        }
+    } elseif ($coreStatus.present -eq $coreStatus.total) {
+        Write-Check ok "$($coreStatus.present)/$($coreStatus.total) core images present (tag: $resolvedTag)"
+    }
+}
 
 $summary.errors = $errors
 $summary.warnings = $warnings
@@ -230,7 +323,7 @@ $summary.ok = ($errors -eq 0)
 $summary.reason = ($blockedReasons -join '; ')
 
 if ($Json) {
-    Write-Output ($summary | ConvertTo-Json -Compress -Depth 4)
+    Write-Output ($summary | ConvertTo-Json -Compress -Depth 6)
 } elseif (-not $Quiet) {
     Write-Host ''
     if ($errors -gt 0) {

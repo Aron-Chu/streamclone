@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # Shared logic for double-click Install / Start / Stop launchers.
 param(
-    [ValidateSet('install', 'start', 'stop', 'uninstall', 'manage', 'repair', 'check')]
+    [ValidateSet('install', 'start', 'stop', 'uninstall', 'manage', 'repair', 'check', 'update')]
     [string]$Action,
     [string]$LauncherRoot = $PSScriptRoot
 )
@@ -10,6 +10,12 @@ $ErrorActionPreference = 'Stop'
 if ($LauncherRoot) {
     $LauncherRoot = $LauncherRoot.TrimEnd('\', '/')
 }
+
+$libDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\lib'
+if (-not (Test-Path $libDir)) {
+    $libDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'scripts\lib'
+}
+. (Join-Path $libDir 'install-upgrade.ps1')
 
 function Get-StreamcloneRoot {
     param([string]$LauncherRoot)
@@ -37,6 +43,21 @@ function Test-StreamcloneWebOk {
     }
 }
 
+function Write-StreamcloneVersionNotice {
+    param([string]$Root)
+    $versions = Get-StreamcloneInstallVersions -Root $Root -FetchLatest
+    $parts = @()
+    if ($versions.bundleVersion) { $parts += "Bundle $($versions.bundleVersion)" }
+    if ($versions.imageTag) { $parts += "Images $($versions.imageTag)" }
+    if ($versions.latestRelease) { $parts += "Latest $($versions.latestRelease)" }
+    if ($parts.Count -gt 0) {
+        Write-Host ("Version: " + ($parts -join ' · ')) -ForegroundColor DarkGray
+    }
+    if (Test-StreamcloneUpgradeNeeded -Root $Root) {
+        Write-Host 'Update available — run Manage Streamclone → Update (or Install to sync).' -ForegroundColor Yellow
+    }
+}
+
 function Invoke-StreamclonePreflight {
     param([string]$Root)
     $preflight = Join-Path $Root 'scripts\preflight-deps.ps1'
@@ -48,7 +69,7 @@ function Invoke-StreamclonePreflight {
         return $true
     }
     Write-Host 'Checking prerequisites (Docker Desktop)...' -ForegroundColor Cyan
-    & $preflight -InstallHints
+    & $preflight -InstallHints -TryStartDocker
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -57,13 +78,23 @@ function Invoke-StreamcloneInstall {
     $setupPs1 = Join-Path $root 'scripts\setup.ps1'
     $shortcutPs1 = Join-Path $root 'scripts\install-desktop-shortcut.ps1'
     $checkPs1 = Join-Path $root 'scripts\check-streamclone.ps1'
+    $hasEnv = Test-Path (Join-Path $root '.env')
 
     if (Test-Path $setupPs1) {
-        if (Test-StreamcloneWebOk -and (Test-Path (Join-Path $root '.env'))) {
-            Write-Host 'Streamclone is already running at http://localhost:8090/' -ForegroundColor Green
-            Write-Host 'Skipping setup - refreshing Desktop shortcuts.' -ForegroundColor Yellow
+        Write-StreamcloneVersionNotice -Root $root
+
+        if (Test-StreamcloneWebOk -and $hasEnv) {
+            if (Test-StreamcloneUpgradeNeeded -Root $root) {
+                Write-Host 'Upgrade needed — syncing images before start...' -ForegroundColor Yellow
+                if (-not (Invoke-StreamclonePreflight -Root $root)) { exit 1 }
+                Invoke-StreamcloneUpgrade -Root $root
+            } else {
+                Write-Host 'Streamclone is already running at http://localhost:8090/' -ForegroundColor Green
+                Write-Host 'Refreshing install scripts and Desktop shortcuts.' -ForegroundColor Yellow
+            }
+            Update-StreamcloneBootstrapOverlayFromMaster -Dir $root
             if (Test-Path $shortcutPs1) {
-                Write-Host 'Step 4/4: Creating Desktop shortcuts...' -ForegroundColor Cyan
+                Write-Host 'Step 4/4: Adding Desktop shortcuts...' -ForegroundColor Cyan
                 & $shortcutPs1 -InstallDir $root
             }
             $startPs1 = Join-Path $root 'scripts\start-streamclone.ps1'
@@ -73,6 +104,7 @@ function Invoke-StreamcloneInstall {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\ensure-setup-control.ps1') -Root $root
                 Start-Process 'http://localhost:8090/'
             }
+            Write-Host 'Optional Analytics and Clip Studio: open app → Stack status → Start Analytics / Clip Studio.' -ForegroundColor DarkGray
             return
         }
 
@@ -85,13 +117,13 @@ function Invoke-StreamcloneInstall {
             exit 1
         }
 
-        if (-not (Test-Path (Join-Path $root '.env'))) {
+        if (-not $hasEnv) {
             Write-Host 'Step 2/4: Creating config and secrets...' -ForegroundColor Cyan
             $setupArgs = @{ Profile = 'core'; NonInteractive = $true }
             $releaseEnv = Join-Path $root 'deploy\env\release-bundle.env'
             if ((Test-Path (Join-Path $root 'VERSION')) -or (Test-Path $releaseEnv)) {
                 $setupArgs['UseImages'] = $true
-                Write-Host 'Step 3/4: Pulling Docker images and starting stack (~3-5 min)...' -ForegroundColor Cyan
+                Write-Host 'Step 3/4: Pulling Docker images and starting stack (3-8 min on first install)...' -ForegroundColor Cyan
             } else {
                 Write-Host 'Step 3/4: Building Docker images and starting stack (may take 10-20 min)...' -ForegroundColor Cyan
             }
@@ -127,15 +159,20 @@ function Invoke-StreamcloneInstall {
                 }
             }
         } else {
-            Write-Host 'Already configured - starting stack...' -ForegroundColor Yellow
-            $startPs1 = Join-Path $root 'scripts\start-streamclone.ps1'
-            if (Test-Path $startPs1) {
-                & $startPs1
-                if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if (Test-StreamcloneUpgradeNeeded -Root $root) {
+                Write-Host 'Upgrade needed — syncing IMAGE_TAG and pulling images...' -ForegroundColor Yellow
+                Invoke-StreamcloneUpgrade -Root $root
+            } else {
+                Write-Host 'Already configured - starting stack...' -ForegroundColor Yellow
+                $startPs1 = Join-Path $root 'scripts\start-streamclone.ps1'
+                if (Test-Path $startPs1) {
+                    & $startPs1
+                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                }
             }
         }
         if (Test-Path $shortcutPs1) {
-            Write-Host 'Step 4/4: Creating Desktop shortcuts...' -ForegroundColor Cyan
+            Write-Host 'Step 4/4: Adding Desktop shortcuts...' -ForegroundColor Cyan
             & $shortcutPs1 -InstallDir $root
         }
         $startPs1 = Join-Path $root 'scripts\start-streamclone.ps1'
@@ -149,6 +186,7 @@ function Invoke-StreamcloneInstall {
                 Start-Process 'http://localhost:8090/'
             }
         }
+        Write-Host 'Optional Analytics and Clip Studio: open app → Stack status → Start Analytics / Clip Studio.' -ForegroundColor DarkGray
         return
     }
 
@@ -207,5 +245,13 @@ switch ($Action) {
             throw "Manager script missing at $root."
         }
         & $managerPs1 -Action repair -InstallDir $root
+    }
+    'update' {
+        $managerPs1 = Join-Path $root 'scripts\streamclone-manager.ps1'
+        if (-not (Test-Path $managerPs1)) {
+            throw "Manager script missing at $root."
+        }
+        & $managerPs1 -Action update -InstallDir $root
+        exit $LASTEXITCODE
     }
 }

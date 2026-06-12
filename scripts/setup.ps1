@@ -13,6 +13,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\env.ps1')
+. (Join-Path $PSScriptRoot 'lib\install-upgrade.ps1')
 
 Set-Location (Get-EnvRepoRoot)
 
@@ -127,6 +128,8 @@ if (-not $NoUp) {
     Repair-FrontendDockerEntrypointLf
     if ($UseImages) {
         Write-Host 'Pulling Docker images...'
+        Write-Host '  First install downloads about 1.5 GB. Docker progress appears below (3-8 min on a cold pull).' -ForegroundColor DarkCyan
+        Write-Host ''
         $pullResult = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs
         $pullTail = @($pullResult.Output | Select-Object -Last 40)
         $code = [int]$pullResult.ExitCode
@@ -139,6 +142,8 @@ if (-not $NoUp) {
             Write-Host 'Last docker compose lines:' -ForegroundColor Yellow
             $pullTail | Select-Object -Last 15 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkRed }
             Write-Host "Full pull log: $pullLog" -ForegroundColor Yellow
+            $coreStatus = Get-StreamcloneCoreImageStatus -Root (Get-Location)
+            Write-Host "$($coreStatus.present)/$($coreStatus.total) core images present — run Start Streamclone to resume." -ForegroundColor Yellow
             Write-Host 'If images partially downloaded, try Start Streamclone.cmd or re-run Install.' -ForegroundColor Yellow
             exit $code
         }
