@@ -61,15 +61,18 @@ function Invoke-DockerComposePullWithProgress {
     try {
         $onPullLine = {
             param($line)
-            if (-not (Test-StreamcloneDockerPullDisplayLine -Line $line)) { return }
             $text = "$line".Trim()
-            if ($text -match 'Pulling|Pulled|Pull complete|Download|up to date|Retrying|attempt') {
+            if ($text -match '\[\+\]\s+Pulling\s+(\d+)/(\d+)') {
+                Set-InstallProgress -Title 'Pulling Docker images' -Detail "Image $($matches[1]) of $($matches[2])"
+                return
+            }
+            if ($text -match 'Pulled|up to date|Pull complete') {
                 $short = $text
                 if ($short.Length -gt 90) { $short = $short.Substring(0, 87) + '...' }
                 Set-InstallProgress -Title 'Pulling Docker images' -Detail $short
             }
         }
-        $result = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $ComposeArgs -OnLine $onPullLine -OutputMode summary
+        $result = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $ComposeArgs -OnLine $onPullLine -OutputMode friendly
         $pullOutput = $result.Output
         $pullExitCode = $result.ExitCode
         if ($pullExitCode -ne 0) {
@@ -156,7 +159,7 @@ try {
                     Set-InstallProgress -Title 'Updating Streamclone' -Detail $short
                 }
             }
-            Invoke-StreamcloneUpgrade -Root $InstallDir -OnLine $onUpgradeLine -PullOutputMode summary
+            Invoke-StreamcloneUpgrade -Root $InstallDir -OnLine $onUpgradeLine -PullOutputMode friendly
             if (-not (Wait-StreamcloneStackReadyWithProgress)) { throw 'services did not become ready after upgrade' }
         } else {
             Set-InstallProgress -Title 'Starting Streamclone' -Detail 'Already configured - bringing stack online.'

@@ -127,9 +127,7 @@ foreach ($p in (Get-EnvComposeProfiles -Profile $Profile)) {
 if (-not $NoUp) {
     Repair-FrontendDockerEntrypointLf
     if ($UseImages) {
-        Write-Host 'Pulling Docker images (~1.5 GB, 3-8 min on first install)...' -ForegroundColor Cyan
-        Write-Host ''
-        $pullResult = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs -OutputMode summary
+        $pullResult = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs -OutputMode friendly
         $pullTail = @($pullResult.Output | Select-Object -Last 40)
         $code = [int]$pullResult.ExitCode
         if ($code -ne 0) {

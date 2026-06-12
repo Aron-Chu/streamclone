@@ -406,7 +406,7 @@ function Invoke-StreamcloneUpgrade {
         [string]$TargetTag = '',
         [scriptblock]$OnLine = $null,
         [int]$WaitTimeoutSec = 300,
-        [ValidateSet('interactive', 'capture', 'summary')][string]$PullOutputMode = 'summary'
+        [ValidateSet('interactive', 'capture', 'summary', 'friendly')][string]$PullOutputMode = 'friendly'
     )
     if ([string]::IsNullOrWhiteSpace($Root)) {
         $Root = Get-EnvRepoRoot
