@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { STREAMCLONE_INSTALL_ID } from '../config'
 import { isOnboardingDismissed, markOnboardingDismissed } from '../onboardingStorage'
 import { OPEN_STACK_STATUS_EVENT, dispatchOpenStackStatus } from '../stackStatusEvents'
 import { useOptionalServices } from '../hooks/useOptionalServices'
@@ -20,6 +21,20 @@ export default function WelcomeOverlay() {
   }, [])
 
   const showOnboarding = Boolean((location.state as { showOnboarding?: boolean } | null)?.showOnboarding)
+  const installId = STREAMCLONE_INSTALL_ID
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if (params.get('welcome') === '1') {
+      setForcedOpen(true)
+      params.delete('welcome')
+      const nextSearch = params.toString()
+      navigate(
+        { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : '' },
+        { replace: true, state: location.state },
+      )
+    }
+  }, [location.pathname, location.search, location.state, navigate])
 
   useEffect(() => {
     if (!showOnboarding) return
@@ -30,20 +45,20 @@ export default function WelcomeOverlay() {
   useEffect(() => {
     if (!setup.data?.incomplete) return
     if (offlinePromptedRef.current) return
-    if (!isOnboardingDismissed() && location.pathname === '/') return
+    if (!isOnboardingDismissed(installId) && location.pathname === '/') return
     if (scraperOffline || clipperOffline) {
       offlinePromptedRef.current = true
       dispatchOpenStackStatus()
     }
-  }, [setup.data?.incomplete, scraperOffline, clipperOffline, location.pathname])
+  }, [setup.data?.incomplete, scraperOffline, clipperOffline, location.pathname, installId])
 
-  const autoShow = location.pathname === '/' && !sessionDismissed && (showOnboarding || !isOnboardingDismissed())
+  const autoShow = location.pathname === '/' && !sessionDismissed && (showOnboarding || !isOnboardingDismissed(installId))
   const open = forcedOpen || autoShow
 
   if (!open) return null
 
   const handleDismiss = () => {
-    markOnboardingDismissed()
+    markOnboardingDismissed(installId)
     setSessionDismissed(true)
     setForcedOpen(false)
   }

@@ -180,11 +180,11 @@ function Invoke-StreamcloneInstall {
             Write-Host ''
             Write-Host 'Opening Streamclone in your browser...' -ForegroundColor Green
             if (-not (Test-StreamcloneWebOk)) {
-                & $startPs1
+                & $startPs1 -NoBrowser
             } else {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\ensure-setup-control.ps1') -Root $root
-                Start-Process 'http://localhost:8090/'
             }
+            Start-Process (Get-StreamcloneWelcomeUrl)
         }
         Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
         return

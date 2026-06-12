@@ -57,6 +57,7 @@ if (-not $SkipSetup -and -not (Test-Path $envFile)) {
         Write-Host 'Using pre-built GHCR images (release bundle or STREAMCLONE_USE_IMAGES=1).'
     }
     . (Join-Path $PSScriptRoot 'lib\env.ps1')
+    Ensure-StreamcloneInstallId -EnvFile $envFile | Out-Null
     $composeArgs = @(
         'compose', '--env-file', '.env',
         '-f', 'deploy/docker-compose.yml',

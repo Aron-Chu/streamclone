@@ -195,7 +195,7 @@ try {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'scripts\ensure-setup-control.ps1') -Root $InstallDir
 
     if ($env:STREAMCLONE_NO_BROWSER -ne '1') {
-        Start-Process 'http://localhost:8090/'
+        Start-Process (Get-StreamcloneWelcomeUrl)
     }
     Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
     Complete-InstallProgress -ExitCode 0

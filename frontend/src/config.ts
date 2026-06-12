@@ -11,6 +11,7 @@ type RuntimeConfig = {
   streamcloneProfile?: string
   setupControlToken?: string
   devTokenImportEnabled?: string | boolean
+  installId?: string
 }
 
 declare global {
@@ -65,3 +66,4 @@ export const MAX_RETAINED_MESSAGES = Number(runtime.maxRetainedMessages ?? impor
 export const STREAMCLONE_PROFILE = String(runtime.streamcloneProfile ?? import.meta.env.VITE_STREAMCLONE_PROFILE ?? 'core').toLowerCase()
 export const DEV_TOKEN_IMPORT_ENABLED = String(runtime.devTokenImportEnabled ?? import.meta.env.VITE_TWITCH_DEV_TOKEN_IMPORT_ENABLED ?? 'false') === 'true'
 export const SETUP_CONTROL_TOKEN = String(runtime.setupControlToken ?? import.meta.env.VITE_SETUP_CONTROL_TOKEN ?? '')
+export const STREAMCLONE_INSTALL_ID = String(runtime.installId ?? import.meta.env.VITE_STREAMCLONE_INSTALL_ID ?? '').trim()
