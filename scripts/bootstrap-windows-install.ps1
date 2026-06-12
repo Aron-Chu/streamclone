@@ -10,48 +10,40 @@ param(
 $ErrorActionPreference = 'Stop'
 $Repo = 'Aron-Chu/streamclone'
 
-#region agent log
-function Write-BootstrapAgentDebugLog {
-    param(
-        [string]$HypothesisId,
-        [string]$Message,
-        [hashtable]$Data = @{}
-    )
-    $entry = @{
-        sessionId    = '1d406b'
-        runId        = 'bootstrap-parse-fix'
-        hypothesisId = $HypothesisId
-        location     = 'bootstrap-windows-install.ps1'
-        message      = $Message
-        data         = $Data
-        timestamp    = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    } | ConvertTo-Json -Compress
-    foreach ($logPath in @(
-            (Join-Path (Split-Path $PSScriptRoot -Parent) 'debug-1d406b.log'),
-            (Join-Path $env:TEMP 'debug-1d406b.log')
-        )) {
-        try { Add-Content -LiteralPath $logPath -Value $entry -Encoding UTF8 } catch { }
+function Test-StreamcloneBootstrapScriptParses {
+    param([string]$Path)
+    $tokens = $null
+    $errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+    return @{
+        Ok     = ($errors.Count -eq 0)
+        Errors = @($errors | ForEach-Object { $_.ToString() })
     }
 }
-#endregion
 
 $bootstrapLibScript = Join-Path $PSScriptRoot 'lib\install-upgrade.ps1'
 if (Test-Path $bootstrapLibScript) {
     . $bootstrapLibScript
-    Write-BootstrapAgentDebugLog -HypothesisId 'H2' -Message 'dot-sourced local install-upgrade.ps1' -Data @{ psscriptRoot = $PSScriptRoot }
 } else {
     $libDir = Join-Path $env:TEMP 'streamclone-bootstrap-lib'
+    if (Test-Path $libDir) {
+        Remove-Item -LiteralPath $libDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
     New-Item -ItemType Directory -Force -Path $libDir | Out-Null
     $base = "https://raw.githubusercontent.com/$Repo/master/scripts/lib"
     $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
+    $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     foreach ($name in @('env.ps1', 'stack-progress.ps1', 'install-upgrade.ps1')) {
         $dest = Join-Path $libDir $name
-        Invoke-WebRequest -Uri "$base/$name" -OutFile $dest -Headers $headers -UseBasicParsing
+        $url = "$base/$name`?t=$cacheBust"
+        Invoke-WebRequest -Uri $url -OutFile $dest -Headers $headers -UseBasicParsing
+        $parse = Test-StreamcloneBootstrapScriptParses -Path $dest
+        if (-not $parse.Ok) {
+            throw "Downloaded $name failed PowerShell parse (encoding?). Errors: $($parse.Errors -join '; ')"
+        }
     }
     . (Join-Path $libDir 'install-upgrade.ps1')
-    Write-BootstrapAgentDebugLog -HypothesisId 'H2' -Message 'dot-sourced cached install-upgrade.ps1 from TEMP' -Data @{ libDir = $libDir }
 }
-Write-BootstrapAgentDebugLog -HypothesisId 'H1' -Message 'bootstrap parsed and libs loaded' -Data @{ installDir = $InstallDir }
 
 function Test-StreamcloneWebOk {
     try {
