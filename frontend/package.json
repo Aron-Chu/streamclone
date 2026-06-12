@@ -15,14 +15,14 @@
   "dependencies": {
     "@tanstack/react-query": "5.62.7",
     "hls.js": "1.5.20",
-    "react": "18.3.1",
+    "react": "19.2.7",
     "react-dom": "18.3.1",
     "react-router-dom": "6.30.4",
     "zustand": "5.0.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
-    "@types/react": "18.3.18",
+    "@types/react": "19.2.17",
     "@types/react-dom": "18.3.5",
     "@vitejs/plugin-react": "6.0.2",
     "autoprefixer": "10.4.20",
