@@ -3,9 +3,14 @@ export const SCRAPER_BANNER_DISMISSED_KEY = 'streamclone-scraper-banner-dismisse
 export const CORE_ANALYTICS_BANNER_DISMISSED_KEY = 'streamclone-core-analytics-banner-dismissed'
 
 export function isOnboardingDismissed() {
-  return typeof window !== 'undefined' && window.localStorage.getItem(ONBOARDING_DISMISSED_KEY) === '1'
+  if (typeof window === 'undefined') return false
+  return (
+    window.localStorage.getItem(ONBOARDING_DISMISSED_KEY) === '1' ||
+    window.sessionStorage.getItem(ONBOARDING_DISMISSED_KEY) === '1'
+  )
 }
 
 export function markOnboardingDismissed() {
   window.localStorage.setItem(ONBOARDING_DISMISSED_KEY, '1')
+  window.sessionStorage.setItem(ONBOARDING_DISMISSED_KEY, '1')
 }
