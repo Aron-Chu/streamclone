@@ -126,6 +126,12 @@ function Invoke-EnvGenerateSecrets {
     }
 
     $current = Read-EnvKeyValueFile -Path $EnvFile
+    if (-not [string]::IsNullOrWhiteSpace($current['CLIPPER_WEBHOOK_TOKEN']) -and
+        $current['VITE_CLIPPER_TOKEN'] -ne $current['CLIPPER_WEBHOOK_TOKEN']) {
+        Set-EnvFileValue -Path $EnvFile -Key 'VITE_CLIPPER_TOKEN' -Value $current['CLIPPER_WEBHOOK_TOKEN']
+    }
+
+    $current = Read-EnvKeyValueFile -Path $EnvFile
     if (Test-EnvPlaceholderValue -Key 'SETUP_CONTROL_TOKEN' -Value $current['SETUP_CONTROL_TOKEN']) {
         Set-EnvFileValue -Path $EnvFile -Key 'SETUP_CONTROL_TOKEN' -Value (Get-EnvRandomHex -Bytes 24)
     }
@@ -637,4 +643,93 @@ function Sync-TwitchCliToEnv {
     }
     Set-EnvFileValue -Path $EnvFile -Key 'TWITCH_OAUTH_CLIENT_ID' -Value $cli['CLIENTID']
     Set-EnvFileValue -Path $EnvFile -Key 'TWITCH_OAUTH_CLIENT_SECRET' -Value $cli['CLIENTSECRET']
+}
+
+function Invoke-EnsureFrontendClipperConfig {
+    param(
+        [string]$EnvFile = (Join-Path (Get-EnvRepoRoot) '.env'),
+        [switch]$SkipRecreate
+    )
+
+    if (-not (Test-Path $EnvFile)) {
+        Write-Host 'ensure-frontend-config: missing .env - skip'
+        return $false
+    }
+
+    . (Join-Path $PSScriptRoot 'stack-progress.ps1')
+
+    Invoke-EnvGenerateSecrets -EnvFile $EnvFile
+    Repair-FrontendDockerEntrypointLf
+
+    $envValues = Read-EnvKeyValueFile -Path $EnvFile
+    $desiredToken = [string]$envValues['VITE_CLIPPER_TOKEN']
+    if ([string]::IsNullOrWhiteSpace($desiredToken)) {
+        $desiredToken = [string]$envValues['CLIPPER_WEBHOOK_TOKEN']
+    }
+    if ([string]::IsNullOrWhiteSpace($desiredToken)) {
+        Write-Host 'ensure-frontend-config: CLIPPER_WEBHOOK_TOKEN missing - run setup or validate-env.ps1 -Fix'
+        return $false
+    }
+
+    $profile = [string]$envValues['STREAMCLONE_PROFILE']
+    if ([string]::IsNullOrWhiteSpace($profile)) { $profile = 'core' }
+    $useImages = ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1') -or (-not [string]::IsNullOrWhiteSpace($envValues['IMAGE_TAG']))
+    $root = Get-EnvRepoRoot
+    $composeArgs = Get-StreamcloneComposeArgs -Root $root -Profile $profile -UseImages:$useImages
+
+    $containerName = $null
+    $psResult = Invoke-EnvDockerCaptured -Arguments ($composeArgs + @('ps', '--filter', 'name=streamclone-frontend', '--format', '{{.Names}}'))
+    if ($psResult.ExitCode -eq 0 -and $psResult.Output) {
+        $containerName = ($psResult.Output | Select-Object -First 1).Trim()
+    }
+
+    if ([string]::IsNullOrWhiteSpace($containerName)) {
+        Write-Host 'ensure-frontend-config: frontend container not running - skip'
+        return $true
+    }
+
+    $containerToken = ''
+    $inspect = Invoke-EnvDockerCaptured -Arguments @(
+        'inspect', $containerName, '--format', '{{range .Config.Env}}{{println .}}{{end}}'
+    )
+    if ($inspect.ExitCode -eq 0) {
+        foreach ($line in $inspect.Output) {
+            if ($line.StartsWith('VITE_CLIPPER_TOKEN=')) {
+                $containerToken = $line.Substring('VITE_CLIPPER_TOKEN='.Length)
+                break
+            }
+        }
+    }
+
+    $configHasToken = $false
+    $configResult = Invoke-EnvDockerCaptured -Arguments @(
+        'exec', $containerName, 'grep', '-q', 'clipperToken:', '/usr/share/nginx/html/config.js'
+    )
+    if ($configResult.ExitCode -eq 0) {
+        $readConfig = Invoke-EnvDockerCaptured -Arguments @(
+            'exec', $containerName, 'grep', 'clipperToken:', '/usr/share/nginx/html/config.js'
+        )
+        if ($readConfig.ExitCode -eq 0 -and $readConfig.Output) {
+            $configLine = ($readConfig.Output | Select-Object -First 1)
+            $configHasToken = ($configLine -match 'clipperToken:\s*"(.+)"') -and (-not [string]::IsNullOrWhiteSpace($Matches[1]))
+        }
+    }
+
+    $needsRecreate = ($containerToken -ne $desiredToken) -or (-not $configHasToken)
+    if ($SkipRecreate -or -not $needsRecreate) {
+        if (-not $needsRecreate) {
+            Write-Host 'ensure-frontend-config: frontend clipper token and config.js match .env'
+        }
+        return (-not $needsRecreate)
+    }
+
+    Write-Host 'ensure-frontend-config: recreating frontend to refresh config.js and clipper token...'
+    $code = Invoke-EnvDocker -Arguments ($composeArgs + @('up', '-d', '--no-deps', '--force-recreate', 'frontend', 'local-proxy'))
+    if ($code -ne 0) {
+        Write-Host "ensure-frontend-config: frontend recreate failed (exit $code)" -ForegroundColor Red
+        return $false
+    }
+
+    Write-Host 'ensure-frontend-config: frontend recreated (hard-refresh the browser if it was already open)'
+    return $true
 }

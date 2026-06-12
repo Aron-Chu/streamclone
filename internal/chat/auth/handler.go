@@ -166,7 +166,7 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Post("/v1/auth/dev/device/poll", h.pollDeviceAuth)
 	r.Get("/v1/me", h.me)
 	r.Post("/v1/logout", h.logout)
-	r.Get("/v1/followed", h.followed)
+	r.Get("/v1/me/followed", h.followed)
 }
 
 func (h *Handler) SessionIDFromRequest(r *http.Request) (string, bool) {

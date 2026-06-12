@@ -185,6 +185,8 @@ env_generate_secrets() {
     env_set_key "$file" VITE_CLIPPER_TOKEN "$clipper"
   elif [ -z "${current[VITE_CLIPPER_TOKEN]:-}" ] && [ -n "$clipper" ]; then
     env_set_key "$file" VITE_CLIPPER_TOKEN "$clipper"
+  elif [ -n "$clipper" ] && [ "${current[VITE_CLIPPER_TOKEN]:-}" != "$clipper" ]; then
+    env_set_key "$file" VITE_CLIPPER_TOKEN "$clipper"
   fi
 }
 

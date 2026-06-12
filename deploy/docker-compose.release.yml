@@ -5,7 +5,8 @@
 #     -f deploy/docker-compose.local-tunnel.yml \
 #     -f deploy/docker-compose.release.yml up -d --pull always
 #
-# Scraper still builds from the streamclone-scraper sibling repo when using --profile scraper.
+# Scraper image: ghcr.io/aron-chu/streamclone/scraper:${IMAGE_TAG} when SCRAPER_USE_IMAGES=1.
+# Otherwise builds from the streamclone-scraper sibling repo (--profile scraper).
 
 services:
   metadata:
@@ -36,4 +37,8 @@ services:
 
   clipper:
     image: ghcr.io/aron-chu/streamclone/clipper:${IMAGE_TAG:-latest}
+    build: !reset null
+
+  scraper:
+    image: ghcr.io/aron-chu/streamclone/scraper:${IMAGE_TAG:-latest}
     build: !reset null

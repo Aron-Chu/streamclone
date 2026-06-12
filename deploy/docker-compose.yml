@@ -81,6 +81,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   video:
     <<: *go
@@ -137,7 +141,9 @@ services:
       ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS: ${ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS:-120000}
       ANALYTICS_PASS_TT_MAXAGE: ${ANALYTICS_PASS_TT_MAXAGE:-true}
       ANALYTICS_TT_MAX_AGE_MS: ${ANALYTICS_TT_MAX_AGE_MS:-0}
-      ANALYTICS_TT_DIRECT_HTTP_ENABLED: ${ANALYTICS_TT_DIRECT_HTTP_ENABLED:-false}
+      # Direct HTTP fast path skips the browser scrape when TT serves plain HTTP;
+      # auto-disables for 1h if success rate drops below 10% (internal/analytics/direct_http.go).
+      ANALYTICS_TT_DIRECT_HTTP_ENABLED: ${ANALYTICS_TT_DIRECT_HTTP_ENABLED:-true}
       ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS: ${ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS:-1200}
     ports: ["8086:8080"]
     depends_on:
@@ -230,6 +236,7 @@ services:
   #   Bridge (local Windows dev): SCRAPER_EPHEMERAL_BROWSER=true, SCRAPER_MAX_CONCURRENT=1
   #   Pooled (production): SCRAPER_EPHEMERAL_BROWSER=false, SCRAPER_BROWSER_POOL_SIZE=1, SCRAPER_MAX_CONCURRENT=2
   # Never raise MAX_CONCURRENT above 1 while ephemeral=true — competing Camoufox profiles deadlock TT detail scrapes.
+  # Release image (SCRAPER_USE_IMAGES=1): ghcr.io/aron-chu/streamclone/scraper:${IMAGE_TAG:-latest} via docker-compose.release.yml
   scraper:
     profiles: [scraper]
     build:

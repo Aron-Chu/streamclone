@@ -43,6 +43,7 @@ type Config struct {
 
 	StreamIdleTimeout    time.Duration `env:"STREAM_IDLE_TIMEOUT" envDefault:"60s"`
 	MaxConcurrentStreams int           `env:"MAX_CONCURRENT_STREAMS" envDefault:"20"`
+	MaxConcurrentRelays  int           `env:"MAX_CONCURRENT_RELAYS" envDefault:"0"`
 	StreamWorkerBackends string        `env:"STREAM_WORKER_BACKENDS" envDefault:"direct_hls,streamlink"`
 	DefaultStreamQuality string        `env:"DEFAULT_STREAM_QUALITY" envDefault:"best"`
 	MediaMTXRTMP         string        `env:"MEDIAMTX_RTMP" envDefault:"mediamtx:1935"`

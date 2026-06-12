@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { Category, getCategories, getCategoryStreams, getRandomStream, getStreams, keepaliveStream, search, startStream, stopStream, Stream } from '../api'
 import { useAuth } from '../auth'
 import { normalizeBrowserOriginUrl } from '../config'
+import { useStreamPrewarm } from '../hooks/useStreamPrewarm'
 import { useHlsPlayback } from '../playback'
 import { useThemeEffect, useUiSettings } from '../settings'
 import BrandLogo from './BrandLogo'
@@ -24,9 +25,14 @@ function StreamCard({ stream, index }: { stream: Stream; index: number }) {
   const isLive = stream.isLive ?? Boolean(stream.thumbnailUrl && (stream.viewers ?? 0) > 0)
   const title = stream.title || stream.displayName || stream.login
   const previewUrl = stream.thumbnailUrl || stream.profileImageUrl
+  const { prewarm, cancelPrewarm } = useStreamPrewarm()
   return (
     <Link
       to={`/c/${stream.login}`}
+      onMouseEnter={() => prewarm(stream.login, isLive)}
+      onMouseLeave={cancelPrewarm}
+      onFocus={() => prewarm(stream.login, isLive)}
+      onBlur={cancelPrewarm}
       className="group block overflow-hidden rounded-lg border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/20 transition duration-300 hover:-translate-y-1 hover:border-violet-400/60 hover:bg-white/[0.07]"
       style={{ animationDelay: `${Math.min(index, 10) * 35}ms` }}
     >

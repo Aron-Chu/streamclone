@@ -30,6 +30,7 @@ const (
 	ProviderSevenTV       Provider = "seventv"
 	ProviderTwitch        Provider = "twitch"
 	ProviderFFZ           Provider = "ffz"
+	ProviderBTTV          Provider = "bttv"
 	sourceDownloadTimeout          = 6 * time.Second
 )
 
@@ -54,16 +55,17 @@ type Seeder struct {
 	apiURL            string
 	cdnURL            string
 	ffzURL            string
+	bttvURL           string
 	twitch            *helix.Client
 	hc                *http.Client
 	importConcurrency int
 }
 
-func New(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger, apiURL, cdnURL, ffzURL string, twitch *helix.Client) *Seeder {
-	return NewWithImportConcurrency(st, obj, d, log, apiURL, cdnURL, ffzURL, twitch, 8)
+func New(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger, apiURL, cdnURL, ffzURL, bttvURL string, twitch *helix.Client) *Seeder {
+	return NewWithImportConcurrency(st, obj, d, log, apiURL, cdnURL, ffzURL, bttvURL, twitch, 8)
 }
 
-func NewWithImportConcurrency(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger, apiURL, cdnURL, ffzURL string, twitch *helix.Client, importConcurrency int) *Seeder {
+func NewWithImportConcurrency(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger, apiURL, cdnURL, ffzURL, bttvURL string, twitch *helix.Client, importConcurrency int) *Seeder {
 	return &Seeder{
 		st:                st,
 		obj:               obj,
@@ -72,6 +74,7 @@ func NewWithImportConcurrency(st *store.Store, obj *objstore.Client, d *dict.Dic
 		apiURL:            strings.TrimRight(apiURL, "/"),
 		cdnURL:            strings.TrimRight(cdnURL, "/"),
 		ffzURL:            strings.TrimRight(ffzURL, "/"),
+		bttvURL:           strings.TrimRight(bttvURL, "/"),
 		twitch:            twitch,
 		hc:                &http.Client{Timeout: 20 * time.Second},
 		importConcurrency: normalizeImportConcurrency(importConcurrency),
@@ -122,6 +125,19 @@ type ffzEmote struct {
 	URLs     map[string]string `json:"urls"`
 	Animated json.RawMessage   `json:"animated"`
 	Modifier bool              `json:"modifier"`
+}
+
+type bttvUserResponse struct {
+	ChannelEmotes []bttvEmote `json:"channelEmotes"`
+	SharedEmotes  []bttvEmote `json:"sharedEmotes"`
+}
+
+type bttvEmote struct {
+	ID        string `json:"id"`
+	Code      string `json:"code"`
+	ImageType string `json:"imageType"`
+	UserID    string `json:"userId"`
+	Animated  bool   `json:"animated"`
 }
 
 type remoteEmote struct {
@@ -190,6 +206,8 @@ func (s *Seeder) SeedChannelProviderSubset(ctx context.Context, login, twitchID 
 			count, err = s.seedTwitch(ctx, twitchID, setID)
 		case ProviderFFZ:
 			count, err = s.seedFFZ(ctx, login, twitchID, setID)
+		case ProviderBTTV:
+			count, err = s.seedBTTV(ctx, twitchID, setID)
 		default:
 			err = fmt.Errorf("unsupported provider %s", provider)
 		}
@@ -394,6 +412,86 @@ func (s *Seeder) seedFFZ(ctx context.Context, login, twitchID, setID string) (in
 	}
 	sortRemoteEmotes(emotes)
 	return s.importRemoteEmotesToSet(ctx, setID, emotes)
+}
+
+func (s *Seeder) seedBTTV(ctx context.Context, twitchID, setID string) (int, error) {
+	user, err := s.fetchBTTVUser(ctx, twitchID)
+	if err != nil {
+		return 0, err
+	}
+	global, err := s.fetchBTTVGlobal(ctx)
+	if err != nil && s.log != nil {
+		s.log.Warn("bttv global fetch failed", "twitch_id", twitchID, "err", err)
+	}
+	emotes := make([]remoteEmote, 0, len(user.ChannelEmotes)+len(user.SharedEmotes)+len(global))
+	appendBTTV := func(rows []bttvEmote, isGlobal bool) {
+		for _, em := range rows {
+			if em.ID == "" || em.Code == "" {
+				continue
+			}
+			emotes = append(emotes, remoteEmote{
+				Provider:        ProviderBTTV,
+				ProviderEmoteID: em.ID,
+				ProviderSetID:   em.UserID,
+				Name:            em.Code,
+				OwnerID:         twitchID,
+				SourceURL:       bttvEmoteURL(em.ID),
+				Animated:        em.Animated,
+				IsGlobal:        isGlobal,
+			})
+		}
+	}
+	appendBTTV(user.ChannelEmotes, false)
+	appendBTTV(user.SharedEmotes, false)
+	appendBTTV(global, true)
+	sortRemoteEmotes(emotes)
+	return s.importRemoteEmotesToSet(ctx, setID, emotes)
+}
+
+func bttvEmoteURL(id string) string {
+	return fmt.Sprintf("https://cdn.betterttv.net/emote/%s/3x", id)
+}
+
+func (s *Seeder) fetchBTTVUser(ctx context.Context, twitchID string) (*bttvUserResponse, error) {
+	url := fmt.Sprintf("%s/users/twitch/%s", s.bttvURL, twitchID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch bttv user: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("bttv returned %d", resp.StatusCode)
+	}
+	var out bttvUserResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode bttv user: %w", err)
+	}
+	return &out, nil
+}
+
+func (s *Seeder) fetchBTTVGlobal(ctx context.Context) ([]bttvEmote, error) {
+	url := fmt.Sprintf("%s/emotes/global", s.bttvURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch bttv global: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("bttv global returned %d", resp.StatusCode)
+	}
+	var out []bttvEmote
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode bttv global: %w", err)
+	}
+	return out, nil
 }
 
 func (s *Seeder) seedTwitch(ctx context.Context, twitchID, setID string) (int, error) {

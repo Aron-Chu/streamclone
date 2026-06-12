@@ -13,6 +13,7 @@ type Message struct {
 	Badges  []string
 	TS      int64
 	Text    string
+	Emotes  []EmoteRange
 }
 
 func ParseLine(line string) (*Message, bool) {
@@ -91,6 +92,7 @@ func ParseLine(line string) (*Message, bool) {
 		Badges:  badges,
 		TS:      ts,
 		Text:    trailing,
+		Emotes:  ParseEmotesTag(tags["emotes"]),
 	}, true
 }
 

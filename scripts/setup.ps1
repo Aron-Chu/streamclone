@@ -86,13 +86,18 @@ if (-not $SkipTwitch) {
             }
         }
     } else {
-        Write-Host 'Twitch CLI: not found (optional)'
-        Write-Host '  Use Sign in (optional) in the app at http://localhost:8090 - no CLI required.'
+        Write-Host 'Twitch CLI: not found (optional for Clip Studio)'
+        Write-Host '  Use Sign in (optional) at http://localhost:8090 after the stack starts — no CLI required.'
+        Write-Host '  Developers: https://github.com/twitchdev/twitch-cli#installation' -ForegroundColor DarkGray
     }
 }
 
 $needsScraper = $Profile -in @('scraper', 'full')
-if ($needsScraper -and -not $SkipScraperClone) {
+$envAfterSynth = Read-EnvKeyValueFile -Path $envFile
+$scraperUseImages = ($envAfterSynth['SCRAPER_USE_IMAGES'] -eq '1')
+if ($needsScraper -and $scraperUseImages) {
+    Write-Host 'Scraper: GHCR image (SCRAPER_USE_IMAGES=1)'
+} elseif ($needsScraper -and -not $SkipScraperClone) {
     $sibling = Get-EnvScraperSiblingPath
     if ((Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile'))) {
         Write-Host "Scraper repo: ok ($sibling)"
@@ -164,10 +169,20 @@ if (-not $NoUp) {
 }
 
 if (-not $NoSmoke -and -not $NoUp) {
+    Write-Host 'Waiting for tiered readiness...'
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'lib\wait-stack.ps1') -Root (Get-Location) -SkipHLS
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'Setup failed: required readiness tier did not pass.' -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
     Write-Host 'Running smoke checks...'
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'smoke-core.ps1')
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'Setup failed: smoke checks did not pass.' -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
 
-    if ($needsScraper -and (Test-Path (Get-EnvScraperSiblingPath))) {
+    if ($needsScraper -and ($scraperUseImages -or (Test-Path (Get-EnvScraperSiblingPath)))) {
         Write-Host 'Checking scraper health...'
         $ok = $false
         for ($i = 1; $i -le 30; $i++) {
@@ -202,7 +217,8 @@ if (-not $NoSmoke -and -not $NoUp) {
 
 if ($Profile -in @('clipper', 'full')) {
     Write-Host ''
-    Write-Host "Optional: run 'make twitch-local-auth' for clip creation scopes."
+    Write-Host 'Clip Studio: open http://localhost:8090 and click Sign in (optional) for a one-time Twitch login.'
+    Write-Host '  Developers with Twitch CLI: powershell -File scripts/twitch-auth.ps1 -Action local-auth'
 }
 
 Write-Host 'Setup complete.'

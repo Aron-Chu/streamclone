@@ -19,6 +19,7 @@ export function useAuth() {
       }))
       queryClient.invalidateQueries({ queryKey: ['me'] })
       queryClient.invalidateQueries({ queryKey: ['followed'] })
+      queryClient.invalidateQueries({ queryKey: ['followed', 'local'] })
     },
   })
   const importMutation = useMutation({
@@ -32,6 +33,7 @@ export function useAuth() {
       }))
       queryClient.invalidateQueries({ queryKey: ['me'] })
       queryClient.invalidateQueries({ queryKey: ['followed'] })
+      queryClient.invalidateQueries({ queryKey: ['followed', 'local'] })
     },
   })
   const claimPreparedMutation = useMutation({
@@ -45,6 +47,7 @@ export function useAuth() {
       }))
       queryClient.invalidateQueries({ queryKey: ['me'] })
       queryClient.invalidateQueries({ queryKey: ['followed'] })
+      queryClient.invalidateQueries({ queryKey: ['followed', 'local'] })
     },
   })
 

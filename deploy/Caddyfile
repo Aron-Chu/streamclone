@@ -6,7 +6,7 @@
 	encode zstd gzip
 
 	@chat {
-		path /v1/auth* /v1/me /v1/logout /v1/followed /v1/ws
+		path /v1/auth* /v1/me /v1/me/followed /v1/logout /v1/ws
 	}
 	reverse_proxy @chat chat:8080
 

@@ -28,6 +28,8 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - Backend tests: `make test`
 - Backend vet: `make vet`
 - Full stack: `make up`
+- Compose profiles (tier fragments in `deploy/env/`): `profile-core` (directory/playback/chat/emotes), `profile-scraper` (minute charts + TwitchTracker), `profile-clipper` (Clip Studio worker), `profile-full` (all optional services). Bootstrap/setup scripts merge these into `.env`; UI **Start Analytics** / clipper toggles start services via setup-control — not raw `docker compose` from the browser.
+- Host **setup-control** daemon: loopback `:9191`, started by `scripts/ensure-setup-control.ps1` on setup/start/install. Caddy proxies `/v1/setup-control/*` → `host.docker.internal:9191`. PID file: `.streamclone-setup-control.pid`.
 - Stop stack (keep data): `make down` or `scripts/stop-streamclone.ps1` / **Stop Streamclone** launcher
 - Remove volumes only: `make down-clean`
 - Complete uninstall: `scripts/uninstall-streamclone.ps1` / **Uninstall Streamclone** launcher
@@ -36,6 +38,8 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - Frontend dev from WSL: `cd /mnt/c/Users/Aron/twitch-7tv-clone/frontend && npm run dev -- --host 127.0.0.1 --port 5174`
 - Frontend build: `cd frontend && npm run build`
 - Scraper Dashboard Web UI: `http://localhost:8000/`
+- Security scan (gitleaks + secret patterns): `make security-scan`
+- Git hooks (gitleaks pre-commit): `make install-hooks`
 
 ## Code Conventions
 

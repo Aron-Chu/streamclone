@@ -101,7 +101,17 @@ function Invoke-StreamcloneComposeDown {
     if (Test-StreamcloneUseReleaseImages -Root $Root) {
         $composeArgs += '-f', 'deploy/docker-compose.release.yml'
     }
-    foreach ($p in @('scraper', 'clipper')) {
+    if ($profile -notin @('core', 'scraper', 'clipper', 'full')) {
+        # Unknown/legacy profile marker: tear down everything to be safe.
+        $profile = 'full'
+    }
+    $optionalProfiles = @(Get-EnvComposeProfiles -Profile $profile)
+    if ($optionalProfiles.Count -gt 0) {
+        Write-Host "Installed profile: $profile (optional services: $($optionalProfiles -join ', '))" -ForegroundColor DarkGray
+    } else {
+        Write-Host "Installed profile: $profile (no optional services)" -ForegroundColor DarkGray
+    }
+    foreach ($p in $optionalProfiles) {
         $composeArgs += '--profile', $p
     }
 
@@ -114,16 +124,18 @@ function Invoke-StreamcloneComposeDown {
         Write-Host 'Stopping Docker stack...' -ForegroundColor Cyan
         $result = Invoke-EnvDockerCaptured -Arguments ($composeArgs + $downArgs)
         foreach ($line in $result.Output) { Write-Host $line }
-        $composeArgsNoProfiles = @(
-            'compose', '--env-file', '.env',
-            '-f', 'deploy/docker-compose.yml',
-            '-f', 'deploy/docker-compose.local-tunnel.yml'
-        )
-        if (Test-StreamcloneUseReleaseImages -Root $Root) {
-            $composeArgsNoProfiles += '-f', 'deploy/docker-compose.release.yml'
+        if ($optionalProfiles.Count -gt 0) {
+            $composeArgsNoProfiles = @(
+                'compose', '--env-file', '.env',
+                '-f', 'deploy/docker-compose.yml',
+                '-f', 'deploy/docker-compose.local-tunnel.yml'
+            )
+            if (Test-StreamcloneUseReleaseImages -Root $Root) {
+                $composeArgsNoProfiles += '-f', 'deploy/docker-compose.release.yml'
+            }
+            $result = Invoke-EnvDockerCaptured -Arguments ($composeArgsNoProfiles + $downArgs)
+            foreach ($line in $result.Output) { Write-Host $line }
         }
-        $result = Invoke-EnvDockerCaptured -Arguments ($composeArgsNoProfiles + $downArgs)
-        foreach ($line in $result.Output) { Write-Host $line }
     } finally {
         $ErrorActionPreference = $prev
     }
@@ -168,7 +180,7 @@ function Remove-StreamcloneMacShortcuts {
 
 function Remove-StreamcloneConfigFiles {
     param([string]$Root)
-    foreach ($name in @('.env', '.streamclone-profile', '.streamclone-setup-control.pid')) {
+    foreach ($name in @('.env', '.streamclone-profile', '.streamclone-setup-control.pid', 'runtime\clipper-twitch.env')) {
         $path = Join-Path $Root $name
         if (Test-Path $path) {
             Remove-Item $path -Force
@@ -199,7 +211,9 @@ function Remove-StreamcloneImages {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        foreach ($ref in (Get-StreamcloneCoreImageRefs -Tag $Tag)) {
+        # Scraper image is profile-gated and not in the core repo list; prune it explicitly.
+        $refs = @(Get-StreamcloneCoreImageRefs -Tag $Tag) + "ghcr.io/aron-chu/streamclone/scraper:$Tag"
+        foreach ($ref in $refs) {
             Invoke-EnvDockerCaptured -Arguments @('image', 'rm', '-f', $ref) | Out-Null
         }
     } finally {

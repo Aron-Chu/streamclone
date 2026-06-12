@@ -54,12 +54,16 @@ def escape_filter_path(path: Path) -> str:
     return "".join(escaped)
 
 
-def _output_size(format_preset: str) -> tuple[int, int]:
+def _output_size(format_preset: str, preview: bool = False) -> tuple[int, int]:
     if format_preset == "youtube":
-        return 1920, 1080
-    if format_preset == "twitter":
-        return 1080, 1080
-    return 1080, 1920
+        base = (1920, 1080)
+    elif format_preset == "twitter":
+        base = (1080, 1080)
+    else:
+        base = (1080, 1920)
+    if preview:
+        return max(360, base[0] // 2), max(360, base[1] // 2)
+    return base
 
 
 def _blur_bg_center_filter(width: int, height: int) -> str:
@@ -258,6 +262,7 @@ def build_command(
     emote_map: dict[str, str] | None = None,
     emote_hits: list[dict] | None = None,
     moment_context: dict | None = None,
+    preview_mode: bool = False,
 ) -> RenderPlan:
     if trim_start is None:
         trim_start = compute_trim_start(
@@ -268,6 +273,7 @@ def build_command(
             peak_chat_ts_ms=peak_chat_ts_ms,
         )
     audio_filter = build_audio_filter(audio_effects)
+    effective_preset = "ultrafast" if preview_mode else preset
     command = [
         ffmpeg_bin,
         "-y",
@@ -304,7 +310,7 @@ def build_command(
             "-c:v",
             encoder,
             "-preset",
-            preset,
+            effective_preset,
             "-c:a",
             "aac",
             "-b:a",
@@ -344,6 +350,7 @@ class Renderer:
         emote_map: dict[str, str] | None = None,
         emote_hits: list[dict] | None = None,
         moment_context: dict | None = None,
+        preview_mode: bool = False,
     ) -> RenderPlan:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         plan = build_command(
@@ -368,6 +375,7 @@ class Renderer:
             emote_map=emote_map,
             emote_hits=emote_hits,
             moment_context=moment_context,
+            preview_mode=preview_mode,
         )
         try:
             proc = subprocess.run(

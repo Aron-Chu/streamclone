@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   ensureChannelEmotes,
@@ -121,6 +121,49 @@ function SourcePills({ sources }: { sources?: SourceStatus[] }) {
       ))}
     </div>
   )
+}
+
+function ChatCoverageBadge({ detail }: { detail?: AnalyticsStreamDetail }) {
+  const pct = detail?.chatCoveragePct ?? detail?.chatCoverage?.coveragePct
+  if (pct === undefined || pct <= 0) return null
+  const partial = detail?.chatCoverage?.partial
+  const title = partial
+    ? `Chat spans ${detail?.chatCoverage?.chatSpanMinutes ?? 0} of ${detail?.chatCoverage?.streamSpanMinutes ?? 0} stream minutes — re-sync later for more`
+    : 'Chat rollups cover most of the stream timeline'
+  return (
+    <span
+      title={title}
+      className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${
+        partial ? 'border-amber-400/25 bg-amber-500/10 text-amber-200' : 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300'
+      }`}
+    >
+      {Math.round(pct)}% chat coverage
+    </span>
+  )
+}
+
+function streamStateLabel(state?: AnalyticsStreamDetail['state'] | 'not found' | 'loading', isHistoricalRoute = false) {
+  if (state === 'not found') return 'not found'
+  if (isHistoricalRoute && (state === 'live' || state === 'loading' || !state)) return 'historical'
+  if (state === 'live') return 'live'
+  if (state === 'syncing') return 'syncing'
+  if (state === 'historical') return 'historical'
+  if (state === 'not_collected') return 'stats only'
+  return state || 'loading'
+}
+
+function isPlaceholderStreamTitle(title?: string) {
+  const trimmed = title?.trim() ?? ''
+  return trimmed === '' || trimmed === 'Syncing...' || trimmed === 'Syncing…'
+}
+
+function displayStreamTitle(stream?: AnalyticsStream, login?: string, fallbacks: Array<string | undefined> = []) {
+  if (!isPlaceholderStreamTitle(stream?.title)) return stream!.title!.trim()
+  for (const candidate of fallbacks) {
+    const trimmed = candidate?.trim() ?? ''
+    if (trimmed && !isPlaceholderStreamTitle(trimmed)) return trimmed
+  }
+  return `${login ?? stream?.login ?? 'Stream'} analytics`
 }
 
 function StatCard({ label, value, tone }: { label: string; value: string; tone?: string }) {
@@ -318,6 +361,29 @@ function rollupsHaveViewerData(rollups: AnalyticsMinuteRollup[]) {
   return rollups.some(point => !point.missing && viewerValue(point) > 0)
 }
 
+function computeRollupViewerStats(rollups: AnalyticsMinuteRollup[]) {
+  const values = rollups
+    .filter(point => !point.missing && viewerValue(point) > 0)
+    .map(point => viewerValue(point))
+  if (!values.length) return null
+  return {
+    current: values[values.length - 1],
+    peak: Math.max(...values),
+    avg: Math.round(values.reduce((sum, value) => sum + value, 0) / values.length),
+  }
+}
+
+function computeRollupChatStats(rollups: AnalyticsMinuteRollup[]) {
+  let chat = 0
+  let emotes = 0
+  for (const point of rollups) {
+    if (point.missing) continue
+    chat += point.chatCount ?? 0
+    emotes += minuteEmoteTotal(point)
+  }
+  return { chat, emotes }
+}
+
 function formatElapsed(startedAt?: string) {
   if (!startedAt) return '0s'
   const ms = Date.now() - Date.parse(startedAt)
@@ -452,7 +518,64 @@ function syncOverallEta(status: SyncStatus, chatTimeline: ReturnType<typeof chat
   return ''
 }
 
-function SyncStepIcon({ state }: { state: 'done' | 'active' | 'pending' }) {
+function syncOverallProgress(
+  status: SyncStatus,
+  viewerStepState: 'done' | 'active' | 'pending' | 'failed',
+  chatStepState: 'done' | 'active' | 'pending',
+  rollupStepState: 'done' | 'active' | 'pending',
+  viewerPct: number,
+  chatFetchPct: number,
+  rollupPct: number,
+  chatOnlyPath: boolean,
+) {
+  if (status.phase === 'completed') return { pct: 100, stageLabel: 'Complete' }
+  if (status.phase === 'failed') return { pct: 0, stageLabel: 'Failed' }
+
+  const lerp = (range: [number, number], innerPct: number) =>
+    range[0] + ((range[1] - range[0]) * Math.max(0, Math.min(100, innerPct))) / 100
+
+  const rollupRange: [number, number] = [85, 100]
+  const chatRange: [number, number] = chatOnlyPath ? [5, 85] : [30, 85]
+  const viewerRange: [number, number] = [10, 30]
+  const vodRange: [number, number] = [0, 10]
+
+  if (rollupStepState === 'done') return { pct: 100, stageLabel: 'Complete' }
+  if (rollupStepState === 'active') {
+    return { pct: lerp(rollupRange, rollupPct), stageLabel: 'Rollups & emotes' }
+  }
+  if (chatStepState === 'active') {
+    return { pct: lerp(chatRange, chatFetchPct), stageLabel: 'VOD chat fetch' }
+  }
+  if (chatStepState === 'done') {
+    return { pct: chatRange[0], stageLabel: 'Rollups & emotes' }
+  }
+  if (!chatOnlyPath) {
+    if (viewerStepState === 'done') {
+      return { pct: chatRange[0], stageLabel: 'VOD chat fetch' }
+    }
+    if (viewerStepState === 'active') {
+      return { pct: lerp(viewerRange, viewerPct), stageLabel: 'Viewers (TwitchTracker)' }
+    }
+  }
+  if (status.phase === 'resolving_vod') {
+    return { pct: lerp(vodRange, 60), stageLabel: 'VOD lookup' }
+  }
+  if (status.phase === 'starting') {
+    return { pct: lerp(vodRange, 15), stageLabel: 'Initial setup' }
+  }
+  return { pct: vodRange[0], stageLabel: chatOnlyPath ? 'VOD lookup' : 'Initial setup' }
+}
+
+function SyncStepIcon({ state }: { state: 'done' | 'active' | 'pending' | 'failed' }) {
+  if (state === 'failed') {
+    return (
+      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-300">
+        <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" aria-hidden>
+          <path d="M6 2.5v3.25M6 8.75h.01" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </span>
+    )
+  }
   if (state === 'done') {
     return (
       <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
@@ -522,7 +645,17 @@ function SegmentGridLegend() {
   )
 }
 
-function SyncProgressPanel({ status, chartChatMinutes = 0 }: { status: SyncStatus | null; chartChatMinutes?: number }) {
+function SyncProgressPanel({
+  status,
+  chartChatMinutes = 0,
+  viewerDataFromExisting = false,
+  chatOnlyPath = false,
+}: {
+  status: SyncStatus | null
+  chartChatMinutes?: number
+  viewerDataFromExisting?: boolean
+  chatOnlyPath?: boolean
+}) {
   if (!status) return null
   if (status.stale && status.phase !== 'completed' && status.phase !== 'failed') {
     return (
@@ -548,18 +681,22 @@ function SyncProgressPanel({ status, chartChatMinutes = 0 }: { status: SyncStatu
   const chatFetchPct = segmentTotal > 1
     ? Math.round((segmentDone / segmentTotal) * 100)
     : (chatTimeline?.pct ?? 0)
-  const overallEta = syncOverallEta(status, chatTimeline)
 
-  const viewerStepState: 'done' | 'active' | 'pending' = viewersChartReady
+  const viewerFailed = status.viewerStatus === 'failed'
+  const viewerStepState: 'done' | 'active' | 'pending' | 'failed' = viewersChartReady
     ? 'done'
-    : (['scraping_tracker', 'parsing_tracker'].includes(status.phase) ? 'active' : 'pending')
+    : viewerFailed
+      ? 'failed'
+      : (['scraping_tracker', 'parsing_tracker'].includes(status.phase) ? 'active' : 'pending')
   const viewerPct = viewersChartReady
     ? 100
-    : status.phase === 'scraping_tracker'
-      ? 35
-      : status.phase === 'parsing_tracker'
-        ? 70
-        : 0
+    : viewerFailed
+      ? 0
+      : status.phase === 'scraping_tracker'
+        ? 35
+        : status.phase === 'parsing_tracker'
+          ? 70
+          : 0
 
   const chatStepState: 'done' | 'active' | 'pending' = chatFetchDone
     ? 'done'
@@ -569,15 +706,27 @@ function SyncProgressPanel({ status, chartChatMinutes = 0 }: { status: SyncStatu
 
   const rollupStepState: 'done' | 'active' | 'pending' = indexPhase === 'done' || status.phase === 'completed'
     ? 'done'
-    : isIndexing
+    : isIndexing || (status.rollupsWritten ?? 0) > 0
       ? 'active'
       : 'pending'
   const rollupPct = chatIndex?.pct ?? (indexPhase === 'tokenizing' ? 12 : 0)
+  const overallEta = syncOverallEta(status, chatTimeline)
+  const overallProgress = syncOverallProgress(
+    status,
+    viewerStepState,
+    chatStepState,
+    rollupStepState,
+    viewerPct,
+    chatFetchPct,
+    rollupPct,
+    chatOnlyPath,
+  )
 
   const segmentCells = segmentTotal > 1
     ? segmentGridBuckets(segmentTotal, segmentDone, Boolean(status.chat?.active), Boolean(status.chat?.throttled))
     : []
-  const showLiveBanner = viewersChartReady && (chatFetchActive || isIndexing)
+  const viewerStepUsesExisting = viewerDataFromExisting || chatOnlyPath || status.viewerStatus === 'skipped'
+  const showIndexingBanner = viewersChartReady && (chatFetchActive || isIndexing)
 
   return (
     <div className="w-full rounded-xl border border-white/10 bg-[#111118]/90 px-4 py-4 text-left shadow-lg shadow-black/20">
@@ -591,18 +740,28 @@ function SyncProgressPanel({ status, chartChatMinutes = 0 }: { status: SyncStatu
           </span>
           <div>
             <div className="text-[11px] font-black uppercase tracking-[0.14em] text-zinc-300">Sync progress</div>
-            <div className="text-[10px] font-semibold text-zinc-500">Historical VOD indexing</div>
+            <div className="text-[10px] font-semibold text-zinc-500">
+              {overallProgress.stageLabel}
+              {chatOnlyPath ? ' · VOD chat indexing (viewer chart unchanged)' : ''}
+            </div>
           </div>
         </div>
         <div className="text-right text-[10px] font-semibold text-zinc-500">
+          <div className="font-black tabular-nums text-violet-200">{Math.round(overallProgress.pct)}%</div>
           <div>Elapsed {formatElapsed(status.startedAt)}</div>
           {overallEta ? <div className="text-violet-300/90">{overallEta}</div> : null}
         </div>
       </div>
 
-      {showLiveBanner ? (
+      <div className="mt-3">
+        <SyncProgressBar pct={overallProgress.pct} tone="violet" />
+      </div>
+
+      {showIndexingBanner ? (
         <div className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-semibold leading-snug text-cyan-100">
-          Viewer data is live. VOD chat and emotes are still being indexed.
+          {viewerStepUsesExisting
+            ? 'Viewer chart ready. VOD chat and emotes are still being indexed.'
+            : 'Viewer minutes are on the chart. VOD chat and emotes are still being indexed.'}
         </div>
       ) : null}
 
@@ -621,12 +780,18 @@ function SyncProgressPanel({ status, chartChatMinutes = 0 }: { status: SyncStatu
               <div>
                 <div className="text-[11px] font-bold text-zinc-200">Viewers (TwitchTracker)</div>
                 <div className="text-[10px] font-semibold text-zinc-500">
-                  {viewersChartReady ? 'Viewer chart is live' : status.tracker?.message || 'Scraping viewer timeline'}
+                  {viewersChartReady
+                    ? (viewerStepUsesExisting ? 'Using existing viewer rollups' : 'Viewer chart ready')
+                    : viewerStepState === 'pending'
+                      ? 'Waiting for TwitchTracker viewer minutes'
+                      : status.tracker?.message || 'Scraping viewer timeline'}
                 </div>
               </div>
             </div>
-            <span className={`text-[11px] font-black tabular-nums ${viewerStepState === 'done' ? 'text-emerald-400' : 'text-zinc-400'}`}>
-              {viewerStepState === 'done' ? '100%' : viewerStepState === 'active' ? `${viewerPct}%` : 'Pending'}
+            <span className={`text-[11px] font-black tabular-nums ${
+              viewerStepState === 'done' ? 'text-emerald-400' : viewerStepState === 'failed' ? 'text-amber-300' : 'text-zinc-400'
+            }`}>
+              {viewerStepState === 'done' ? '100%' : viewerStepState === 'failed' ? 'Skipped' : viewerStepState === 'active' ? `${viewerPct}%` : 'Pending'}
             </span>
           </div>
           <SyncProgressBar pct={viewerPct} tone="green" pending={viewerStepState === 'pending'} />
@@ -737,7 +902,7 @@ function SyncProgressPanel({ status, chartChatMinutes = 0 }: { status: SyncStatu
             {rollupStepState === 'pending' ? (
               <div className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-zinc-600">
                 <span aria-hidden>⏱</span>
-                Starts after chat fetch completes
+                {chatFetchActive ? 'Indexing starts as each VOD segment finishes' : 'Starts after chat fetch completes'}
               </div>
             ) : null}
             {rollupStepState === 'active' && chartChatMinutes > 0 ? (
@@ -858,7 +1023,7 @@ function buildSeries(
     return useViewerFallback && viewerBaseline > 0 ? viewerBaseline : 0
   })
   const chat = rollups.map(point => point.missing ? null : point.chatCount)
-  
+
   // Raw per-minute emote counts (no smoothing — preserves spikes).
   const emotesRaw = rollups.map(point => point.missing ? null : minuteEmoteTotal(point))
   const emotesMax = seriesMax(emotesRaw)
@@ -1171,7 +1336,7 @@ function linePath(
     }
 
     let d = `M${seg[0].x.toFixed(1)} ${seg[0].y.toFixed(1)}`
-    
+
     // Compute slopes at each point for smooth tangent matching
     const slopes: number[] = new Array(seg.length)
     for (let i = 0; i < seg.length; i++) {
@@ -1192,7 +1357,7 @@ function linePath(
       const p1 = seg[i]
       const p2 = seg[i + 1]
       const dx = p2.x - p1.x
-      
+
       const cp1x = p1.x + dx * 0.35
       const cp1y = Math.max(bandTop, Math.min(bandBottom, p1.y + slopes[i] * dx * 0.35))
       const cp2x = p2.x - dx * 0.35
@@ -1250,7 +1415,7 @@ function areaPath(
   const drawAreaSegment = (seg: Array<{ x: number; y: number }>) => {
     if (seg.length === 0) return ''
     const bottomY = bandBottom
-    
+
     let d = `M${seg[0].x.toFixed(1)} ${bottomY.toFixed(1)}`
     d += ` L${seg[0].x.toFixed(1)} ${seg[0].y.toFixed(1)}`
 
@@ -1314,7 +1479,6 @@ function AnalyticsChart({
   selectedRollup,
   onSelectRollup,
   syncing = false,
-  syncStatus = null,
   syncError = null,
   syncNotice = null,
   onSync = () => {},
@@ -1326,6 +1490,9 @@ function AnalyticsChart({
   isLive = false,
   notInAnalyticsDb = false,
   coreMinuteChartsBlocked = false,
+  liveHasRichHistory = false,
+  chatOnlySyncAvailable = false,
+  onChatOnlySync,
 }: {
   detail?: AnalyticsStreamDetail;
   selectedEmotes: Set<string>;
@@ -1333,7 +1500,6 @@ function AnalyticsChart({
   selectedRollup: AnalyticsMinuteRollup | null;
   onSelectRollup: (rollup: AnalyticsMinuteRollup | null) => void;
   syncing?: boolean;
-  syncStatus?: SyncStatus | null;
   syncError?: string | null;
   syncNotice?: string | null;
   onSync?: () => void;
@@ -1345,6 +1511,9 @@ function AnalyticsChart({
   isLive?: boolean;
   notInAnalyticsDb?: boolean;
   coreMinuteChartsBlocked?: boolean;
+  liveHasRichHistory?: boolean;
+  chatOnlySyncAvailable?: boolean;
+  onChatOnlySync?: () => void;
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const [expandedScale, setExpandedScale] = useState(true)
@@ -1376,10 +1545,6 @@ function AnalyticsChart({
     [allRollups],
   )
   const canRenderChart = hasChartData || hasViewerChartData
-  const chartChatMinutes = useMemo(
-    () => rollups.filter(point => !point.missing && (point.chatCount ?? 0) > 0).length,
-    [rollups],
-  )
   const partialChatCoverage = !isLive && !syncing && Boolean(detail?.chatCoverage?.partial)
   const width = 1000
   const height = CHART_VIEWBOX_HEIGHT
@@ -1620,7 +1785,7 @@ function AnalyticsChart({
       </div>
     )
   }
- 
+
   if (!canRenderChart && (detail?.state === 'syncing' || syncing)) {
     return (
       <div className="grid min-h-80 place-items-center rounded border border-white/10 bg-[#0d0d12]/50 backdrop-blur-md px-4 text-center">
@@ -1629,7 +1794,9 @@ function AnalyticsChart({
           <div className="mt-1 text-sm font-semibold text-zinc-500 max-w-md">
             Viewer minutes appear as soon as TwitchTracker finishes. Chat and emotes fill in segment by segment.
           </div>
-          {syncing ? <SyncProgressPanel status={syncStatus} chartChatMinutes={chartChatMinutes} /> : null}
+          <div className="mt-2 text-xs font-semibold text-zinc-600">
+            Step-by-step progress is in the Sync tab on the right.
+          </div>
           {syncNotice ? <div className="mt-2 text-xs font-bold text-amber-300">{syncNotice}</div> : null}
           {syncError ? <div className="mt-2 text-xs font-bold text-red-400">{syncError}</div> : null}
         </div>
@@ -1642,6 +1809,26 @@ function AnalyticsChart({
       return (
         <div className="grid min-h-80 place-items-center rounded border border-white/10 bg-[#0d0d12]/50 backdrop-blur-md px-4 text-center">
           <CoreMinuteChartsNotice />
+        </div>
+      )
+    }
+    if (isLive && liveHasRichHistory) {
+      return (
+        <div className="grid min-h-80 place-items-center rounded border border-white/10 bg-[#0d0d12]/50 backdrop-blur-md px-4 text-center">
+          <div>
+            <div className="text-base font-black text-zinc-100">Live collector has no minute rollups yet</div>
+            <div className="mt-1 text-sm font-semibold text-zinc-500 max-w-md">
+              The IRC collector is running but has not written chart minutes for this session. Past synced streams are in the left rail — pick one for full charts, or wait and refresh.
+            </div>
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="mt-5 rounded-lg border border-white/10 bg-white/[0.05] px-5 py-2.5 text-xs font-black uppercase tracking-wider text-zinc-200 transition hover:bg-white/10 disabled:opacity-50"
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh data'}
+            </button>
+          </div>
         </div>
       )
     }
@@ -1663,14 +1850,28 @@ function AnalyticsChart({
           ) : null}
           {canShowSync && (
             <div className="mt-5 flex w-full flex-col items-center gap-2">
+              {chatOnlySyncAvailable && onChatOnlySync ? (
+                <div className="max-w-md text-[11px] font-semibold text-zinc-500">
+                  Viewer minutes are already synced — this fetches VOD chat via Twitch GQL only (no scraper profile needed).
+                </div>
+              ) : null}
               <button
                 onClick={onSync}
                 disabled={syncing}
                 className="rounded-lg bg-violet-600 px-5 py-2.5 text-xs font-black uppercase tracking-wider text-white transition hover:bg-violet-500 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
               >
-                {syncing ? 'Sync in progress…' : 'Sync Historical Data'}
+                {syncing ? 'Sync in progress…' : chatOnlySyncAvailable ? 'Sync VOD chat' : 'Sync Historical Data'}
               </button>
-              {syncing ? <SyncProgressPanel status={syncStatus} chartChatMinutes={chartChatMinutes} /> : null}
+              {chatOnlySyncAvailable && onChatOnlySync ? (
+                <button
+                  type="button"
+                  onClick={onChatOnlySync}
+                  disabled={syncing}
+                  className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-5 py-2 text-[10px] font-black uppercase tracking-wider text-cyan-100 transition hover:bg-cyan-500/20 disabled:opacity-50"
+                >
+                  Re-sync chat only
+                </button>
+              ) : null}
               {syncNotice && <div className="mt-2 text-xs font-bold text-amber-300">{syncNotice}</div>}
               {syncError && <div className="mt-2 text-xs font-bold text-red-400">{syncError}</div>}
             </div>
@@ -1712,7 +1913,6 @@ function AnalyticsChart({
           {detail?.vodId ? ` (VOD ${detail.vodId})` : ''}. Twitch may still be processing the archive — re-sync later.
         </div>
       ) : null}
-      {syncing ? <div className="mb-3"><SyncProgressPanel status={syncStatus} chartChatMinutes={chartChatMinutes} /></div> : null}
       {syncNotice ? (
         <div className="mb-3 rounded border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-200">{syncNotice}</div>
       ) : null}
@@ -2201,7 +2401,7 @@ function AnalyticsChart({
           const n = rollups.length
           if (n === 0) return null
           const totalDurationSec = n * 60
-          
+
           const startX = padLeft + (segment.offsetSeconds / totalDurationSec) * (width - padLeft - padRight)
           const durationFraction = segment.durationSeconds / totalDurationSec
           const endX = startX + durationFraction * (width - padLeft - padRight)
@@ -2326,6 +2526,7 @@ function StreamSidebar({
   syncedOnly,
   onSyncedOnlyChange,
   coreMinuteChartsBlocked = false,
+  activeRollupStats,
 }: {
   login: string
   streams: AnalyticsStream[]
@@ -2338,6 +2539,7 @@ function StreamSidebar({
   syncedOnly?: boolean
   onSyncedOnlyChange?: (value: boolean) => void
   coreMinuteChartsBlocked?: boolean
+  activeRollupStats?: { avg: number; peak: number; current: number } | null
 }) {
   const dateCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -2401,6 +2603,8 @@ function StreamSidebar({
               const targetSlug = isUnique ? dateSlug : stream.streamId
               const isActive = !isLiveView && (activeID === stream.streamId || activeID === dateSlug || activeID === targetSlug)
               const hasMinuteData = (stream.viewerSamples ?? 0) > 0 || (stream.chatMessages ?? 0) > 0
+              const isSyncingActive = Boolean(syncing && isActive)
+              const rollupStats = isSyncingActive ? activeRollupStats : null
 
               return (
                 <Link
@@ -2426,17 +2630,23 @@ function StreamSidebar({
                     ) : null}
                     <span
                       className={`rounded px-1.5 py-0.5 text-[9px] font-black uppercase ${
-                        hasMinuteData ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'
+                        isSyncingActive
+                          ? 'bg-violet-500/10 text-violet-300'
+                          : hasMinuteData
+                            ? 'bg-emerald-500/10 text-emerald-300'
+                            : 'bg-amber-500/10 text-amber-300'
                       }`}
                       title={
-                        hasMinuteData
-                          ? 'Minute-level viewer, chat, and emote rollups are synced for charts.'
-                          : coreMinuteChartsBlocked
-                            ? 'Session stats only. Minute charts require the Analytics (scraper) tier.'
-                            : 'Session stats only (duration, title). Use Sync chat/emotes on the stream detail page for minute charts.'
+                        isSyncingActive
+                          ? 'Sync in progress — partial chart data may already be visible.'
+                          : hasMinuteData
+                            ? 'Minute-level viewer, chat, and emote rollups are synced for charts.'
+                            : coreMinuteChartsBlocked
+                              ? 'Session stats only. Minute charts require the Analytics (scraper) tier.'
+                              : 'Session stats only (duration, title). Use Sync chat/emotes on the stream detail page for minute charts.'
                       }
                     >
-                      {hasMinuteData ? 'Synced' : 'Stats only'}
+                      {isSyncingActive ? 'Syncing' : hasMinuteData ? 'Synced' : 'Stats only'}
                     </span>
                   </div>
                   {!hasMinuteData && isActive && coreMinuteChartsBlocked ? (
@@ -2460,8 +2670,8 @@ function StreamSidebar({
                   ) : null}
                   <div className="mt-1.5 grid grid-cols-3 gap-1 text-[10px] font-bold text-zinc-500">
                     <span>{duration(stream)}</span>
-                    <span>avg {count(stream.avgViewers)}</span>
-                    <span>peak {count(stream.peakViewers)}</span>
+                    <span>avg {count(rollupStats?.avg ?? stream.avgViewers)}</span>
+                    <span>peak {count(rollupStats?.peak ?? stream.peakViewers)}</span>
                   </div>
                 </Link>
               )
@@ -2473,10 +2683,10 @@ function StreamSidebar({
   )
 }
 
-function TopEmoteTable({ emotes, selected, onSelect }: { emotes: AnalyticsTopEmote[]; selected: Set<string>; onSelect: (key: string) => void }) {
+function TopEmoteTable({ emotes, selected, onSelect, embedded = false }: { emotes: AnalyticsTopEmote[]; selected: Set<string>; onSelect: (key: string) => void; embedded?: boolean }) {
   if (!emotes.length) {
     return (
-      <div className="grid min-h-44 place-items-center rounded border border-white/10 bg-white/[0.035] text-center">
+      <div className={`grid min-h-44 place-items-center text-center ${embedded ? 'px-3 py-4' : 'rounded border border-white/10 bg-white/[0.035]'}`}>
         <div>
           <div className="text-sm font-black text-zinc-200">No emotes counted</div>
           <div className="mt-1 text-xs font-semibold text-zinc-500">Collected chat has not matched known emotes yet.</div>
@@ -2485,7 +2695,7 @@ function TopEmoteTable({ emotes, selected, onSelect }: { emotes: AnalyticsTopEmo
     )
   }
   return (
-    <div className="overflow-hidden rounded border border-white/10 bg-white/[0.035]">
+    <div className={`overflow-hidden ${embedded ? 'max-h-[calc(100vh-14rem)] overflow-y-auto' : 'rounded border border-white/10 bg-white/[0.035]'}`}>
       <div className="grid grid-cols-[minmax(0,1fr)_90px_80px] gap-3 border-b border-white/10 px-3 py-2 text-[11px] font-black uppercase text-zinc-500">
         <span>Emote</span>
         <span>Provider</span>
@@ -2558,11 +2768,13 @@ function MomentReviewPanel({
   selectedRollup,
   onSelectRollup,
   topEmotesCatalog,
+  embedded = false,
 }: {
   rollups: AnalyticsMinuteRollup[]
   selectedRollup: AnalyticsMinuteRollup | null
   onSelectRollup: (rollup: AnalyticsMinuteRollup) => void
   topEmotesCatalog?: AnalyticsTopEmote[]
+  embedded?: boolean
 }) {
   const [sortBy, setSortBy] = useState<MomentSortMode>('score')
   const baselines = useMemo(() => computeStreamBaselines(rollups), [rollups])
@@ -2594,10 +2806,16 @@ function MomentReviewPanel({
     return sorted.slice(0, 10)
   }, [rollups, baselines, sortBy, topEmotesCatalog])
 
-  if (candidates.length < 2) return null
+  if (candidates.length < 2) {
+    return (
+      <div className={`${embedded ? 'px-3 py-4' : 'rounded border border-white/10 bg-[#0d0d12] p-3'} text-center text-[11px] font-semibold text-zinc-500`}>
+        {rollups.some(rollupHasMinuteData) ? 'Not enough peaks yet — sync chat or wait for more minutes.' : 'Sync chat/emotes to surface ranked moments.'}
+      </div>
+    )
+  }
 
   return (
-    <div className="rounded border border-white/10 bg-[#0d0d12] p-3">
+    <div className={embedded ? 'p-3' : 'rounded border border-white/10 bg-[#0d0d12] p-3'}>
       <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-[11px] font-black uppercase text-zinc-500">Top Moments</div>
         <div className="flex flex-wrap gap-1">
@@ -2689,7 +2907,7 @@ function SelectedMomentPanel({
 
   const timeStr = new Date(rollup.minuteTs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   const dateStr = new Date(rollup.minuteTs).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
-  
+
   let offsetSeconds = 0
   let offsetStr = ''
   if (startedAt) {
@@ -2759,7 +2977,7 @@ function SelectedMomentPanel({
   return (
     <div className="rounded border border-amber-500/10 bg-[#0d0d12] p-4 relative overflow-hidden transition-all duration-300">
       <div className="absolute left-0 right-0 top-0 h-1 bg-gradient-to-r from-amber-500/25 via-amber-400/60 to-amber-500/25" />
-      
+
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -2872,7 +3090,11 @@ export default function Analytics() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
   const [activeClipsTab, setActiveClipsTab] = useState<'edits' | 'twitch'>('edits')
+  const [rightPanelTab, setRightPanelTab] = useState<'moments' | 'emotes' | 'clips' | 'sync'>('moments')
   const [syncedOnlyFilter, setSyncedOnlyFilter] = useState(false)
+
+  const isLiveRoute = !streamId
+  const isHistoricalRoute = Boolean(streamId)
 
   useEffect(() => {
     setSelectedRollup(null)
@@ -2922,7 +3144,7 @@ export default function Analytics() {
   const combinedStreams = useMemo(() => {
     const local = streamsQuery.data?.items ?? []
     const tracker = historyQuery.data?.items ?? []
-    
+
     const mappedTracker: AnalyticsStream[] = tracker.map(s => ({
       streamId: s.id,
       broadcasterId: '',
@@ -2975,22 +3197,22 @@ export default function Analytics() {
 
   const matchedStream = useMemo(() => {
     if (!streamId) return undefined
-    
+
     // 1. Try to find by streamId (numeric or date alias)
     const exactMatch = combinedStreams.find(s => s.streamId === streamId)
     if (exactMatch) return exactMatch
-    
+
     // 2. If streamId is a date alias (YYYY-MM-DD), find a stream starting on that date
     if (/^\d{4}-\d{2}-\d{2}$/.test(streamId)) {
       return combinedStreams.find(s => {
         if (!s.startedAt) return false
         const date = new Date(s.startedAt)
         if (isNaN(date.getTime())) return false
-        
+
         // Match UTC date YYYY-MM-DD
         const utcDateStr = date.toISOString().slice(0, 10)
         if (utcDateStr === streamId) return true
-        
+
         // Match local date YYYY-MM-DD
         const year = date.getFullYear()
         const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -2999,7 +3221,7 @@ export default function Analytics() {
         return localDateStr === streamId
       })
     }
-    
+
     return undefined
   }, [streamId, combinedStreams])
 
@@ -3041,7 +3263,14 @@ export default function Analytics() {
     enabled: Boolean(login && (streamId === '' || targetQueryStreamId)),
     refetchInterval: streamId ? false : 15000,
     retry: false,
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) => {
+      const prevKey = previousQuery?.queryKey?.[2]
+      if (streamId === '') {
+        return prevKey === '' || prevKey === undefined ? previousData : undefined
+      }
+      if (targetQueryStreamId && prevKey === targetQueryStreamId) return previousData
+      return undefined
+    },
     staleTime: 120_000,
     refetchOnWindowFocus: !streamId,
   })
@@ -3056,7 +3285,7 @@ export default function Analytics() {
     if (!login || refreshing) return
     setRefreshing(true)
     try {
-      const isLiveView = !streamId || detailQuery.data?.state === 'live'
+      const isLiveView = isLiveRoute && detailQuery.data?.state !== 'historical'
       if (isLiveView) {
         await watchAnalyticsChannel(login).catch(() => undefined)
       }
@@ -3142,9 +3371,10 @@ export default function Analytics() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- poll chart rollups while Redis sync is active
   }, [syncing, targetQueryStreamId])
 
-  const handleSync = async () => {
+  const handleSync = async (opts?: { forceChat?: boolean; chatOnly?: boolean }) => {
     if (!targetQueryStreamId) return
-    const viewersOnly = viewersOnlySync
+    const viewersOnly = opts?.chatOnly ? false : viewersOnlySync
+    const forceChat = Boolean(opts?.forceChat)
     const pollCallbacks = syncPollChartCallbacks(refetchChartDuringSync, viewersOnly)
     const hintVodId = historyQuery.data?.items?.find(s => s.id === targetQueryStreamId)?.videoId
       || detailQuery.data?.vodId
@@ -3153,9 +3383,10 @@ export default function Analytics() {
     setSyncError(null)
     setSyncNotice(null)
     setSyncStatus(null)
+    setRightPanelTab('sync')
     refetchChartDuringSync()
     try {
-      const start = await startHistoricalSync(targetQueryStreamId, login, { viewersOnly, vodId: hintVodId })
+      const start = await startHistoricalSync(targetQueryStreamId, login, { viewersOnly, vodId: hintVodId, forceChat })
       if (start.status) {
         setSyncStatus(start.status)
       }
@@ -3209,6 +3440,7 @@ export default function Analytics() {
       )
       if (!detailSyncing && !statusActive) return
       setSyncing(true)
+      setRightPanelTab('sync')
       if (status) setSyncStatus(status)
       setSyncNotice('Sync in progress — resuming live progress.')
       const resumeViewersOnly = status?.viewersOnly ?? viewersOnlySync
@@ -3245,6 +3477,17 @@ export default function Analytics() {
     return historyQuery.data.items.find(s => s.id === targetQueryStreamId)
   }, [targetQueryStreamId, historyQuery.data?.items])
 
+  const detailQueryMatchesRoute = useMemo(() => {
+    const data = detailQuery.data
+    if (!data) return false
+    if (isLiveRoute) {
+      return data.state === 'live' || data.state === 'not_collected' || !data.stream?.streamId
+    }
+    if (!targetQueryStreamId) return false
+    const sid = data.stream?.streamId
+    return !sid || sid === targetQueryStreamId
+  }, [detailQuery.data, isLiveRoute, targetQueryStreamId])
+
   const needsSync = Boolean(
     targetQueryStreamId
     && historicalStream
@@ -3254,24 +3497,45 @@ export default function Analytics() {
   )
 
   const detail = useMemo(() => {
-    if (detailQuery.data) {
-      const base = detailQuery.data
+    const routeDetail = detailQueryMatchesRoute ? detailQuery.data : undefined
+    if (routeDetail) {
+      const base = routeDetail
       if (historicalStream && base.stream) {
         const s = base.stream
         const missingViewers = s.peakViewers === 0 && s.avgViewers === 0
         const hasHistoricalViewers = historicalStream.peakViewers > 0 || historicalStream.avgViewers > 0
-        if (missingViewers && hasHistoricalViewers) {
+        const placeholderTitle = isPlaceholderStreamTitle(s.title)
+        const resolvedTitle = placeholderTitle
+          ? (historicalStream.title?.trim() || matchedStream?.title?.trim())
+          : undefined
+        if ((missingViewers && hasHistoricalViewers) || resolvedTitle) {
           return {
             ...base,
             stream: {
               ...s,
-              avgViewers: historicalStream.avgViewers,
-              peakViewers: historicalStream.peakViewers,
+              ...(missingViewers && hasHistoricalViewers
+                ? {
+                    avgViewers: historicalStream.avgViewers,
+                    peakViewers: historicalStream.peakViewers,
+                  }
+                : {}),
+              ...(resolvedTitle ? { title: resolvedTitle } : {}),
             },
           } satisfies AnalyticsStreamDetail
         }
       }
       return base
+    }
+    if (isHistoricalRoute && matchedStream) {
+      return {
+        channel: login,
+        state: 'historical' as const,
+        stream: matchedStream,
+        rollups: [],
+        topEmotes: [],
+        sources: [{ source: 'twitchtracker', state: 'ready' as const, message: 'Historical stats from Twitch Tracker' }],
+        updatedAt: Date.now(),
+      }
     }
     if (historicalStream) {
       return {
@@ -3303,9 +3567,74 @@ export default function Analytics() {
       }
     }
     return undefined
-  }, [detailQuery.data, historicalStream, login])
+  }, [detailQuery.data, detailQueryMatchesRoute, historicalStream, login, isHistoricalRoute, matchedStream])
+
+  const headerState = useMemo(() => {
+    if (dateSlugUnresolved) return 'not found'
+    if (isHistoricalRoute) {
+      if (detailQueryMatchesRoute && detail?.state && detail.state !== 'live') return detail.state
+      if (syncing || detail?.state === 'syncing') return 'syncing'
+      return 'historical'
+    }
+    return detail?.state || (detailQuery.isLoading ? 'loading' : 'not_collected')
+  }, [dateSlugUnresolved, isHistoricalRoute, detailQueryMatchesRoute, detail?.state, syncing, detailQuery.isLoading])
 
   const stream = detail?.stream
+  const liveHasRichHistory = useMemo(() => {
+    if (!isLiveRoute) return false
+    const rollups = detail?.rollups ?? []
+    const hasLiveRollups = rollups.some(rollupHasMinuteData)
+    if (hasLiveRollups) return false
+    return combinedStreams.some(s => (s.viewerSamples ?? 0) > 0 || (s.chatMessages ?? 0) > 0)
+  }, [isLiveRoute, detail?.rollups, combinedStreams])
+
+  const chatOnlySyncAvailable = useMemo(() => {
+    if (!targetQueryStreamId || isLiveRoute || coreMinuteChartsBlocked) return false
+    const rollups = detail?.rollups ?? []
+    const viewerSamples = detail?.stream?.viewerSamples ?? matchedStream?.viewerSamples ?? 0
+    const hasViewerData = viewerSamples > 0 || detailHasViewerData(detail)
+    if (!hasViewerData) return false
+    const hasChat = rollups.some(point => (point.chatCount ?? 0) > 0 || minuteEmoteTotal(point) > 0)
+      || (detail?.stream?.chatMessages ?? 0) > 0
+    return !hasChat || Boolean(detail?.chatCoverage?.partial)
+  }, [targetQueryStreamId, isLiveRoute, coreMinuteChartsBlocked, detail, matchedStream])
+
+  const viewerDataFromExisting = useMemo(() => {
+    if (!targetQueryStreamId || isLiveRoute) return false
+    const viewerSamples = detail?.stream?.viewerSamples ?? matchedStream?.viewerSamples ?? 0
+    return viewerSamples > 0 || detailHasViewerData(detail)
+  }, [targetQueryStreamId, isLiveRoute, detail, matchedStream])
+
+  const headerSyncLabel = useMemo(() => {
+    if (syncing) return 'Syncing…'
+    if (chatOnlySyncAvailable) return 'Sync VOD chat'
+    if (viewersOnlySync) return 'Re-sync viewers'
+    if (needsSync) return 'Sync for charts'
+    return 'Sync chat/emotes'
+  }, [syncing, chatOnlySyncAvailable, viewersOnlySync, needsSync])
+
+  const canHeaderSync = !coreMinuteChartsBlocked && Boolean(targetQueryStreamId || needsSync)
+  const headerStats = useMemo(() => {
+    const rollups = detail?.rollups ?? []
+    const viewerStats = computeRollupViewerStats(rollups)
+    const chatStats = computeRollupChatStats(rollups)
+    const chatSegments = syncStatus?.chat
+    const emoteSegmentLabel = syncing && (chatSegments?.segmentsTotal ?? 0) > 0
+      ? `${(chatSegments?.segmentsDone ?? 0).toLocaleString()} / ${(chatSegments?.segmentsTotal ?? 0).toLocaleString()} segments`
+      : null
+    return {
+      current: viewerStats?.current ?? stream?.currentViewers,
+      avg: viewerStats?.avg ?? stream?.avgViewers,
+      peak: viewerStats?.peak ?? stream?.peakViewers,
+      chat: chatStats.chat > 0 ? chatStats.chat : stream?.chatMessages,
+      emotes: chatStats.emotes > 0 ? chatStats.emotes : stream?.totalEmoteUses,
+      emoteLabel: emoteSegmentLabel,
+    }
+  }, [detail?.rollups, stream, syncing, syncStatus?.chat])
+  const sidebarRollupStats = useMemo(
+    () => (syncing ? computeRollupViewerStats(detail?.rollups ?? []) : null),
+    [syncing, detail?.rollups],
+  )
   const chartEmoteKeys = useMemo(() => {
     if (selected.size > 0) return selected
     return new Set((detail?.topEmotes ?? []).slice(0, 4).map(emote => emote.key))
@@ -3328,13 +3657,29 @@ export default function Analytics() {
             <div className="flex flex-wrap items-center gap-2 text-xs font-black uppercase text-zinc-500">
               <Link to="/" className="rounded bg-white/10 px-2 py-1 text-zinc-200 transition hover:bg-white/15">Live directory</Link>
               <Link to={`/c/${encodeURIComponent(login)}`} className="rounded bg-violet-400/15 px-2 py-1 text-violet-100 transition hover:bg-violet-400/25">{login}</Link>
-              <span className={`rounded px-2 py-1 ${detail?.state === 'live' ? 'bg-red-500/15 text-red-100' : 'bg-white/10 text-zinc-300'}`}>{detail?.state || 'loading'}</span>
+              <span className={`rounded px-2 py-1 ${
+                headerState === 'live'
+                  ? 'bg-red-500/15 text-red-100'
+                  : headerState === 'syncing'
+                    ? 'bg-violet-500/15 text-violet-100'
+                    : headerState === 'historical'
+                      ? 'bg-cyan-500/10 text-cyan-100'
+                      : 'bg-white/10 text-zinc-300'
+              }`}>
+                {streamStateLabel(headerState as AnalyticsStreamDetail['state'] | 'not found' | 'loading', isHistoricalRoute)}
+              </span>
+              <ChatCoverageBadge detail={detailQueryMatchesRoute ? detail : undefined} />
             </div>
-            <h1 className="mt-3 truncate text-2xl font-black leading-tight text-white lg:text-3xl" title={stream?.title || `${login} analytics`}>{stream?.title || `${login} analytics`}</h1>
+            <h1 className="mt-3 truncate text-2xl font-black leading-tight text-white lg:text-3xl" title={displayStreamTitle(stream, login, [historicalStream?.title, matchedStream?.title])}>
+              {displayStreamTitle(stream, login, [historicalStream?.title, matchedStream?.title])}
+            </h1>
             <div className="mt-2 flex flex-wrap gap-2 text-sm font-bold text-zinc-500">
               {stream?.displayName ? <span>{stream.displayName}</span> : null}
               {stream?.category ? <span>{stream.category}</span> : null}
               {stream?.startedAt ? <span>Started {relativeTime(stream.startedAt)}</span> : null}
+              {isHistoricalRoute && stream?.streamId ? (
+                <span className="font-mono text-[11px] text-zinc-600">{stream.streamId}</span>
+              ) : null}
               <span>
                 {lastRefreshedAt
                   ? `Refreshed ${relativeTime(lastRefreshedAt)}`
@@ -3343,6 +3688,16 @@ export default function Analytics() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            {canHeaderSync ? (
+              <button
+                type="button"
+                onClick={() => void handleSync(chatOnlySyncAvailable ? { chatOnly: true } : undefined)}
+                disabled={syncing || (isHistoricalRoute && !targetQueryStreamId)}
+                className="rounded-lg bg-violet-600 px-4 py-2 text-[11px] font-black uppercase tracking-wide text-white transition hover:bg-violet-500 disabled:opacity-50"
+              >
+                {headerSyncLabel}
+              </button>
+            ) : null}
             <StackStatusButton />
             <button
               type="button"
@@ -3361,11 +3716,15 @@ export default function Analytics() {
         ) : null}
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-          <StatCard label="Current" value={count(stream?.currentViewers)} tone="text-cyan-300/90" />
-          <StatCard label="Average" value={count(stream?.avgViewers)} />
-          <StatCard label="Peak" value={count(stream?.peakViewers)} />
-          <StatCard label="Chat" value={count(stream?.chatMessages)} tone="text-violet-300/90" />
-          <StatCard label="Emote Uses" value={count(stream?.totalEmoteUses)} tone="text-emerald-300/90" />
+          <StatCard label="Current" value={count(headerStats.current)} tone="text-cyan-300/90" />
+          <StatCard label="Average" value={count(headerStats.avg)} />
+          <StatCard label="Peak" value={count(headerStats.peak)} />
+          <StatCard label="Chat" value={count(headerStats.chat)} tone="text-violet-300/90" />
+          <StatCard
+            label="Emote Uses"
+            value={headerStats.emoteLabel ?? count(headerStats.emotes)}
+            tone="text-emerald-300/90"
+          />
           <StatCard label="Duration" value={duration(stream)} />
         </section>
 
@@ -3386,15 +3745,16 @@ export default function Analytics() {
             <StreamSidebar
               login={login}
               streams={combinedStreams}
-              activeID={stream?.streamId || streamId}
-              isLiveView={!streamId}
-              liveState={detail?.state}
+              activeID={isHistoricalRoute ? (targetQueryStreamId || streamId) : undefined}
+              isLiveView={isLiveRoute}
+              liveState={isLiveRoute ? detail?.state : undefined}
               onPrefetchStream={prefetchStreamDetail}
-              onSync={coreMinuteChartsBlocked ? undefined : handleSync}
+              onSync={coreMinuteChartsBlocked ? undefined : () => void handleSync()}
               syncing={syncing}
               syncedOnly={syncedOnlyFilter}
               onSyncedOnlyChange={setSyncedOnlyFilter}
               coreMinuteChartsBlocked={coreMinuteChartsBlocked}
+              activeRollupStats={sidebarRollupStats}
             />
           </aside>
           <section className="min-w-0 space-y-4">
@@ -3405,18 +3765,20 @@ export default function Analytics() {
               selectedRollup={selectedRollup}
               onSelectRollup={setSelectedRollup}
               syncing={syncing}
-              syncStatus={syncStatus}
               syncError={syncError}
               syncNotice={syncNotice}
-              onSync={handleSync}
+              onSync={() => void handleSync(chatOnlySyncAvailable ? { chatOnly: true } : undefined)}
+              onChatOnlySync={chatOnlySyncAvailable ? () => void handleSync({ chatOnly: true, forceChat: true }) : undefined}
               notInAnalyticsDb={needsSync}
               onRefresh={handleRefresh}
               refreshing={refreshing}
-              loading={detailQuery.isLoading && !historicalStream}
+              loading={detailQuery.isLoading && !matchedStream && !historicalStream}
               games={gamesQuery.data ?? []}
               canSync={!coreMinuteChartsBlocked && (Boolean(streamId) || needsSync)}
-              isLive={detail?.state === 'live'}
+              isLive={isLiveRoute && detail?.state === 'live'}
               coreMinuteChartsBlocked={coreMinuteChartsBlocked}
+              liveHasRichHistory={liveHasRichHistory}
+              chatOnlySyncAvailable={chatOnlySyncAvailable}
             />
             <SelectedMomentPanel
               rollup={selectedRollup}
@@ -3424,55 +3786,124 @@ export default function Analytics() {
               startedAt={stream?.startedAt}
               vodId={detail?.vodId}
               channel={login}
-              streamId={stream?.streamId || streamId}
+              streamId={stream?.streamId || targetQueryStreamId || streamId}
               topEmotesCatalog={detail?.topEmotes}
-              isLiveView={!streamId}
+              isLiveView={isLiveRoute}
               channelLive={detail?.state === 'live'}
-            />
-            <MomentReviewPanel
-              rollups={detail?.rollups ?? []}
-              selectedRollup={selectedRollup}
-              onSelectRollup={setSelectedRollup}
-              topEmotesCatalog={detail?.topEmotes}
             />
           </section>
           <aside className="space-y-4">
             <div className="rounded border border-white/10 bg-white/[0.035] overflow-hidden">
-              <div className="flex border-b border-white/10 text-[11px] font-black uppercase bg-white/[0.015]">
-                <button
-                  onClick={() => setActiveClipsTab('edits')}
-                  className={`flex-1 py-2 text-center transition border-r border-white/10 ${
-                    activeClipsTab === 'edits'
-                      ? 'bg-white/[0.04] text-white font-black'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  Clipper Edits
-                </button>
-                <button
-                  onClick={() => setActiveClipsTab('twitch')}
-                  className={`flex-1 py-2 text-center transition ${
-                    activeClipsTab === 'twitch'
-                      ? 'bg-white/[0.04] text-white font-black'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  Twitch Clips
-                </button>
+              <div className="flex border-b border-white/10 text-[10px] font-black uppercase bg-white/[0.015]">
+                {(['moments', 'emotes', 'clips', 'sync'] as const).map(tab => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setRightPanelTab(tab)}
+                    className={`flex-1 py-2 text-center transition border-r border-white/10 last:border-r-0 ${
+                      rightPanelTab === tab
+                        ? 'bg-white/[0.04] text-white'
+                        : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    {tab === 'moments' ? 'Moments' : tab === 'emotes' ? 'Emotes' : tab === 'clips' ? 'Clips' : 'Sync'}
+                  </button>
+                ))}
               </div>
-              
-              {activeClipsTab === 'edits' ? (
-                <RecentClipsList login={login} isTab={true} />
-              ) : (
-                <TwitchDayClipsList
-                  login={login}
-                  startedAt={stream?.startedAt || ''}
-                  endedAt={stream?.endedAt || new Date().toISOString()}
-                />
-              )}
+              <div className="p-0">
+                {rightPanelTab === 'moments' ? (
+                  <MomentReviewPanel
+                    rollups={detail?.rollups ?? []}
+                    selectedRollup={selectedRollup}
+                    onSelectRollup={setSelectedRollup}
+                    topEmotesCatalog={detail?.topEmotes}
+                    embedded
+                  />
+                ) : null}
+                {rightPanelTab === 'emotes' ? (
+                  <TopEmoteTable emotes={detail?.topEmotes ?? []} selected={chartEmoteKeys} onSelect={toggleSelected} embedded />
+                ) : null}
+                {rightPanelTab === 'clips' ? (
+                  <div>
+                    <div className="flex border-b border-white/10 text-[10px] font-black uppercase">
+                      <button
+                        type="button"
+                        onClick={() => setActiveClipsTab('edits')}
+                        className={`flex-1 py-2 text-center transition border-r border-white/10 ${
+                          activeClipsTab === 'edits' ? 'bg-white/[0.04] text-white' : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        Clipper
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveClipsTab('twitch')}
+                        className={`flex-1 py-2 text-center transition ${
+                          activeClipsTab === 'twitch' ? 'bg-white/[0.04] text-white' : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        Twitch
+                      </button>
+                    </div>
+                    {activeClipsTab === 'edits' ? (
+                      <RecentClipsList login={login} isTab={true} />
+                    ) : (
+                      <TwitchDayClipsList
+                        login={login}
+                        startedAt={stream?.startedAt || ''}
+                        endedAt={stream?.endedAt || new Date().toISOString()}
+                      />
+                    )}
+                  </div>
+                ) : null}
+                {rightPanelTab === 'sync' ? (
+                  <div className="space-y-3 p-3">
+                    {chatOnlySyncAvailable ? (
+                      <div className="rounded border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-semibold leading-snug text-cyan-100">
+                        Viewer minutes are already synced. VOD chat uses Twitch GQL only — no scraper profile required.
+                      </div>
+                    ) : null}
+                    {canHeaderSync ? (
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleSync(chatOnlySyncAvailable ? { chatOnly: true } : undefined)}
+                          disabled={syncing || (isHistoricalRoute && !targetQueryStreamId)}
+                          className="rounded-lg bg-violet-600 px-4 py-2 text-[11px] font-black uppercase text-white transition hover:bg-violet-500 disabled:opacity-50"
+                        >
+                          {headerSyncLabel}
+                        </button>
+                        {chatOnlySyncAvailable ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleSync({ chatOnly: true, forceChat: true })}
+                            disabled={syncing}
+                            className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-4 py-2 text-[10px] font-black uppercase text-cyan-100 transition hover:bg-cyan-500/20 disabled:opacity-50"
+                          >
+                            Re-sync chat only
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {syncing ? (
+                      <SyncProgressPanel
+                        status={syncStatus}
+                        chartChatMinutes={(detail?.rollups ?? []).filter(p => (p.chatCount ?? 0) > 0).length}
+                        viewerDataFromExisting={viewerDataFromExisting}
+                        chatOnlyPath={chatOnlySyncAvailable}
+                      />
+                    ) : null}
+                    {syncNotice ? <div className="text-xs font-bold text-amber-200">{syncNotice}</div> : null}
+                    {syncError ? <div className="text-xs font-bold text-red-300">{syncError}</div> : null}
+                    {!syncing && !syncNotice && !syncError ? (
+                      <div className="text-[11px] font-semibold text-zinc-500">
+                        Start a sync from here or use the header button. Progress appears while VOD chat and emotes index.
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </div>
-
-            <TopEmoteTable emotes={detail?.topEmotes ?? []} selected={chartEmoteKeys} onSelect={toggleSelected} />
           </aside>
         </div>
       </div>
@@ -3634,4 +4065,3 @@ function TwitchDayClipsList({ login, startedAt, endedAt }: { login: string; star
     </div>
   )
 }
-

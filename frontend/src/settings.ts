@@ -48,7 +48,8 @@ function loadSettings(): UiSettings {
   try {
     const parsed = JSON.parse(localStorage.getItem(storageKey) || '{}') as Partial<UiSettings>
     const providers = (parsed.emoteProviders ?? defaults.emoteProviders)
-      .filter((provider): provider is EmoteProvider => provider === 'seventv' || provider === 'twitch')
+      .filter((provider): provider is EmoteProvider =>
+        provider === 'seventv' || provider === 'twitch' || provider === 'ffz' || provider === 'bttv')
     const preferredQuality = typeof parsed.preferredQuality === 'string' && parsed.preferredQuality.trim() ? parsed.preferredQuality : defaults.preferredQuality
     const playbackLatencyMode: PlaybackLatencyMode =
       parsed.playbackLatencyMode === 'instant' || parsed.playbackLatencyMode === 'fast' || parsed.playbackLatencyMode === 'stable'

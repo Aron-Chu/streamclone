@@ -15,13 +15,23 @@ Read `.kiro/steering/clipper.md` first.
 
 ## Auth + scopes
 
-Required scopes include `clips:edit` (and chat scopes for IRC monitor).
+**Recommended (no Twitch CLI):** open http://localhost:8090 → **Sign in (optional)**. That runs the device-code flow in the browser and syncs clipper credentials automatically.
+
+Developers with Twitch CLI:
 
 ```powershell
 make twitch-local-auth
 # or
 powershell -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action local-auth -Scopes "chat:read chat:edit user:read:follows clips:edit" -ChatHttp "http://localhost:8090"
-docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml up -d --force-recreate clipper
+```
+
+Both paths run `ensure-clipper-auth` + `ensure-frontend-config` so clipper and `/config.js` stay aligned with `.env` (plain `docker compose restart` is not enough).
+
+Manual recovery:
+
+```powershell
+make ensure-clipper-auth
+make ensure-frontend-config
 ```
 
 ## Diagnostics

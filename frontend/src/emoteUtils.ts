@@ -1,13 +1,13 @@
 import type { AnalyticsMinuteRollup, AnalyticsTopEmote, ChannelEmote } from './api'
 
-export type EmoteProviderKind = 'seventv' | 'twitch' | 'ffz' | 'unknown'
+export type EmoteProviderKind = 'seventv' | 'twitch' | 'ffz' | 'bttv' | 'unknown'
 
 export function parseEmoteKey(key: string): { provider: EmoteProviderKind; id: string; name: string } {
   const parts = key.split(':')
   if (parts.length >= 3) {
     const provider = parts[0].toLowerCase()
     const normalized: EmoteProviderKind =
-      provider === 'seventv' || provider === 'twitch' || provider === 'ffz' ? provider : 'unknown'
+      provider === 'seventv' || provider === 'twitch' || provider === 'ffz' || provider === 'bttv' ? provider : 'unknown'
     return { provider: normalized, id: parts[1], name: parts.slice(2).join(':') }
   }
   return { provider: 'unknown', id: '', name: key }
@@ -17,6 +17,7 @@ export function emoteProviderLabel(provider?: string): string {
   if (provider === 'seventv') return '7TV'
   if (provider === 'twitch') return 'Twitch'
   if (provider === 'ffz') return 'FFZ'
+  if (provider === 'bttv') return 'BTTV'
   return provider ? provider.toUpperCase() : 'Emote'
 }
 
@@ -24,6 +25,7 @@ export function emoteProviderTone(provider?: string): string {
   if (provider === 'seventv') return 'text-emerald-300 bg-emerald-500/15 border-emerald-500/25'
   if (provider === 'twitch') return 'text-violet-300 bg-violet-500/15 border-violet-500/25'
   if (provider === 'ffz') return 'text-sky-300 bg-sky-500/15 border-sky-500/25'
+  if (provider === 'bttv') return 'text-amber-300 bg-amber-500/15 border-amber-500/25'
   return 'text-zinc-400 bg-white/[0.06] border-white/10'
 }
 

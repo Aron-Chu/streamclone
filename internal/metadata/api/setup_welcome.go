@@ -51,7 +51,7 @@ func (h *Handler) setupWelcome(w http.ResponseWriter, r *http.Request) {
 		profile = "core"
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
 
 	services := setupWelcomeServices{
@@ -103,14 +103,27 @@ func scraperHealthURL(scrapeURL string) string {
 }
 
 func (h *Handler) probeServiceHealth(ctx context.Context, rawURL string) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return false
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			continue
+		}
+		resp, err := h.http.Do(req)
+		if err != nil {
+			continue
+		}
+		ok := resp.StatusCode >= 200 && resp.StatusCode < 300
+		resp.Body.Close()
+		if ok {
+			return true
+		}
 	}
-	resp, err := h.http.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	return false
 }

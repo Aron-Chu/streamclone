@@ -5,35 +5,10 @@ param(
     [string]$ComposeFile = 'deploy/docker-compose.yml',
     [string]$ComposeTunnelFile = 'deploy/docker-compose.local-tunnel.yml',
     [string]$CliConfig = "$env:APPDATA\twitch-cli\.twitch-cli.env",
-    [string]$LogPath = 'debug-4e0301.log',
-    [string]$SessionId = '4e0301',
     [switch]$SkipRecreate
 )
 
 $ErrorActionPreference = 'Stop'
-
-function Write-AgentLog {
-    param(
-        [string]$Location,
-        [string]$Message,
-        [hashtable]$Data,
-        [string]$HypothesisId = 'H1'
-    )
-    $entry = @{
-        sessionId   = $SessionId
-        timestamp   = [int64]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
-        location    = $Location
-        message     = $Message
-        data        = $Data
-        hypothesisId = $HypothesisId
-        runId       = 'ensure-clipper-auth'
-    } | ConvertTo-Json -Compress
-    try {
-        Add-Content -Path $LogPath -Value $entry -Encoding utf8
-    } catch {
-        # ignore log write failures
-    }
-}
 
 function Read-KeyValueFile {
     param([string]$Path)
@@ -137,13 +112,6 @@ $token = $envValues['CLIPPER_TWITCH_USER_ACCESS_TOKEN']
 if ([string]::IsNullOrWhiteSpace($token)) { $token = $cli['ACCESSTOKEN'] }
 
 $before = Test-TwitchToken -Token $token
-Write-AgentLog -Location 'ensure-clipper-auth.ps1:start' -Message 'clipper token check' -Data @{
-    before_ok = $before.ok
-    token_len = if ($token) { $token.Length } else { 0 }
-    has_refresh_in_env = -not [string]::IsNullOrWhiteSpace($envValues['CLIPPER_TWITCH_REFRESH_TOKEN'])
-    has_refresh_in_cli = -not [string]::IsNullOrWhiteSpace($cli['REFRESHTOKEN'])
-    clipper_running = (Test-ClipperRunning)
-} -HypothesisId 'H1-H4'
 
 $tokenChanged = $false
 if (-not $before.ok) {
@@ -167,16 +135,8 @@ if (-not $before.ok) {
             $token = $newToken
             $tokenChanged = $true
             $before = Test-TwitchToken -Token $token
-            Write-AgentLog -Location 'ensure-clipper-auth.ps1:refresh' -Message 'clipper token refreshed' -Data @{
-                after_ok = $before.ok
-                expires_in = $before.expires_in
-            } -HypothesisId 'H4'
             Write-Host "ensure-clipper-auth: refreshed clipper token (expires_in=$($before.expires_in)s)"
         } else {
-            Write-AgentLog -Location 'ensure-clipper-auth.ps1:refresh' -Message 'refresh failed' -Data @{
-                status = $refreshed.status
-                error = $refreshed.error
-            } -HypothesisId 'H4'
             Write-Host "ensure-clipper-auth: auto-refresh failed - run make twitch-local-auth and approve Twitch login" -ForegroundColor Yellow
         }
     } else {
@@ -184,30 +144,30 @@ if (-not $before.ok) {
     }
 }
 
+function Complete-EnsureClipperAuth {
+    param([int]$ExitCode = 0)
+    if ($ExitCode -eq 0) {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-frontend-config.ps1') -EnvFile $EnvFile 2>$null | Out-Host
+    }
+    exit $ExitCode
+}
+
 if (-not $before.ok) {
-    Write-AgentLog -Location 'ensure-clipper-auth.ps1:exit' -Message 'token still invalid' -Data @{ ok = $false } -HypothesisId 'H1'
     exit 1
 }
 
 if ($SkipRecreate -or -not (Test-ClipperRunning)) {
     Write-Host "ensure-clipper-auth: token valid in $EnvFile"
-    exit 0
+    Complete-EnsureClipperAuth -ExitCode 0
 }
 
 $containerToken = Get-ContainerEnvValue -Container 'streamclone-clipper-1' -Key 'CLIPPER_TWITCH_USER_ACCESS_TOKEN'
 $containerValid = (Test-TwitchToken -Token $containerToken).ok
 $needsRecreate = $tokenChanged -or ($containerToken -ne $token) -or (-not $containerValid)
 
-Write-AgentLog -Location 'ensure-clipper-auth.ps1:container' -Message 'container drift check' -Data @{
-    token_changed_in_env = $tokenChanged
-    container_matches_env = ($containerToken -eq $token)
-    container_valid = $containerValid
-    needs_recreate = $needsRecreate
-} -HypothesisId 'H2'
-
 if (-not $needsRecreate) {
     Write-Host "ensure-clipper-auth: clipper container token matches valid .env"
-    exit 0
+    Complete-EnsureClipperAuth -ExitCode 0
 }
 
 Write-Host "ensure-clipper-auth: recreating clipper to load updated token..."
@@ -220,10 +180,6 @@ if ($LASTEXITCODE -ne 0) {
 
 $afterContainer = Get-ContainerEnvValue -Container 'streamclone-clipper-1' -Key 'CLIPPER_TWITCH_USER_ACCESS_TOKEN'
 $afterValid = (Test-TwitchToken -Token $afterContainer).ok
-Write-AgentLog -Location 'ensure-clipper-auth.ps1:done' -Message 'clipper recreated' -Data @{
-    container_valid = $afterValid
-    container_matches_env = ($afterContainer -eq $token)
-} -HypothesisId 'H2'
 
 Write-Host "ensure-clipper-auth: clipper recreated (container_valid=$afterValid)"
-exit $(if ($afterValid) { 0 } else { 1 })
+Complete-EnsureClipperAuth -ExitCode $(if ($afterValid) { 0 } else { 1 })

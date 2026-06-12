@@ -9,7 +9,8 @@ Read this file first. Load **one** domain steering doc, then use the code graph 
 | Any change | `.kiro/steering/tech.md` | `get_ast_chunk` / `get_blast_radius` |
 | Product / UX guardrails | `.kiro/steering/product.md` | — |
 | Live clipper / Clip Studio | `.kiro/steering/clipper.md` | `get_ast_chunk("ClipStudio")`, `get_ast_chunk("VideoStage")`, `get_ast_chunk("CaptionOverlayEditor")`, `get_ast_chunk("_process")`, `get_ast_chunk("prepare_emote_assets")` |
-| Analytics / rollups / VODs | `.kiro/steering/analytics.md`, `.kiro/specs/vod-chat-pipeline-notes.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("gqlCommentText")`, `get_ast_chunk("hasGoodChatCoverageFromRollups")` |
+| Analytics / rollups / VODs | `.kiro/steering/analytics.md`, `.kiro/specs/vod-chat-pipeline-notes.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("gqlCommentText")`, `get_ast_chunk("hasGoodChatCoverageFromRollups")`, `get_ast_chunk("SyncProgressPanel")` |
+| System health / optional services / setup-control | `.kiro/steering/product.md`, `.kiro/steering/windows-dev.md` | `get_ast_chunk("SystemHealthPanel")`, `get_ast_chunk("useOptionalServices")`, `get_ast_chunk("OptionalServicesPanel")` |
 | Scraper optimization / TT perf | `.kiro/specs/scraper-optimization-notes.md`, `.kiro/steering/analytics.md` | — |
 | HLS playback / MediaMTX 401 | `.kiro/steering/playback.md` | `get_call_chain("waitForHLS")`, `get_blast_radius("filterTwitchAdSegments")` |
 | Local Twitch auth | `.kiro/steering/local-auth.md` | — |

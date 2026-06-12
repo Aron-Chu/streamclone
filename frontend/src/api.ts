@@ -317,6 +317,7 @@ export interface SetupControlStartResponse {
   message?: string
   error?: string
   log?: string
+  warmup?: string
 }
 
 export interface SetupControlStartStatus {
@@ -326,6 +327,7 @@ export interface SetupControlStartStatus {
   phase: string
   detail: string
   lines?: string[]
+  warmup?: string
 }
 
 export interface HostDiagnosticsContainer {
@@ -708,11 +710,12 @@ export interface StartSyncResponse {
 export const startHistoricalSync = async (
   streamId: string,
   login = '',
-  options?: { viewersOnly?: boolean; vodId?: string },
+  options?: { viewersOnly?: boolean; vodId?: string; forceChat?: boolean },
 ): Promise<StartSyncResponse> => {
   const params = new URLSearchParams()
   if (login) params.set('channel', login)
   if (options?.viewersOnly) params.set('viewers_only', 'true')
+  if (options?.forceChat) params.set('force_chat', 'true')
   if (options?.vodId) params.set('vod_id', options.vodId)
   const res = await fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}/sync?${params}`, { method: 'POST' })
   return json<StartSyncResponse>(res)
@@ -775,7 +778,7 @@ export const stopStream = (channel: string, sessionId?: string): Promise<void> =
     body: JSON.stringify({ channel, session_id: sessionId }),
   }).then(r => { if (!r.ok) throw new Error(r.statusText) })
 
-export type EmoteProvider = 'seventv' | 'twitch' | 'ffz'
+export type EmoteProvider = 'seventv' | 'twitch' | 'ffz' | 'bttv'
 
 export interface EmoteProviderStatus {
   provider: EmoteProvider
@@ -929,10 +932,57 @@ export const pollDevTwitchDeviceAuth = (requestId: string): Promise<DevDeviceAut
     body: JSON.stringify({ request_id: requestId }),
   }).then(r => json<DevDeviceAuthPollResponse>(r))
 
-export const getFollowedChannels = (): Promise<FollowedChannel[]> =>
-  fetch(`${CHAT_HTTP}/v1/followed`, { credentials: 'include' })
+export const getLocalFollowedChannels = (): Promise<FollowedChannel[]> =>
+  fetch(`${METADATA}/v1/followed`)
     .then(r => json<{ channels: FollowedChannel[] }>(r))
     .then(r => r.channels ?? [])
+
+export const getTwitchFollowedChannels = (): Promise<FollowedChannel[]> =>
+  fetch(`${CHAT_HTTP}/v1/me/followed`, { credentials: 'include' })
+    .then(async r => {
+      if (r.status === 401) return [] as FollowedChannel[]
+      if (!r.ok) throw new Error(r.statusText)
+      const body = await json<{ channels: FollowedChannel[] }>(r)
+      return body.channels ?? []
+    })
+
+function mergeFollowedChannels(twitch: FollowedChannel[], local: FollowedChannel[]): FollowedChannel[] {
+  const byLogin = new Map<string, FollowedChannel>()
+  const order: string[] = []
+  const add = (channel: FollowedChannel) => {
+    const key = channel.login.toLowerCase()
+    const existing = byLogin.get(key)
+    if (existing) {
+      byLogin.set(key, {
+        ...existing,
+        ...channel,
+        isLive: existing.isLive || channel.isLive,
+        viewers: Math.max(existing.viewers ?? 0, channel.viewers ?? 0) || channel.viewers || existing.viewers,
+        profileImage: channel.profileImage || existing.profileImage,
+        thumbnailUrl: channel.thumbnailUrl || existing.thumbnailUrl,
+      })
+      return
+    }
+    byLogin.set(key, channel)
+    order.push(key)
+  }
+  for (const channel of twitch) add(channel)
+  for (const channel of local) add(channel)
+  return order.map(login => byLogin.get(login)!)
+}
+
+/** Twitch follows (when signed in) merged with Streamclone-local follows. */
+export const getFollowedChannels = (): Promise<FollowedChannel[]> =>
+  Promise.all([getTwitchFollowedChannels(), getLocalFollowedChannels()])
+    .then(([twitch, local]) => mergeFollowedChannels(twitch, local))
+
+export const followChannel = (login: string): Promise<{ ok: boolean; login: string; following: boolean }> =>
+  fetch(`${METADATA}/v1/channels/${encodeURIComponent(login)}/follow`, { method: 'POST' })
+    .then(r => json<{ ok: boolean; login: string; following: boolean }>(r))
+
+export const unfollowChannel = (login: string): Promise<{ ok: boolean; login: string; following: boolean }> =>
+  fetch(`${METADATA}/v1/channels/${encodeURIComponent(login)}/follow`, { method: 'DELETE' })
+    .then(r => json<{ ok: boolean; login: string; following: boolean }>(r))
 
 const browserOrigin = typeof window === 'undefined' ? '' : window.location.origin
 const CLIPPER_BASE = CLIPPER === browserOrigin ? `${CLIPPER}/v1/clipper` : `${CLIPPER}/v1`
@@ -1159,6 +1209,50 @@ export const retryClipperJob = (jobId: string): Promise<{ job: ClipperJob }> =>
     method: 'POST',
     headers: clipperHeaders({ 'Content-Type': 'application/json' }),
   }).then(r => json<{ job: ClipperJob }>(r))
+
+export interface ClipperEditorProject {
+  trim_start?: number
+  trim_end?: number
+  format_preset?: string
+  caption_preset?: CaptionPreset
+  caption_size?: CaptionSize
+  caption_position?: CaptionPosition
+  layout?: string
+  layout_split_ratio?: number
+  selected_template_id?: string | null
+}
+
+export const getClipperJobProject = (jobId: string): Promise<{ project: ClipperEditorProject }> =>
+  fetch(`${CLIPPER_BASE}/jobs/${encodeURIComponent(jobId)}/project`).then(r => json<{ project: ClipperEditorProject }>(r))
+
+export const updateClipperJobProject = (jobId: string, project: ClipperEditorProject): Promise<{ status: string }> =>
+  fetch(`${CLIPPER_BASE}/jobs/${encodeURIComponent(jobId)}/project`, {
+    method: 'PUT',
+    headers: clipperHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ project }),
+  }).then(r => json<{ status: string }>(r))
+
+export const previewClipperJob = (
+  jobId: string,
+  options: Parameters<typeof renderClipperJob>[1],
+): Promise<{ status: string; job_id: string }> =>
+  fetch(`${CLIPPER_BASE}/jobs/${encodeURIComponent(jobId)}/preview`, {
+    method: 'POST',
+    headers: clipperHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(options),
+  }).then(r => json<{ status: string; job_id: string }>(r))
+
+export const getClipperPreviewVideoUrl = (jobId: string): string =>
+  `${CLIPPER_BASE}/jobs/${encodeURIComponent(jobId)}/preview.mp4`
+
+export const batchQueueClipperMoments = (
+  moments: ClipperManualTriggerOptions[],
+): Promise<{ queued: string[]; suppressed: string[]; count: number }> =>
+  fetch(`${CLIPPER_BASE}/jobs/batch`, {
+    method: 'POST',
+    headers: clipperHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ moments }),
+  }).then(r => json<{ queued: string[]; suppressed: string[]; count: number }>(r))
 
 export function describeClipperFailure(job: Pick<ClipperJob, 'failure_code' | 'error_message'>): string {
   switch (job.failure_code) {

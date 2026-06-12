@@ -52,6 +52,9 @@ cat >"$STAGE/deploy/env/release-bundle.env" <<EOF
 # Auto-generated release bundle — pull GHCR images pinned to this tag
 IMAGE_TAG=$VERSION
 STREAMCLONE_USE_IMAGES=1
+SCRAPER_USE_IMAGES=1
+# Loopback token-import/device-code endpoints are dev-only (docs/security.md).
+TWITCH_DEV_TOKEN_IMPORT_ENABLED=false
 EOF
 
 if [ -n "${TWITCH_OAUTH_CLIENT_ID:-}" ] && [ -n "${TWITCH_OAUTH_CLIENT_SECRET:-}" ]; then

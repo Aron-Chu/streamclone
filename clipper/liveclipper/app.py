@@ -92,6 +92,7 @@ def create_app() -> FastAPI:
         layout: str | None = None,
         layout_split_ratio: float | None = None,
         emote_map: dict[str, str] | None = None,
+        preview_only: bool = False,
     ):
         try:
             job = store.get_job(job_id)
@@ -154,8 +155,11 @@ def create_app() -> FastAPI:
                     moment_context = None
 
             final_path = Path(job.get("final_path") or (str(cfg.output_dir / (job_id + ".mp4"))))
+            if preview_only:
+                final_path = cfg.output_dir / "tmp" / f"{job_id}_preview.mp4"
 
-            store.set_state(job_id, "rendering", "re-rendering video")
+            if not preview_only:
+                store.set_state(job_id, "rendering", "re-rendering video")
 
             source_duration = job.get("twitch_clip_duration") or float(job.get("source_duration") or cfg.source_duration)
 
@@ -181,7 +185,12 @@ def create_app() -> FastAPI:
                 emote_map=emote_map,
                 emote_hits=emote_hits,
                 moment_context=moment_context if isinstance(moment_context, dict) else None,
+                preview_mode=preview_only,
             )
+
+            if preview_only:
+                store.update_job(job_id, preview_path=str(final_path))
+                return
 
             store.set_state(
                 job_id,
@@ -192,6 +201,9 @@ def create_app() -> FastAPI:
             )
             shutil.rmtree(job_dir, ignore_errors=True)
         except Exception as exc:
+            if preview_only:
+                store.add_warning(job_id, f"preview render failed: {exc}")
+                return
             store.set_state(job_id, "failed", f"re-render failed: {exc}")
 
     def perform_retranscribe(
@@ -304,6 +316,10 @@ def create_app() -> FastAPI:
         irc.stop()
         worker.stop()
         store.close()
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, str]:
+        return {"status": "ok", "service": "clipper"}
 
     @app.get("/", response_class=JSONResponse)
     def api_root() -> dict[str, str]:
@@ -477,12 +493,12 @@ def create_app() -> FastAPI:
         job = store.get_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail={"error": "job_not_found"})
-        
+
         body = await json_body(request)
         trim_start = body.get("trim_start")
         if trim_start is not None:
             trim_start = float(trim_start)
-        
+
         trim_duration = body.get("trim_duration") or body.get("final_duration")
         if trim_duration is not None:
             trim_duration = float(trim_duration)
@@ -559,11 +575,100 @@ def create_app() -> FastAPI:
         )
         return {"status": "transcribing", "job_id": job_id}
 
-    def enqueue_trigger(body: dict[str, Any], trigger_type: str) -> JSONResponse:
+    @app.get("/v1/jobs/{job_id}/project")
+    def get_project(job_id: str) -> dict[str, Any]:
+        job = store.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail={"error": "job_not_found"})
+        import json
+        raw = job.get("editor_project") or "{}"
+        try:
+            project = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            project = {}
+        if not isinstance(project, dict):
+            project = {}
+        return {"project": project}
+
+    @app.put("/v1/jobs/{job_id}/project")
+    async def put_project(job_id: str, request: Request) -> dict[str, str]:
+        check_webhook_token(request, cfg.webhook_token)
+        job = store.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail={"error": "job_not_found"})
+        body = await json_body(request)
+        project = body.get("project")
+        if not isinstance(project, dict):
+            raise HTTPException(status_code=400, detail={"error": "project_must_be_object"})
+        import json
+        store.update_job(job_id, editor_project=json.dumps(project))
+        return {"status": "ok"}
+
+    @app.post("/v1/jobs/{job_id}/preview")
+    async def preview_job(
+        job_id: str,
+        background_tasks: BackgroundTasks,
+        request: Request,
+    ) -> dict[str, str]:
+        check_webhook_token(request, cfg.webhook_token)
+        job = store.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail={"error": "job_not_found"})
+        body = await json_body(request)
+        background_tasks.add_task(
+            perform_rerender,
+            job_id=job_id,
+            trim_start=float(body.get("trim_start") or 0.0),
+            trim_duration=float(body.get("trim_duration") or job.get("final_duration") or cfg.final_duration),
+            format_preset=str(body.get("format_preset") or "tiktok"),
+            caption_preset=str(body.get("caption_preset") or "default"),
+            template_id=body.get("template_id"),
+            caption_size=body.get("caption_size"),
+            caption_position=body.get("caption_position"),
+            layout=body.get("layout"),
+            layout_split_ratio=body.get("layout_split_ratio"),
+            emote_map=body.get("emote_map") if isinstance(body.get("emote_map"), dict) else None,
+            preview_only=True,
+        )
+        return {"status": "preview_queued", "job_id": job_id}
+
+    @app.get("/v1/jobs/{job_id}/preview.mp4")
+    def preview_mp4(job_id: str) -> FileResponse:
+        job = store.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail={"error": "job_not_found"})
+        path_raw = job.get("preview_path")
+        if not path_raw:
+            raise HTTPException(status_code=404, detail={"error": "preview_not_available"})
+        path = Path(str(path_raw))
+        if not path.exists():
+            raise HTTPException(status_code=404, detail={"error": "preview_missing"})
+        return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+    @app.post("/v1/jobs/batch")
+    async def batch_queue(request: Request) -> dict[str, Any]:
+        check_webhook_token(request, cfg.webhook_token)
+        body = await json_body(request)
+        moments = body.get("moments")
+        if not isinstance(moments, list) or not moments:
+            raise HTTPException(status_code=400, detail={"error": "moments_required"})
+        queued: list[str] = []
+        suppressed: list[str] = []
+        for item in moments[:20]:
+            if not isinstance(item, dict):
+                continue
+            result = enqueue_trigger_body(item, str(item.get("trigger_type") or "manual"))
+            if result.get("status") == "queued" and result.get("job_id"):
+                queued.append(str(result["job_id"]))
+            elif result.get("existing_job_id"):
+                suppressed.append(str(result["existing_job_id"]))
+        return {"queued": queued, "suppressed": suppressed, "count": len(queued)}
+
+    def enqueue_trigger_body(body: dict[str, Any], trigger_type: str) -> dict[str, Any]:
         try:
             channel = normalize_channel(str(body.get("channel") or body.get("streamer") or ""))
         except ValueError:
-            raise HTTPException(status_code=400, detail={"error": "invalid_channel"})
+            return {"status": "error", "error": "invalid_channel"}
         duration = float(body.get("duration") or cfg.source_duration)
         final_duration = float(body.get("final_duration") or cfg.final_duration)
         import json as json_mod
@@ -591,16 +696,21 @@ def create_app() -> FastAPI:
             moment_context=moment_context_value,
         )
         if result.suppressed:
-            return JSONResponse(
-                {
-                    "status": "suppressed",
-                    "reason": result.reason,
-                    "existing_job_id": result.existing_job_id,
-                },
-                status_code=202,
-            )
+            return {
+                "status": "suppressed",
+                "reason": result.reason,
+                "existing_job_id": result.existing_job_id,
+            }
         worker.wake()
-        return JSONResponse({"status": "queued", "job_id": result.job_id}, status_code=202)
+        return {"status": "queued", "job_id": result.job_id}
+
+    def enqueue_trigger(body: dict[str, Any], trigger_type: str) -> JSONResponse:
+        payload = enqueue_trigger_body(body, trigger_type)
+        if payload.get("status") == "suppressed":
+            return JSONResponse(payload, status_code=202)
+        if payload.get("status") == "error":
+            raise HTTPException(status_code=400, detail={"error": payload.get("error")})
+        return JSONResponse(payload, status_code=202)
 
     return app
 

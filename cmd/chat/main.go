@@ -56,7 +56,7 @@ func main() {
 			Color:     msg.Color,
 			Badges:    msg.Badges,
 			TS:        msg.TS,
-			Fragments: enricher.Tokenize(msg.Channel, msg.Text),
+			Fragments: enricher.Tokenize(msg.Channel, msg.Text, msg.Emotes),
 		})
 	}
 

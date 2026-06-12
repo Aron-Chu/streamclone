@@ -5,12 +5,14 @@ import (
 	"os"
 
 	goredis "github.com/redis/go-redis/v9"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"streamclone/internal/config"
 	"streamclone/internal/httpx"
 	"streamclone/internal/log"
 	"streamclone/internal/metadata/api"
 	"streamclone/internal/metadata/cache"
+	"streamclone/internal/metadata/follow"
 	"streamclone/internal/metadata/gql"
 	"streamclone/internal/metadata/helix"
 	"streamclone/internal/metrics"
@@ -44,7 +46,16 @@ func main() {
 	store := cache.NewRedisStore(rdb)
 	c := cache.New(store, cfg.MetaCacheTTL, cfg.StaleTTL)
 
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("postgres connect failed", "err", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
 	h := api.New(c, gqlClient).
+		WithFollowStore(follow.NewStore(pool)).
 		WithHelix(helixClient).
 		WithExternalSources(cfg.TwitchTrackerAPIURL, cfg.RedditAPIURL, cfg.Upstream.UserAgent).
 		WithRedditOptions(api.RedditOptions{
@@ -76,7 +87,10 @@ func main() {
 
 	srv := httpx.New("metadata", cfg.HTTPAddr, logger, metrics.HTTPMiddleware("metadata"), httpx.CORS, httpx.NewRateLimiter(20, 40).Middleware)
 	srv.AddReady(func(ctx context.Context) error {
-		return rdb.Ping(ctx).Err()
+		if err := rdb.Ping(ctx).Err(); err != nil {
+			return err
+		}
+		return pool.Ping(ctx)
 	})
 	h.Mount(srv.Router)
 

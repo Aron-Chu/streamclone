@@ -8,5 +8,6 @@ type Endpoints struct {
 	SevenTVAPIURL  string `env:"SEVENTV_API_URL" envDefault:"https://7tv.io/v3"`
 	SevenTVCDNURL  string `env:"SEVENTV_CDN_URL" envDefault:"https://cdn.7tv.app"`
 	FFZAPIURL      string `env:"FFZ_API_URL" envDefault:"https://api.frankerfacez.com/v1"`
+	BTTVAPIURL     string `env:"BTTV_API_URL" envDefault:"https://api.betterttv.net/3/cached"`
 	UserAgent      string `env:"TWITCH_USER_AGENT" envDefault:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"`
 }

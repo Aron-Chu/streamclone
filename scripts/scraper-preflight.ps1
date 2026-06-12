@@ -9,6 +9,8 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $repoRoot
+. (Join-Path $PSScriptRoot 'lib\env.ps1')
+. (Join-Path $PSScriptRoot 'lib\stack-progress.ps1')
 
 function Fail([string]$Message) {
     Write-Error "scraper-preflight: $Message"
@@ -16,11 +18,13 @@ function Fail([string]$Message) {
 }
 
 function Invoke-ComposeScraper {
-    param([string[]]$Args)
-    docker compose --env-file .env `
-        -f deploy/docker-compose.yml `
-        -f deploy/docker-compose.local-tunnel.yml `
-        --profile scraper @Args
+    param([string[]]$ComposeArguments)
+    $useImages = (Test-Path (Join-Path $repoRoot 'VERSION'))
+    $composeArgs = Get-StreamcloneComposeArgs -Root $repoRoot -Profile 'scraper' -UseImages:$useImages
+    Invoke-EnvDocker -Arguments ($composeArgs + $ComposeArguments)
+    if ($LASTEXITCODE -ne 0) {
+        Fail "docker compose failed (exit $LASTEXITCODE)"
+    }
 }
 
 function Wait-ScraperHealth {
@@ -51,8 +55,7 @@ function Invoke-ScrapeProbe {
 
 function Clear-ProfileLocks {
     Write-Host "Clearing Camoufox profile locks in scraper volume..."
-    $py = 'from profile_sync import clear_firefox_profile_locks; print("removed:", clear_firefox_profile_locks("/data/camoufox-profile"))'
-    docker exec streamclone-scraper python -c $py
+    docker exec streamclone-scraper python -c "from profile_sync import clear_firefox_profile_locks; print('removed:', clear_firefox_profile_locks('/data/camoufox-profile'))"
 }
 
 function Recreate-Scraper {

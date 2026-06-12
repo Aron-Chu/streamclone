@@ -405,6 +405,11 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 
 		trackerStart := time.Now()
 		html, err = s.scrapeTwitchTracker(ctx, trackerURL, stream, viewersOnly)
+		if err != nil && strings.Contains(strings.ToLower(err.Error()), "browser has been closed") {
+			s.log.Warn("retrying TwitchTracker scrape after Camoufox browser crash", "stream_id", streamID)
+			time.Sleep(2 * time.Second)
+			html, err = s.scrapeTwitchTracker(ctx, trackerURL, stream, viewersOnly)
+		}
 		trackerScrapeMS = time.Since(trackerStart).Milliseconds()
 		s.updateTrackerProgress(ctx, streamID, func(tp *SyncTrackerProgress) {
 			tp.Active = false
@@ -431,7 +436,7 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 				if st.Tracker == nil {
 					st.Tracker = &SyncTrackerProgress{}
 				}
-				st.Tracker.Message = "Viewer chart unavailable — chat sync continues"
+				st.Tracker.Message = "Viewer chart unavailable — chat sync continues. Run scripts/scraper-preflight.ps1 or Re-sync viewers after scraper recovery."
 			})
 		} else {
 			viewerStatus = "ok"
@@ -1647,7 +1652,7 @@ func (s *SyncService) parseTwitchTrackerHTML(html string, startedAt time.Time) (
 		if endIdx := strings.Index(sectionContent, `</section>`); endIdx != -1 {
 			sectionContent = sectionContent[:endIdx]
 		}
-		
+
 		gameBlocks := strings.Split(sectionContent, `class="g-x-wrapper"`)
 		if len(gameBlocks) > 1 {
 			for _, block := range gameBlocks[1:] {
@@ -1732,7 +1737,7 @@ func findViewerPath(svg string) string {
 			!strings.Contains(attrs, `highcharts-grid-line`) &&
 			!strings.Contains(attrs, `highcharts-plot-line`) &&
 			!strings.Contains(attrs, `highcharts-axis-line`) {
-			
+
 			d := m[2]
 			if len(strings.Split(d, " ")) > 20 {
 				return d
@@ -2108,7 +2113,7 @@ func buildChatMinuteRollup(login string, enricher *enrich.Enricher, comments []s
 	emotes = make(map[string]int)
 	chatCount = len(comments)
 	for _, comment := range comments {
-		fragments := enricher.Tokenize(login, comment)
+		fragments := enricher.Tokenize(login, comment, nil)
 		for _, frag := range fragments {
 			if frag.T != "emote" {
 				continue

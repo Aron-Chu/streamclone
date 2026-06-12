@@ -59,6 +59,7 @@ type Options struct {
 	HLSProbeBase    string
 	HLSProbeTimeout time.Duration
 	MaxStreams      int
+	MaxRelays       int
 	MaxRestarts     int
 	IdleTimeout     time.Duration
 	BackendVersion  string
@@ -98,13 +99,20 @@ func New(o Options) *Orchestrator {
 	if o.MaxStreams < 1 {
 		o.MaxStreams = 1
 	}
+	relayCap := o.MaxStreams
+	if o.MaxRelays > 0 {
+		relayCap = o.MaxRelays
+	}
+	if relayCap < 1 {
+		relayCap = 1
+	}
 	if o.HLSProbeTimeout == 0 {
 		o.HLSProbeTimeout = 15 * time.Second
 	}
 	if o.BackendVersion == "" {
 		o.BackendVersion = "dev"
 	}
-	return &Orchestrator{o: o, sem: make(chan struct{}, o.MaxStreams), breaker: resilience.NewBreaker(5, 30*time.Second)}
+	return &Orchestrator{o: o, sem: make(chan struct{}, relayCap), breaker: resilience.NewBreaker(5, 30*time.Second)}
 }
 
 func (h *Orchestrator) Routes(r chi.Router) {

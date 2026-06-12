@@ -14,9 +14,13 @@ Read `.kiro/steering/windows-dev.md` first.
    - `wsl --shutdown`
    - Recreate stack: `docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml up -d`
 3. Call **`stack_health`** — review `auth_debug`, `warnings`, and `containers`
-4. If auth/session issues → **`twitch_auth_status`**
-5. If HLS/player issues → switch to **`streamclone-playback-hls`** skill
-6. If analytics/scraper issues → **`streamclone-analytics-sync`** skill
+4. If optional services, **Start Analytics**, or install wizard fail:
+   - Probe setup-control: `curl.exe http://127.0.0.1:9191/health` or `curl.exe http://localhost:8090/v1/setup-control/health`
+   - If unhealthy: `powershell -ExecutionPolicy Bypass -File scripts/ensure-setup-control.ps1` or run **Start Streamclone**
+   - Check UI `installHelperReady` in **Settings → Stack status**
+5. If auth/session issues → **`twitch_auth_status`**
+6. If HLS/player issues → switch to **`streamclone-playback-hls`** skill
+7. If analytics/scraper issues → **`streamclone-analytics-sync`** skill
 
 ## UI verification
 
@@ -25,6 +29,7 @@ Use **Playwright MCP** only against **`http://localhost:8090`** (Caddy proxy). D
 ## Probes
 
 - Auth: `curl.exe http://localhost:8090/v1/auth/debug`
+- Setup-control: `curl.exe http://127.0.0.1:9191/health`
 - Ports: `powershell -File scripts/stack-ports.ps1`
 - After `.env` / OAuth changes: `make reload-env` (chat, metadata, analytics, emote) or `make twitch-sync`. `make app` auto-runs `reload-env-if-stale` when container OAuth ≠ `.env`.
 

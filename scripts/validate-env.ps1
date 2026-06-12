@@ -67,8 +67,13 @@ Test-NotPlaceholder -Key 'CURATOR_API_TOKEN' -Placeholder 'change-me' -Fix 'Run 
 Test-Required -Key 'PUBLIC_ORIGIN' -Fix 'Set PUBLIC_ORIGIN=http://localhost:8090 for local dev'
 Test-Required -Key 'FRONTEND_ORIGIN' -Fix 'Set FRONTEND_ORIGIN=http://localhost:8090'
 
-if ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -ne 'true') {
-    Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true' -Hint 'Run make setup (core profile sets this for in-app local token import)'
+$isReleaseInstall = ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1')
+if ($isReleaseInstall) {
+    if ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -eq 'true') {
+        Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED=true on a release install' -Hint 'Dev-only token import should stay false in releases (docs/security.md)'
+    }
+} elseif ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -ne 'true') {
+    Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true' -Hint 'Run make setup (.env.dev sets this for in-app local token import)'
 }
 
 $oauthId = $envValues['TWITCH_OAUTH_CLIENT_ID']
@@ -98,7 +103,7 @@ if ($Profile -in @('clipper', 'full')) {
         Add-ValidateWarning -Message 'VITE_CLIPPER_TOKEN should match CLIPPER_WEBHOOK_TOKEN' -Hint 'Run make setup or scripts/validate-env.ps1 -Fix'
     }
     if ([string]::IsNullOrWhiteSpace($envValues['CLIPPER_TWITCH_USER_ACCESS_TOKEN'])) {
-        Add-ValidateWarning -Message 'CLIPPER_TWITCH_USER_ACCESS_TOKEN is empty' -Hint 'Run make twitch-local-auth after stack is up'
+        Add-ValidateWarning -Message 'CLIPPER_TWITCH_USER_ACCESS_TOKEN is empty' -Hint 'Click Sign in (optional) at http://localhost:8090, or run make twitch-local-auth with Twitch CLI'
     }
     if ([string]::IsNullOrWhiteSpace($envValues['CLIPPER_TWITCH_CLIENT_ID']) -and [string]::IsNullOrWhiteSpace($envValues['TWITCH_OAUTH_CLIENT_ID'])) {
         Add-ValidateWarning -Message 'No Twitch OAuth client id for clipper' -Hint 'Run twitch configure then make twitch-sync'

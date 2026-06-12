@@ -5,10 +5,11 @@ import (
 	"time"
 
 	"streamclone/internal/chat/batch"
+	"streamclone/internal/chat/parse"
 )
 
 type CommentTokenizer interface {
-	Tokenize(channel, text string) []batch.Fragment
+	Tokenize(channel, text string, native []parse.EmoteRange) []batch.Fragment
 }
 
 type RollupViewerPoint struct {
@@ -113,7 +114,8 @@ func BuildMinuteRollupsFromCommentsCached(
 		if comments, ok := commentsMap[m]; ok {
 			chatCount = len(comments)
 			for _, comment := range comments {
-				for _, frag := range tokenizer.Tokenize(login, comment) {
+				// VOD GQL comments carry no IRC emote ranges; dictionary tokenization only.
+				for _, frag := range tokenizer.Tokenize(login, comment, nil) {
 					if frag.T == "emote" {
 						totalEmoteCount++
 						if frag.Provider == "seventv" {

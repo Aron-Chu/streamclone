@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation } from 'react-router-dom'
 import { getFollowedChannels, getStreams } from '../api'
 import type { FollowedChannel } from '../api'
-import { useAuth } from '../auth'
+import { useStreamPrewarm } from '../hooks/useStreamPrewarm'
 import { useUiSettings } from '../settings'
 
 interface ChannelRailProps {
@@ -44,10 +44,15 @@ function formatViewers(val: number): string {
 
 function ChannelItem({ channel, collapsed, active, onClick, viewerOverrides }: { channel: FollowedChannel; collapsed: boolean; active: boolean; onClick?: () => void; viewerOverrides?: Record<string, number | undefined> }) {
   const viewers = viewerOverrides?.[channel.login] ?? channel.viewers ?? 0
+  const { prewarm, cancelPrewarm } = useStreamPrewarm()
   return (
     <Link
       to={`/c/${channel.login}`}
       onClick={onClick}
+      onMouseEnter={() => prewarm(channel.login, Boolean(channel.isLive) && !active)}
+      onMouseLeave={cancelPrewarm}
+      onFocus={() => prewarm(channel.login, Boolean(channel.isLive) && !active)}
+      onBlur={cancelPrewarm}
       className={`group flex items-center gap-3 rounded px-2 py-1.5 transition ${active ? 'bg-violet-500/20 text-white' : 'text-zinc-300 hover:bg-white/[0.07] hover:text-white'}`}
       title={collapsed ? `${channel.displayName || channel.login}${channel.isLive ? ` - ${channel.category || 'Live'}` : ' - Offline'}` : undefined}
     >
@@ -133,13 +138,11 @@ function ChannelList({
 }
 
 function RailContent({ collapsed, onCloseMobile, viewerOverrides }: { collapsed: boolean; onCloseMobile?: () => void; viewerOverrides?: Record<string, number | undefined> }) {
-  const auth = useAuth()
   const settings = useUiSettings(s => s.settings)
   const toggleRailSection = useUiSettings(s => s.toggleRailSection)
   const followed = useQuery({
     queryKey: ['followed'],
     queryFn: getFollowedChannels,
-    enabled: auth.isAuthenticated,
     retry: false,
     staleTime: 30_000,
   })
@@ -152,7 +155,7 @@ function RailContent({ collapsed, onCloseMobile, viewerOverrides }: { collapsed:
   const fallback = fromLiveDirectory(live.data)
   const liveFollowing = followedChannels.filter(channel => channel.isLive)
   const offlineFollowing = followedChannels.filter(channel => !channel.isLive)
-  const showFollowing = auth.isAuthenticated && followedChannels.length > 0
+  const showFollowing = followedChannels.length > 0
   const topLive = showFollowing ? fallback.filter(channel => !followedChannels.some(followedChannel => followedChannel.login === channel.login)).slice(0, 20) : fallback
   const sections = [
     { id: 'live' as const, label: showFollowing ? 'Following live' : 'Live channels', channels: showFollowing ? liveFollowing : topLive },

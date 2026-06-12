@@ -134,6 +134,9 @@ try {
     }
     if ($preflight.blocked) {
         $reason = if ($preflight.reason) { [string]$preflight.reason } else { 'Docker prerequisites not met' }
+        if ($preflight.dockerEngineRunning -eq $false) {
+            $reason = 'Docker Desktop is not running. Start Docker Desktop, wait until it shows Running, then run Check Streamclone.cmd or re-run Setup.'
+        }
         Set-InstallProgress -Title 'Setup blocked' -Detail $reason -Status "blocked|$reason"
         exit 1
     }
