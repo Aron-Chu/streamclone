@@ -60,6 +60,17 @@ var
   PruneImagesOnUninstall: Boolean;
   PruneBaseImagesOnUninstall: Boolean;
 
+function PowerShellExe: string;
+var
+  NativePowerShell: string;
+begin
+  NativePowerShell := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
+  if IsWin64 and FileExists(NativePowerShell) then
+    Result := NativePowerShell
+  else
+    Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+end;
+
 function DockerLooksReady: Boolean;
 var
   ResultCode: Integer;
@@ -89,17 +100,6 @@ begin
     '-NoProfile -ExecutionPolicy Bypass -File "' + PreflightScript + '" -Quiet -TryStartDocker',
     ExpandConstant('{src}'), SW_HIDE, ewWaitUntilTerminated, ResultCode)
     and (ResultCode = 0);
-end;
-
-function PowerShellExe: string;
-var
-  NativePowerShell: string;
-begin
-  NativePowerShell := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
-  if IsWin64 and FileExists(NativePowerShell) then
-    Result := NativePowerShell
-  else
-    Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
 end;
 
 function RemoveIncompleteInstallDir: Boolean;
