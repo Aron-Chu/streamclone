@@ -2,6 +2,18 @@ package seeder
 
 import "testing"
 
+func TestSevenTVZeroWidthFromAPIFlags(t *testing.T) {
+	em := sevenTVEmote{Name: "RainTime", Flags: 1}
+	em.Data.Flags = 256
+	if !sevenTVZeroWidth(em) {
+		t.Fatalf("expected overlay emote to be zero width")
+	}
+	em = sevenTVEmote{Name: "Clap"}
+	if sevenTVZeroWidth(em) {
+		t.Fatalf("expected regular emote not to be zero width")
+	}
+}
+
 func TestSortRemoteEmotesPrioritizesUsableStaticEmotes(t *testing.T) {
 	emotes := []remoteEmote{
 		{Name: "wide", ZeroWidth: true},

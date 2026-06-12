@@ -54,6 +54,11 @@ func New(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
 }
 
+func (s *Store) UpdateEmoteFlags(ctx context.Context, id string, flags int) error {
+	_, err := s.db.Exec(ctx, `UPDATE emotes SET flags=$1, updated_at=now() WHERE id=$2::uuid`, flags, id)
+	return err
+}
+
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.Ping(ctx)
 }

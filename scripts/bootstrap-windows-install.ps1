@@ -45,6 +45,26 @@ function Get-LocalInstallVersion {
     return (Get-Content $versionFile -Raw).Trim()
 }
 
+function Prepare-InstallDirectory {
+    param([string]$Dir)
+    Set-Location $env:TEMP
+    if (-not (Test-Path -LiteralPath $Dir)) {
+        New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+        return
+    }
+    try {
+        Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop
+        New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+        return
+    } catch { }
+    Get-ChildItem -LiteralPath $Dir -Force -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    $remaining = @(Get-ChildItem -LiteralPath $Dir -Force -ErrorAction SilentlyContinue).Count
+    if ($remaining -gt 0) {
+        throw "Cannot replace install folder ($Dir) - $remaining item(s) still in use. Close File Explorer windows and terminals open in that folder, then retry."
+    }
+}
+
 Write-Host 'Step 1/4: Downloading latest release...' -ForegroundColor Cyan
 $meta = Get-ReleaseZipMeta -Tag $Version
 Write-Host "  $($meta.Name) ($($meta.Tag))"
@@ -77,10 +97,7 @@ if (Test-Path $InstallDir) {
 $tempZip = Join-Path ([System.IO.Path]::GetTempPath()) "streamclone-$([Guid]::NewGuid().N).zip"
 try {
     Invoke-WebRequest -Uri $meta.Url -OutFile $tempZip -UseBasicParsing
-    if (Test-Path $InstallDir) {
-        Remove-Item -Recurse -Force $InstallDir
-    }
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    Prepare-InstallDirectory -Dir $InstallDir
     Expand-Archive -Path $tempZip -DestinationPath $InstallDir -Force
     $nested = Join-Path $InstallDir ("streamclone-" + $meta.Tag)
     if ((Test-Path $nested) -and -not (Test-Path (Join-Path $InstallDir 'VERSION'))) {

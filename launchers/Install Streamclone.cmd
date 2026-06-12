@@ -17,7 +17,7 @@ echo  Some antivirus tools flag new unsigned installers — see docs/install-des
 echo.
 echo  If setup fails but the app already works, run Check Streamclone.cmd first.
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $ErrorActionPreference='Stop'; $u='https://raw.githubusercontent.com/Aron-Chu/streamclone/master/scripts/bootstrap-windows-install.ps1'; $f=Join-Path $env:TEMP 'streamclone-bootstrap.ps1'; Invoke-WebRequest -Uri $u -OutFile $f -UseBasicParsing; & $f }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $ErrorActionPreference='Stop'; $u='https://raw.githubusercontent.com/Aron-Chu/streamclone/master/scripts/bootstrap-windows-install.ps1'; $f=Join-Path $env:TEMP 'streamclone-bootstrap.ps1'; Invoke-WebRequest -Uri $u -OutFile $f -UseBasicParsing; & $f; exit $LASTEXITCODE }"
 if errorlevel 1 (
   echo.
   echo Setup failed. Run Check Streamclone.cmd in %%USERPROFILE%%\streamclone for details.

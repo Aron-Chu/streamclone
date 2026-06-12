@@ -12,6 +12,7 @@ import (
 
 	"streamclone/internal/emote/assets"
 	"streamclone/internal/emote/dict"
+	"streamclone/internal/emote/flags"
 	"streamclone/internal/emote/objstore"
 	"streamclone/internal/emote/store"
 	"streamclone/internal/metrics"
@@ -226,7 +227,7 @@ func (w *Worker) rebuildChannelDictionary(ctx context.Context, login string) (in
 		entries = append(entries, dict.EmoteEntry{
 			Name:      e.Name,
 			EmoteID:   e.EmoteID,
-			ZeroWidth: e.Flags&1 != 0,
+			ZeroWidth: flags.IsZeroWidth(e.Flags),
 			Provider:  e.Provider,
 		})
 	}
