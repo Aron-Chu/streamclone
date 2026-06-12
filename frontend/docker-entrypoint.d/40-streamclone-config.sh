@@ -14,6 +14,7 @@ window.__STREAMCLONE_CONFIG__ = {
   maxRetainedMessages: "${VITE_MAX_RETAINED_MESSAGES:-250}",
   streamcloneProfile: "${STREAMCLONE_PROFILE:-core}",
   setupControlToken: "${SETUP_CONTROL_TOKEN:-}",
-  devTokenImportEnabled: "${TWITCH_DEV_TOKEN_IMPORT_ENABLED:-false}"
+  devTokenImportEnabled: "${TWITCH_DEV_TOKEN_IMPORT_ENABLED:-false}",
+  installId: "${STREAMCLONE_INSTALL_ID:-}"
 };
 EOF

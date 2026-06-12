@@ -173,10 +173,34 @@ function Invoke-EnvSynthesize {
     if (Test-Path $oauthBundle) { $sources += $oauthBundle }
     $local = Join-Path $root '.env.local'
     if (Test-Path $local) { $sources += $local }
+    $priorInstallId = $null
+    if (Test-Path $OutFile) {
+        $priorVals = Read-EnvKeyValueFile -Path $OutFile
+        $priorInstallId = $priorVals['STREAMCLONE_INSTALL_ID']
+    }
     Merge-EnvFiles -OutFile $OutFile -Sources $sources
     Set-EnvFileValue -Path $OutFile -Key 'STREAMCLONE_PROFILE' -Value $Profile
     Invoke-EnvGenerateSecrets -EnvFile $OutFile
     Invoke-EnvApplyReleaseImageTag -EnvFile $OutFile
+    $installId = if ($priorInstallId) { $priorInstallId } else { [Guid]::NewGuid().ToString('N') }
+    Set-EnvFileValue -Path $OutFile -Key 'STREAMCLONE_INSTALL_ID' -Value $installId
+}
+
+function Get-StreamcloneWelcomeUrl {
+    param([string]$Base = 'http://localhost:8090/')
+    return ($Base.TrimEnd('/') + '/?welcome=1')
+}
+
+function Ensure-StreamcloneInstallId {
+    param([string]$EnvFile = (Join-Path (Get-EnvRepoRoot) '.env'))
+    if (-not (Test-Path $EnvFile)) { return $null }
+    $vals = Read-EnvKeyValueFile -Path $EnvFile
+    if (-not [string]::IsNullOrWhiteSpace($vals['STREAMCLONE_INSTALL_ID'])) {
+        return $vals['STREAMCLONE_INSTALL_ID']
+    }
+    $installId = [Guid]::NewGuid().ToString('N')
+    Set-EnvFileValue -Path $EnvFile -Key 'STREAMCLONE_INSTALL_ID' -Value $installId
+    return $installId
 }
 
 function Get-EnvScraperSiblingPath {
