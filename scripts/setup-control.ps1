@@ -13,6 +13,7 @@ if ([string]::IsNullOrWhiteSpace($PidFile)) {
 
 . (Join-Path $PSScriptRoot 'lib\env.ps1')
 . (Join-Path $PSScriptRoot 'lib\stack-progress.ps1')
+. (Join-Path $PSScriptRoot 'lib\diagnostics.ps1')
 
 $envPath = Join-Path $Root '.env'
 $envValues = if (Test-Path $envPath) { Read-EnvKeyValueFile -Path $envPath } else { @{} }
@@ -30,7 +31,7 @@ function Write-JsonResponse {
         [int]$StatusCode,
         [object]$Body
     )
-    $json = ($Body | ConvertTo-Json -Compress)
+    $json = ($Body | ConvertTo-Json -Compress -Depth 6)
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
     $Response.StatusCode = $StatusCode
     $Response.ContentType = 'application/json; charset=utf-8'
@@ -126,7 +127,13 @@ function Start-ProfileServiceUpAsync {
     $logFile = Join-Path $Root ".streamclone-start-$Service.log"
     $args = $composeArgs + @('up', '-d', '--remove-orphans', $Service)
 
-    $proc = Start-Process -FilePath $docker -ArgumentList (Join-EnvProcessArguments -Arguments $args) -WorkingDirectory $Root -WindowStyle Hidden -PassThru
+    $proc = Start-Process -FilePath $docker `
+        -ArgumentList (Join-EnvProcessArguments -Arguments $args) `
+        -WorkingDirectory $Root `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $logFile `
+        -RedirectStandardError $logFile `
+        -PassThru
     return "compose start initiated (pid $($proc.Id)); see $logFile"
 }
 
@@ -202,6 +209,12 @@ try {
         try {
             if ($request.HttpMethod -eq 'GET' -and ($path -eq '/health' -or $path -eq '/')) {
                 Write-JsonResponse -Response $response -StatusCode 200 -Body @{ ok = $true; service = 'setup-control' }
+                continue
+            }
+
+            if ($request.HttpMethod -eq 'GET' -and $path -eq '/diagnostics') {
+                $report = Get-StreamcloneDiagnostics -Root $Root
+                Write-JsonResponse -Response $response -StatusCode 200 -Body $report
                 continue
             }
 

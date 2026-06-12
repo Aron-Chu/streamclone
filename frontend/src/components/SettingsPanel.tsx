@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getAuthDebug, getAlwaysTracked, setAlwaysTracked } from '../api'
 import { useThemeEffect, useUiSettings, type ThemeName } from '../settings'
+import SystemHealthPanel from './SystemHealthPanel'
+import { dispatchOpenStackStatus } from '../stackStatusEvents'
 
 const themes: Array<{ id: ThemeName; label: string }> = [
   { id: 'obsidian', label: 'Obsidian' },
@@ -220,6 +222,22 @@ export default function SettingsButton() {
                 ) : (
                   <div className="text-xs text-zinc-500 italic">No channels tracked yet.</div>
                 )}
+              </div>
+            </div>
+            <div>
+              <div className="mb-2 text-[11px] font-black uppercase text-zinc-500">System status</div>
+              <div className="rounded border border-white/10 bg-white/[0.035] p-3 space-y-3">
+                <SystemHealthPanel variant="compact" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false)
+                    dispatchOpenStackStatus()
+                  }}
+                  className="w-full rounded border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs font-black text-violet-100 transition hover:bg-violet-500/20"
+                >
+                  Open full status
+                </button>
               </div>
             </div>
           </div>
