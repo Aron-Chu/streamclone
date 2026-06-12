@@ -60,7 +60,7 @@ function Invoke-ProfileServiceUp {
 
     Set-Location $Root
     if (-not (Test-Path $envPath)) {
-        throw 'Missing .env — run scripts/setup.ps1 first.'
+        throw 'Missing .env - run scripts/setup.ps1 first.'
     }
 
     $profile = $Service
@@ -97,7 +97,7 @@ function Start-ProfileServiceUpAsync {
 
     Set-Location $Root
     if (-not (Test-Path $envPath)) {
-        throw 'Missing .env — run scripts/setup.ps1 first.'
+        throw 'Missing .env - run scripts/setup.ps1 first.'
     }
 
     Sync-SetupControlTokenFromEnv
@@ -140,7 +140,7 @@ function Start-ProfileServiceUpAsync {
 function Invoke-SyncClipperAuth {
     Set-Location $Root
     if (-not (Test-Path $envPath)) {
-        throw 'Missing .env — run scripts/setup.ps1 first.'
+        throw 'Missing .env - run scripts/setup.ps1 first.'
     }
     if (-not (Sync-ClipperAuthFromRuntime -Root $Root -EnvFile $envPath)) {
         return @{ ok = $true; merged = $false; message = 'no runtime clipper auth file yet' }

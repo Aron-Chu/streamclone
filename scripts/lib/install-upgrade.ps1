@@ -383,6 +383,7 @@ function Update-StreamcloneBootstrapOverlayFromMaster {
     )
     $masterRawBase = "https://raw.githubusercontent.com/$Repo/master"
     $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
+    $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     foreach ($rel in $OverlayPaths) {
         $dest = Join-Path $Dir ($rel -replace '/', '\')
         $destDir = Split-Path $dest -Parent
@@ -390,7 +391,7 @@ function Update-StreamcloneBootstrapOverlayFromMaster {
             New-Item -ItemType Directory -Path $destDir -Force | Out-Null
         }
         try {
-            $url = "$masterRawBase/$rel"
+            $url = "$masterRawBase/$rel`?t=$cacheBust"
             Invoke-WebRequest -Uri $url -OutFile $dest -Headers $headers -UseBasicParsing
         } catch {
             Write-Host "  script overlay skipped: $rel ($($_.Exception.Message))" -ForegroundColor DarkYellow
