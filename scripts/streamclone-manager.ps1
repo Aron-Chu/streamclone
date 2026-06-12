@@ -41,35 +41,6 @@ function Get-ManagerInstallRoot {
     }
 }
 
-function Show-ManagerStatus {
-    Get-ManagerInstallRoot
-    Write-Host '--- Prerequisites ---' -ForegroundColor Yellow
-    & (Join-Path $PSScriptRoot 'preflight-deps.ps1') -InstallHints
-    if ($LASTEXITCODE -ne 0) { return $false }
-
-    Write-Host ''
-    Write-Host '--- Containers ---' -ForegroundColor Yellow
-    $summary = Get-StreamcloneContainerSummary -Root $Root
-    Write-Host $summary
-    Write-Host ''
-
-    $url = 'http://localhost:8090/'
-    try {
-        $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 8
-        $sw.Stop()
-        if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) {
-            Write-Host "Web UI: ready at $url (${sw.ElapsedMilliseconds}ms)" -ForegroundColor Green
-            return $true
-        }
-        Write-Host "Web UI: responded HTTP $($resp.StatusCode)" -ForegroundColor Yellow
-    } catch {
-        Write-Host "Web UI: not ready at $url ($($_.Exception.Message))" -ForegroundColor Red
-        Write-Host 'Tip: first install can take 3-8 minutes while images download and services become healthy.' -ForegroundColor DarkGray
-    }
-    return $false
-}
-
 function Invoke-ManagerRepair {
     Get-ManagerInstallRoot
     if (-not (Test-Path (Join-Path $Root '.env'))) {
@@ -95,8 +66,9 @@ function Invoke-ManagerRepair {
     $profile = Get-StreamcloneProfileFromRoot -Root $Root
     $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile
 
-    Write-Host 'Pulling images...' -ForegroundColor Cyan
-    $pull = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs
+    Write-Host 'Pulling Docker images (~1.5 GB, 3-8 min on first install)...' -ForegroundColor Cyan
+    Write-Host ''
+    $pull = Invoke-EnvDockerComposePullWithRetry -ComposeArgs $composeArgs -OutputMode interactive
     if ($pull.ExitCode -ne 0) {
         throw "docker compose pull failed: $($pull.Output -join [Environment]::NewLine)"
     }
@@ -202,7 +174,7 @@ function Show-ManagerMenu {
             '2' {
                 & (Join-Path $PSScriptRoot 'stop-streamclone.ps1')
             }
-            '3' { Show-ManagerStatus }
+            '3' { & (Join-Path $PSScriptRoot 'check-streamclone.ps1') -InstallDir $Root }
             '4' { Invoke-ManagerRepair }
             '5' { Invoke-ManagerUpdate }
             '6' {
@@ -221,35 +193,13 @@ function Show-ManagerMenu {
     }
 }
 
-function Get-StreamcloneContainerSummary {
-    param([string]$Root)
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $composeArgs = Get-StreamcloneComposeArgs -Root $Root
-        $result = Invoke-EnvDockerCaptured -Arguments ($composeArgs + @('ps', '-a', '--format', '{{.Name}}|{{.Status}}'))
-        if ($result.ExitCode -ne 0) { return 'Docker status unavailable.' }
-        $lines = $result.Output
-        if (-not $lines) { return 'No Streamclone containers found.' }
-        $parts = foreach ($line in $lines) {
-            $split = $line -split '\|', 2
-            $name = ($split[0] -replace '^streamclone-', '' -replace '-\d+$', '')
-            $state = $split[1]
-            if ($state -match 'healthy') { "$name ready" }
-            elseif ($state -match 'Up') { "$name starting" }
-            elseif ($state -match 'Exited \(0\)') { "$name done" }
-            else { "$name $state" }
-        }
-        return ($parts -join ' | ')
-    } finally {
-        $ErrorActionPreference = $prev
-    }
-}
-
 try {
     switch ($Action) {
         'menu' { Show-ManagerMenu }
-        'status' { if (-not (Show-ManagerStatus)) { exit 1 } }
+        'status' {
+            & (Join-Path $PSScriptRoot 'check-streamclone.ps1') -InstallDir $Root
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+        }
         'start' {
             Get-ManagerInstallRoot
             & (Join-Path $PSScriptRoot 'start-streamclone.ps1')

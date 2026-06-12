@@ -132,6 +132,7 @@ function Invoke-StreamcloneComposeDown {
 function Remove-StreamcloneDesktopShortcuts {
     $desktop = [Environment]::GetFolderPath('Desktop')
     foreach ($name in @(
+        'Streamclone.lnk',
         'Start Streamclone.lnk',
         'Stop Streamclone.lnk',
         'Manage Streamclone.lnk',

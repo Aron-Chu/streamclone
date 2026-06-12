@@ -57,7 +57,7 @@ if ($Release) {
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($DesktopShortcut) {
-    Write-Host 'Step 4/4: Creating Desktop shortcuts...' -ForegroundColor Cyan
+    Write-Host 'Step 4/4: Creating Desktop shortcut...' -ForegroundColor Cyan
     & (Join-Path $Dir 'scripts\install-desktop-shortcut.ps1') -InstallDir $Dir
 }
 

@@ -1,5 +1,6 @@
 #Requires -Version 5.1
 # Helpers for visible install progress (pull + container status).
+# Test-StreamcloneDockerPullDisplayLine is defined in env.ps1 (dot-sourced below).
 
 . (Join-Path $PSScriptRoot 'env.ps1')
 
