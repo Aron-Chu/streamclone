@@ -378,15 +378,21 @@ function Invoke-StreamcloneReleaseDownloadWithProgress {
     }
 }
 
+function Get-StreamcloneGitHubMasterSha {
+    param([string]$Repo = 'Aron-Chu/streamclone')
+    $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
+    return (Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/commits/master" -Headers $headers).sha
+}
+
 function Update-StreamcloneBootstrapOverlayFromMaster {
     param(
         [string]$Dir,
         [string]$Repo = 'Aron-Chu/streamclone',
         [string[]]$OverlayPaths = $Script:StreamcloneBootstrapOverlayPaths
     )
-    $masterRawBase = "https://raw.githubusercontent.com/$Repo/master"
+    $masterSha = Get-StreamcloneGitHubMasterSha -Repo $Repo
+    $masterRawBase = "https://raw.githubusercontent.com/$Repo/$masterSha"
     $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
-    $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     foreach ($rel in $OverlayPaths) {
         $dest = Join-Path $Dir ($rel -replace '/', '\')
         $destDir = Split-Path $dest -Parent
@@ -394,7 +400,7 @@ function Update-StreamcloneBootstrapOverlayFromMaster {
             New-Item -ItemType Directory -Path $destDir -Force | Out-Null
         }
         try {
-            $url = "$masterRawBase/$rel`?t=$cacheBust"
+            $url = "$masterRawBase/$rel"
             Invoke-WebRequest -Uri $url -OutFile $dest -Headers $headers -UseBasicParsing
         } catch {
             Write-Host "  script overlay skipped: $rel ($($_.Exception.Message))" -ForegroundColor DarkYellow

@@ -10,6 +10,48 @@ param(
 $ErrorActionPreference = 'Stop'
 $Repo = 'Aron-Chu/streamclone'
 
+function Write-StreamcloneAgentDebugLog {
+    param(
+        [string]$HypothesisId,
+        [string]$Location,
+        [string]$Message,
+        [hashtable]$Data = @{},
+        [string]$RunId = 'pre-fix'
+    )
+    #region agent log
+    try {
+        $entry = [ordered]@{
+            sessionId    = 'ccdd9b'
+            runId        = $RunId
+            hypothesisId = $HypothesisId
+            location     = $Location
+            message      = $Message
+            data         = $Data
+            timestamp    = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        }
+        $line = ($entry | ConvertTo-Json -Compress) + [Environment]::NewLine
+        foreach ($logPath in @(
+                (Join-Path $env:TEMP 'debug-ccdd9b.log'),
+                (Join-Path $InstallDir 'debug-ccdd9b.log')
+            )) {
+            if ($logPath) {
+                $logDir = Split-Path $logPath -Parent
+                if ($logDir -and -not (Test-Path $logDir)) {
+                    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+                }
+                Add-Content -LiteralPath $logPath -Value $line -Encoding utf8
+            }
+        }
+    } catch { }
+    #endregion
+}
+
+function Get-StreamcloneGitHubMasterSha {
+    param([string]$Repo)
+    $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
+    return (Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/commits/master" -Headers $headers).sha
+}
+
 function Test-StreamcloneBootstrapScriptParses {
     param([string]$Path)
     $tokens = $null
@@ -19,6 +61,26 @@ function Test-StreamcloneBootstrapScriptParses {
         Ok     = ($errors.Count -eq 0)
         Errors = @($errors | ForEach-Object { $_.ToString() })
     }
+}
+
+function Resolve-StreamcloneBootstrapEnvScript {
+    foreach ($dir in @(
+            $script:StreamcloneBootstrapLibDir,
+            (Join-Path $env:TEMP 'streamclone-bootstrap-lib'),
+            (Join-Path $PSScriptRoot 'lib')
+        )) {
+        if ([string]::IsNullOrWhiteSpace($dir)) { continue }
+        $candidate = Join-Path $dir 'env.ps1'
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
+$script:StreamcloneMasterSha = Get-StreamcloneGitHubMasterSha -Repo $Repo
+Write-StreamcloneAgentDebugLog -HypothesisId 'A' -Location 'bootstrap:start' -Message 'resolved master commit sha' -Data @{
+    sha          = $script:StreamcloneMasterSha
+    psscriptRoot = $PSScriptRoot
+    installDir   = $InstallDir
 }
 
 $bootstrapLibScript = Join-Path $PSScriptRoot 'lib\install-upgrade.ps1'
@@ -31,12 +93,11 @@ if (Test-Path $bootstrapLibScript) {
         Remove-Item -LiteralPath $libDir -Recurse -Force -ErrorAction SilentlyContinue
     }
     New-Item -ItemType Directory -Force -Path $libDir | Out-Null
-    $base = "https://raw.githubusercontent.com/$Repo/master/scripts/lib"
+    $base = "https://raw.githubusercontent.com/$Repo/$($script:StreamcloneMasterSha)/scripts/lib"
     $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
-    $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     foreach ($name in @('env.ps1', 'stack-progress.ps1', 'install-upgrade.ps1')) {
         $dest = Join-Path $libDir $name
-        $url = "$base/$name`?t=$cacheBust"
+        $url = "$base/$name"
         Invoke-WebRequest -Uri $url -OutFile $dest -Headers $headers -UseBasicParsing
         $parse = Test-StreamcloneBootstrapScriptParses -Path $dest
         if (-not $parse.Ok) {
@@ -47,8 +108,21 @@ if (Test-Path $bootstrapLibScript) {
     . (Join-Path $libDir 'install-upgrade.ps1')
 }
 
+Write-StreamcloneAgentDebugLog -HypothesisId 'D' -Location 'bootstrap:lib-loaded' -Message 'bootstrap lib ready' -Data @{
+    bootstrapLibDir = $script:StreamcloneBootstrapLibDir
+    envExists       = [bool](Resolve-StreamcloneBootstrapEnvScript)
+}
+
 function Test-StreamcloneWebOk {
-    . (Join-Path $script:StreamcloneBootstrapLibDir 'env.ps1')
+    $envScript = Resolve-StreamcloneBootstrapEnvScript
+    Write-StreamcloneAgentDebugLog -HypothesisId 'D' -Location 'bootstrap:Test-StreamcloneWebOk' -Message 'resolved env.ps1 path' -Data @{
+        envScript       = $envScript
+        bootstrapLibDir = $script:StreamcloneBootstrapLibDir
+    }
+    if (-not $envScript) {
+        throw 'Bootstrap could not locate env.ps1 (lib download may have failed).'
+    }
+    . $envScript
     return Test-StreamcloneWebReachable -Url (Get-StreamcloneAppUrl)
 }
 
@@ -69,6 +143,11 @@ $versions = if (Test-StreamcloneInstalledAt -Dir $InstallDir) {
 }
 
 if (-not $Force -and $versions -and $versions.bundleVersion -eq $meta.Tag -and (Test-Path $launcher) -and (Test-Path (Join-Path $InstallDir '.env'))) {
+    Write-StreamcloneAgentDebugLog -HypothesisId 'B' -Location 'bootstrap:fast-path' -Message 'same-version reinstall fast path' -Data @{
+        tag     = $meta.Tag
+        hasEnv  = $true
+        hasLauncher = $true
+    }
     $webOk = Test-StreamcloneWebOk
     Write-Host ''
     if ($webOk) {
