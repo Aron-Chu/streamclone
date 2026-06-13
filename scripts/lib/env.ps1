@@ -781,3 +781,47 @@ function Invoke-EnsureFrontendClipperConfig {
     Write-Host 'ensure-frontend-config: frontend recreated (hard-refresh the browser if it was already open)'
     return $true
 }
+
+function Test-StreamcloneCaddyfileLocalTunnelPath {
+    param([string]$Root = '')
+    if ([string]::IsNullOrWhiteSpace($Root)) { $Root = Get-EnvRepoRoot }
+    $path = Join-Path $Root 'deploy\Caddyfile.local-tunnel'
+    if (-not (Test-Path -LiteralPath $path)) {
+        return [pscustomobject]@{ ok = $false; reason = 'missing'; path = $path }
+    }
+    $item = Get-Item -LiteralPath $path -Force
+    if ($item.PSIsContainer) {
+        return [pscustomobject]@{ ok = $false; reason = 'directory'; path = $path }
+    }
+    return [pscustomobject]@{ ok = $true; reason = 'file'; path = $path }
+}
+
+function Repair-StreamcloneCaddyfileLocalTunnel {
+    param(
+        [string]$Root = '',
+        [string]$Repo = 'Aron-Chu/streamclone'
+    )
+    if ([string]::IsNullOrWhiteSpace($Root)) { $Root = Get-EnvRepoRoot }
+    $state = Test-StreamcloneCaddyfileLocalTunnelPath -Root $Root
+    if ($state.ok) { return $true }
+
+    Write-Host "Repairing deploy/Caddyfile.local-tunnel ($($state.reason) - breaks Caddy on :8090)..." -ForegroundColor Yellow
+    if (Test-Path -LiteralPath $state.path) {
+        Remove-Item -LiteralPath $state.path -Recurse -Force
+    }
+    $deployDir = Split-Path $state.path -Parent
+    if (-not (Test-Path $deployDir)) {
+        New-Item -ItemType Directory -Force -Path $deployDir | Out-Null
+    }
+
+    $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
+    $sha = (Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/commits/master" -Headers $headers).sha
+    $url = "https://raw.githubusercontent.com/$Repo/$sha/deploy/Caddyfile.local-tunnel"
+    Invoke-WebRequest -Uri $url -OutFile $state.path -Headers $headers -UseBasicParsing
+
+    $after = Test-StreamcloneCaddyfileLocalTunnelPath -Root $Root
+    if (-not $after.ok) {
+        throw 'Caddyfile.local-tunnel repair failed - proxy on :8090 will not start.'
+    }
+    return $true
+}

@@ -57,6 +57,7 @@ if (-not $SkipSetup -and -not (Test-Path $envFile)) {
         Write-Host 'Using pre-built GHCR images (release bundle or STREAMCLONE_USE_IMAGES=1).'
     }
     . (Join-Path $PSScriptRoot 'lib\env.ps1')
+    Repair-StreamcloneCaddyfileLocalTunnel -Root $Root | Out-Null
     Ensure-StreamcloneInstallId -EnvFile $envFile | Out-Null
     Ensure-LocalhostDevTokenImport -EnvFile $envFile | Out-Null
     $composeArgs = @(

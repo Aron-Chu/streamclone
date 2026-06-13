@@ -20,7 +20,9 @@ function Test-StreamcloneLocalTunnelHlsCaddyConfig {
     param([string]$Root = '')
     if ([string]::IsNullOrWhiteSpace($Root)) { $Root = Get-EnvRepoRoot }
     $caddyFile = Join-Path $Root 'deploy\Caddyfile.local-tunnel'
-    if (-not (Test-Path $caddyFile)) { return $true }
+    if (-not (Test-Path -LiteralPath $caddyFile)) { return $true }
+    $item = Get-Item -LiteralPath $caddyFile -Force
+    if ($item.PSIsContainer) { return $false }
     $content = Get-Content $caddyFile -Raw
     if ($content -match '@hls_local') { return $false }
     if ($content -notmatch 'header_up Authorization "Bearer streamclone-local-hls-cdn"') { return $false }

@@ -33,7 +33,8 @@ $Script:StreamcloneBootstrapOverlayPaths = @(
     'scripts/preflight-deps.ps1',
     'scripts/start-streamclone.ps1',
     'scripts/bootstrap-windows-install.ps1',
-    'launchers/install-streamclone-launcher.ps1'
+    'launchers/install-streamclone-launcher.ps1',
+    'deploy/Caddyfile.local-tunnel'
 )
 
 function Get-StreamcloneCoreImageRefs {
