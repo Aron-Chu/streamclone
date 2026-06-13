@@ -1590,6 +1590,14 @@ function AnalyticsChart({
   const [expandedScale, setExpandedScale] = useState(true)
   const [showDots, setShowDots] = useState(false)
   const [showSpikes, setShowSpikes] = useState(false)
+  const [focusedSeriesKey, setFocusedSeriesKey] = useState<string | null>(null)
+  const seriesFocusOpacity = useCallback((seriesKey: string, base: number) => {
+    if (!focusedSeriesKey) return base
+    return seriesKey === focusedSeriesKey ? base : base * 0.14
+  }, [focusedSeriesKey])
+  const toggleSeriesFocus = useCallback((seriesKey: string) => {
+    setFocusedSeriesKey(current => current === seriesKey ? null : seriesKey)
+  }, [])
   const allRollups = detail?.rollups ?? []
   const rollups = useMemo(() => rollupsForChart(allRollups, isLive), [allRollups, isLive])
   const peakViewersFallback = detail?.stream?.peakViewers ?? 0
@@ -2003,8 +2011,22 @@ function AnalyticsChart({
             if (isEmote) {
               imageUrl = getEmoteImageUrl({ provider: parts[0], id: parts[1] })
             }
+            const isFocused = focusedSeriesKey === item.key
+            const isDimmed = focusedSeriesKey != null && !isFocused
             return (
-              <span key={item.key} className="flex items-center gap-1.5 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] font-black uppercase text-zinc-400">
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => toggleSeriesFocus(item.key)}
+                title={isFocused ? 'Click to show all series' : `Highlight ${item.label}`}
+                className={`flex items-center gap-1.5 rounded border px-2 py-1 text-[11px] font-black uppercase transition ${
+                  isFocused
+                    ? 'border-white/35 bg-white/[0.12] text-zinc-100 ring-1 ring-white/20'
+                    : isDimmed
+                      ? 'border-white/5 bg-white/[0.02] text-zinc-600 opacity-45'
+                      : 'border-white/10 bg-white/[0.03] text-zinc-400 hover:bg-white/[0.07] hover:text-zinc-200'
+                }`}
+              >
                 <span className="inline-block h-2 w-2 rounded-full" style={legendDotStyle(item.color)} />
                 {imageUrl && (
                   <img src={imageUrl} alt={item.label} className="h-3.5 w-3.5 object-contain inline-block align-middle" loading="lazy" />
@@ -2017,7 +2039,7 @@ function AnalyticsChart({
                     ? ` · ${Math.round(((item.max - selectedEmoteScaleMin) / (selectedEmoteScaleMax - selectedEmoteScaleMin)) * 100)}% focus`
                     : ''}
                 </span>
-              </span>
+              </button>
             )
           })}
         </div>
@@ -2147,6 +2169,7 @@ function AnalyticsChart({
           <path
             d={viewerAreaPathD}
             fill="url(#viewerAreaGradient)"
+            opacity={seriesFocusOpacity('viewers', 1)}
           />
         ) : null}
 
@@ -2157,7 +2180,7 @@ function AnalyticsChart({
               <path
                 d={overlay.areaPathD}
                 fill={overlay.color}
-                opacity={CHART_THEME.emoteOverlay}
+                opacity={seriesFocusOpacity(overlay.key, CHART_THEME.emoteOverlay)}
               />
             ) : null}
             {overlay.linePathD ? (
@@ -2169,7 +2192,7 @@ function AnalyticsChart({
                 strokeLinejoin="round"
                 strokeWidth="2"
                 strokeDasharray="4 4"
-                opacity={0.92}
+                opacity={seriesFocusOpacity(overlay.key, 0.92)}
               />
             ) : null}
           </g>
@@ -2189,7 +2212,7 @@ function AnalyticsChart({
               strokeLinejoin="round"
               strokeWidth={segment.estimated ? 2 : 2.5}
               strokeDasharray={segment.estimated ? '7 6' : undefined}
-              opacity={segment.estimated ? 0.4 : CHART_THEME.viewer.line}
+              opacity={seriesFocusOpacity('viewers', segment.estimated ? 0.4 : CHART_THEME.viewer.line)}
             />
           )
         })}
@@ -2216,11 +2239,14 @@ function AnalyticsChart({
             rx={0}
             fill={bar.isSpike ? CHART_THEME.spike.color : CHART_THEME.emote.color}
             opacity={
-              bar.isSpike
-                ? CHART_THEME.emote.barSpike
-                : bar.hasValue
-                  ? CHART_THEME.emote.bar
-                  : CHART_THEME.emote.barBaseline
+              seriesFocusOpacity(
+                'emotes',
+                bar.isSpike
+                  ? CHART_THEME.emote.barSpike
+                  : bar.hasValue
+                    ? CHART_THEME.emote.bar
+                    : CHART_THEME.emote.barBaseline,
+              )
             }
           />
         ))}
@@ -2234,7 +2260,7 @@ function AnalyticsChart({
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeWidth="1"
-            opacity={CHART_THEME.emote.line}
+            opacity={seriesFocusOpacity('emotes', CHART_THEME.emote.line)}
           />
         ) : null}
 
@@ -2248,7 +2274,7 @@ function AnalyticsChart({
             height={bar.height}
             rx={0}
             fill={CHART_THEME.chat.color}
-            opacity={bar.hasValue ? CHART_THEME.chat.whisperBar : CHART_THEME.chat.whisperBar * 0.6}
+            opacity={seriesFocusOpacity('chat', bar.hasValue ? CHART_THEME.chat.whisperBar : CHART_THEME.chat.whisperBar * 0.6)}
           />
         ))}
 
@@ -2274,7 +2300,7 @@ function AnalyticsChart({
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeWidth="1.5"
-            opacity={CHART_THEME.chat.lineOpacity}
+            opacity={seriesFocusOpacity('chat', CHART_THEME.chat.lineOpacity)}
           />
         ) : null}
 
@@ -2316,7 +2342,7 @@ function AnalyticsChart({
               fill={CHART_THEME.spike.color}
               stroke={CHART_THEME.background}
               strokeWidth="1"
-              opacity={CHART_THEME.spike.opacity}
+              opacity={seriesFocusOpacity('emotes', CHART_THEME.spike.opacity)}
             />
           )
         })}
@@ -2338,7 +2364,7 @@ function AnalyticsChart({
               fill={CHART_THEME.spike.color}
               stroke={CHART_THEME.background}
               strokeWidth="1"
-              opacity={CHART_THEME.spike.opacity}
+              opacity={seriesFocusOpacity('chat', CHART_THEME.spike.opacity)}
             />
           )
         })}
@@ -2361,7 +2387,7 @@ function AnalyticsChart({
               fill={CHART_THEME.viewer.color}
               stroke={CHART_THEME.background}
               strokeWidth="1.5"
-              opacity={hover === idx ? CHART_THEME.viewer.line : estimated ? 0.35 : CHART_THEME.viewer.dot}
+              opacity={seriesFocusOpacity('viewers', hover === idx ? CHART_THEME.viewer.line : estimated ? 0.35 : CHART_THEME.viewer.dot)}
               className="transition-all duration-100"
             />
           )
