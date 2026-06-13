@@ -58,6 +58,7 @@ if (-not $SkipSetup -and -not (Test-Path $envFile)) {
     }
     . (Join-Path $PSScriptRoot 'lib\env.ps1')
     Ensure-StreamcloneInstallId -EnvFile $envFile | Out-Null
+    Ensure-LocalhostDevTokenImport -EnvFile $envFile | Out-Null
     $composeArgs = @(
         'compose', '--env-file', '.env',
         '-f', 'deploy/docker-compose.yml',

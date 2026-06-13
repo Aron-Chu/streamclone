@@ -190,6 +190,31 @@ function Invoke-EnvSynthesize {
     Invoke-EnvApplyReleaseImageTag -EnvFile $OutFile
     $installId = if ($priorInstallId) { $priorInstallId } else { [Guid]::NewGuid().ToString('N') }
     Set-EnvFileValue -Path $OutFile -Key 'STREAMCLONE_INSTALL_ID' -Value $installId
+    Ensure-LocalhostDevTokenImport -EnvFile $OutFile | Out-Null
+}
+
+function Test-EnvLoopbackPublicOrigin {
+    param([hashtable]$EnvValues = @{})
+    foreach ($key in @('PUBLIC_ORIGIN', 'FRONTEND_ORIGIN')) {
+        $origin = [string]$EnvValues[$key]
+        if ([string]::IsNullOrWhiteSpace($origin)) { continue }
+        if ($origin -match '^https?://(localhost|127\.0\.0\.1)(:\d+)?(/|$)') {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Ensure-LocalhostDevTokenImport {
+    param([string]$EnvFile = (Join-Path (Get-EnvRepoRoot) '.env'))
+    if (-not (Test-Path $EnvFile)) { return $false }
+    $vals = Read-EnvKeyValueFile -Path $EnvFile
+    $loopback = Test-EnvLoopbackPublicOrigin -EnvValues $vals
+    $before = [string]$vals['TWITCH_DEV_TOKEN_IMPORT_ENABLED']
+    if (-not $loopback) { return $false }
+    if ($before -eq 'true') { return $false }
+    Set-EnvFileValue -Path $EnvFile -Key 'TWITCH_DEV_TOKEN_IMPORT_ENABLED' -Value 'true'
+    return $true
 }
 
 function Get-StreamcloneWelcomeUrl {

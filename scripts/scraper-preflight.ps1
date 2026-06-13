@@ -13,15 +13,30 @@ Set-Location $repoRoot
 . (Join-Path $PSScriptRoot 'lib\stack-progress.ps1')
 
 function Fail([string]$Message) {
-    Write-Error "scraper-preflight: $Message"
+    [Console]::Error.WriteLine("scraper-preflight: $Message")
     exit 1
+}
+
+function Wait-ScraperContainer {
+    Write-Host "Waiting for streamclone-scraper container..."
+    for ($i = 1; $i -le 450; $i++) {
+        $running = docker ps --filter name=streamclone-scraper --format '{{.Names}}' 2>$null
+        if ($running) { return }
+        Start-Sleep -Seconds 2
+    }
+    Fail "Analytics container did not start within 15 minutes. Check .streamclone-start-scraper.log.err"
 }
 
 function Invoke-ComposeScraper {
     param([string[]]$ComposeArguments)
     $useImages = (Test-Path (Join-Path $repoRoot 'VERSION'))
-    $composeArgs = Get-StreamcloneComposeArgs -Root $repoRoot -Profile 'scraper' -UseImages:$useImages
-    Invoke-EnvDocker -Arguments ($composeArgs + $ComposeArguments)
+    $sourceBuild = Test-ScraperBuildFromSource -Root $repoRoot
+    $composeArgs = Get-StreamcloneComposeArgs -Root $repoRoot -Profile 'scraper' -UseImages:$useImages -ScraperSourceBuild:$sourceBuild
+    $args = $ComposeArguments
+    if ($sourceBuild -and ($args -notcontains '--build')) {
+        $args = @('--build') + $args
+    }
+    Invoke-EnvDocker -Arguments ($composeArgs + $args)
     if ($LASTEXITCODE -ne 0) {
         Fail "docker compose failed (exit $LASTEXITCODE)"
     }
@@ -71,10 +86,7 @@ function Show-RecoveryHints {
     Write-Host ""
 }
 
-$running = docker ps --filter name=streamclone-scraper --format '{{.Names}}' 2>$null
-if (-not $running) {
-    Fail "streamclone-scraper is not running - start with: make up-scraper"
-}
+Wait-ScraperContainer
 
 Wait-ScraperHealth
 

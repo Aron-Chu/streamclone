@@ -93,9 +93,15 @@ require_nonempty FRONTEND_ORIGIN "Set FRONTEND_ORIGIN=http://localhost:8090"
 
 dev_import="$(env_read_value "$ENV_FILE" TWITCH_DEV_TOKEN_IMPORT_ENABLED || true)"
 use_images="$(env_read_value "$ENV_FILE" STREAMCLONE_USE_IMAGES || true)"
+loopback_install=false
+if env_loopback_public_origin "$ENV_FILE" 2>/dev/null; then
+  loopback_install=true
+fi
 if [ "$use_images" = "1" ]; then
-  if [ "$dev_import" = "true" ]; then
-    warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED=true on a release install" "Dev-only token import should stay false in releases (docs/security.md)"
+  if [ "$dev_import" = "true" ] && [ "$loopback_install" != true ]; then
+    warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED=true on a non-loopback release install" "Dev-only token import should stay false outside localhost (docs/security.md)"
+  elif [ "$dev_import" != "true" ] && [ "$loopback_install" = true ]; then
+    warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true on loopback release install" "Run scripts/reload-env-if-stale.ps1 or restart Streamclone to enable Sign in (optional)"
   fi
 elif [ "$dev_import" != "true" ]; then
   warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true" "Run make setup (.env.dev sets this for in-app local token import)"

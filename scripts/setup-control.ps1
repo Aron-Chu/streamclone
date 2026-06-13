@@ -18,6 +18,120 @@ if ([string]::IsNullOrWhiteSpace($PidFile)) {
 $envPath = Join-Path $Root '.env'
 $envValues = if (Test-Path $envPath) { Read-EnvKeyValueFile -Path $envPath } else { @{} }
 $setupControlToken = [string]$envValues['SETUP_CONTROL_TOKEN']
+$composeLockPath = Join-Path $Root '.streamclone-compose.lock'
+$composeQueuePath = Join-Path $Root '.streamclone-start-queue.json'
+
+function Get-StreamcloneComposeLock {
+    if (-not (Test-Path $composeLockPath)) { return $null }
+    try { return (Get-Content -LiteralPath $composeLockPath -Raw | ConvertFrom-Json) } catch { return $null }
+}
+
+function Test-StreamcloneComposeLockActive {
+    param($Lock)
+    if (-not $Lock) { return $false }
+    if (-not $Lock.pid) { return $false }
+    return $null -ne (Get-Process -Id ([int]$Lock.pid) -ErrorAction SilentlyContinue)
+}
+
+function Read-StreamcloneOptionalStartQueue {
+    if (-not (Test-Path $composeQueuePath)) { return @() }
+    try {
+        $raw = Get-Content -LiteralPath $composeQueuePath -Raw | ConvertFrom-Json
+        if ($null -eq $raw) { return @() }
+        if ($raw -is [System.Array]) { return @($raw) }
+        return @($raw)
+    } catch {
+        return @()
+    }
+}
+
+function Write-StreamcloneOptionalStartQueue {
+    param([array]$Queue)
+    if ($Queue.Count -eq 0) {
+        Remove-Item -LiteralPath $composeQueuePath -Force -ErrorAction SilentlyContinue
+        return
+    }
+    Set-Content -LiteralPath $composeQueuePath -Value ($Queue | ConvertTo-Json -Compress) -Encoding UTF8
+}
+
+function Add-StreamcloneOptionalStartQueue {
+    param([string]$Service)
+    $entry = @{ service = $Service; queuedAt = (Get-Date).ToString('o') }
+    $queue = Read-StreamcloneOptionalStartQueue
+    foreach ($item in $queue) {
+        if ($item.service -eq $Service) { return $false }
+    }
+    $queue += $entry
+    Write-StreamcloneOptionalStartQueue -Queue $queue
+    return $true
+}
+
+function Format-StreamcloneStartDetail {
+    param(
+        [string]$Service,
+        [string]$Detail,
+        [string]$Blob = ''
+    )
+    $text = "$Detail $Blob".Trim()
+    if ($text -match 'registry:\s*denied|error from registry:\s*denied') {
+        return 'GitHub container registry denied the Analytics image. Building from streamclone-scraper instead (first build takes 5-15 min).'
+    }
+    if ($text -match 'scraper-preflight:\s*(.+?)(?:\r|$)') {
+        $msg = $Matches[1].Trim()
+        if ($msg -match 'not running') {
+            return 'Waiting for Analytics container — Camoufox warmup will run once Docker finishes.'
+        }
+        return $msg
+    }
+    if ($text -match 'WriteErrorException|FullyQualifiedErrorId') {
+        return 'Optional service startup hit a script error — check Docker Desktop; retry in a minute.'
+    }
+    if ($text -match 'docker compose failed') {
+        return "Docker compose failed while starting $Service. See .streamclone-start-$Service.log.err in the install folder."
+    }
+    return $Detail
+}
+
+function Start-StreamcloneComposeLockWatcher {
+    param(
+        [ValidateSet('scraper', 'clipper')]
+        [string]$Service,
+        [int]$ProcessId
+    )
+    $worker = Join-Path $PSScriptRoot 'start-profile-service-worker.ps1'
+    $psExe = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
+    $releaseScript = @"
+`$lockPath = '$($composeLockPath -replace "'", "''")'
+`$queuePath = '$($composeQueuePath -replace "'", "''")'
+`$root = '$($Root -replace "'", "''")'
+`$service = '$Service'
+`$pidToWait = $ProcessId
+`$worker = '$($worker -replace "'", "''")'
+`$psExe = '$psExe'
+try { Wait-Process -Id `$pidToWait -ErrorAction SilentlyContinue } catch { }
+if (Test-Path `$lockPath) {
+  try {
+    `$lock = Get-Content -LiteralPath `$lockPath -Raw | ConvertFrom-Json
+    if (`$lock.service -eq `$service -and [int]`$lock.pid -eq `$pidToWait) {
+      Remove-Item -LiteralPath `$lockPath -Force -ErrorAction SilentlyContinue
+    }
+  } catch { Remove-Item -LiteralPath `$lockPath -Force -ErrorAction SilentlyContinue }
+}
+if (Test-Path `$queuePath) {
+  try {
+    `$queue = @(Get-Content -LiteralPath `$queuePath -Raw | ConvertFrom-Json)
+    if (`$queue.Count -gt 0) {
+      `$next = `$queue[0]
+      `$rest = @(`$queue | Select-Object -Skip 1)
+      if (`$rest.Count -gt 0) { Set-Content -LiteralPath `$queuePath -Value (`$rest | ConvertTo-Json -Compress) -Encoding UTF8 }
+      else { Remove-Item -LiteralPath `$queuePath -Force -ErrorAction SilentlyContinue }
+      Start-Process -FilePath `$psExe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',`$worker,'-Service',[string]`$next.service,'-Root',`$root) -WindowStyle Hidden | Out-Null
+    }
+  } catch { }
+}
+"@
+    Start-Process -FilePath $psExe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $releaseScript) -WindowStyle Hidden | Out-Null
+}
 
 function Sync-SetupControlTokenFromEnv {
     if (-not (Test-Path $envPath)) { return }
@@ -121,12 +235,27 @@ function Start-ProfileServiceUpAsync {
 
     Sync-SetupControlTokenFromEnv
 
+    $lock = Get-StreamcloneComposeLock
+    if (Test-StreamcloneComposeLockActive -Lock $lock) {
+        if ($lock.service -eq $Service) {
+            return "$Service compose is already running (pid $($lock.pid))."
+        }
+        if ($lock.service -ne $Service) {
+            [void](Add-StreamcloneOptionalStartQueue -Service $Service)
+            $other = if ($lock.service -eq 'scraper') { 'Analytics' } else { 'Clip Studio' }
+            $self = if ($Service -eq 'scraper') { 'Analytics' } else { 'Clip Studio' }
+            return "$self queued - will start automatically after $other finishes (Docker runs one compose step at a time)."
+        }
+    }
+
+    $scraperSourceBuild = $false
     if ($Service -eq 'scraper') {
         Ensure-ScraperSiblingRepo
+        $scraperSourceBuild = Test-ScraperBuildFromSource -Root $Root
     }
 
     $useImages = Get-SetupControlUseImages
-    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $Service -UseImages:$useImages
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $Service -UseImages:$useImages -ScraperSourceBuild:$scraperSourceBuild
     $docker = Get-EnvDockerExe
     if (-not $docker) {
         throw "Docker is required. Install Docker Desktop and ensure 'docker.exe' is on PATH."
@@ -138,7 +267,8 @@ function Start-ProfileServiceUpAsync {
         if (Test-Path $path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
     }
     $args = $composeArgs + @('up', '-d', '--remove-orphans')
-    if ($useImages) { $args += '--pull', 'missing' }
+    if ($useImages -and -not $scraperSourceBuild) { $args += '--pull', 'missing' }
+    if ($scraperSourceBuild) { $args += '--build' }
     $args += $Service
 
     $proc = Start-Process -FilePath $docker `
@@ -148,13 +278,24 @@ function Start-ProfileServiceUpAsync {
         -RedirectStandardOutput $logFile `
         -RedirectStandardError $errLog `
         -PassThru
-    if ($Service -eq 'scraper') {
-        Start-ScraperCamoufoxWarmupAsync | Out-Null
-    }
+
+    Set-Content -LiteralPath $composeLockPath -Value (@{
+        service = $Service
+        pid     = $proc.Id
+        started = (Get-Date).ToString('o')
+    } | ConvertTo-Json -Compress) -Encoding UTF8
+
+    Start-StreamcloneComposeLockWatcher -Service $Service -ProcessId $proc.Id
     return "compose start initiated (pid $($proc.Id)); see $logFile"
 }
 
 function Start-ScraperCamoufoxWarmupAsync {
+    $warmupFlag = Join-Path $Root '.streamclone-scraper-warmup.requested'
+    if (Test-Path $warmupFlag) {
+        return 'Camoufox warmup already queued'
+    }
+    Set-Content -LiteralPath $warmupFlag -Value (Get-Date).ToString('o') -Encoding UTF8
+
     $warmupLog = Join-Path $Root '.streamclone-scraper-warmup.log'
     $warmupErr = "${warmupLog}.err"
     foreach ($path in @($warmupLog, $warmupErr)) {
@@ -203,6 +344,18 @@ function Get-StreamcloneProfileStartStatus {
     $percent = 15
     $phase = 'Starting service'
 
+    if (Test-Path $composeQueuePath) {
+        foreach ($item in (Read-StreamcloneOptionalStartQueue)) {
+            if ($item.service -eq $Service) {
+                $percent = 12
+                $phase = 'Queued'
+                $other = if ($Service -eq 'scraper') { 'Clip Studio' } else { 'Analytics' }
+                $detail = "Waiting for $other to finish - $other compose will run first, then this service starts automatically."
+                break
+            }
+        }
+    }
+
     if ($blob -match 'cloning|clone') {
         $percent = 20
         $phase = 'Downloading scraper repo'
@@ -228,6 +381,7 @@ function Get-StreamcloneProfileStartStatus {
     if ($blob -match 'error|failed|denied|cannot') {
         $percent = 5
         $phase = 'Docker reported an error'
+        $detail = Format-StreamcloneStartDetail -Service $Service -Detail $detail -Blob $blob
     }
 
     $nameFilter = if ($Service -eq 'scraper') { 'streamclone-scraper' } else { 'streamclone-clipper' }
@@ -238,6 +392,9 @@ function Get-StreamcloneProfileStartStatus {
             $percent = [math]::Max($percent, 82)
             $phase = 'Container is up'
             $detail = $status
+            if ($Service -eq 'scraper') {
+                Start-ScraperCamoufoxWarmupAsync | Out-Null
+            }
         }
         if ($status -match 'healthy') {
             $percent = 92
@@ -267,15 +424,16 @@ function Get-StreamcloneProfileStartStatus {
                 }
             } elseif ($warmupBlob -match 'cloudflare|warm the camoufox profile') {
                 $warmup = 'Cloudflare blocked — run scripts/warm-camoufox-profile.ps1 once, then retry sync'
-            } elseif ($warmupBlob -match 'waiting for scraper|scraper healthy') {
-                $warmup = 'Probing Camoufox / TwitchTracker…'
+            } elseif ($warmupBlob -match 'not running|waiting for scraper|scraper healthy') {
+                $warmup = 'Waiting for Analytics container, then probing Camoufox / TwitchTracker…'
                 if ($percent -ge 82 -and $percent -lt 94) {
                     $percent = 94
                     $phase = 'Warming Camoufox profile'
-                    $detail = $warmupLines[$warmupLines.Count - 1]
                 }
+            } elseif ($warmupBlob -match 'writeerror|fullyqualifiederrorid') {
+                $warmup = Format-StreamcloneStartDetail -Service 'scraper' -Detail ($warmupLines[$warmupLines.Count - 1]) -Blob $warmupBlob
             } else {
-                $warmup = $warmupLines[$warmupLines.Count - 1]
+                $warmup = Format-StreamcloneStartDetail -Service 'scraper' -Detail ($warmupLines[$warmupLines.Count - 1]) -Blob $warmupBlob
             }
         } elseif ($percent -ge 82) {
             $warmup = 'Camoufox warmup queued after container start'

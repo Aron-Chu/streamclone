@@ -1,0 +1,7 @@
+# Build scraper from streamclone-scraper sibling when GHCR pull is unavailable.
+services:
+  scraper:
+    image: !reset null
+    build:
+      context: ../../streamclone-scraper
+      dockerfile: Dockerfile

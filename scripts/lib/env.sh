@@ -232,6 +232,33 @@ env_synthesize() {
   env_set_key "$outfile" STREAMCLONE_PROFILE "$profile"
   env_generate_secrets "$outfile"
   env_apply_release_image_tag "$outfile"
+  ensure_localhost_dev_token_import "$outfile" || true
+}
+
+env_loopback_public_origin() {
+  local file="$1"
+  local key origin
+  for key in PUBLIC_ORIGIN FRONTEND_ORIGIN; do
+    origin="$(env_read_value "$file" "$key" 2>/dev/null || true)"
+    [ -n "$origin" ] || continue
+    case "$origin" in
+      http://localhost|http://127.0.0.1|http://localhost:*|http://127.0.0.1:*|https://localhost|https://127.0.0.1|https://localhost:*|https://127.0.0.1:*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+ensure_localhost_dev_token_import() {
+  local file="${1:-$ENV_REPO_ROOT/.env}"
+  [ -f "$file" ] || return 1
+  env_loopback_public_origin "$file" || return 1
+  local before
+  before="$(env_read_value "$file" TWITCH_DEV_TOKEN_IMPORT_ENABLED 2>/dev/null || true)"
+  [ "$before" = "true" ] && return 1
+  env_set_key "$file" TWITCH_DEV_TOKEN_IMPORT_ENABLED true
+  return 0
 }
 
 env_read_value() {
