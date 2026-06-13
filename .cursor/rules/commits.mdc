@@ -24,6 +24,8 @@ $env:GIT_COMMITTER_NAME = 'Aron-Chu'
 $env:GIT_COMMITTER_EMAIL = 'aroncloudchu@gmail.com'
 ```
 
+**Cursor may auto-append** `Co-authored-by: Cursor` on agent commits. If that happens, rewrite the message with `git commit-tree` + `git update-ref refs/heads/master <new>` (message file with no trailer), or commit yourself in a terminal outside the agent.
+
 ## Message format
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/) — see `CONTRIBUTING.md`.
