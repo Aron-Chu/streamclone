@@ -3043,46 +3043,49 @@ function SelectedMomentPanel({
     : undefined
 
   const canClipLive = isLiveView && channelLive !== false
+  const canExportVod = !isLiveView && Boolean(vodId)
 
   const handleCreateClip = async () => {
     if (!rollup) return
     setClipStatus('loading')
     setClipError('')
     try {
-      if (!canClipLive) {
+      if (!canClipLive && !canExportVod) {
         setClipStatus('error')
         setClipError(
           isLiveView
             ? 'Channel is not live right now. Clip moments from the live view require an active broadcast.'
-            : 'Past-stream moments cannot use Twitch clip creation while the channel is offline. Use Jump into VOD to watch this moment — live-only clipping will be replaced with VOD export later.',
+            : 'VOD ID is not resolved for this session yet. Wait for VOD metadata or open the stream on Twitch before exporting a past moment.',
         )
-        return
-      }
-      if (!isLiveView && !vodId) {
-        setClipStatus('error')
-        setClipError('VOD ID is not resolved for this session yet. Wait for VOD metadata or open the stream on Twitch before clipping a past moment.')
         return
       }
       const authStatus = await getClipperTwitchStatus().catch(() => null)
       if (authStatus && !authStatus.ok) {
-        setClipStatus('error')
-        setClipError(
-          authStatus.remediation
-            || describeClipperFailure({ failure_code: authStatus.failure_code })
-        )
-        return
+        const blockingCodes = canExportVod
+          ? ['twitch_not_configured', 'invalid_token']
+          : ['twitch_not_configured', 'invalid_token', 'missing_scope', 'client_id_mismatch']
+        if (blockingCodes.includes(authStatus.failure_code || '')) {
+          setClipStatus('error')
+          setClipError(
+            authStatus.remediation
+              || describeClipperFailure({ failure_code: authStatus.failure_code })
+          )
+          return
+        }
       }
       const pickReason = detectPickReason(rollup, baselines, topEmotesCatalog)
       const chatMultiplier = (rollup.chatCount ?? 0) / baselines.chat
       const data = await triggerClipperManual(channel, {
-        title: `Analytics Spike (${timeStr})`,
+        title: canExportVod ? `Analytics Export (${timeStr})` : `Analytics Spike (${timeStr})`,
         duration: 60.0,
         final_duration: 30.0,
         reason: `${pickReason} at ${timeStr}`,
         moment_context: {
           stream_id: streamId,
           minute_ts: rollup.minuteTs,
+          vod_id: vodId,
           vod_offset_seconds: offsetSeconds,
+          source_kind: canExportVod ? 'vod' : 'live',
           viewer_count: viewerValue(rollup),
           chat_per_min: rollup.chatCount ?? 0,
           emote_per_min: minuteEmoteTotal(rollup),
@@ -3142,6 +3145,14 @@ function SelectedMomentPanel({
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">
+          {vodId ? (
+            <Link
+              to={`/c/${encodeURIComponent(channel)}?vod=${encodeURIComponent(vodId)}&offset=${offsetSeconds}`}
+              className="flex items-center gap-2 rounded bg-cyan-600 px-4 py-2 text-xs font-black text-white hover:bg-cyan-700 transition shadow-lg shadow-cyan-600/20"
+            >
+              <span>Play in Streamclone</span>
+            </Link>
+          ) : null}
           {vodUrl ? (
             <a
               href={vodUrl}
@@ -3183,11 +3194,29 @@ function SelectedMomentPanel({
                 {clipStatus === 'error' && <span>Retry Clip</span>}
                 {clipStatus === 'idle' && <span>Clip Live Moment</span>}
               </button>
+            ) : canExportVod ? (
+              <button
+                type="button"
+                onClick={handleCreateClip}
+                disabled={clipStatus === 'loading'}
+                className={`flex items-center gap-2 rounded px-4 py-2 text-xs font-black transition ${
+                  clipStatus === 'loading'
+                    ? 'bg-zinc-800 text-zinc-400 border border-white/5 cursor-wait'
+                    : clipStatus === 'success'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-violet-600 text-white hover:bg-violet-700 shadow-lg shadow-violet-600/20'
+                }`}
+              >
+                {clipStatus === 'loading' && <span>Exporting...</span>}
+                {clipStatus === 'success' && <span>✓ Export Queued!</span>}
+                {clipStatus === 'error' && <span>Retry Export</span>}
+                {clipStatus === 'idle' && <span>Export Moment</span>}
+              </button>
             ) : (
               <button
                 type="button"
                 disabled
-                title="Twitch clip creation only works while the channel is live. Use Jump into VOD for past stream moments."
+                title="Twitch clip creation only works while the channel is live. Export moment requires a synced VOD ID for past streams."
                 className="flex items-center gap-2 rounded border border-white/10 bg-zinc-900 px-4 py-2 text-xs font-black text-zinc-500 cursor-not-allowed"
               >
                 Clip requires live channel
@@ -3204,7 +3233,11 @@ function SelectedMomentPanel({
       )}
       {clipStatus === 'success' && (
         <div className="mt-3 text-xs font-semibold text-emerald-400 rounded border border-emerald-500/10 bg-emerald-500/5 p-2.5 flex justify-between items-center">
-          <span>Clip queued — open Clip Studio to edit while the source downloads (~30–90s).</span>
+          <span>
+            {canExportVod
+              ? 'VOD export queued — open Clip Studio to edit while the segment downloads (may take 1–3 min for long VODs).'
+              : 'Clip queued — open Clip Studio to edit while the source downloads (~30–90s).'}
+          </span>
           {createdJobId && (
             <Link to={`/studio/${createdJobId}`} className="ml-2 underline text-emerald-300 font-bold hover:text-emerald-200">
               Open in Clip Studio →

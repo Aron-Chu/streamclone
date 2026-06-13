@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ApiError,
@@ -17,11 +17,13 @@ import {
   getStreamDiagnostics,
   keepaliveStream,
   startStream,
+  startVodPlayback,
   stopStream,
   unfollowChannel,
+  vodSessionKey,
   watchAnalyticsChannel,
 } from '../api'
-import type { AnalyticsMinuteRollup, AnalyticsTopEmote, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat } from '../api'
+import type { AnalyticsMinuteRollup, AnalyticsTopEmote, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat, VodStartResponse } from '../api'
 import { useAuth } from '../auth'
 import { useChatStore } from '../chatStore'
 import { normalizeBrowserOriginUrl } from '../config'
@@ -1115,17 +1117,17 @@ function StreamHistoryTable({ rows, sources, channel }: { rows: StreamStat[] | u
   }
   return (
     <div className="overflow-x-auto rounded border border-white/10 bg-white/[0.035]">
-      <div className="grid min-w-[620px] grid-cols-[minmax(0,1.6fr)_120px_120px_120px] gap-3 border-b border-white/10 px-3 py-2 text-[11px] font-black uppercase text-zinc-500">
+      <div className="grid min-w-[760px] grid-cols-[minmax(0,1.4fr)_100px_100px_100px_minmax(180px,1fr)] gap-3 border-b border-white/10 px-3 py-2 text-[11px] font-black uppercase text-zinc-500">
         <span>Stream</span>
         <span>Average</span>
         <span>Peak</span>
         <span>Watched</span>
+        <span>Actions</span>
       </div>
       {rows.map(row => (
-        <Link
+        <div
           key={row.id}
-          to={`/analytics/${encodeURIComponent(channel)}/${encodeURIComponent(row.id)}`}
-          className="grid min-w-[620px] grid-cols-[minmax(0,1.6fr)_120px_120px_120px] gap-3 border-b border-white/5 px-3 py-3 text-sm font-bold text-zinc-300 transition last:border-b-0 hover:bg-white/[0.05]"
+          className="grid min-w-[760px] grid-cols-[minmax(0,1.4fr)_100px_100px_100px_minmax(180px,1fr)] gap-3 border-b border-white/5 px-3 py-3 text-sm font-bold text-zinc-300 transition last:border-b-0 hover:bg-white/[0.05]"
         >
           <div className="min-w-0">
             <div className="truncate font-black text-white">{row.title}</div>
@@ -1134,7 +1136,25 @@ function StreamHistoryTable({ rows, sources, channel }: { rows: StreamStat[] | u
           <span>{fullCount(row.avgViewers)}</span>
           <span>{fullCount(row.peakViewers)}</span>
           <span>{count(row.hoursWatched)}</span>
-        </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to={`/analytics/${encodeURIComponent(channel)}/${encodeURIComponent(row.id)}`}
+              className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-black uppercase text-cyan-300 hover:border-cyan-400/40"
+            >
+              Analytics
+            </Link>
+            {row.videoId ? (
+              <Link
+                to={`/c/${encodeURIComponent(channel)}?vod=${encodeURIComponent(row.videoId)}`}
+                className="rounded border border-violet-400/20 bg-violet-500/10 px-2 py-1 text-[11px] font-black uppercase text-violet-200 hover:border-violet-300/40"
+              >
+                Play VOD
+              </Link>
+            ) : (
+              <span className="text-[11px] font-semibold text-zinc-600">No VOD ID</span>
+            )}
+          </div>
+        </div>
       ))}
     </div>
   )
@@ -1491,7 +1511,13 @@ function ChannelDetailSections({ details, dense }: { details?: ChannelDetails; d
 
 export default function Channel() {
   const { login } = useParams<{ login: string }>()
+  const [searchParams] = useSearchParams()
   const channelLogin = login ?? ''
+  const vodPlaybackId = searchParams.get('vod')?.trim() || ''
+  const vodOffsetSeconds = Math.max(0, Number.parseInt(searchParams.get('offset') || '0', 10) || 0)
+  const isVodPlayback = vodPlaybackId.length > 0
+  const relaySessionKey = isVodPlayback ? vodSessionKey(vodPlaybackId) : channelLogin
+  const [vodSeekOnStart, setVodSeekOnStart] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
   const sessionIdRef = useRef<string | undefined>()
   const [error, setError] = useState<string | null>(null)
@@ -1546,7 +1572,9 @@ export default function Channel() {
     enabled: Boolean(hlsUrl),
     muted,
     autoPlay: true,
-    latencyMode: settings.playbackLatencyMode,
+    mode: isVodPlayback ? 'vod' : 'live',
+    seekOnStart: isVodPlayback ? vodSeekOnStart : undefined,
+    latencyMode: isVodPlayback ? 'stable' : settings.playbackLatencyMode,
     onUnauthorizedHls: handleUnauthorizedHls,
   })
 
@@ -1572,7 +1600,7 @@ export default function Channel() {
   const diagnostics = useQuery({
     queryKey: ['stream-diagnostics', channelLogin, hlsUrl, playback.state],
     queryFn: () => getStreamDiagnostics(channelLogin),
-    enabled: Boolean(channelLogin && hlsUrl),
+    enabled: Boolean(channelLogin && hlsUrl && !isVodPlayback),
     refetchInterval: hlsUrl ? 5000 : false,
   })
   const emotePreview = useQuery({
@@ -1637,30 +1665,38 @@ export default function Channel() {
     setHlsUrl('')
     setStreamSession(null)
     setListeners(null)
+    setVodSeekOnStart(0)
 
     subscribe(channelLogin)
 
     const start = async (attempt = 0) => {
       try {
         const requestedQuality = requestQuality(settings.preferredQuality || 'best')
-        const response = await startStream(channelLogin, requestedQuality, settings.playbackLatencyMode)
+        const response: StartResponse | VodStartResponse = isVodPlayback
+          ? await startVodPlayback(vodPlaybackId, vodOffsetSeconds, requestedQuality, 'stable')
+          : await startStream(channelLogin, requestedQuality, settings.playbackLatencyMode)
         if (!alive) {
-          await stopStream(channelLogin, response.session_id).catch(() => undefined)
+          await stopStream(relaySessionKey, response.session_id).catch(() => undefined)
           return
         }
         sessionIdRef.current = response.session_id
         setStreamSession(response)
         setListeners(response.listeners ?? null)
+        if (isVodPlayback) {
+          const vodResponse = response as VodStartResponse
+          const seekTarget = Math.max(0, vodResponse.offset_seconds - vodResponse.seek_seconds)
+          setVodSeekOnStart(seekTarget)
+        }
         const playableUrl = await resolvePlayableHlsUrl(response.hlsUrl)
         if (!alive) {
-          await stopStream(channelLogin, response.session_id).catch(() => undefined)
+          await stopStream(relaySessionKey, response.session_id).catch(() => undefined)
           return
         }
         setHlsUrl(playableUrl)
         setRelayState('playing')
 
         intervalId = setInterval(() => {
-          keepaliveStream(channelLogin, sessionIdRef.current).catch(() => undefined)
+          keepaliveStream(relaySessionKey, sessionIdRef.current).catch(() => undefined)
         }, 20000)
       } catch (e) {
         if (alive && e instanceof ApiError && e.code === 'hls_not_ready' && e.retryable && attempt < 1) {
@@ -1669,10 +1705,17 @@ export default function Channel() {
           return
         }
         if (alive) {
-          const isOffline = e instanceof ApiError && e.code === 'channel_offline'
+          const isOffline = !isVodPlayback && e instanceof ApiError && e.code === 'channel_offline'
+          const isVodUnavailable = isVodPlayback && e instanceof ApiError && e.code === 'vod_unavailable'
           setIsChannelOffline(isOffline)
           setRelayState('error')
-          setError(isOffline ? 'This channel is currently offline.' : ((e as Error).message || 'stream start failed'))
+          if (isVodUnavailable) {
+            setError('This VOD is unavailable or has been deleted from Twitch.')
+          } else if (isOffline) {
+            setError('This channel is currently offline.')
+          } else {
+            setError((e as Error).message || (isVodPlayback ? 'VOD playback failed' : 'stream start failed'))
+          }
         }
       }
     }
@@ -1683,9 +1726,9 @@ export default function Channel() {
       if (intervalId) clearInterval(intervalId)
       setHlsUrl('')
       unsubscribe(channelLogin)
-      stopStream(channelLogin, sessionIdRef.current).catch(() => undefined)
+      stopStream(relaySessionKey, sessionIdRef.current).catch(() => undefined)
     }
-  }, [channelLogin, retryKey, settings.playbackLatencyMode, settings.preferredQuality, subscribe, unsubscribe])
+  }, [channelLogin, isVodPlayback, relaySessionKey, retryKey, settings.playbackLatencyMode, settings.preferredQuality, subscribe, unsubscribe, vodOffsetSeconds, vodPlaybackId])
 
   useEffect(() => {
     setEmoteStatus({ state: 'idle', count: 0, pending: 0 })

@@ -438,6 +438,12 @@ export interface StartResponse {
   qualityRestarted?: boolean
 }
 
+export interface VodStartResponse extends StartResponse {
+  vod_id: string
+  offset_seconds: number
+  seek_seconds: number
+}
+
 export interface HLSProbe {
   url?: string
   ready: boolean
@@ -766,6 +772,27 @@ export const startStream = (channel: string, quality?: string, latencyMode?: Pla
     body: JSON.stringify({ channel, quality, latency_mode: latencyMode }),
   }).then(r => json<StartResponse>(r))
 
+export const startVodPlayback = (
+  vodId: string,
+  offsetSeconds = 0,
+  quality?: string,
+  latencyMode?: PlaybackLatencyMode,
+): Promise<VodStartResponse> =>
+  fetch(`${VIDEO}/v1/stream/vod/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      vod_id: vodId,
+      offset_seconds: offsetSeconds,
+      quality,
+      latency_mode: latencyMode,
+    }),
+  }).then(r => json<VodStartResponse>(r))
+
+export function vodSessionKey(vodId: string): string {
+  return `vod:${vodId.trim()}`
+}
+
 export const getStreamDiagnostics = (channel: string): Promise<StreamDiagnostics> =>
   fetch(`${VIDEO}/v1/stream/diagnostics?channel=${encodeURIComponent(channel)}`).then(r => json<StreamDiagnostics>(r))
 
@@ -997,7 +1024,10 @@ const CLIPPER_BASE = CLIPPER === browserOrigin ? `${CLIPPER}/v1/clipper` : `${CL
 export interface ClipperMomentContext {
   stream_id?: string
   minute_ts?: string
+  vod_id?: string
   vod_offset_seconds?: number
+  vod_segment_start?: number
+  source_kind?: 'live' | 'vod' | string
   viewer_count?: number
   chat_per_min?: number
   emote_per_min?: number
@@ -1276,12 +1306,21 @@ export function describeClipperFailure(job: Pick<ClipperJob, 'failure_code' | 'e
     case 'offline':
     case 'not_found':
       if (job.error_message?.toLowerCase().includes('offline')) {
-        return 'Twitch only creates clips from live broadcasts. For past stream moments, use Jump into VOD — VOD-based clipping in Clip Studio is not available yet.'
+        return 'Twitch only creates clips from live broadcasts. For past stream moments, use Export moment when a VOD ID is available.'
       }
       if (job.failure_code === 'offline') {
-        return 'The channel was offline when clip creation was attempted. Clip moments from live analytics require the broadcaster to be live; for past streams, use Jump into VOD.'
+        return 'The channel was offline when clip creation was attempted. For past streams, use Export moment from analytics when VOD metadata is synced.'
       }
       return job.error_message || 'Clip request failed (channel may be offline or unavailable).'
+    case 'vod_auth_failed':
+      return 'VOD export could not authenticate with Twitch. Run make twitch-local-auth, update .env, and recreate the clipper service.'
+    case 'vod_resolve_failed':
+    case 'vod_download_failed':
+    case 'vod_download_timeout':
+    case 'vod_resolve_timeout':
+      return job.error_message || 'VOD segment download failed. Confirm the VOD is still available on Twitch and retry.'
+    case 'vod_invalid':
+      return 'VOD export requires a valid vod_id in the moment context.'
     case 'job_failed':
     case 'transcribe_failed':
     case 'render_failed':

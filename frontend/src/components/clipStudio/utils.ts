@@ -30,6 +30,9 @@ export function buildEmoteMap(emotes: ChannelEmote[]): Record<string, string> {
 export function spikePositionInSource(job: ClipperJob, sourceDuration: number): number | null {
   const ctx = job.moment_context
   if (!ctx || ctx.vod_offset_seconds == null) return null
+  if (ctx.vod_segment_start != null) {
+    return Math.max(0, Math.min(sourceDuration, ctx.vod_offset_seconds - ctx.vod_segment_start))
+  }
   const clipStart = Math.max(0, (ctx.vod_offset_seconds ?? 0) - (job.source_duration / 2))
   return Math.max(0, Math.min(sourceDuration, (ctx.vod_offset_seconds ?? 0) - clipStart))
 }

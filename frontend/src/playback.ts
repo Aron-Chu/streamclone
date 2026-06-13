@@ -99,6 +99,9 @@ interface UseHlsPlaybackOptions {
   muted?: boolean
   autoPlay?: boolean
   latencyMode?: PlaybackLatencyMode
+  mode?: 'live' | 'vod'
+  /** Seconds into the relayed stream to seek once playback starts (VOD mode). */
+  seekOnStart?: number
   onLatencyDowngrade?: (mode: PlaybackLatencyMode) => void
   /** Fired after repeated 401s on HLS playlists — usually stale session or dead relay. */
   onUnauthorizedHls?: () => void
@@ -210,7 +213,10 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     stageRef.current = 'starting'
     setState('starting')
     setError(null)
-    const latencyMode = effectiveLatencyMode
+    const playbackMode = options.mode ?? 'live'
+    const latencyMode = playbackMode === 'vod' ? 'stable' : effectiveLatencyMode
+    const seekTarget = playbackMode === 'vod' ? Math.max(0, options.seekOnStart ?? 0) : 0
+    let seekApplied = seekTarget <= 0
     setMetrics({ ...emptyMetrics, hlsStage: 'starting', latencyMode: latencyModeLabel(latencyMode) })
     video.muted = Boolean(options.muted)
 
@@ -235,6 +241,10 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
 
     const markPlaying = () => {
       if (!alive) return
+      if (!seekApplied && seekTarget > 0 && Number.isFinite(video.duration)) {
+        video.currentTime = Math.min(seekTarget, Math.max(0, video.duration - 0.25))
+        seekApplied = true
+      }
       if (rebufferStartedRef.current !== null) {
         const rebufferMs = performance.now() - rebufferStartedRef.current
         if (rebufferMs >= rebufferDowngradeMs) {
@@ -316,6 +326,10 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
         hls.on(HlsPlayer.Events.MANIFEST_PARSED, () => {
           stageRef.current = 'manifest-parsed'
           updateMetrics()
+          if (!seekApplied && seekTarget > 0) {
+            video.currentTime = seekTarget
+            seekApplied = true
+          }
           if (options.autoPlay !== false) video.play().catch(() => undefined)
         })
         hls.on(HlsPlayer.Events.BUFFER_APPENDED, () => {
@@ -433,7 +447,7 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
       video.removeAttribute('src')
       video.load()
     }
-  }, [effectiveLatencyMode, options.autoPlay, options.enabled, options.muted, options.onLatencyDowngrade, options.src, videoRef])
+  }, [effectiveLatencyMode, options.autoPlay, options.enabled, options.mode, options.muted, options.onLatencyDowngrade, options.seekOnStart, options.src, videoRef])
 
   return useMemo(() => ({ state, error, metrics, jumpLive, effectiveLatencyMode }), [state, error, metrics, jumpLive, effectiveLatencyMode])
 }
