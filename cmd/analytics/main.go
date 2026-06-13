@@ -98,11 +98,18 @@ func main() {
 		cfg.AnalyticsVODGQLSegmentSeconds,
 		cfg.AnalyticsVODGQLDenseSegmentSeconds,
 		cfg.AnalyticsVODGQLHotSegmentPageThreshold,
+		cfg.AnalyticsVODGQLHotSlowAdvanceSec,
+		cfg.AnalyticsVODGQLHotSlowAdvancePages,
+		cfg.AnalyticsVODGQLHotCommentsPerPage,
+		cfg.AnalyticsVODGQLPriorityEdgeSeconds,
 		cfg.AnalyticsVODGQLIncrementalDB,
 		cfg.AnalyticsTrackerScrapeMS,
 		cfg.AnalyticsPassTTMaxAge,
 		cfg.AnalyticsTTMaxAgeMS,
+		cfg.AnalyticsTTStaleMaxAgeMS,
+		cfg.AnalyticsTTPrefetchEnabled,
 		cfg.AnalyticsTTDirectHTTPEnabled,
+		cfg.AnalyticsTTDirectHTTPStaleOnly,
 		cfg.AnalyticsTTDirectHTTPTimeoutMS,
 	)
 	handler := analytics.NewHandler(store, collector, helix, syncService)

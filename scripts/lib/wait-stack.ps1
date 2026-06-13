@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # Tiered readiness gates: infra -> apps -> proxy (optional HLS probe).
 param(
-    [string]$Url = 'http://localhost:8090/',
+    [string]$Url = 'http://127.0.0.1:8090/',
     [string]$Root = '',
     [int]$TimeoutSec = 300,
     [int]$IntervalSec = 3,
@@ -111,7 +111,7 @@ function Wait-StreamcloneAppsReady {
 
 function Wait-StreamcloneProxyReady {
     param(
-        [string]$Url = 'http://localhost:8090/',
+        [string]$Url = 'http://127.0.0.1:8090/',
         [int]$TimeoutSec = 300,
         [int]$IntervalSec = 3
     )
@@ -124,7 +124,7 @@ function Wait-StreamcloneProxyReady {
 
 function Wait-StreamcloneHLSReady {
     param(
-        [string]$BaseUrl = 'http://localhost:8090',
+        [string]$BaseUrl = 'http://127.0.0.1:8090',
         [string]$Channel = '',
         [int]$TimeoutSec = 60
     )
@@ -175,7 +175,7 @@ function Wait-StreamcloneHLSReady {
 function Wait-StreamcloneTieredReadiness {
     param(
         [string]$Root = '',
-        [string]$Url = 'http://localhost:8090/',
+        [string]$Url = 'http://127.0.0.1:8090/',
         [int]$TimeoutSec = 300,
         [int]$IntervalSec = 3,
         [switch]$SkipHLS,

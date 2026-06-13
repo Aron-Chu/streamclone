@@ -45,8 +45,11 @@ function Get-StreamcloneStartLogTail {
 function Get-StreamcloneDiagnostics {
     param(
         [string]$Root,
-        [string]$WebUrl = 'http://localhost:8090/'
+        [string]$WebUrl = ''
     )
+    if ([string]::IsNullOrWhiteSpace($WebUrl)) {
+        $WebUrl = (Get-StreamcloneAppUrl) + '/'
+    }
 
     $suggestions = [System.Collections.Generic.List[string]]::new()
     $envFile = Join-Path $Root '.env'
@@ -130,6 +133,16 @@ function Get-StreamcloneDiagnostics {
         }
     }
 
+    if (-not $webOk) {
+        $localhostOk = Test-StreamcloneWebReachable -Url 'http://localhost:8090/' -TimeoutSec 3
+        $loopbackOk = Test-StreamcloneWebReachable -Url (Get-StreamcloneAppUrl) -TimeoutSec 5
+        if (-not $localhostOk -and $loopbackOk) {
+            $webOk = $true
+            $WebUrl = (Get-StreamcloneAppUrl) + '/'
+            [void]$suggestions.Add('Use http://127.0.0.1:8090/ — localhost is broken on this PC (WSL port relay on [::1]:8090).')
+        }
+    }
+
     $setupControl = Test-StreamcloneSetupControlHealth
     if (-not $setupControl) {
         [void]$suggestions.Add('Run Start Streamclone.cmd once, or: powershell -File scripts\ensure-setup-control.ps1')
@@ -137,7 +150,7 @@ function Get-StreamcloneDiagnostics {
 
     $scraperReady = Test-StreamcloneHostServiceHealth -Url 'http://localhost:8000/health'
     $clipperReady = $false
-    foreach ($clipperUrl in @('http://localhost:8090/v1/clipper/health', 'http://localhost:8095/health')) {
+    foreach ($clipperUrl in @((Get-StreamcloneAppUrl '/v1/clipper/health'), 'http://127.0.0.1:8095/health')) {
         if (Test-StreamcloneHostServiceHealth -Url $clipperUrl) {
             $clipperReady = $true
             break

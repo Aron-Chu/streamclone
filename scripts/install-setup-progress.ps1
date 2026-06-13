@@ -89,10 +89,13 @@ function Invoke-DockerComposePullWithProgress {
 
 function Wait-StreamcloneStackReadyWithProgress {
     param(
-        [string]$Url = 'http://localhost:8090/',
+        [string]$Url = '',
         [int]$TimeoutSec = 300,
         [int]$IntervalSec = 3
     )
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        $Url = (Get-StreamcloneAppUrl) + '/'
+    }
     Set-InstallProgress -Title 'Waiting for services' -Detail 'First install: 3-8 min while images download and frontend becomes healthy.'
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {

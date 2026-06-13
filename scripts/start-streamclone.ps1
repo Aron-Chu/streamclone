@@ -86,6 +86,12 @@ $null = $LASTEXITCODE
 & (Join-Path $PSScriptRoot 'lib\wait-stack.ps1')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+. (Join-Path $PSScriptRoot 'lib\env.ps1')
+if (-not (Test-StreamcloneWebReachable -Url 'http://localhost:8090/' -TimeoutSec 3) -and (Test-StreamcloneWebReachable -Url (Get-StreamcloneAppUrl))) {
+    Write-Host ''
+    Write-Host 'Note: http://localhost:8090 fails on this PC (WSL port relay). Use http://127.0.0.1:8090/' -ForegroundColor Yellow
+}
+
 if (Test-Path (Join-Path $Root 'VERSION')) {
     . (Join-Path $PSScriptRoot 'lib\install-upgrade.ps1')
     try {
@@ -101,13 +107,13 @@ $controlScript = Join-Path $PSScriptRoot 'setup-control.ps1'
 
 
 Write-Host ''
-Write-Host 'Streamclone is running at http://localhost:8090' -ForegroundColor Green
+Write-Host ("Streamclone is running at {0}" -f (Get-StreamcloneAppUrl)) -ForegroundColor Green
 Write-Host 'Stop:  powershell -File scripts/stop-streamclone.ps1'
 if ($Profile -in @('clipper', 'full')) {
-    Write-Host 'Clips: open http://localhost:8090 and click Sign in (optional) (one-time Twitch login)'
+    Write-Host ("Clips: open {0} and click Sign in (optional) (one-time Twitch login)" -f (Get-StreamcloneAppUrl))
     Write-Host '      or: powershell -File scripts/twitch-auth.ps1 -Action local-auth  (Twitch CLI)'
 }
 
 if (-not $NoBrowser) {
-    Start-Process 'http://localhost:8090/'
+    Start-Process (Get-StreamcloneAppUrl)
 }

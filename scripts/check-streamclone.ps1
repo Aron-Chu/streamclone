@@ -102,7 +102,7 @@ if (-not $Json) {
 
     Write-Host ''
     if ($report.healthy) {
-        Write-Host 'Streamclone looks healthy. Open http://localhost:8090/' -ForegroundColor Green
+        Write-Host ("Streamclone looks healthy. Open {0}" -f (Get-StreamcloneAppUrl)) -ForegroundColor Green
     } else {
         Write-Host 'Streamclone is not fully ready.' -ForegroundColor Yellow
         if ($report.suggestions.Count -gt 0) {

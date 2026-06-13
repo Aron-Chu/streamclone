@@ -618,6 +618,11 @@ export const setAlwaysTracked = (channel: string, track: boolean): Promise<Analy
     body: JSON.stringify({ channel, track }),
   }).then(r => json<AnalyticsWatchResponse>(r))
 
+export const prefetchAnalyticsTracker = (streamId: string, channel: string): Promise<{ status: string }> =>
+  fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}/prefetch-tracker?channel=${encodeURIComponent(channel)}`, {
+    method: 'POST',
+  }).then(r => json<{ status: string }>(r))
+
 export const getAnalyticsStream = async (
   streamId: string,
   opts?: { sparse?: boolean; channel?: string },

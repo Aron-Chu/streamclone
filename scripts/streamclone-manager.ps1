@@ -50,7 +50,7 @@ function Invoke-ManagerRepair {
     Write-Host 'Repair will:' -ForegroundColor Cyan
     Write-Host '  1. Re-pull release images from GHCR'
     Write-Host '  2. Recreate containers (keeps database and MinIO data)'
-    Write-Host '  3. Wait until http://localhost:8090 responds'
+    Write-Host ('  3. Wait until {0} responds' -f (Get-StreamcloneAppUrl))
     Write-Host ''
     Write-Host 'First repair after a clean machine may take several minutes (large video image).' -ForegroundColor DarkGray
     Write-Host ''
@@ -213,7 +213,7 @@ try {
         'uninstall' { Invoke-ManagerUninstall }
         'open' {
             Get-ManagerInstallRoot
-            Start-Process 'http://localhost:8090/'
+            Start-Process (Get-StreamcloneAppUrl)
         }
         'logs' {
             Get-ManagerInstallRoot
