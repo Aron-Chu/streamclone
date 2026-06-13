@@ -37,9 +37,16 @@ SKIP_DIRS = {
     ".git",
     ".tmp",
     ".venv",
+    ".gocache",
+    ".gomodcache",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
     "bin",
+    "clipper-data",
     "dist",
     "node_modules",
+    "vendor",
 }
 
 QUERY_BY_LANGUAGE = {

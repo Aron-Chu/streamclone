@@ -2,7 +2,7 @@
 
 This explains how the **optional scraper profile** gets minute-level viewer data from **TwitchTracker**, why plain HTTP fails, what **Camoufox** does, and what role **proxies** actually played in practice.
 
-**Scope:** TwitchTracker analytics scrapes (`--profile scraper`). The scraper lives in the sibling repo [`streamclone-scraper`](https://github.com/Aron-Chu/streamclone-scraper) and runs as Docker service `scraper:8000`. Core watching/clipping does **not** need it.
+**Scope:** TwitchTracker analytics scrapes (`--profile scraper`). Release installs use the scraper image `ghcr.io/aron-chu/streamclone/scraper:${IMAGE_TAG}` when `SCRAPER_USE_IMAGES=1`; source/dev installs can build from the sibling repo [`streamclone-scraper`](https://github.com/Aron-Chu/streamclone-scraper). In both cases it runs as Docker service `scraper:8000`. Core watching/clipping does **not** need it.
 
 ---
 
@@ -87,7 +87,7 @@ flowchart LR
 3. Press Enter — cookies are saved to the profile dir.
 4. Headless Docker scrapes reuse those cookies.
 
-Preflight scripts (`scripts/scraper-preflight.ps1`) tell you to run warmup if they still see Cloudflare HTML.
+Preflight scripts (`scripts/scraper-preflight.ps1` / `.sh`) run two sequential TwitchTracker detail scrapes. This catches both Cloudflare blocks and pooled-browser regressions where the first scrape succeeds but the second reuses a closed browser. They tell you to run warmup if they still see Cloudflare HTML.
 
 ### 3. Highcharts injection (data extraction)
 
@@ -205,6 +205,7 @@ sequenceDiagram
 |---------|--------------|-----|
 | Flat viewer chart, peak-only stats | Scrape returned shell HTML, no `meta#ecs` | Run scraper preflight; warmup Camoufox profile |
 | `"just a moment"` in HTML | Cloudflare block | `warm-camoufox-profile.ps1`; check profile volume locks |
+| First scrape succeeds, next scrape says browser/context closed | Pooled Camoufox entry was closed or died | Use current scraper with pool recycling; run sequential `scraper-preflight` before trusting install |
 | Scraper “works” on `:8000` but analytics empty (Windows) | **wslrelay** stale listener | Use `diagnose-scraper.ps1 -UseDocker` or hit scraper via `docker exec` |
 | Camoufox deadlocks | `SCRAPER_MAX_CONCURRENT > 1` with ephemeral browser | Use `SCRAPER_EPHEMERAL_BROWSER=true`, `SCRAPER_MAX_CONCURRENT=1` on Windows |
 | Proxy configured but no effect on TT | By design for TwitchTracker | Expect direct Camoufox; proxies target other workloads |
@@ -240,7 +241,7 @@ Scraper port **`8000`** should stay on trusted networks (same as other dev servi
 | `scripts/scraper-cdp.ps1` | Host Chrome CDP fallback |
 | `.kiro/steering/analytics.md` | Scraper integration + pitfalls |
 | `.kiro/specs/scraper-optimization-notes.md` | Benchmarks, proxy vs direct |
-| `streamclone-scraper/` (sibling repo) | Scraper implementation (`main.py`, browser pool, injection) |
+| `streamclone-scraper/` (sibling repo) | Source scraper implementation (`main.py`, browser pool, injection) for local builds |
 
 ---
 

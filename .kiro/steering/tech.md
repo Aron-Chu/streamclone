@@ -29,6 +29,7 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - Backend vet: `make vet`
 - Full stack: `make up`
 - Compose profiles (tier fragments in `deploy/env/`): `profile-core` (directory/playback/chat/emotes), `profile-scraper` (minute charts + TwitchTracker), `profile-clipper` (Clip Studio worker), `profile-full` (all optional services). Bootstrap/setup scripts merge these into `.env`; UI **Start Analytics** / clipper toggles start services via setup-control — not raw `docker compose` from the browser.
+- Release installs use prebuilt images selected by `.env` `IMAGE_TAG` and bundle `VERSION`; source checkouts use local builds unless `-UseImages` / `--use-images` is passed. Keep this distinction clear when debugging "my install does not have my commit".
 - Host **setup-control** daemon: loopback `:9191`, started by `scripts/ensure-setup-control.ps1` on setup/start/install. Caddy proxies `/v1/setup-control/*` → `host.docker.internal:9191`. PID file: `.streamclone-setup-control.pid`.
 - Stop stack (keep data): `make down` or `scripts/stop-streamclone.ps1` / **Stop Streamclone** launcher
 - Remove volumes only: `make down-clean`
@@ -71,3 +72,4 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - For local proxy, auth, or chat transport changes, validate `docker compose ... config`, `http://localhost:8090/v1/auth/debug`, and a websocket subscribe through `ws://localhost:8090/v1/ws`.
 - For channel playback/UI changes, verify against the proxied local bundle at `http://localhost:8090`, not just the standalone Vite dev server.
 - For docs-only changes, no build is required unless the docs describe a command or generated artifact that should be verified.
+- After adding/moving symbols or completing a cross-package change, rebuild the AST graph with `make codegraph` so codegraph MCP stays fresh.

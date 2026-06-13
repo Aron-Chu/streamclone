@@ -46,6 +46,24 @@ Pooled mode stable on single TT detail run; faster than ephemeral bridge due to 
 - TT detail `scrape_cache.put()` gated on ecs or ≥3 chart points.
 - `GET .../sync/status` returns `200 {"phase":"idle"}` when Redis key missing.
 
+## Pool lifecycle fix (2026-06-12)
+
+Root cause for the recurring "Viewer chart unavailable" / random analytics scrape failures: pooled Camoufox mode reused a browser entry after its persistent context had been closed, so the first TwitchTracker scrape could pass and the next failed with `BrowserContext.new_page: Target page, context or browser has been closed`.
+
+Fixes:
+
+- `streamclone-scraper` skips closing pooled Camoufox contexts during normal session teardown.
+- Browser-pool `release()` checks entry liveness and recycles dead entries.
+- Browser-closed exceptions mark the pool entry for recycle before it is requeued.
+- `scripts/scraper-preflight.ps1` and `.sh` run two sequential TwitchTracker detail probes, and setup/CI use that instead of `/health` alone.
+
+Verification:
+
+```powershell
+.\scripts\scraper-preflight.ps1 -CheckOnly
+docker run --rm -v "C:\Users\Aron\streamclone-scraper:/app" -w /app streamclone-scraper python -m unittest test_site_profiles.py test_protection.py -v
+```
+
 ## TT network + proxy comparison (2026-06-09 evening)
 
 **What analytics needs from TT detail:** `viewerExtraction` with ≥3 chart points (injection or `meta#ecs`), `cloudflareState=resolved`, ~80 sample points for minute rollups.

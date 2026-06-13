@@ -12,6 +12,7 @@ Current provider/channel flow:
 4. `ensure` checks PostgreSQL for ready and pending channel/global emotes.
 5. If selected providers are ready, the service rebuilds the Redis dictionary and returns `ready`.
 6. If selected providers still need loading, the service starts a background provider seed and returns `processing`; the frontend polls every 5 seconds while processing.
+7. If a seed is already running or assets are pending, `ensure` returns `processing` from local state before making remote provider refresh calls. Keep this fast path so VOD chat sync and 7TV polling do not wait on repeated 7TV API checks while assets are rendering.
 
 Current provider seed flow:
 

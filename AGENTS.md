@@ -11,7 +11,7 @@ Read this file first. Load **one** domain steering doc, then use the code graph 
 | Live clipper / Clip Studio | `.kiro/steering/clipper.md` | `get_ast_chunk("ClipStudio")`, `get_ast_chunk("VideoStage")`, `get_ast_chunk("CaptionOverlayEditor")`, `get_ast_chunk("_process")`, `get_ast_chunk("prepare_emote_assets")` |
 | Analytics / rollups / VODs | `.kiro/steering/analytics.md`, `.kiro/specs/vod-chat-pipeline-notes.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("gqlCommentText")`, `get_ast_chunk("hasGoodChatCoverageFromRollups")`, `get_ast_chunk("SyncProgressPanel")` |
 | System health / optional services / setup-control | `.kiro/steering/product.md`, `.kiro/steering/windows-dev.md` | `get_ast_chunk("SystemHealthPanel")`, `get_ast_chunk("useOptionalServices")`, `get_ast_chunk("OptionalServicesPanel")` |
-| Scraper optimization / TT perf | `.kiro/specs/scraper-optimization-notes.md`, `.kiro/steering/analytics.md` | — |
+| Scraper optimization / TT perf | `.kiro/specs/scraper-optimization-notes.md`, `.kiro/steering/analytics.md`, `docs/scraper-cloudflare-and-proxy.md` | — |
 | HLS playback / MediaMTX 401 | `.kiro/steering/playback.md` | `get_call_chain("waitForHLS")`, `get_blast_radius("filterTwitchAdSegments")` |
 | Local Twitch auth | `.kiro/steering/local-auth.md` | — |
 | Emotes / 7TV / FFZ | `.kiro/steering/emote-pipeline.md` | — |
@@ -31,7 +31,7 @@ Deterministic AST graph in `.codegraph/streamclone.kuzu`. Prefer graph tools ove
 4. **`search_symbols(query)`** — find symbols when the exact name is unknown.
 5. **`graph_status()`** / **`rebuild_graph()`** — index freshness and rebuild.
 
-Setup: `make codegraph-install` then `make codegraph`. Rebuild after large refactors. See `tools/codegraph/README.md`.
+Setup: `make codegraph-install` then `make codegraph`. Rebuild after large refactors or commits that add/move symbols. See `tools/codegraph/README.md`.
 
 The Kuzu database is a **single file** at `.codegraph/streamclone.kuzu` (not a directory). If MCP fails to start, run `powershell -File scripts/mcp-preflight.ps1`.
 
@@ -59,6 +59,8 @@ If the graph is missing or stale, run `make codegraph` before debugging cross-pa
 6. Debug mode / instrumentation only when the failure is unknown — not for routine fixes.
 7. Before PRs that touch auth, compose, clipper, or env: read `docs/security.md`; run `make security-scan` when changing secrets-related paths.
 8. Git commits use [Conventional Commits](https://www.conventionalcommits.org/) — see `CONTRIBUTING.md` (`type(scope): summary`).
+9. Release installs under `%USERPROFILE%\streamclone` are usually **not git checkouts**. To get code changes into that install, update/publish Docker images and sync `IMAGE_TAG`/`VERSION`; copying source files only updates scripts/docs.
+10. After scraper, analytics, install, or OAuth changes, update `.kiro/steering/*` and rebuild the AST graph (`make codegraph`) before calling the work fully synchronized.
 
 ## Layout
 
