@@ -15,6 +15,8 @@ The primary in-app local login path is the `Use local token` button. It should s
 
 `make twitch-local-auth` is an optional terminal helper. It syncs Twitch CLI app credentials into `.env`, makes sure the local proxy is running, runs the Twitch CLI device-code token flow, prepares a short-lived backend claim, and opens a localhost claim URL that sets the browser session cookie.
 
+For release installs, Twitch OAuth app credentials are optional for watching and local sign-in. Missing `TWITCH_OAUTH_CLIENT_ID/SECRET` should be treated as degraded Helix/token-refresh support, not as an install blocker. Local loopback auth depends on `TWITCH_DEV_TOKEN_IMPORT_ENABLED=true`, the backend device-code/import flow, and `http://localhost:8090` alignment.
+
 ## Guardrails
 
 - Keep Twitch access and refresh tokens out of query strings, fragments, logs, and frontend local storage.
@@ -24,6 +26,7 @@ The primary in-app local login path is the `Use local token` button. It should s
 - Keep the session cookie server-set and HttpOnly. The browser should not synthesize or persist auth cookies itself.
 - Keep local browser, chat auth, frontend runtime config, and Caddy proxy aligned to `http://localhost:8090` unless intentionally testing a tunnel or deployment.
 - If adding a new local auth helper, prefer using the existing backend validation flow so imported tokens still match `TWITCH_OAUTH_CLIENT_ID`.
+- Do not reintroduce redirect OAuth setup instructions for localhost installs; the current path is device-code/import + one-time local claims.
 
 ## Task Checklist For Auth Changes
 

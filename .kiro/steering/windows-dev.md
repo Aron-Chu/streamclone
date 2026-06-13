@@ -68,6 +68,19 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml logs -f clipper analytics
 ```
 
+## Release install sync
+
+`C:\Users\Aron\streamclone` from Setup.exe / ZIP is a release install, not a git checkout. Its running app is controlled by extracted `VERSION`, `.env` `IMAGE_TAG`, and Docker images. Source commits in `C:\Users\Aron\twitch-7tv-clone` do not affect that install until images are rebuilt/published and the install is updated.
+
+Check drift:
+
+```powershell
+Get-Content C:\Users\Aron\streamclone\VERSION
+Select-String '^IMAGE_TAG=' C:\Users\Aron\streamclone\.env
+```
+
+If they differ, run **Manage Streamclone → Update** or `Invoke-StreamcloneUpgrade` from `scripts\lib\install-upgrade.ps1`. Copying source files into the install folder only updates scripts/docs; it does not update Go/frontend code baked into images.
+
 ## Twitch local auth (Windows)
 
 ```powershell
@@ -108,3 +121,4 @@ If `.env` changed after setup-control started, `ensure-setup-control.ps1` restar
 - Prefer `curl.exe http://localhost:8090/...` for probes on Windows PowerShell.
 - If optional services or install wizard fail, check setup-control on `:9191` before blaming Docker.
 - After `.env` / OAuth changes, run `make reload-env` (or `make twitch-sync`, which calls it). `docker compose restart` does **not** reload `env_file`; affected services: `chat`, `metadata`, `analytics`, `emote`, and `clipper` when using Clip Studio. `make app` / `make up` run `ensure-oauth` + `reload-env-if-stale` to catch drift (e.g. `.env` has OAuth but `emote` container was created without it).
+- For scraper/full installs, `scripts\scraper-preflight.ps1 -CheckOnly` must pass sequential TwitchTracker detail probes; `/health` alone is not enough.

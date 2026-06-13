@@ -10,7 +10,7 @@ The analytics service collects per-minute viewer, chat, and 7TV emote rollups fo
 - API: `/v1/analytics/channels/{login}/live`, `/streams`, `/streams/{streamId}`, sync POST
 - Frontend: `frontend/src/components/Analytics.tsx`
 - Historical enrichment: TwitchTracker stats + Twitch GQL VOD comment sync (`SyncService`)
-- **Scraper**: sibling repo `streamclone-scraper`, Compose service `scraper:8000` (`SCRAPER_API_URL=http://scraper:8000/v2/scrape`). Default engine: **Camoufox** (`SCRAPER_BROWSER=camoufox`). Compose defaults use a **pooled browser** (`SCRAPER_EPHEMERAL_BROWSER=false`, `SCRAPER_MAX_CONCURRENT=2`); local Windows dev sets `SCRAPER_EPHEMERAL_BROWSER=true`, `SCRAPER_MAX_CONCURRENT=1`, `REDDIT_PROVIDER=off` in `.env` and runs `docker compose --env-file .env -f deploy/docker-compose.yml` so substitutions match (otherwise compose `environment:` overrides `env_file`). Profile volume `scraper-profile` at `/data/camoufox-profile`. Fallbacks: `SCRAPER_BROWSER=chromium` or `cdp` (host Chrome via `scripts/scraper-cdp.ps1`). Warm CF cookies once: `scripts/warm-camoufox-profile.ps1`. Analytics sync sends `useProxy:false` and tiered `maxAge` for Tracker URLs; set `PROXY_BYPASS=twitchtracker.com`. Windows: use `.\scripts\diagnose-scraper.ps1 -UseDocker` (avoids wslrelay on localhost:8000).
+- **Scraper**: Compose service `scraper:8000` (`SCRAPER_API_URL=http://scraper:8000/v2/scrape`). Release installs use `SCRAPER_USE_IMAGES=1` and `ghcr.io/aron-chu/streamclone/scraper:${IMAGE_TAG}` via `deploy/docker-compose.release.yml`; source/dev builds can use the sibling repo `streamclone-scraper`. Default engine: **Camoufox** (`SCRAPER_BROWSER=camoufox`). Compose defaults use a **pooled browser** (`SCRAPER_EPHEMERAL_BROWSER=false`, `SCRAPER_MAX_CONCURRENT=2`, `SCRAPER_BROWSER_POOL_SIZE=1`); Windows release profile fragments prefer `SCRAPER_EPHEMERAL_BROWSER=true`, `SCRAPER_MAX_CONCURRENT=1` for profile-lock safety. The scraper recycles dead pooled Camoufox entries, and `scripts/scraper-preflight.ps1` / `.sh` run **two sequential TwitchTracker detail probes** to catch "first scrape works, second scrape reuses a dead browser" regressions. Profile volume `scraper-profile` at `/data/camoufox-profile`. Fallbacks: `SCRAPER_BROWSER=chromium` or `cdp` (host Chrome via `scripts/scraper-cdp.ps1`). Warm CF cookies once: `scripts/warm-camoufox-profile.ps1`. Analytics sync sends `useProxy:false` and tiered `maxAge` for Tracker URLs; set `PROXY_BYPASS=twitchtracker.com`. Windows: use `.\scripts\diagnose-scraper.ps1 -UseDocker` or `.\scripts\scraper-preflight.ps1 -CheckOnly` (avoids wslrelay on localhost:8000).
 - **Stream list fallback**: metadata `insights` loads VOD rows from **Twitch Helix** first (fast). TwitchTracker HTML is optional enrichment for avg/peak viewers only. Minute-level viewer charts still need a successful TwitchTracker *detail* scrape (`meta#ecs`).
 - **Emote images in analytics**: rollup keys store the local emote-service id (`/emotes/{uuid}/1x.webp`), not the 7TV provider id — do not point charts at `cdn.7tv.app/emote/{rollup-id}`.
 
@@ -55,6 +55,7 @@ Analytics is a separate Compose service (`cmd/analytics`) but reuses chat packag
 - Historical: `/analytics/{login}/{streamId}` or date slug when unique per day.
 - **Streams sidebar** (left) is the only stream picker — do not re-add a header dropdown.
 - **Synced** badge: `viewerSamples > 0` or `chatMessages > 0`. **Stats only**: TwitchTracker averages without minute data — user clicks **Sync chat/emotes** on the chart.
+- Selected emote overlays use their own focus scale instead of the aggregate emotes/min axis. Keep this when changing the Fit/Peak button or selected-emote legend, otherwise individual 7TV lines become visually flat again.
 
 ## Sync behavior
 
@@ -68,6 +69,7 @@ Analytics is a separate Compose service (`cmd/analytics`) but reuses chat packag
 - Keep `ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS` above the scraper's TwitchTracker wait budget (`wait_for_function` + navigation overhead); avoid setting below ~95s or viewer charts may truncate at the tail.
 - **Early stream row**: first-time sync upserts a placeholder `analytics_streams` row immediately (Helix `VideoByStreamID` for `started_at` / `vod_id`) so `GET .../streams/{id}?sparse=true` returns 200 during sync instead of 404.
 - **Syncing API fallback**: if the row is still missing but Redis sync status is active, `streamDetail` returns `state: "syncing"` with empty rollups.
+- **7TV preload fast path**: `ensure` returns local `processing` status immediately when a provider seed is already running or assets are pending, and only performs remote provider refresh checks after those fast paths. This keeps VOD chat sync polling from waiting on repeated 7TV API calls while assets are rendering.
 
 ### VOD resolution
 
@@ -149,3 +151,4 @@ Re-run after API/UI changes and append measured p50/p95 to this table.
 - Use codegraph `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("gqlCommentText")`, or `get_ast_chunk("targetQueryStreamId")` before editing sync or rollup code.
 - Verify via `curl http://localhost:8090/v1/analytics/streams/{streamId}` — check nonzero `chatCount` / `seventvEmoteCount` on synced streams.
 - Frontend changes: `cd frontend && npm run build`.
+- Install/scraper changes: run `scripts\scraper-preflight.ps1 -CheckOnly` and confirm it performs sequential detail probes.

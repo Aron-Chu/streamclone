@@ -42,9 +42,9 @@ Reinstalls and **Start** use `--pull missing` so already-downloaded images are n
 | Tier | How you get it | First-pull download | Prerequisites | Without scraper |
 |------|----------------|---------------------|---------------|-----------------|
 | **Core Watch** | Setup.exe / default install | **~383 MB** core GHCR images at `v0.1.4-rc1` (+ third-party on first compose up) | Docker Desktop running | Directory, live playback, chat, emotes, Helix/VOD stream history, TwitchTracker **summary** stats (avg/peak on stream rows) |
-| **Analytics** | `setup.ps1 -Profile scraper` or compose `--profile scraper` | + scraper image (builds from sibling repo; **not** published to GHCR) | Clone [`streamclone-scraper`](https://github.com/Aron-Chu/streamclone-scraper) beside this repo | Minute-level viewer charts on Analytics, reliable TwitchTracker sync |
+| **Analytics** | **Start Analytics** in the app, `setup.ps1 -Profile scraper`, or compose `--profile scraper` | + scraper image (`ghcr.io/aron-chu/streamclone/scraper:${IMAGE_TAG}` when `SCRAPER_USE_IMAGES=1`) | Docker Desktop; source builds can also use a sibling [`streamclone-scraper`](https://github.com/Aron-Chu/streamclone-scraper) repo | Minute-level viewer charts on Analytics, reliable TwitchTracker sync |
 | **Clip Studio** | `--profile clipper` or **Start Clip Studio** in Stack status | + ~1 GB `clipper` image | Optional **Sign in** on localhost (no Twitch CLI) | Clip Studio at `/studio` |
-| **Full** | both profiles | Analytics + Clip Studio sizes combined | Scraper sibling; sign-in for clips | All optional features |
+| **Full** | both profiles | Analytics + Clip Studio sizes combined | Scraper image or sibling repo; sign-in for clips | All optional features |
 
 ### Optional Twitch sign-in (chat send, follows, Clip Studio)
 
@@ -103,6 +103,27 @@ After install, your Desktop has **one shortcut**: **Streamclone** (custom icon).
 **Manage Streamclone** is the support console when something feels stuck: option **3 Status / diagnostics** runs the same checks as **Check Streamclone.cmd**. Option **4 Repair** re-pulls GHCR images and recreates containers without wiping your database. Option **5 Update** syncs `IMAGE_TAG` to the bundle version when an upgrade is available. Repair and fresh install show **native Docker pull progress** in the terminal (in-place bars, not hundreds of layer lines).
 
 **Setup.exe** uses a filtered pull summary in the wizard UI (no layer spam in the progress panel). Interactive `.cmd` / Manager paths use Docker's native TTY progress bars.
+
+### Keeping a non-git install in sync
+
+`%USERPROFILE%\streamclone` from **Setup.exe**, ZIP, or `Install Streamclone.cmd` is a release install, not a git checkout. That is intentional: it keeps user secrets, launchers, and Docker volumes separate from development source.
+
+Use this rule:
+
+- **Source changes** live in the git repos (`streamclone` source and `streamclone-scraper`) until they are tagged/released or rebuilt locally.
+- **Installed runtime changes** come from Docker images selected by `.env` `IMAGE_TAG` plus the extracted bundle `VERSION`.
+- **Manage → Update** syncs `.env` `IMAGE_TAG` to the bundle `VERSION`, pulls images, and recreates containers while preserving volumes.
+- If `VERSION` and `.env` `IMAGE_TAG` differ, the install is stale. Run **Manage → Update** or install a newer release bundle.
+- Copying source files into `%USERPROFILE%\streamclone` only updates scripts/docs. It does **not** update Go/frontend code already baked into Docker images.
+
+For unreleased local changes, run from the source checkout and build images locally:
+
+```powershell
+cd C:\Users\Aron\twitch-7tv-clone
+powershell -File scripts\setup.ps1 -Profile full
+```
+
+For release-style verification, tag/publish images, install that bundle, then run **Check Streamclone.cmd** and `scripts\scraper-preflight.ps1 -CheckOnly`.
 
 ### What each action does
 
@@ -212,3 +233,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for tests and PR workflow. Optional fe
 | Start from scratch | Run **Uninstall**, then **Setup.exe** or **Install** again |
 | Install feels slow | Normal on first run (~3–8 min; large `video`/`emote` images). Use wired network; second Start is much faster |
 | Setup.exe stuck on "Pulling Docker images" | Normal on first install (~1.5 GB). Ensure Docker Desktop is running and network is stable |
+| Install says current but app acts old | Check `%USERPROFILE%\streamclone\VERSION` and `.env` `IMAGE_TAG`; run **Manage Streamclone → Update** if they differ |
+| Analytics starts but viewer chart is unavailable | Run `scripts\scraper-preflight.ps1 -CheckOnly`; it must pass two sequential TwitchTracker probes, not just `/health` |
