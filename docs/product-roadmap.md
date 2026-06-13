@@ -332,8 +332,8 @@ Deferred v0.1.5 items and UX gaps from [product steering](../.kiro/steering/prod
 
 | Feature | What | Why vs Twitch | Deps / files | Tier | Status |
 |---------|------|---------------|--------------|------|--------|
-| In-player VOD playback | Relay past broadcasts through existing ffmpeg/Streamlink path, not Twitch embed | Ad-free VOD, local quality control; guardrail: no browser embed default | `cmd/video`, `Channel.tsx`, orchestrator | Core | **Deferred v0.1.5** |
-| VOD tab actions | Jump to analytics stream, sync chat, open in player from channel VOD list | Unified workspace vs separate Twitch VOD page | `Channel.tsx`, metadata API | Core | **Greenfield** |
+| In-player VOD playback | Relay past broadcasts through existing ffmpeg/Streamlink path, not Twitch embed | Ad-free VOD, local quality control; guardrail: no browser embed default | `cmd/video`, `Channel.tsx`, orchestrator | Core | **Done** — `POST /v1/stream/vod/start`, Channel `?vod=&offset=`, Analytics Play in Streamclone |
+| VOD tab actions | Jump to analytics stream, sync chat, open in player from channel VOD list | Unified workspace vs separate Twitch VOD page | `Channel.tsx`, metadata API | Core | **Done** — Analytics + Play VOD on stream history rows |
 | Latency modes + buffer stats | Expand `PlaybackLatencyMode` UI with visible buffer depth, downgrade reasons | Honest latency vs Twitch "low latency" toggle | `playback.ts`, `Channel.tsx` | Core | **Already partial** |
 | Audio-only mode | Video element hidden; audio continues | Bandwidth saver for background listening | `Channel.tsx`, player controls | Core | **Greenfield** |
 | PiP / chat-only layout | Picture-in-picture or chat-focused layout while listening | Multitask viewing | `Channel.tsx` CSS/layout | Core | **Greenfield** |
@@ -790,7 +790,7 @@ Representative mapping — adjust per release capacity. P tags reference Section
 | Publish trimmed GHCR + benchmark registry pulls | P0 | Already partial |
 | Docker Desktop blocking screen in installer | P0 | Greenfield |
 | Follow / unfollow button on channel page | P1 | Deferred v0.1.5 |
-| In-player VOD playback | P1 | Deferred v0.1.5 |
+| In-player VOD playback | P1 | Done |
 | Live viewer sparkline | P2 | Deferred v0.1.5 |
 | Camoufox warmup integrated into Start Analytics | P1 | Greenfield |
 | Crypto RNG + release token import disabled | P0 | Audit P0 |
@@ -928,7 +928,7 @@ Users are responsible for Twitch Terms of Service, developer agreement, and thir
 | 8 | Docker Desktop not-running blocking UX | H | M | Core | P0 | Done (`preflight-deps.ps1` dockerEngineRunning + installer hard stop) |
 | 9 | Setup-control auth on all mutations | M | L | Core | P0 | Already partial |
 | 10 | Unified Get-StreamcloneComposeArgs everywhere | M | M | Core | P1 | Already partial |
-| 11 | In-player VOD playback | H | M | Core | P1 | Deferred v0.1.5 |
+| 11 | In-player VOD playback | H | M | Core | P1 | Done |
 | 12 | Follow / unfollow button | M | M | Core | P1 | Done (local follows: migration 000011 + metadata API + `Channel.tsx`) |
 | 13 | Live viewer sparkline | M | M | Core | P2 | Done (`MiniViewerSparkline` in channel header) |
 | 14 | VOD chat without scraper profile (UI) | H | M | Analytics | P1 | Done ("Sync VOD chat" chat-only path in `Analytics.tsx`) |
@@ -1119,7 +1119,7 @@ Channel compare + scheduled sync ──► after single-stream workflow + scrape
 
 From [install-benchmark-and-revamp-audit.md](./install-benchmark-and-revamp-audit.md) — track until shipped:
 
-- [ ] In-player VOD playback
+- [x] In-player VOD playback (relay + Analytics/Channel deep links)
 - [x] Follow button on channel page
 - [x] Live viewer sparkline on channel header
 - [x] VOD chat replay without scraper profile (user-facing)
