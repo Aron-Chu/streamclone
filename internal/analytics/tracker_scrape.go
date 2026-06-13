@@ -6,9 +6,11 @@ import (
 )
 
 const (
-	ttMaxAgeRecentMS   = 15 * 60 * 1000   // live / <6h ended
-	ttMaxAgeMidMS      = 6 * 60 * 60 * 1000 // 6–48h
-	ttMaxAgeStaleMS    = 24 * 60 * 60 * 1000 // >48h with good coverage
+	ttMaxAgeRecentMS      = 15 * 60 * 1000        // live / <6h ended
+	ttMaxAgeMidMS         = 6 * 60 * 60 * 1000    // 6–48h
+	ttMaxAgeStaleMS       = 24 * 60 * 60 * 1000   // 48h–7d
+	ttMaxAgeVeryStaleMS   = 7 * 24 * 60 * 60 * 1000 // >7d archived VODs
+	ttDirectHTTPStaleAfter = 6 * time.Hour
 )
 
 func (s *SyncService) shouldSkipTracker(ctx context.Context, stream *StreamRecord) bool {
@@ -40,8 +42,15 @@ func (s *SyncService) trackerScrapeMaxAgeMS(stream *StreamRecord, viewersOnly bo
 	if endedAt == nil || endedAt.IsZero() {
 		return ttMaxAgeRecentMS
 	}
+	staleMax := s.ttStaleMaxAgeMS
+	if staleMax <= 0 {
+		staleMax = ttMaxAgeVeryStaleMS
+	}
+
 	age := time.Since(*endedAt)
 	switch {
+	case age >= 7*24*time.Hour:
+		return staleMax
 	case age >= 48*time.Hour:
 		return ttMaxAgeStaleMS
 	case age >= 6*time.Hour:
@@ -49,4 +58,17 @@ func (s *SyncService) trackerScrapeMaxAgeMS(stream *StreamRecord, viewersOnly bo
 	default:
 		return ttMaxAgeRecentMS
 	}
+}
+
+func (s *SyncService) shouldTryDirectHTTP(stream *StreamRecord) bool {
+	if s == nil || !s.ttDirectHTTPEnabled {
+		return false
+	}
+	if !s.ttDirectHTTPStaleOnly {
+		return true
+	}
+	if stream == nil || stream.EndedAt == nil || stream.EndedAt.IsZero() {
+		return false
+	}
+	return time.Since(*stream.EndedAt) >= ttDirectHTTPStaleAfter
 }

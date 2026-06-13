@@ -16,6 +16,7 @@ if (-not (Test-Path $libDir)) {
     $libDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'scripts\lib'
 }
 . (Join-Path $libDir 'install-upgrade.ps1')
+. (Join-Path $libDir 'env.ps1')
 
 function Get-StreamcloneRoot {
     param([string]$LauncherRoot)
@@ -34,13 +35,9 @@ function Get-StreamcloneRoot {
 }
 
 function Test-StreamcloneWebOk {
-    param([string]$Url = 'http://localhost:8090/')
-    try {
-        $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
-        return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500)
-    } catch {
-        return $false
-    }
+    param([string]$Url = '')
+    if ([string]::IsNullOrWhiteSpace($Url)) { $Url = Get-StreamcloneAppUrl }
+    return Test-StreamcloneWebReachable -Url $Url
 }
 
 function Write-StreamcloneVersionNotice {
@@ -89,7 +86,7 @@ function Invoke-StreamcloneInstall {
                 if (-not (Invoke-StreamclonePreflight -Root $root)) { exit 1 }
                 Invoke-StreamcloneUpgrade -Root $root
             } else {
-                Write-Host 'Streamclone is already running at http://localhost:8090/' -ForegroundColor Green
+                Write-Host ("Streamclone is already running at {0}" -f (Get-StreamcloneAppUrl)) -ForegroundColor Green
                 Write-Host 'Refreshing install scripts and Desktop shortcut.' -ForegroundColor Yellow
             }
             Update-StreamcloneBootstrapOverlayFromMaster -Dir $root
@@ -102,7 +99,7 @@ function Invoke-StreamcloneInstall {
                 Write-Host ''
                 Write-Host 'Opening Streamclone in your browser...' -ForegroundColor Green
                 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\ensure-setup-control.ps1') -Root $root
-                Start-Process 'http://localhost:8090/'
+                Start-Process (Get-StreamcloneAppUrl)
             }
             Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
             return

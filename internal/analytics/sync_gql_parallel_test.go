@@ -269,6 +269,102 @@ func TestVODCommentsFetchStateMergeExcludesSegmentEndBoundary(t *testing.T) {
 	}
 }
 
+func TestBuildGQLMomentWindowsFromViewerPoints(t *testing.T) {
+	points := []parsedViewerPoint{
+		{OffsetSeconds: 0, Viewers: 1000},
+		{OffsetSeconds: 60, Viewers: 1100},
+		{OffsetSeconds: 120, Viewers: 1050},
+		{OffsetSeconds: 180, Viewers: 5000},
+		{OffsetSeconds: 240, Viewers: 1020},
+		{OffsetSeconds: 300, Viewers: 4800},
+	}
+	windows := buildGQLMomentWindowsFromViewerPoints(points)
+	if len(windows) == 0 {
+		t.Fatal("expected moment windows around viewer spikes")
+	}
+	if got := segmentSchedulePriority(gqlSegmentProgress{StartSec: 120, EndSec: 240}, gqlFetchScheduleHints{
+		MomentWindows: windows,
+	}); got != gqlSegPriorityMoment {
+		t.Fatalf("expected moment priority inside spike window, got %d", got)
+	}
+}
+
+func TestSegmentSchedulePriority(t *testing.T) {
+	hints := gqlFetchScheduleHints{
+		VodDurationSec:  3600,
+		EdgePrioritySec: 600,
+		MomentWindows:   []gqlTimeRange{{StartSec: 1000, EndSec: 1100}},
+		GameRanges:      []gqlTimeRange{{StartSec: 2000, EndSec: 2600}},
+	}
+	if got := segmentSchedulePriority(gqlSegmentProgress{StartSec: 1000, EndSec: 1200}, hints); got != gqlSegPriorityMoment {
+		t.Fatalf("expected moment priority, got %d", got)
+	}
+	if got := segmentSchedulePriority(gqlSegmentProgress{StartSec: 2100, EndSec: 2200}, hints); got != gqlSegPriorityGame {
+		t.Fatalf("expected game priority, got %d", got)
+	}
+	if got := segmentSchedulePriority(gqlSegmentProgress{StartSec: 0, EndSec: 600}, hints); got != gqlSegPriorityEdge {
+		t.Fatalf("expected edge priority for stream start, got %d", got)
+	}
+	if got := segmentSchedulePriority(gqlSegmentProgress{StartSec: 3100, EndSec: 3600}, hints); got != gqlSegPriorityEdge {
+		t.Fatalf("expected edge priority for stream end, got %d", got)
+	}
+	if got := segmentSchedulePriority(gqlSegmentProgress{StartSec: 1300, EndSec: 1900}, hints); got != gqlSegPriorityBackground {
+		t.Fatalf("expected background priority, got %d", got)
+	}
+}
+
+func TestShouldSplitHotSegmentAdaptiveTriggers(t *testing.T) {
+	recent := []gqlPageSample{
+		{offsetAdvance: 5, commentCount: 20},
+		{offsetAdvance: 4, commentCount: 18},
+		{offsetAdvance: 3, commentCount: 22},
+		{offsetAdvance: 2, commentCount: 19},
+		{offsetAdvance: 1, commentCount: 21},
+	}
+	if !shouldSplitHotSegment(10, 10, recent, 30, 5, 80) {
+		t.Fatal("expected page threshold split")
+	}
+	if !shouldSplitHotSegment(3, 10, recent, 30, 5, 80) {
+		t.Fatal("expected slow advance split")
+	}
+	dense := []gqlPageSample{
+		{offsetAdvance: 120, commentCount: 90},
+		{offsetAdvance: 110, commentCount: 95},
+		{offsetAdvance: 100, commentCount: 85},
+		{offsetAdvance: 90, commentCount: 88},
+		{offsetAdvance: 80, commentCount: 92},
+	}
+	if !shouldSplitHotSegment(3, 10, dense, 30, 5, 80) {
+		t.Fatal("expected comments/page split")
+	}
+	if shouldSplitHotSegment(3, 10, dense, 30, 5, 200) {
+		t.Fatal("did not expect split when density threshold disabled")
+	}
+}
+
+func TestGQLSegmentWorkQueuePriorityOrder(t *testing.T) {
+	q := newGQLSegmentWorkQueue()
+	q.push(3, gqlSegPriorityBackground)
+	q.push(1, gqlSegPriorityEdge)
+	q.push(2, gqlSegPriorityGame)
+	q.push(0, gqlSegPriorityMoment)
+
+	ctx := context.Background()
+	for _, want := range []int{0, 2, 1, 3} {
+		idx, ok := q.acquire(ctx)
+		if !ok {
+			t.Fatalf("expected work item for idx %d", want)
+		}
+		if idx != want {
+			t.Fatalf("expected idx %d, got %d", want, idx)
+		}
+		q.release()
+	}
+	if _, ok := q.acquire(ctx); ok {
+		t.Fatal("expected empty queue")
+	}
+}
+
 func TestGQLRateCoordinatorAdaptiveConcurrency(t *testing.T) {
 	coord := newGQLRateCoordinator(2, 6, 4)
 	if got := coord.ActiveConcurrency(); got != 4 {
@@ -306,47 +402,5 @@ func TestSegmentAlignedMinuteBounds(t *testing.T) {
 	start, end = segmentAlignedMinuteBounds(seg, 0)
 	if start != 0 || end != 9 {
 		t.Fatalf("expected zero-align bounds 0-9, got %d-%d", start, end)
-	}
-}
-
-func TestFinishSegmentExtractsAlignedMinutesForIncrementalPatch(t *testing.T) {
-	var count atomic.Int64
-	commentsMap := make(map[int][]string)
-	state := &vodCommentsFetchState{
-		commentsMap:   commentsMap,
-		commentsCount: &count,
-		chatAlignSec:  16740,
-	}
-	edge := GQLCommentEdge{
-		Node: struct {
-			ID                   string `json:"id"`
-			ContentOffsetSeconds int    `json:"contentOffsetSeconds"`
-			Message              struct {
-				Body      string `json:"body"`
-				Fragments []struct {
-					Text string `json:"text"`
-				} `json:"fragments"`
-			} `json:"message"`
-		}{
-			ID:                   "abc",
-			ContentOffsetSeconds: 90,
-			Message: struct {
-				Body      string `json:"body"`
-				Fragments []struct {
-					Text string `json:"text"`
-				} `json:"fragments"`
-			}{Body: "hello"},
-		},
-	}
-	state.mergeEdge(edge, 0, 600)
-	seg := gqlSegmentProgress{StartSec: 0, EndSec: 600, OffsetSec: 90}
-	state.finishSegment(&seg, 90)
-	if len(commentsMap[280]) != 1 {
-		t.Fatalf("expected aligned minute 280 in commentsMap, got %+v", commentsMap)
-	}
-	remaining := make(map[int][]string)
-	state.shardedComments.mergeInto(remaining)
-	if len(remaining) != 0 {
-		t.Fatalf("expected sharded comments drained for segment, got %+v", remaining)
 	}
 }

@@ -46,12 +46,8 @@ if (Test-Path $bootstrapLibScript) {
 }
 
 function Test-StreamcloneWebOk {
-    try {
-        $resp = Invoke-WebRequest -Uri 'http://localhost:8090/' -UseBasicParsing -TimeoutSec 5
-        return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500)
-    } catch {
-        return $false
-    }
+    . (Join-Path $PSScriptRoot 'lib\env.ps1')
+    return Test-StreamcloneWebReachable -Url (Get-StreamcloneAppUrl)
 }
 
 function Test-StreamcloneInstalledAt {
@@ -73,7 +69,7 @@ $versions = if (Test-StreamcloneInstalledAt -Dir $InstallDir) {
 if (-not $Force -and $versions -and $versions.bundleVersion -eq $meta.Tag -and (Test-Path $launcher)) {
     if (Test-StreamcloneWebOk -and (Test-Path (Join-Path $InstallDir '.env'))) {
         Write-Host ''
-        Write-Host "  Already on $($meta.Tag) and running at http://localhost:8090/" -ForegroundColor Green
+        Write-Host ("  Already on $($meta.Tag) and running at {0}" -f (Get-StreamcloneAppUrl)) -ForegroundColor Green
         Write-Host '  Refreshing install scripts and shortcuts...' -ForegroundColor Yellow
         if ($versions.bundleVersion -ne $versions.imageTag) {
             Write-Host "  Note: bundle $($versions.bundleVersion) but images $($versions.imageTag) - run Manage -> Update." -ForegroundColor Yellow

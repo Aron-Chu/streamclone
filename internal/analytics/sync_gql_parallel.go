@@ -1,9 +1,11 @@
 package analytics
 
 import (
+	"container/heap"
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,7 +19,19 @@ const (
 	vodCommentsParallelMaxFail       = 3
 	vodGQLSegmentLargeVOD            = 300 // 5-minute segments for long VODs
 	vodGQLSegmentDenseVOD            = 120 // 2-minute segments for very high comment volume
-	vodGQLHotSegmentPageThreshold    = 50  // split hot segments after this many pages
+	vodGQLHotSegmentPageThreshold    = 10 // split hot segments after this many pages
+	vodGQLHotSlowAdvanceSecDefault   = 30
+	vodGQLHotSlowAdvancePagesDefault = 5
+	vodGQLHotCommentsPerPageDefault  = 80
+	gqlPriorityEdgeSecondsDefault    = 600 // first/last 10 minutes
+	gqlMomentWindowBufferSec         = 120
+	gqlMaxMomentWindows              = 5
+	gqlMomentSpikeMultiplier         = 1.5
+
+	gqlSegPriorityMoment     = 0
+	gqlSegPriorityGame       = 1
+	gqlSegPriorityEdge       = 2
+	gqlSegPriorityBackground = 3
 	vodGQLLargeVODDurationSec        = 4 * 3600
 	vodGQLDenseCommentsThreshold     = 50_000
 	vodGQLVeryDenseCommentsThreshold = 250_000
@@ -149,6 +163,275 @@ type gqlParallelCheckpoint struct {
 	CommentsFetched int                  `json:"commentsFetched"`
 }
 
+type gqlTimeRange struct {
+	StartSec int
+	EndSec   int
+}
+
+// gqlFetchScheduleHints drives priority enqueue order for parallel VOD GQL workers.
+type gqlFetchScheduleHints struct {
+	MomentWindows   []gqlTimeRange
+	GameRanges      []gqlTimeRange
+	VodDurationSec  int
+	EdgePrioritySec int
+}
+
+type gqlPageSample struct {
+	offsetAdvance int
+	commentCount  int
+}
+
+type gqlSegmentWorkItem struct {
+	idx      int
+	priority int
+	order    int
+}
+
+type gqlWorkHeap []gqlSegmentWorkItem
+
+func (h gqlWorkHeap) Len() int { return len(h) }
+
+func (h gqlWorkHeap) Less(i, j int) bool {
+	if h[i].priority != h[j].priority {
+		return h[i].priority < h[j].priority
+	}
+	return h[i].order < h[j].order
+}
+
+func (h gqlWorkHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+
+func (h *gqlWorkHeap) Push(x any) {
+	*h = append(*h, x.(gqlSegmentWorkItem))
+}
+
+func (h *gqlWorkHeap) Pop() any {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
+}
+
+// gqlSegmentWorkQueue is a mutex-protected priority heap shared by parallel GQL workers.
+// Hot splits push tail segments back; idle workers acquire the next highest-priority item.
+type gqlSegmentWorkQueue struct {
+	mu       sync.Mutex
+	cond     *sync.Cond
+	heap     gqlWorkHeap
+	orderSeq int
+	inFlight int
+}
+
+func newGQLSegmentWorkQueue() *gqlSegmentWorkQueue {
+	q := &gqlSegmentWorkQueue{}
+	q.cond = sync.NewCond(&q.mu)
+	heap.Init(&q.heap)
+	return q
+}
+
+func (q *gqlSegmentWorkQueue) push(idx, priority int) {
+	q.mu.Lock()
+	heap.Push(&q.heap, gqlSegmentWorkItem{idx: idx, priority: priority, order: q.orderSeq})
+	q.orderSeq++
+	q.mu.Unlock()
+	q.cond.Signal()
+}
+
+func (q *gqlSegmentWorkQueue) acquire(ctx context.Context) (int, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for {
+		if q.heap.Len() > 0 {
+			item := heap.Pop(&q.heap).(gqlSegmentWorkItem)
+			q.inFlight++
+			return item.idx, true
+		}
+		if q.inFlight == 0 {
+			return -1, false
+		}
+		q.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			q.mu.Lock()
+			return -1, false
+		case <-time.After(50 * time.Millisecond):
+		}
+		q.mu.Lock()
+	}
+}
+
+func (q *gqlSegmentWorkQueue) release() {
+	q.mu.Lock()
+	q.inFlight--
+	if q.inFlight == 0 {
+		q.cond.Broadcast()
+	}
+	q.mu.Unlock()
+}
+
+func segmentOverlapsRange(seg gqlSegmentProgress, r gqlTimeRange) bool {
+	return seg.StartSec < r.EndSec && seg.EndSec > r.StartSec
+}
+
+func segmentSchedulePriority(seg gqlSegmentProgress, hints gqlFetchScheduleHints) int {
+	for _, r := range hints.MomentWindows {
+		if segmentOverlapsRange(seg, r) {
+			return gqlSegPriorityMoment
+		}
+	}
+	for _, r := range hints.GameRanges {
+		if segmentOverlapsRange(seg, r) {
+			return gqlSegPriorityGame
+		}
+	}
+	edge := hints.EdgePrioritySec
+	if edge <= 0 {
+		edge = gqlPriorityEdgeSecondsDefault
+	}
+	if seg.StartSec < edge {
+		return gqlSegPriorityEdge
+	}
+	if hints.VodDurationSec > 0 && seg.EndSec > hints.VodDurationSec-edge {
+		return gqlSegPriorityEdge
+	}
+	return gqlSegPriorityBackground
+}
+
+func buildGQLScheduleHints(vodDurationSec, edgeSec int, momentWindows []gqlTimeRange, gameSegments []GameSegment) gqlFetchScheduleHints {
+	hints := gqlFetchScheduleHints{
+		MomentWindows:  momentWindows,
+		VodDurationSec: vodDurationSec,
+		EdgePrioritySec: edgeSec,
+	}
+	if hints.EdgePrioritySec <= 0 {
+		hints.EdgePrioritySec = gqlPriorityEdgeSecondsDefault
+	}
+	for _, g := range gameSegments {
+		if g.DurationSeconds <= 0 {
+			continue
+		}
+		hints.GameRanges = append(hints.GameRanges, gqlTimeRange{
+			StartSec: g.OffsetSeconds,
+			EndSec:   g.OffsetSeconds + g.DurationSeconds,
+		})
+	}
+	return hints
+}
+
+func medianPositiveInt(values []int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]int(nil), values...)
+	sort.Ints(sorted)
+	return sorted[len(sorted)/2]
+}
+
+func mergeOverlappingGQLRanges(ranges []gqlTimeRange) []gqlTimeRange {
+	if len(ranges) <= 1 {
+		return ranges
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		if ranges[i].StartSec != ranges[j].StartSec {
+			return ranges[i].StartSec < ranges[j].StartSec
+		}
+		return ranges[i].EndSec < ranges[j].EndSec
+	})
+	merged := []gqlTimeRange{ranges[0]}
+	for _, r := range ranges[1:] {
+		last := &merged[len(merged)-1]
+		if r.StartSec <= last.EndSec {
+			if r.EndSec > last.EndSec {
+				last.EndSec = r.EndSec
+			}
+			continue
+		}
+		merged = append(merged, r)
+	}
+	return merged
+}
+
+// buildGQLMomentWindowsFromViewerPoints returns high-priority fetch windows around
+// top viewer spikes (± buffer). Used during sync when chat rollups are not ready yet.
+func buildGQLMomentWindowsFromViewerPoints(points []parsedViewerPoint) []gqlTimeRange {
+	if len(points) < 3 {
+		return nil
+	}
+	values := make([]int, 0, len(points))
+	for _, p := range points {
+		if p.Viewers > 0 {
+			values = append(values, p.Viewers)
+		}
+	}
+	if len(values) < 3 {
+		return nil
+	}
+	baseline := medianPositiveInt(values)
+	if baseline <= 0 {
+		return nil
+	}
+	threshold := int(float64(baseline) * gqlMomentSpikeMultiplier)
+
+	type spike struct {
+		offset  int
+		viewers int
+	}
+	spikes := make([]spike, 0, len(points))
+	for _, p := range points {
+		if p.Viewers >= threshold {
+			spikes = append(spikes, spike{offset: p.OffsetSeconds, viewers: p.Viewers})
+		}
+	}
+	if len(spikes) == 0 {
+		return nil
+	}
+	sort.Slice(spikes, func(i, j int) bool {
+		if spikes[i].viewers != spikes[j].viewers {
+			return spikes[i].viewers > spikes[j].viewers
+		}
+		return spikes[i].offset < spikes[j].offset
+	})
+	if len(spikes) > gqlMaxMomentWindows {
+		spikes = spikes[:gqlMaxMomentWindows]
+	}
+
+	windows := make([]gqlTimeRange, 0, len(spikes))
+	for _, sp := range spikes {
+		start := sp.offset - gqlMomentWindowBufferSec
+		if start < 0 {
+			start = 0
+		}
+		windows = append(windows, gqlTimeRange{
+			StartSec: start,
+			EndSec:   sp.offset + gqlMomentWindowBufferSec,
+		})
+	}
+	return mergeOverlappingGQLRanges(windows)
+}
+
+func shouldSplitHotSegment(pageCount, pageThreshold int, recent []gqlPageSample, slowAdvanceSec, slowAdvancePages, commentsPerPage int) bool {
+	if pageThreshold > 0 && pageCount >= pageThreshold {
+		return true
+	}
+	if slowAdvancePages <= 0 || len(recent) < slowAdvancePages {
+		return false
+	}
+	window := recent[len(recent)-slowAdvancePages:]
+	totalAdvance := 0
+	totalComments := 0
+	for _, sample := range window {
+		totalAdvance += sample.offsetAdvance
+		totalComments += sample.commentCount
+	}
+	if slowAdvanceSec > 0 && totalAdvance/slowAdvancePages < slowAdvanceSec {
+		return true
+	}
+	if commentsPerPage > 0 && totalComments/slowAdvancePages >= commentsPerPage {
+		return true
+	}
+	return false
+}
+
 func vodChatAlignSeconds(streamStart, vodCreated time.Time) int {
 	if streamStart.IsZero() || vodCreated.IsZero() {
 		return 0
@@ -183,6 +466,11 @@ type vodCommentsFetchState struct {
 	report           func(force bool)
 	saveParallel     func(force bool)
 	hotPageThreshold int
+	hotSlowAdvanceSec   int
+	hotSlowAdvancePages int
+	hotCommentsPerPage  int
+	scheduleHints       gqlFetchScheduleHints
+	workQueue           *gqlSegmentWorkQueue
 }
 
 func segmentAlignedMinuteBounds(seg gqlSegmentProgress, chatAlignSec int) (startMinute, endMinute int) {
@@ -308,7 +596,23 @@ func (s *SyncService) estimatedStreamComments(ctx context.Context, streamID stri
 	return rec.ChatMessages
 }
 
-func (s *SyncService) fetchVODComments(ctx context.Context, streamID, login, videoID string, commentsMap map[int][]string, vodDurationSec, chatAlignSec int, rollupStartFn func() time.Time, chatCache *chatRollupCache) error {
+func (s *SyncService) gqlScheduleHintsForStream(ctx context.Context, streamID string, vodDurationSec int, scrapedGames []scrapedGame, viewerPoints []parsedViewerPoint) gqlFetchScheduleHints {
+	momentWindows := buildGQLMomentWindowsFromViewerPoints(viewerPoints)
+	if len(momentWindows) == 0 && streamID != "" {
+		if rollups, err := s.store.RollupsByStream(ctx, streamID); err == nil {
+			momentWindows = buildGQLMomentWindowsFromViewerPoints(rollupsToViewerPoints(rollups))
+		}
+	}
+	var gameSegs []GameSegment
+	if len(scrapedGames) > 0 {
+		gameSegs = buildGameSegments(scrapedGames, vodDurationSec)
+	} else if stored, err := s.store.GetGameSegments(ctx, streamID); err == nil && len(stored) > 0 {
+		gameSegs = stored
+	}
+	return buildGQLScheduleHints(vodDurationSec, s.vodGQLPriorityEdgeSeconds, momentWindows, gameSegs)
+}
+
+func (s *SyncService) fetchVODComments(ctx context.Context, streamID, login, videoID string, commentsMap map[int][]string, vodDurationSec, chatAlignSec int, rollupStartFn func() time.Time, chatCache *chatRollupCache, scheduleHints gqlFetchScheduleHints) error {
 	estimatedComments := s.estimatedStreamComments(ctx, streamID)
 	fetchMode := "serial"
 	concurrency := 1
@@ -347,7 +651,7 @@ func (s *SyncService) fetchVODComments(ctx context.Context, streamID, login, vid
 	if vodDurationSec <= 0 {
 		vodDurationSec = 86400
 	}
-	return s.fetchVODCommentsParallel(ctx, streamID, login, videoID, commentsMap, vodDurationSec, chatAlignSec, rollupStartFn, chatCache)
+	return s.fetchVODCommentsParallel(ctx, streamID, login, videoID, commentsMap, vodDurationSec, chatAlignSec, rollupStartFn, chatCache, scheduleHints)
 }
 
 func (s *SyncService) fetchVODCommentsSerial(ctx context.Context, streamID, videoID string, commentsMap map[int][]string, vodDurationSec, chatAlignSec int) error {
@@ -575,7 +879,7 @@ func formatIntComma(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, login, videoID string, commentsMap map[int][]string, vodDurationSec, chatAlignSec int, rollupStartFn func() time.Time, chatCache *chatRollupCache) error {
+func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, login, videoID string, commentsMap map[int][]string, vodDurationSec, chatAlignSec int, rollupStartFn func() time.Time, chatCache *chatRollupCache, scheduleHints gqlFetchScheduleHints) error {
 	estimatedComments := s.estimatedStreamComments(ctx, streamID)
 	segmentSec := effectiveGQLSegmentSeconds(s.vodGQLSegmentSeconds, s.vodGQLDenseSegmentSeconds, vodDurationSec, estimatedComments)
 	segments := buildGQLSegments(vodDurationSec, segmentSec)
@@ -583,6 +887,27 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 	hotThreshold := s.vodGQLHotSegmentPageThreshold
 	if hotThreshold <= 0 {
 		hotThreshold = vodGQLHotSegmentPageThreshold
+	}
+	slowAdvanceSec := s.vodGQLHotSlowAdvanceSec
+	if slowAdvanceSec <= 0 {
+		slowAdvanceSec = vodGQLHotSlowAdvanceSecDefault
+	}
+	slowAdvancePages := s.vodGQLHotSlowAdvancePages
+	if slowAdvancePages <= 0 {
+		slowAdvancePages = vodGQLHotSlowAdvancePagesDefault
+	}
+	hotCommentsPerPage := s.vodGQLHotCommentsPerPage
+	if hotCommentsPerPage <= 0 {
+		hotCommentsPerPage = vodGQLHotCommentsPerPageDefault
+	}
+	if scheduleHints.VodDurationSec <= 0 {
+		scheduleHints.VodDurationSec = vodDurationSec
+	}
+	if scheduleHints.EdgePrioritySec <= 0 {
+		scheduleHints.EdgePrioritySec = s.vodGQLPriorityEdgeSeconds
+	}
+	if scheduleHints.EdgePrioritySec <= 0 {
+		scheduleHints.EdgePrioritySec = gqlPriorityEdgeSecondsDefault
 	}
 
 	if cp, err := s.store.GetSyncCheckpoint(ctx, streamID, videoID); err != nil {
@@ -633,6 +958,7 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 			}
 		}
 	}
+	workQueue := newGQLSegmentWorkQueue()
 	state := &vodCommentsFetchState{
 		streamID:         streamID,
 		login:            login,
@@ -649,6 +975,11 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 		rollupStartFn:    rollupStartFn,
 		onSegmentDone:    onSegmentDone,
 		hotPageThreshold: hotThreshold,
+		hotSlowAdvanceSec:   slowAdvanceSec,
+		hotSlowAdvancePages: slowAdvancePages,
+		hotCommentsPerPage:  hotCommentsPerPage,
+		scheduleHints:       scheduleHints,
+		workQueue:           workQueue,
 	}
 	state.report = func(force bool) {
 		count := int(commentsCount.Load())
@@ -699,7 +1030,16 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 		saveParallelCheckpoint(segs)
 	}
 
-	segCh := make(chan int)
+	for i := range segments {
+		if segments[i].Done {
+			continue
+		}
+		if int(commentsCount.Load()) >= vodCommentsMaxCount {
+			break
+		}
+		workQueue.push(i, segmentSchedulePriority(segments[i], scheduleHints))
+	}
+
 	var wg sync.WaitGroup
 	var integrityFails atomic.Int32
 	started := time.Now()
@@ -712,42 +1052,30 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			for segIdx := range segCh {
+			for {
+				segIdx, ok := workQueue.acquire(ctx)
+				if !ok {
+					return
+				}
 				if int(commentsCount.Load()) >= vodCommentsMaxCount {
+					workQueue.release()
 					continue
 				}
 				for coord.ActiveConcurrency() <= workerID {
 					select {
 					case <-ctx.Done():
+						workQueue.release()
 						return
 					case <-time.After(100 * time.Millisecond):
 					}
 				}
-				var processSegment func(idx int)
-				processSegment = func(idx int) {
-					tailIdx, fetchErr := s.fetchGQLSegment(ctx, videoID, &segments[idx], state, coord, &integrityFails, &gqlPageCount)
-					if fetchErr != nil {
-						s.log.Warn("segment fetch failed", "stream_id", streamID, "segment", idx, "err", fetchErr)
-					}
-					if tailIdx >= 0 {
-						processSegment(tailIdx)
-					}
+				if err := s.fetchGQLSegment(ctx, videoID, &segments[segIdx], state, coord, &integrityFails, &gqlPageCount); err != nil {
+					s.log.Warn("segment fetch failed", "stream_id", streamID, "segment", segIdx, "worker", workerID, "err", err)
 				}
-				processSegment(segIdx)
+				workQueue.release()
 			}
 		}(w)
 	}
-
-	for i := range segments {
-		if segments[i].Done {
-			continue
-		}
-		if int(commentsCount.Load()) >= vodCommentsMaxCount {
-			break
-		}
-		segCh <- i
-	}
-	close(segCh)
 	wg.Wait()
 
 	var serialRetries int
@@ -817,7 +1145,7 @@ func (s *SyncService) fetchGQLSegment(
 	coord *gqlRateCoordinator,
 	integrityFails *atomic.Int32,
 	pages *atomic.Int64,
-) (tailIdx int, err error) {
+) error {
 	offset := seg.OffsetSec
 	if offset < seg.StartSec {
 		offset = seg.StartSec
@@ -826,24 +1154,26 @@ func (s *SyncService) fetchGQLSegment(
 	cursorFailed := false
 	nextCursor := ""
 	pageCount := 0
+	var pageSamples []gqlPageSample
 
 	for {
 		if int(state.commentsCount.Load()) >= vodCommentsMaxCount {
 			state.finishSegment(seg, offset)
-			return -1, nil
+			return nil
 		}
 		if integrityFails.Load() >= vodCommentsParallelMaxFail {
-			return -1, fmt.Errorf("integrity threshold reached")
+			return fmt.Errorf("integrity threshold reached")
 		}
 		if offset > seg.EndSec {
 			state.finishSegment(seg, offset)
-			return -1, nil
+			return nil
 		}
 
 		if err := coord.Wait(ctx); err != nil {
-			return -1, err
+			return err
 		}
 
+		pageStartOffset := offset
 		reqBody := buildVideoCommentsGQLRequest(videoID, gqlVideoCommentsSHA256, useCursor, offset, nextCursor)
 		gqlResp, err := s.postGQLVideoComments(ctx, reqBody, coord)
 		pages.Add(1)
@@ -851,7 +1181,7 @@ func (s *SyncService) fetchGQLSegment(
 		if err != nil {
 			seg.OffsetSec = offset
 			state.saveParallel(true)
-			return -1, err
+			return err
 		}
 		if isGQLIntegrityError(gqlResp) {
 			if useCursor {
@@ -867,44 +1197,62 @@ func (s *SyncService) fetchGQLSegment(
 			integrityFails.Add(1)
 			seg.OffsetSec = offset
 			state.saveParallel(true)
-			return -1, fmt.Errorf("gql video comments integrity error")
+			return fmt.Errorf("gql video comments integrity error")
 		}
 		if len(gqlResp.Errors) > 0 {
 			seg.OffsetSec = offset
 			state.saveParallel(true)
-			return -1, fmt.Errorf("gql video comments error: %s", gqlResp.Errors[0].Message)
+			return fmt.Errorf("gql video comments error: %s", gqlResp.Errors[0].Message)
 		}
 		if gqlResp.Data.Video == nil || gqlResp.Data.Video.Comments == nil {
 			state.finishSegment(seg, offset)
-			return -1, nil
+			return nil
 		}
 
 		edges := gqlResp.Data.Video.Comments.Edges
 		if len(edges) == 0 {
 			state.finishSegment(seg, offset)
-			return -1, nil
+			return nil
 		}
 
 		lastOffset := offset
 		pastSegment := false
+		pageComments := 0
 		for _, edge := range edges {
 			if state.mergeEdge(edge, seg.StartSec, seg.EndSec) {
 				pastSegment = true
 				break
 			}
 			lastOffset = edge.Node.ContentOffsetSeconds
+			pageComments++
+		}
+		offsetAdvance := 0
+		if lastOffset > pageStartOffset {
+			offsetAdvance = lastOffset - pageStartOffset
+		}
+		pageSamples = append(pageSamples, gqlPageSample{
+			offsetAdvance: offsetAdvance,
+			commentCount:  pageComments,
+		})
+		if len(pageSamples) > state.hotSlowAdvancePages*2 {
+			pageSamples = pageSamples[len(pageSamples)-state.hotSlowAdvancePages*2:]
 		}
 		state.report(false)
 		seg.OffsetSec = lastOffset
 
 		if pastSegment || !gqlResp.Data.Video.Comments.PageInfo.HasNextPage {
 			state.finishSegment(seg, offset)
-			return -1, nil
+			return nil
 		}
 
-		if state.hotPageThreshold > 0 &&
-			pageCount >= state.hotPageThreshold &&
-			lastOffset < seg.EndSec-60 {
+		if shouldSplitHotSegment(
+			pageCount,
+			state.hotPageThreshold,
+			pageSamples,
+			state.hotSlowAdvanceSec,
+			state.hotSlowAdvancePages,
+			state.hotCommentsPerPage,
+		) && lastOffset < seg.EndSec-60 {
 			splitAt := lastOffset + 1
 			tail := gqlSegmentProgress{
 				StartSec:  splitAt,
@@ -914,10 +1262,13 @@ func (s *SyncService) fetchGQLSegment(
 			seg.EndSec = splitAt - 1
 			state.segmentsMu.Lock()
 			*state.segments = append(*state.segments, tail)
-			tailIdx = len(*state.segments) - 1
+			tailIdx := len(*state.segments) - 1
 			state.segmentsMu.Unlock()
+			if state.workQueue != nil {
+				state.workQueue.push(tailIdx, segmentSchedulePriority(tail, state.scheduleHints))
+			}
 			state.finishSegment(seg, lastOffset)
-			return tailIdx, nil
+			return nil
 		}
 
 		lastEdge := edges[len(edges)-1]

@@ -20,7 +20,19 @@ func TestTrackerScrapeMaxAgeMS(t *testing.T) {
 	svc := &SyncService{passTTMaxAge: true}
 	got := svc.trackerScrapeMaxAgeMS(&StreamRecord{EndedAt: &ended}, false)
 	if got != ttMaxAgeStaleMS {
-		t.Fatalf("stale stream maxAge=%d want %d", got, ttMaxAgeStaleMS)
+		t.Fatalf("48h-7d stream maxAge=%d want %d", got, ttMaxAgeStaleMS)
+	}
+
+	endedVery := time.Now().Add(-8 * 24 * time.Hour)
+	gotVery := svc.trackerScrapeMaxAgeMS(&StreamRecord{EndedAt: &endedVery}, false)
+	if gotVery != ttMaxAgeVeryStaleMS {
+		t.Fatalf("archived stream maxAge=%d want %d", gotVery, ttMaxAgeVeryStaleMS)
+	}
+
+	endedMid := time.Now().Add(-50 * time.Hour)
+	gotMid := svc.trackerScrapeMaxAgeMS(&StreamRecord{EndedAt: &endedMid}, false)
+	if gotMid != ttMaxAgeStaleMS {
+		t.Fatalf("mid-stale stream maxAge=%d want %d", gotMid, ttMaxAgeStaleMS)
 	}
 
 	if got := svc.trackerScrapeMaxAgeMS(&StreamRecord{EndedAt: &ended}, true); got != 0 {
@@ -30,6 +42,34 @@ func TestTrackerScrapeMaxAgeMS(t *testing.T) {
 	svc.ttMaxAgeMSDefault = 12345
 	if got := svc.trackerScrapeMaxAgeMS(nil, false); got != 12345 {
 		t.Fatalf("override maxAge=%d want 12345", got)
+	}
+
+	svc.ttMaxAgeMSDefault = 0
+	svc.ttStaleMaxAgeMS = 99999
+	endedCustom := time.Now().Add(-8 * 24 * time.Hour)
+	if got := svc.trackerScrapeMaxAgeMS(&StreamRecord{EndedAt: &endedCustom}, false); got != 99999 {
+		t.Fatalf("custom stale maxAge=%d want 99999", got)
+	}
+}
+
+func TestShouldTryDirectHTTP(t *testing.T) {
+	recent := time.Now().Add(-2 * time.Hour)
+	stale := time.Now().Add(-12 * time.Hour)
+
+	svc := &SyncService{ttDirectHTTPEnabled: true, ttDirectHTTPStaleOnly: true}
+	if svc.shouldTryDirectHTTP(&StreamRecord{EndedAt: &recent}) {
+		t.Fatal("expected recent stream to skip direct HTTP when stale-only")
+	}
+	if !svc.shouldTryDirectHTTP(&StreamRecord{EndedAt: &stale}) {
+		t.Fatal("expected stale stream to allow direct HTTP when stale-only")
+	}
+	if svc.shouldTryDirectHTTP(nil) {
+		t.Fatal("expected nil stream to skip direct HTTP when stale-only")
+	}
+
+	svc.ttDirectHTTPStaleOnly = false
+	if !svc.shouldTryDirectHTTP(&StreamRecord{EndedAt: &recent}) {
+		t.Fatal("expected direct HTTP for recent stream when stale-only disabled")
 	}
 }
 

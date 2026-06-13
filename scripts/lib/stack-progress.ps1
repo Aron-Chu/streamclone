@@ -125,11 +125,14 @@ function Show-StreamcloneContainerStatus {
 
 function Wait-StreamcloneStackReady {
     param(
-        [string]$Url = 'http://localhost:8090/',
+        [string]$Url = '',
         [int]$TimeoutSec = 300,
         [int]$IntervalSec = 3,
         [switch]$ShowContainers
     )
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        $Url = (Get-StreamcloneAppUrl) + '/'
+    }
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     $attempt = 0
     Write-StreamcloneProgressHeader 'Waiting for services to become healthy'

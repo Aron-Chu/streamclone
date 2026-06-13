@@ -7,6 +7,7 @@ import {
   getAnalyticsLive,
   getAnalyticsStream,
   getAnalyticsStreams,
+  prefetchAnalyticsTracker,
   getChannel,
   getChannelStreamHistory,
   watchAnalyticsChannel,
@@ -432,6 +433,64 @@ function chatIndexProgress(chat?: SyncChatProgress, rollupsWritten = 0) {
   return { pct, written, expected }
 }
 
+function chatFetchProgressState(
+  status: SyncStatus,
+  chatTimeline: ReturnType<typeof chatTimelineProgress>,
+  segmentDone: number,
+  segmentTotal: number,
+) {
+  const indexPhase = status.chat?.indexPhase
+  const segmentsTrackable = segmentTotal > 1
+  const segmentsComplete = !segmentsTrackable || segmentDone >= segmentTotal
+  const timelinePct = chatTimeline?.pct ?? 0
+  const chatFetchStarted = Boolean(
+    status.chat?.active ||
+    status.phase === 'fetching_comments' ||
+    indexPhase === 'fetching' ||
+    indexPhase === 'tokenizing' ||
+    indexPhase === 'writing' ||
+    segmentDone > 0 ||
+    (status.chat?.commentsFetched ?? 0) > 0,
+  )
+  const chatFetchDone = !status.viewersOnly && (
+    segmentsTrackable
+      ? segmentsComplete
+      : (
+          indexPhase === 'done' ||
+          status.phase === 'writing_rollups' ||
+          status.phase === 'completed' ||
+          indexPhase === 'tokenizing' ||
+          indexPhase === 'writing'
+        )
+  )
+  const chatFetchActive = !status.viewersOnly && !chatFetchDone && chatFetchStarted && (
+    Boolean(status.chat?.active) ||
+    status.phase === 'fetching_comments' ||
+    (segmentsTrackable && !segmentsComplete) ||
+    indexPhase === 'fetching'
+  )
+  const segmentCleanup = segmentsTrackable && !segmentsComplete && timelinePct >= 99
+  return { chatFetchDone, chatFetchActive, chatFetchStarted, segmentsTrackable, segmentsComplete, segmentCleanup, timelinePct }
+}
+
+function chatFetchDetailLabel(
+  status: SyncStatus,
+  chatFetchDone: boolean,
+  segmentsTrackable: boolean,
+  segmentCleanup: boolean,
+  timelinePct: number,
+  segmentDone: number,
+  segmentTotal: number,
+): string {
+  if (chatFetchDone) return 'All comments fetched'
+  if (status.chat?.throttled) return 'Waiting on rate limit'
+  if (segmentsTrackable) {
+    if (segmentCleanup) return 'Final segment cleanup'
+    return `Timeline indexed: ${timelinePct}% · ${segmentDone.toLocaleString()}/${segmentTotal.toLocaleString()} segments`
+  }
+  return `${(status.chat?.commentsFetched ?? 0).toLocaleString()} comments indexed`
+}
+
 function syncIndexPhaseDetail(chat?: SyncChatProgress, rollupsWritten = 0) {
   switch (chat?.indexPhase) {
     case 'tokenizing':
@@ -676,11 +735,25 @@ function SyncProgressPanel({
   const viewersChartReady = status.viewerStatus === 'ok' || (status.rollupsWritten ?? 0) > 0
   const segmentTotal = status.chat?.segmentsTotal ?? 0
   const segmentDone = status.chat?.segmentsDone ?? 0
-  const chatFetchActive = Boolean(status.chat?.active || status.phase === 'fetching_comments')
-  const chatFetchDone = !status.viewersOnly && (indexPhase === 'tokenizing' || indexPhase === 'writing' || indexPhase === 'done' || status.phase === 'writing_rollups' || status.phase === 'completed')
-  const chatFetchPct = segmentTotal > 1
+  const {
+    chatFetchDone,
+    chatFetchActive,
+    segmentsTrackable,
+    segmentCleanup,
+    timelinePct: chatTimelinePct,
+  } = chatFetchProgressState(status, chatTimeline, segmentDone, segmentTotal)
+  const chatFetchPct = segmentsTrackable
     ? Math.round((segmentDone / segmentTotal) * 100)
     : (chatTimeline?.pct ?? 0)
+  const chatFetchLabel = chatFetchDetailLabel(
+    status,
+    chatFetchDone,
+    segmentsTrackable,
+    segmentCleanup,
+    chatTimelinePct,
+    segmentDone,
+    segmentTotal,
+  )
 
   const viewerFailed = status.viewerStatus === 'failed'
   const viewerStepState: 'done' | 'active' | 'pending' | 'failed' = viewersChartReady
@@ -806,11 +879,7 @@ function SyncProgressPanel({
                 <div>
                   <div className="text-[11px] font-bold text-zinc-200">VOD Chat Fetch (Twitch GQL)</div>
                   <div className="text-[10px] font-semibold text-zinc-500">
-                    {chatFetchDone
-                      ? 'All comments fetched'
-                      : status.chat?.throttled
-                        ? 'Waiting on rate limit'
-                        : `${(status.chat?.commentsFetched ?? 0).toLocaleString()} comments indexed`}
+                    {chatFetchLabel}
                   </div>
                 </div>
               </div>
@@ -3274,6 +3343,7 @@ export default function Analytics() {
 
   const prefetchStreamDetail = useCallback((id: string) => {
     if (!login || !id) return
+    prefetchAnalyticsTracker(id, login).catch(() => undefined)
     queryClient.prefetchQuery({
       queryKey: ['analytics-detail', login, id],
       queryFn: () => getAnalyticsStream(id, { channel: login }),

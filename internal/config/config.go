@@ -66,13 +66,20 @@ type Config struct {
 	AnalyticsVODGQLConcurrencyMax     int `env:"ANALYTICS_VOD_GQL_CONCURRENCY_MAX" envDefault:"0"`
 	AnalyticsVODGQLSegmentSeconds          int  `env:"ANALYTICS_VOD_GQL_SEGMENT_SECONDS" envDefault:"600"`
 	AnalyticsVODGQLDenseSegmentSeconds     int  `env:"ANALYTICS_VOD_GQL_DENSE_SEGMENT_SECONDS" envDefault:"120"`
-	AnalyticsVODGQLHotSegmentPageThreshold int  `env:"ANALYTICS_VOD_GQL_HOT_SEGMENT_PAGE_THRESHOLD" envDefault:"50"`
+	AnalyticsVODGQLHotSegmentPageThreshold int  `env:"ANALYTICS_VOD_GQL_HOT_SEGMENT_PAGE_THRESHOLD" envDefault:"10"`
+	AnalyticsVODGQLHotSlowAdvanceSec       int  `env:"ANALYTICS_VOD_GQL_HOT_SLOW_ADVANCE_SEC" envDefault:"30"`
+	AnalyticsVODGQLHotSlowAdvancePages     int  `env:"ANALYTICS_VOD_GQL_HOT_SLOW_ADVANCE_PAGES" envDefault:"5"`
+	AnalyticsVODGQLHotCommentsPerPage        int  `env:"ANALYTICS_VOD_GQL_HOT_COMMENTS_PER_PAGE" envDefault:"80"`
+	AnalyticsVODGQLPriorityEdgeSeconds     int  `env:"ANALYTICS_VOD_GQL_PRIORITY_EDGE_SECONDS" envDefault:"600"`
 	AnalyticsVODGQLIncrementalDB             bool `env:"ANALYTICS_VOD_GQL_INCREMENTAL_DB" envDefault:"true"`
 	AnalyticsTrackerScrapeMS        int  `env:"ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS" envDefault:"120000"`
-	AnalyticsPassTTMaxAge           bool `env:"ANALYTICS_PASS_TT_MAXAGE" envDefault:"true"`
-	AnalyticsTTMaxAgeMS             int  `env:"ANALYTICS_TT_MAX_AGE_MS" envDefault:"0"`
-	AnalyticsTTDirectHTTPEnabled    bool `env:"ANALYTICS_TT_DIRECT_HTTP_ENABLED" envDefault:"true"`
-	AnalyticsTTDirectHTTPTimeoutMS  int  `env:"ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS" envDefault:"1200"`
+	AnalyticsPassTTMaxAge             bool `env:"ANALYTICS_PASS_TT_MAXAGE" envDefault:"true"`
+	AnalyticsTTMaxAgeMS               int  `env:"ANALYTICS_TT_MAX_AGE_MS" envDefault:"0"`
+	AnalyticsTTStaleMaxAgeMS          int  `env:"ANALYTICS_TT_STALE_MAX_AGE_MS" envDefault:"604800000"`
+	AnalyticsTTPrefetchEnabled        bool `env:"ANALYTICS_TT_PREFETCH_ENABLED" envDefault:"true"`
+	AnalyticsTTDirectHTTPEnabled      bool `env:"ANALYTICS_TT_DIRECT_HTTP_ENABLED" envDefault:"true"`
+	AnalyticsTTDirectHTTPStaleOnly    bool `env:"ANALYTICS_TT_DIRECT_HTTP_STALE_ONLY" envDefault:"false"`
+	AnalyticsTTDirectHTTPTimeoutMS    int  `env:"ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS" envDefault:"1200"`
 	AlwaysTrackedChannels        []string      `env:"ALWAYS_TRACKED_CHANNELS" envSeparator:","`
 
 	TwitchOAuthClientID     string `env:"TWITCH_OAUTH_CLIENT_ID"`

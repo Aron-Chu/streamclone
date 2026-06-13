@@ -193,8 +193,31 @@ function Invoke-EnvSynthesize {
 }
 
 function Get-StreamcloneWelcomeUrl {
-    param([string]$Base = 'http://localhost:8090/')
+    param([string]$Base = '')
+    if ([string]::IsNullOrWhiteSpace($Base)) {
+        $Base = Get-StreamcloneAppUrl
+    }
     return ($Base.TrimEnd('/') + '/?welcome=1')
+}
+
+function Get-StreamcloneAppUrl {
+    param([string]$Path = '/')
+    if (-not $Path.StartsWith('/')) { $Path = "/$Path" }
+    # wslrelay binds [::1]:8090 on Windows and breaks http://localhost:8090 in browsers.
+    return "http://127.0.0.1:8090$Path"
+}
+
+function Test-StreamcloneWebReachable {
+    param(
+        [string]$Url,
+        [int]$TimeoutSec = 5
+    )
+    try {
+        $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec
+        return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500)
+    } catch {
+        return $false
+    }
 }
 
 function Ensure-StreamcloneInstallId {

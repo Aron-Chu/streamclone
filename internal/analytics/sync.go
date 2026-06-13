@@ -43,13 +43,21 @@ type SyncService struct {
 	vodGQLSegmentSeconds          int
 	vodGQLDenseSegmentSeconds     int
 	vodGQLHotSegmentPageThreshold int
+	vodGQLHotSlowAdvanceSec       int
+	vodGQLHotSlowAdvancePages     int
+	vodGQLHotCommentsPerPage      int
+	vodGQLPriorityEdgeSeconds     int
 	vodGQLIncrementalDB           bool
 	trackerScrapeTimeoutMS int
-	passTTMaxAge           bool
-	ttMaxAgeMSDefault      int
-	ttDirectHTTPEnabled    bool
-	ttDirectHTTPTimeoutMS  int
-	directHTTP             directHTTPTelemetry
+	passTTMaxAge              bool
+	ttMaxAgeMSDefault         int
+	ttStaleMaxAgeMS           int
+	ttPrefetchEnabled         bool
+	ttDirectHTTPEnabled       bool
+	ttDirectHTTPStaleOnly     bool
+	ttDirectHTTPTimeoutMS     int
+	directHTTP                directHTTPTelemetry
+	trackerPrefetch           trackerPrefetchState
 	syncStatusCache        syncStatusCache
 	log                 *slog.Logger
 	rdb                 *redis.Client
@@ -76,11 +84,18 @@ func NewSyncService(
 	vodGQLSegmentSeconds int,
 	vodGQLDenseSegmentSeconds int,
 	vodGQLHotSegmentPageThreshold int,
+	vodGQLHotSlowAdvanceSec int,
+	vodGQLHotSlowAdvancePages int,
+	vodGQLHotCommentsPerPage int,
+	vodGQLPriorityEdgeSeconds int,
 	vodGQLIncrementalDB bool,
 	trackerScrapeTimeoutMS int,
 	passTTMaxAge bool,
 	ttMaxAgeMSDefault int,
+	ttStaleMaxAgeMS int,
+	ttPrefetchEnabled bool,
 	ttDirectHTTPEnabled bool,
+	ttDirectHTTPStaleOnly bool,
 	ttDirectHTTPTimeoutMS int,
 ) *SyncService {
 	if trackerScrapeTimeoutMS <= 0 {
@@ -114,7 +129,19 @@ func NewSyncService(
 		vodGQLDenseSegmentSeconds = vodGQLSegmentDenseVOD
 	}
 	if vodGQLHotSegmentPageThreshold <= 0 {
-		vodGQLHotSegmentPageThreshold = 50
+		vodGQLHotSegmentPageThreshold = 10
+	}
+	if vodGQLHotSlowAdvanceSec <= 0 {
+		vodGQLHotSlowAdvanceSec = vodGQLHotSlowAdvanceSecDefault
+	}
+	if vodGQLHotSlowAdvancePages <= 0 {
+		vodGQLHotSlowAdvancePages = vodGQLHotSlowAdvancePagesDefault
+	}
+	if vodGQLHotCommentsPerPage <= 0 {
+		vodGQLHotCommentsPerPage = vodGQLHotCommentsPerPageDefault
+	}
+	if vodGQLPriorityEdgeSeconds <= 0 {
+		vodGQLPriorityEdgeSeconds = gqlPriorityEdgeSecondsDefault
 	}
 	if ttDirectHTTPTimeoutMS <= 0 {
 		ttDirectHTTPTimeoutMS = 1200
@@ -148,13 +175,21 @@ func NewSyncService(
 		vodGQLSegmentSeconds:          vodGQLSegmentSeconds,
 		vodGQLDenseSegmentSeconds:     vodGQLDenseSegmentSeconds,
 		vodGQLHotSegmentPageThreshold: vodGQLHotSegmentPageThreshold,
+		vodGQLHotSlowAdvanceSec:       vodGQLHotSlowAdvanceSec,
+		vodGQLHotSlowAdvancePages:     vodGQLHotSlowAdvancePages,
+		vodGQLHotCommentsPerPage:      vodGQLHotCommentsPerPage,
+		vodGQLPriorityEdgeSeconds:     vodGQLPriorityEdgeSeconds,
 		vodGQLIncrementalDB:           vodGQLIncrementalDB,
 		trackerScrapeTimeoutMS: trackerScrapeTimeoutMS,
-		passTTMaxAge:           passTTMaxAge,
-		ttMaxAgeMSDefault:      ttMaxAgeMSDefault,
-		ttDirectHTTPEnabled:    ttDirectHTTPEnabled,
-		ttDirectHTTPTimeoutMS:  ttDirectHTTPTimeoutMS,
-		log:                    logger.With("service", "sync"),
+		passTTMaxAge:              passTTMaxAge,
+		ttMaxAgeMSDefault:         ttMaxAgeMSDefault,
+		ttStaleMaxAgeMS:           ttStaleMaxAgeMS,
+		ttPrefetchEnabled:         ttPrefetchEnabled,
+		ttDirectHTTPEnabled:       ttDirectHTTPEnabled,
+		ttDirectHTTPStaleOnly:     ttDirectHTTPStaleOnly,
+		ttDirectHTTPTimeoutMS:     ttDirectHTTPTimeoutMS,
+		trackerPrefetch:           *newTrackerPrefetchState(),
+		log:                       logger.With("service", "sync"),
 		rdb:                    rdb,
 	}
 }
@@ -318,6 +353,7 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 
 	commentsMap := make(map[int][]string) // offset minutes -> comments text
 	chatCache := newChatRollupCache()
+	var gameSegments []scrapedGame
 	var commentsErr error
 	var gqlFetchMS int64
 	var rollupStartMu sync.RWMutex
@@ -362,7 +398,7 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 
 	var commentsWG sync.WaitGroup
 	var commentsFetchStarted bool
-	startVODCommentsFetch := func(vod string) {
+	startVODCommentsFetch := func(vod string, viewerPts []parsedViewerPoint, scrapeGames []scrapedGame) {
 		if viewersOnly || vod == "" || commentsFetchStarted {
 			return
 		}
@@ -381,7 +417,9 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 			s.setSyncPhase(ctx, streamID, SyncPhaseFetchingComments, "Fetching VOD chat via Twitch GQL", nil)
 			start := time.Now()
 			chatAlignSec := resolveChatAlignSec(vod)
-			commentsErr = s.fetchVODComments(ctx, streamID, login, vod, commentsMap, s.vodDurationSeconds(ctx, vod), chatAlignSec, rollupStartFn, chatCache)
+			vodDur := s.vodDurationSeconds(ctx, vod)
+			scheduleHints := s.gqlScheduleHintsForStream(ctx, streamID, vodDur, scrapeGames, viewerPts)
+			commentsErr = s.fetchVODComments(ctx, streamID, login, vod, commentsMap, vodDur, chatAlignSec, rollupStartFn, chatCache, scheduleHints)
 			gqlFetchMS = time.Since(start).Milliseconds()
 			s.log.Info("sync phase complete", "stream_id", streamID, "phase", "gql_fetch", "duration_ms", gqlFetchMS, "chat_align_sec", chatAlignSec)
 		}()
@@ -459,7 +497,7 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		} else if !startedAt.IsZero() {
 			setSharedRollupStart(startedAt)
 		}
-		startVODCommentsFetch(cachedVodID)
+		startVODCommentsFetch(cachedVodID, tracker.ViewerPoints, tracker.Games)
 	}
 
 	// Parse stream metadata if this is a new stream record
@@ -514,11 +552,11 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		} else if !startedAt.IsZero() {
 			setSharedRollupStart(startedAt)
 		}
-		startVODCommentsFetch(cachedVodID)
+		startVODCommentsFetch(cachedVodID, tracker.ViewerPoints, tracker.Games)
 	}
 	durationMinutes := tracker.DurationMinutes
 	peakViewers := tracker.PeakViewers
-	gameSegments := tracker.Games
+	gameSegments = tracker.Games
 	viewerPoints := tracker.ViewerPoints
 	if html != "" {
 		if fromHTML := parseTrackerDurationMinutesFromHTML(html); fromHTML > durationMinutes {
@@ -634,7 +672,7 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 	if viewersOnly {
 		s.log.Info("viewers-only sync; skipping VOD comment fetch", "stream_id", streamID)
 	} else if cachedVodID != "" {
-		startVODCommentsFetch(cachedVodID)
+		startVODCommentsFetch(cachedVodID, viewerPoints, gameSegments)
 		s.setSyncPhase(ctx, streamID, SyncPhaseFetchingComments, "Waiting for VOD chat workers to finish", nil)
 		commentsWG.Wait()
 		if commentsErr != nil {
@@ -645,7 +683,9 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		s.setSyncPhase(ctx, streamID, SyncPhaseFetchingComments, "Fetching VOD chat comments", nil)
 		gqlStart := time.Now()
 		chatAlignSec := resolveChatAlignSec(vodID)
-		if err := s.fetchVODComments(ctx, streamID, login, vodID, commentsMap, s.vodDurationSeconds(ctx, vodID), chatAlignSec, rollupStartFn, chatCache); err != nil {
+		vodDur := s.vodDurationSeconds(ctx, vodID)
+		scheduleHints := s.gqlScheduleHintsForStream(ctx, streamID, vodDur, gameSegments, viewerPoints)
+		if err := s.fetchVODComments(ctx, streamID, login, vodID, commentsMap, vodDur, chatAlignSec, rollupStartFn, chatCache, scheduleHints); err != nil {
 			s.log.Warn("failed to fetch VOD comments (it may have been deleted)", "err", err)
 		}
 		gqlFetchMS = time.Since(gqlStart).Milliseconds()
@@ -1136,15 +1176,18 @@ func formatScraperConnectError(err error, scraperURL string) string {
 }
 
 func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string, stream *StreamRecord, viewersOnly bool) (string, error) {
-	if s.ttDirectHTTPEnabled && s.directHTTP.allowed() {
-		if htmlBody, err := s.scrapeTwitchTrackerDirect(ctx, url); err == nil {
+	tryDirect := s.shouldTryDirectHTTP(stream) && s.directHTTP.allowed()
+	if tryDirect {
+		htmlBody, directErr := s.scrapeTwitchTrackerDirect(ctx, url)
+		if directErr == nil {
 			s.directHTTP.record(true)
 			s.log.Info("fetched TwitchTracker page via direct HTTP", "url", url)
 			return htmlBody, nil
-		} else {
-			s.directHTTP.record(false)
-			s.log.Info("direct TwitchTracker fetch unavailable, trying browser scraper", "url", url, "err", err)
 		}
+		s.directHTTP.record(false)
+		s.log.Info("direct TwitchTracker fetch unavailable, trying browser scraper", "url", url, "err", directErr)
+	} else if s.ttDirectHTTPEnabled && s.ttDirectHTTPStaleOnly && !s.shouldTryDirectHTTP(stream) {
+		s.log.Debug("direct TwitchTracker fetch skipped for recent stream", "url", url)
 	} else if s.ttDirectHTTPEnabled && !s.directHTTP.allowed() {
 		s.log.Debug("direct TwitchTracker fetch temporarily disabled due to low success rate", "url", url)
 	}

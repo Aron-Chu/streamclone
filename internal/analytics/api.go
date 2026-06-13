@@ -35,6 +35,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/channels/{login}/live", h.channelLive)
 		r.Get("/channels/{login}/streams", h.channelStreams)
 		r.Get("/streams/{streamID}", h.streamDetail)
+		r.Post("/streams/{streamID}/prefetch-tracker", h.prefetchTracker)
 		r.Post("/streams/{streamID}/sync", h.syncStream)
 		r.Get("/streams/{streamID}/sync/status", h.syncStreamStatus)
 		r.Get("/streams/{streamID}/games", h.getStreamGames)
@@ -352,7 +353,7 @@ func fillMissingRollups(in []MinuteRollup, startedAt time.Time, endedAt *time.Ti
 	}
 
 	startMin := startedAt.UTC().Truncate(time.Minute)
-	
+
 	var endMin time.Time
 	if endedAt != nil {
 		endMin = endedAt.UTC().Truncate(time.Minute)
@@ -426,6 +427,29 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (h *Handler) prefetchTracker(w http.ResponseWriter, r *http.Request) {
+	streamID := strings.TrimSpace(chi.URLParam(r, "streamID"))
+	if streamID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_stream_id"})
+		return
+	}
+	login, ok := validLogin(r.URL.Query().Get("channel"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_channel"})
+		return
+	}
+	if h.syncService == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync_unavailable"})
+		return
+	}
+	queued := h.syncService.PrefetchTracker(login, streamID)
+	status := "skipped"
+	if queued {
+		status = "queued"
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": status})
 }
 
 func (h *Handler) syncStream(w http.ResponseWriter, r *http.Request) {
