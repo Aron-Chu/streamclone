@@ -50,20 +50,11 @@
 		}
 	}
 
-	@hls_local {
-		host localhost 127.0.0.1
-		path /live/*
-	}
-	reverse_proxy @hls_local mediamtx:8888 {
-		header_up X-Forwarded-Proto http
-		header_up Authorization "Bearer streamclone-local-hls-cdn"
-	}
-
 	@hls {
 		path /live/*
 	}
 	reverse_proxy @hls mediamtx:8888 {
-		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Proto {http.request.scheme}
 		header_up Authorization "Bearer streamclone-local-hls-cdn"
 	}
 

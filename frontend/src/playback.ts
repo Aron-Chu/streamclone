@@ -100,6 +100,8 @@ interface UseHlsPlaybackOptions {
   autoPlay?: boolean
   latencyMode?: PlaybackLatencyMode
   onLatencyDowngrade?: (mode: PlaybackLatencyMode) => void
+  /** Fired after repeated 401s on HLS playlists — usually stale session or dead relay. */
+  onUnauthorizedHls?: () => void
 }
 
 function hlsLatencyConfig(latencyMode: PlaybackLatencyMode) {
@@ -198,6 +200,7 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     let frameCallbackId: number | null = null
     const src = options.src
     recoveryRef.current = 0
+    let unauthorizedReloadCount = 0
     stallsRef.current = 0
     rebufferStartedRef.current = null
     firstFrameRef.current = null
@@ -329,6 +332,25 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
           updateMetrics()
         })
         hls.on(HlsPlayer.Events.ERROR, (_, data) => {
+          const details = `${data.details || ''}`.toLowerCase()
+          const responseCode = (data as { response?: { code?: number } }).response?.code
+          const isUnauthorizedPlaylist =
+            responseCode === 401 &&
+            (details.includes('level') || details.includes('manifest') || details.includes('frag'))
+
+          if (isUnauthorizedPlaylist) {
+            unauthorizedReloadCount += 1
+            stageRef.current = data.details || 'hls-unauthorized'
+            updateMetrics()
+            if (unauthorizedReloadCount <= 4) {
+              setState('retrying')
+              hls.loadSource(src)
+              return
+            }
+            options.onUnauthorizedHls?.()
+            if (!data?.fatal) return
+          }
+
           if (!data?.fatal) return
           recoveryRef.current += 1
           stageRef.current = data.details || 'hls-error'
@@ -340,7 +362,11 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
               return
             }
             setState('retrying')
-            hls.startLoad()
+            if (responseCode === 401 || details.includes('levelload') || details.includes('manifestload')) {
+              hls.loadSource(src)
+            } else {
+              hls.startLoad()
+            }
             return
           }
           if (data.type === HlsPlayer.ErrorTypes.MEDIA_ERROR) {

@@ -1,0 +1,7 @@
+# Build frontend from sibling twitch-7tv-clone when GHCR image lacks local fixes.
+services:
+  frontend:
+    image: !reset null
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile

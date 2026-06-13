@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation } from 'react-router-dom'
 import { getFollowedChannels, getStreams } from '../api'
 import type { FollowedChannel } from '../api'
+import { useAuth } from '../auth'
 import { useStreamPrewarm } from '../hooks/useStreamPrewarm'
 import { useUiSettings } from '../settings'
 
@@ -140,9 +141,10 @@ function ChannelList({
 function RailContent({ collapsed, onCloseMobile, viewerOverrides }: { collapsed: boolean; onCloseMobile?: () => void; viewerOverrides?: Record<string, number | undefined> }) {
   const settings = useUiSettings(s => s.settings)
   const toggleRailSection = useUiSettings(s => s.toggleRailSection)
+  const auth = useAuth()
   const followed = useQuery({
-    queryKey: ['followed'],
-    queryFn: getFollowedChannels,
+    queryKey: ['followed', auth.isAuthenticated],
+    queryFn: () => getFollowedChannels(auth.isAuthenticated),
     retry: false,
     staleTime: 30_000,
   })

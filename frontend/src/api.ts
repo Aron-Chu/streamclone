@@ -977,9 +977,11 @@ function mergeFollowedChannels(twitch: FollowedChannel[], local: FollowedChannel
 }
 
 /** Twitch follows (when signed in) merged with Streamclone-local follows. */
-export const getFollowedChannels = (): Promise<FollowedChannel[]> =>
-  Promise.all([getTwitchFollowedChannels(), getLocalFollowedChannels()])
-    .then(([twitch, local]) => mergeFollowedChannels(twitch, local))
+export const getFollowedChannels = (includeTwitch = true): Promise<FollowedChannel[]> =>
+  Promise.all([
+    includeTwitch ? getTwitchFollowedChannels() : Promise.resolve([] as FollowedChannel[]),
+    getLocalFollowedChannels(),
+  ]).then(([twitch, local]) => mergeFollowedChannels(twitch, local))
 
 export const followChannel = (login: string): Promise<{ ok: boolean; login: string; following: boolean }> =>
   fetch(`${METADATA}/v1/channels/${encodeURIComponent(login)}/follow`, { method: 'POST' })

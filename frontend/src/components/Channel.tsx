@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -911,9 +911,10 @@ function viewerSparklineValues(rollups: AnalyticsMinuteRollup[] | undefined) {
 
 function FollowButton({ login }: { login: string }) {
   const queryClient = useQueryClient()
+  const auth = useAuth()
   const followed = useQuery({
-    queryKey: ['followed'],
-    queryFn: getFollowedChannels,
+    queryKey: ['followed', auth.isAuthenticated],
+    queryFn: () => getFollowedChannels(auth.isAuthenticated),
     retry: false,
     staleTime: 30_000,
   })
@@ -1524,7 +1525,24 @@ export default function Channel() {
   const subscribe = useChatStore(s => s.subscribe)
   const unsubscribe = useChatStore(s => s.unsubscribe)
   const connectionState = useChatStore(s => s.connectionState)
-  const playback = useHlsPlayback(videoRef, { src: hlsUrl, enabled: Boolean(hlsUrl), muted, autoPlay: true, latencyMode: settings.playbackLatencyMode })
+  const retryStream = useCallback(() => {
+    setError(null)
+    setHlsUrl('')
+    setRetryKey(k => k + 1)
+  }, [])
+  const handleUnauthorizedHls = useCallback(() => {
+    if (autoRetryAttemptsRef.current >= 2) return
+    autoRetryAttemptsRef.current += 1
+    retryStream()
+  }, [retryStream])
+  const playback = useHlsPlayback(videoRef, {
+    src: hlsUrl,
+    enabled: Boolean(hlsUrl),
+    muted,
+    autoPlay: true,
+    latencyMode: settings.playbackLatencyMode,
+    onUnauthorizedHls: handleUnauthorizedHls,
+  })
 
   const details = useQuery({
     queryKey: ['channel-details', channelLogin],
@@ -1616,7 +1634,7 @@ export default function Channel() {
 
     subscribe(channelLogin)
 
-    const start = async () => {
+    const start = async (attempt = 0) => {
       try {
         const requestedQuality = requestQuality(settings.preferredQuality || 'best')
         const response = await startStream(channelLogin, requestedQuality, settings.playbackLatencyMode)
@@ -1639,6 +1657,11 @@ export default function Channel() {
           keepaliveStream(channelLogin, sessionIdRef.current).catch(() => undefined)
         }, 20000)
       } catch (e) {
+        if (alive && e instanceof ApiError && e.code === 'hls_not_ready' && e.retryable && attempt < 1) {
+          setRelayState('retrying')
+          await start(attempt + 1)
+          return
+        }
         if (alive) {
           const isOffline = e instanceof ApiError && e.code === 'channel_offline'
           setIsChannelOffline(isOffline)
@@ -1768,11 +1791,7 @@ export default function Channel() {
     playback.jumpLive()
   }
 
-  const retry = () => {
-    setError(null)
-    setHlsUrl('')
-    setRetryKey(k => k + 1)
-  }
+  const retry = retryStream
 
   useEffect(() => {
     const video = videoRef.current
