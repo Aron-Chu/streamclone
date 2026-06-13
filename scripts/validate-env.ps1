@@ -68,9 +68,12 @@ Test-Required -Key 'PUBLIC_ORIGIN' -Fix 'Set PUBLIC_ORIGIN=http://localhost:8090
 Test-Required -Key 'FRONTEND_ORIGIN' -Fix 'Set FRONTEND_ORIGIN=http://localhost:8090'
 
 $isReleaseInstall = ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1')
+$loopbackInstall = Test-EnvLoopbackPublicOrigin -EnvValues $envValues
 if ($isReleaseInstall) {
-    if ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -eq 'true') {
-        Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED=true on a release install' -Hint 'Dev-only token import should stay false in releases (docs/security.md)'
+    if ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -eq 'true' -and -not $loopbackInstall) {
+        Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED=true on a non-loopback release install' -Hint 'Dev-only token import should stay false outside localhost (docs/security.md)'
+    } elseif ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -ne 'true' -and $loopbackInstall) {
+        Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true on loopback release install' -Hint 'Run scripts/reload-env-if-stale.ps1 or restart Streamclone to enable Sign in (optional)'
     }
 } elseif ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -ne 'true') {
     Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true' -Hint 'Run make setup (.env.dev sets this for in-app local token import)'

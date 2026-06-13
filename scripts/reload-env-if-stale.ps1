@@ -1,4 +1,4 @@
-# Recreate env-sensitive services when container TWITCH_OAUTH_* differs from .env.
+# Recreate env-sensitive services when container env differs from .env.
 # docker compose restart does NOT reload env_file — only --force-recreate does.
 param(
     [string]$EnvFile = '.env',
@@ -9,7 +9,11 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
+. (Join-Path $PSScriptRoot 'lib\env.ps1')
 . (Join-Path $PSScriptRoot 'lib\stack-progress.ps1')
+
+$envPath = if ([System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile } else { Join-Path $Root $EnvFile }
+Ensure-LocalhostDevTokenImport -EnvFile $envPath | Out-Null
 
 function Read-EnvValue {
     param([string]$Path, [string]$Key)
@@ -38,16 +42,14 @@ function Get-ContainerEnvValue {
     return ''
 }
 
-$desiredId = Read-EnvValue -Path $EnvFile -Key 'TWITCH_OAUTH_CLIENT_ID'
-if ([string]::IsNullOrWhiteSpace($desiredId)) {
-    Write-Host "reload-env-if-stale: TWITCH_OAUTH_CLIENT_ID not in $EnvFile - skip (run make twitch-sync)"
-    exit 0
-}
+$desiredId = Read-EnvValue -Path $envPath -Key 'TWITCH_OAUTH_CLIENT_ID'
+$desiredDevToken = Read-EnvValue -Path $envPath -Key 'TWITCH_DEV_TOKEN_IMPORT_ENABLED'
+$checkOAuth = -not [string]::IsNullOrWhiteSpace($desiredId)
 
-$profile = Read-EnvValue -Path $EnvFile -Key 'STREAMCLONE_PROFILE'
+$profile = Read-EnvValue -Path $envPath -Key 'STREAMCLONE_PROFILE'
 if ([string]::IsNullOrWhiteSpace($profile)) { $profile = 'core' }
-$useImages = (Read-EnvValue -Path $EnvFile -Key 'STREAMCLONE_USE_IMAGES') -eq '1'
-if (-not $useImages -and (Read-EnvValue -Path $EnvFile -Key 'IMAGE_TAG')) { $useImages = $true }
+$useImages = (Read-EnvValue -Path $envPath -Key 'STREAMCLONE_USE_IMAGES') -eq '1'
+if (-not $useImages -and (Read-EnvValue -Path $envPath -Key 'IMAGE_TAG')) { $useImages = $true }
 
 $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile -UseImages:$useImages
 $psResult = Invoke-EnvDockerCaptured -Arguments ($composeArgs + @('ps', '--format', '{{.Service}}|{{.Name}}|{{.State}}'))
@@ -56,7 +58,7 @@ if ($psResult.ExitCode -ne 0) {
     exit 0
 }
 
-$stale = @()
+$stale = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($line in $psResult.Output) {
     if ([string]::IsNullOrWhiteSpace($line)) { continue }
     $parts = $line -split '\|', 3
@@ -66,23 +68,37 @@ foreach ($line in $psResult.Output) {
     $state = $parts[2]
     if ($service -notin $Services) { continue }
     if ($state -ne 'running') { continue }
+
+    if ($service -eq 'chat') {
+        $actualDev = Get-ContainerEnvValue -Container $container -Key 'TWITCH_DEV_TOKEN_IMPORT_ENABLED'
+        if ($null -ne $actualDev -and $actualDev -ne $desiredDevToken) {
+            [void]$stale.Add('chat')
+        }
+    }
+
+    if (-not $checkOAuth) { continue }
     $actual = Get-ContainerEnvValue -Container $container -Key 'TWITCH_OAUTH_CLIENT_ID'
     if ($null -eq $actual) { continue }
     if ($actual -ne $desiredId) {
-        $stale += $service
+        [void]$stale.Add($service)
     }
 }
 
 if ($stale.Count -eq 0) {
-    Write-Host 'reload-env-if-stale: container OAuth env matches .env'
+    if (-not $checkOAuth) {
+        Write-Host 'reload-env-if-stale: TWITCH_OAUTH_CLIENT_ID not in .env - dev token env matches chat container'
+    } else {
+        Write-Host 'reload-env-if-stale: container env matches .env'
+    }
     exit 0
 }
 
-Write-Host "reload-env-if-stale: stale OAuth in [$($stale -join ', ')] - force-recreating: $($Services -join ' ')"
-$code = Invoke-EnvDocker -Arguments ($composeArgs + @('up', '-d', '--no-deps', '--force-recreate') + $Services)
+$recreate = @($stale)
+Write-Host "reload-env-if-stale: stale env in [$($recreate -join ', ')] - force-recreating"
+$code = Invoke-EnvDocker -Arguments ($composeArgs + @('up', '-d', '--no-deps', '--force-recreate') + $recreate)
 if ($code -ne 0) {
     Write-Host "reload-env-if-stale: docker compose recreate failed (exit $code)" -ForegroundColor Red
     exit $code
 }
-Write-Host "reload-env-if-stale: recreated $($Services -join ' ')"
+Write-Host "reload-env-if-stale: recreated $($recreate -join ' ')"
 exit 0

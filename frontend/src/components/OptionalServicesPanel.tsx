@@ -5,7 +5,7 @@ import { useOptionalServices, type ServiceStartProgress } from '../hooks/useOpti
 type ServiceStatus = 'ready' | 'offline' | 'checking'
 
 export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean }) {
-  const { controlReady, starting, startService } = useOptionalServices()
+  const { controlReady, isStarting, startService } = useOptionalServices()
 
   return (
     <div className={compact ? 'mt-2 text-left' : 'max-w-md'}>
@@ -21,10 +21,10 @@ export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean 
           <button
             type="button"
             onClick={() => void startService('scraper')}
-            disabled={starting === 'scraper'}
+            disabled={isStarting('scraper')}
             className={`rounded border border-violet-400/40 bg-violet-500/15 px-2.5 py-1 font-black text-violet-100 transition hover:bg-violet-500/25 disabled:opacity-50 ${compact ? 'text-[10px]' : 'text-xs'}`}
           >
-            {starting === 'scraper' ? 'Starting…' : 'Start Analytics'}
+            {isStarting('scraper') ? 'Starting…' : 'Start Analytics'}
           </button>
         ) : null}
         <Link
@@ -146,8 +146,8 @@ export default function OptionalServicesPanel({
     controlReady,
     scraperOffline,
     clipperOffline,
-    starting,
-    startProgress,
+    isStarting,
+    startProgressByService,
     actionError,
     startService,
     refreshStatus,
@@ -201,20 +201,20 @@ export default function OptionalServicesPanel({
               <button
                 type="button"
                 onClick={() => void startService('scraper')}
-                disabled={starting === 'scraper'}
+                disabled={isStarting('scraper')}
                 className="rounded border border-amber-200/30 bg-amber-300/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-amber-50 transition hover:bg-amber-300/25 disabled:opacity-50"
               >
-                {starting === 'scraper' ? 'Starting…' : 'Start Analytics'}
+                {isStarting('scraper') ? 'Starting…' : 'Start Analytics'}
               </button>
             ) : null}
             {clipperBanner && controlReady ? (
               <button
                 type="button"
                 onClick={() => void startService('clipper')}
-                disabled={starting === 'clipper'}
+                disabled={isStarting('clipper')}
                 className="rounded border border-amber-200/30 bg-amber-300/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-amber-50 transition hover:bg-amber-300/25 disabled:opacity-50"
               >
-                {starting === 'clipper' ? 'Starting…' : 'Start Clip Studio'}
+                {isStarting('clipper') ? 'Starting…' : 'Start Clip Studio'}
               </button>
             ) : null}
             <Link
@@ -233,9 +233,14 @@ export default function OptionalServicesPanel({
             ) : null}
           </div>
         </div>
-        {startProgress ? (
-          <div className="mt-2">
-            <ServiceStartProgressBar progress={startProgress} compact />
+        {(startProgressByService.scraper || startProgressByService.clipper) ? (
+          <div className="mt-2 space-y-2">
+            {startProgressByService.scraper ? (
+              <ServiceStartProgressBar progress={startProgressByService.scraper} compact />
+            ) : null}
+            {startProgressByService.clipper ? (
+              <ServiceStartProgressBar progress={startProgressByService.clipper} compact />
+            ) : null}
           </div>
         ) : null}
         {actionError ? (
@@ -273,8 +278,15 @@ export default function OptionalServicesPanel({
         </button>
       </div>
 
-      {startProgress ? (
-        <ServiceStartProgressBar progress={startProgress} />
+      {(startProgressByService.scraper || startProgressByService.clipper) ? (
+        <div className="space-y-2">
+          {startProgressByService.scraper ? (
+            <ServiceStartProgressBar progress={startProgressByService.scraper} />
+          ) : null}
+          {startProgressByService.clipper ? (
+            <ServiceStartProgressBar progress={startProgressByService.clipper} />
+          ) : null}
+        </div>
       ) : null}
 
       {actionError ? (
@@ -296,8 +308,8 @@ export default function OptionalServicesPanel({
             status={scraperStatus}
             actionLabel="Start Analytics"
             onAction={() => void startService('scraper')}
-            busy={starting === 'scraper'}
-            progress={startProgress?.service === 'scraper' ? startProgress : null}
+            busy={isStarting('scraper')}
+            progress={startProgressByService.scraper ?? null}
           />
         ) : null}
         {showClipper ? (
@@ -307,8 +319,8 @@ export default function OptionalServicesPanel({
             status={clipperStatus}
             actionLabel="Start Clip Studio"
             onAction={() => void startService('clipper')}
-            busy={starting === 'clipper'}
-            progress={startProgress?.service === 'clipper' ? startProgress : null}
+            busy={isStarting('clipper')}
+            progress={startProgressByService.clipper ?? null}
           />
         ) : null}
       </div>

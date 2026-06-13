@@ -48,21 +48,26 @@ function isServiceReady(
 
 export function useOptionalServices() {
   const queryClient = useQueryClient()
-  const [starting, setStarting] = useState<'scraper' | 'clipper' | null>(null)
-  const [startProgress, setStartProgress] = useState<ServiceStartProgress | null>(null)
+  const [starting, setStarting] = useState<Set<'scraper' | 'clipper'>>(() => new Set())
+  const [startProgressByService, setStartProgressByService] = useState<
+    Partial<Record<'scraper' | 'clipper', ServiceStartProgress>>
+  >({})
   const [actionError, setActionError] = useState<string | null>(null)
+
+  const anyStarting = starting.size > 0
+  const startProgress = startProgressByService.scraper ?? startProgressByService.clipper ?? null
 
   const setup = useQuery({
     queryKey: ['setup-welcome'],
     queryFn: getSetupWelcome,
     staleTime: 10_000,
-    refetchInterval: starting ? 2_000 : 15_000,
+    refetchInterval: anyStarting ? 2_000 : 15_000,
   })
   const diagnostics = useQuery({
     queryKey: ['setup-diagnostics'],
     queryFn: getMetadataDiagnostics,
     staleTime: 5_000,
-    refetchInterval: starting ? 2_000 : 15_000,
+    refetchInterval: anyStarting ? 2_000 : 15_000,
   })
   const control = useQuery({
     queryKey: ['setup-control-health'],
@@ -106,23 +111,41 @@ export function useOptionalServices() {
       )
       return false
     }
-    setStarting(service)
-    setStartProgress({
-      service,
-      percent: 8,
-      phase: 'Sending start request',
-      detail: `Starting ${START_LABELS[service]}...`,
-    })
-    try {
-      await startSetupService(service)
-      setStartProgress({
+    setStarting(prev => new Set(prev).add(service))
+    setStartProgressByService(prev => ({
+      ...prev,
+      [service]: {
         service,
-        percent: 18,
-        phase: 'Docker compose running',
-        detail: service === 'scraper'
-          ? 'First start may build a large browser image (5–15 min).'
-          : 'Bringing optional containers online...',
-      })
+        percent: 8,
+        phase: 'Sending start request',
+        detail: `Starting ${START_LABELS[service]}...`,
+      },
+    }))
+    try {
+      const startResp = await startSetupService(service)
+      if (startResp.message?.includes('queued')) {
+        setStartProgressByService(prev => ({
+          ...prev,
+          [service]: {
+            service,
+            percent: 12,
+            phase: 'Queued',
+            detail: startResp.message,
+          },
+        }))
+      } else {
+        setStartProgressByService(prev => ({
+          ...prev,
+          [service]: {
+            service,
+            percent: 18,
+            phase: 'Docker compose running',
+            detail: service === 'scraper'
+              ? 'First start may build a large browser image (5–15 min).'
+              : 'Bringing optional containers online...',
+          },
+        }))
+      }
       const maxAttempts = service === 'scraper' ? 450 : 45
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise(resolve => window.setTimeout(resolve, 2000))
@@ -140,20 +163,28 @@ export function useOptionalServices() {
               hostPhase = status.phase
             }
           }
-          setStartProgress({
-            service,
-            percent: hostPercent,
-            phase: hostPhase,
-            detail: hostDetail,
-          })
+          setStartProgressByService(prev => ({
+            ...prev,
+            [service]: {
+              service,
+              percent: hostPercent,
+              phase: hostPhase,
+              detail: hostDetail || prev[service]?.detail || '',
+            },
+          }))
         } catch {
-          setStartProgress(prev => prev && prev.service === service
-            ? {
-                ...prev,
-                percent: Math.min(90, prev.percent + 1),
+          setStartProgressByService(prev => {
+            const cur = prev[service]
+            if (!cur) return prev
+            return {
+              ...prev,
+              [service]: {
+                ...cur,
+                percent: Math.min(90, cur.percent + 1),
                 phase: 'Still starting',
-              }
-            : prev)
+              },
+            }
+          })
         }
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['setup-welcome'] }),
@@ -163,21 +194,27 @@ export function useOptionalServices() {
         const diag = queryClient.getQueryData<MetadataDiagnostics>(['setup-diagnostics'])
         const ready = isServiceReady(welcome, diag, service)
         if (ready) {
-          setStartProgress({
-            service,
-            percent: 100,
-            phase: 'Ready',
-            detail: `${START_LABELS[service]} is online`,
-          })
+          setStartProgressByService(prev => ({
+            ...prev,
+            [service]: {
+              service,
+              percent: 100,
+              phase: 'Ready',
+              detail: `${START_LABELS[service]} is online`,
+            },
+          }))
           return true
         }
         if (hostPercent >= 82 && hostPhase === 'Container is up' && service === 'clipper') {
-          setStartProgress({
-            service,
-            percent: 98,
-            phase: 'Waiting for health check',
-            detail: hostDetail || 'Container is up — confirming API...',
-          })
+          setStartProgressByService(prev => ({
+            ...prev,
+            [service]: {
+              service,
+              percent: 98,
+              phase: 'Waiting for health check',
+              detail: hostDetail || 'Container is up — confirming API...',
+            },
+          }))
         }
       }
       setActionError(
@@ -190,10 +227,23 @@ export function useOptionalServices() {
       setActionError(err instanceof Error ? err.message : `Unable to start ${service}.`)
       return false
     } finally {
-      setStarting(null)
-      window.setTimeout(() => setStartProgress(null), 2500)
+      setStarting(prev => {
+        const next = new Set(prev)
+        next.delete(service)
+        return next
+      })
+      window.setTimeout(() => {
+        setStartProgressByService(prev => {
+          if (!prev[service]) return prev
+          const next = { ...prev }
+          delete next[service]
+          return next
+        })
+      }, 2500)
     }
   }
+
+  const isStarting = (service: 'scraper' | 'clipper') => starting.has(service)
 
   return {
     setup,
@@ -204,11 +254,14 @@ export function useOptionalServices() {
     controlReady,
     scraperOffline,
     clipperOffline,
-    starting,
+    starting: isStarting('scraper') ? 'scraper' : isStarting('clipper') ? 'clipper' : null,
+    startingServices: starting,
     startProgress,
+    startProgressByService,
     actionError,
     setActionError,
     startService,
     refreshStatus,
+    isStarting,
   }
 }

@@ -41,12 +41,37 @@ function Test-StreamcloneScraperUseImagesFromRoot {
     return ($vals['SCRAPER_USE_IMAGES'] -eq '1')
 }
 
+function Test-ScraperSiblingRepoReady {
+    param([string]$Root = (Get-EnvRepoRoot))
+    $sibling = Get-EnvScraperSiblingPath
+    return (Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile'))
+}
+
+function Test-ScraperBuildFromSource {
+    param([string]$Root)
+    if (-not (Test-StreamcloneScraperUseImagesFromRoot -Root $Root)) {
+        return $true
+    }
+    if (Test-ScraperSiblingRepoReady -Root $Root) {
+        return $true
+    }
+    $errLog = Join-Path $Root '.streamclone-start-scraper.log.err'
+    if (Test-Path $errLog) {
+        $text = Get-Content -LiteralPath $errLog -Raw -ErrorAction SilentlyContinue
+        if ($text -match 'registry:\s*denied|error from registry:\s*denied') {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Get-StreamcloneComposeArgs {
     param(
         [string]$Root,
         [string]$Profile = '',
         [switch]$UseImages,
-        [switch]$NoUseImages
+        [switch]$NoUseImages,
+        [switch]$ScraperSourceBuild
     )
     if ([string]::IsNullOrWhiteSpace($Profile)) {
         $Profile = Get-StreamcloneProfileFromRoot -Root $Root
@@ -65,6 +90,9 @@ function Get-StreamcloneComposeArgs {
     )
     if ($pullImages -or $scraperImages) {
         $args += '-f', (Join-Path $Root 'deploy\docker-compose.release.yml')
+    }
+    if ($ScraperSourceBuild.IsPresent -or (Test-ScraperBuildFromSource -Root $Root)) {
+        $args += '-f', (Join-Path $Root 'deploy\docker-compose.scraper-source.yml')
     }
     foreach ($p in (Get-EnvComposeProfiles -Profile $Profile)) {
         $args += '--profile', $p
