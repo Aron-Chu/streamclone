@@ -14,6 +14,7 @@ Index of **active** vs **archived** docs and cleanup checklist. Use this when re
 | [docs/options.md](options.md) | Profiles, Twitch, scraper |
 | [docs/security.md](security.md) | Operator hardening (short) |
 | [docs/getting-started.md](getting-started.md) | Doc hub links |
+| [README-quickstart.md](../README-quickstart.md) | One-page install cheat sheet |
 | [docs/scraper-cloudflare-and-proxy.md](scraper-cloudflare-and-proxy.md) | Analytics tier |
 | [deploy/FREE_DEPLOYMENT.md](../deploy/FREE_DEPLOYMENT.md) | Public HTTPS VM |
 | [docs/product-roadmap.md](product-roadmap.md) | Product status |
@@ -82,6 +83,32 @@ Moved to [docs/archive/](archive/) — agent review snapshots and old benchmark 
 | Date | Change |
 |------|--------|
 | 2026-06-13 | Shortened README, CONTRIBUTING, security.md; added SECURITY.md, repo-maintenance.md; archived review briefs |
+| 2026-06-13 | Install bug fix log; repo vs `%USERPROFILE%\streamclone` naming note |
+
+## Naming: Streamclone repo vs local folder vs install
+
+Use these names in commits, docs, and agent summaries:
+
+| Name | What it is |
+|------|------------|
+| **Streamclone** | The product and GitHub repo [`Aron-Chu/streamclone`](https://github.com/Aron-Chu/streamclone). Say this in user-facing text and bug-fix notes. |
+| **This git checkout** | Source tree you edit and push. The folder on disk may still be named `twitch-7tv-clone` — that is legacy; do **not** call the product that. |
+| **`%USERPROFILE%\streamclone`** | End-user **release install** (Setup.exe / ZIP). Not a git repo. Changes here alone do not ship to other users. |
+
+**Bug fixes ship from this repo:** edit scripts/docs/CI here, commit, push `master`, then cut a release tag when installers need the bundle. Installers also pull script overlays from GitHub on Start/Install. Do not treat fixes copied only into `%USERPROFILE%\streamclone` as done.
+
+When logging a fix, append a row to **Install bug fix log** below (scope `install`, `fix(install)`, etc.).
+
+## Install bug fix log
+
+Windows installer / bootstrap / `%USERPROFILE%\streamclone` lifecycle. End-user impact, not dev-only stack tweaks.
+
+| Date | Commit | Summary |
+|------|--------|---------|
+| 2026-06-12 | `04b79c5` | Defer Docker cleanup on uninstall when Docker Desktop is offline; `Finish Streamclone Docker cleanup.cmd` |
+| 2026-06-13 | `4bb1298` | Bootstrap from `%TEMP%`: load `env.ps1` from bootstrap lib dir, not `%TEMP%\lib`; same-version reinstall without re-downloading ZIP |
+| 2026-06-13 | `966c6b0` | Fetch bootstrap and script overlay by GitHub commit SHA (raw `/master/` CDN was stale) |
+| 2026-06-13 | `a67bd05` | Repair `deploy/Caddyfile.local-tunnel` when Docker created a directory (broke `local-proxy` / `:8090`) |
 
 ## When adding new docs
 

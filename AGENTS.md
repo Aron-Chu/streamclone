@@ -2,6 +2,8 @@
 
 Read this file first. Load **one** domain steering doc, then use the code graph MCP before broad file reads.
 
+**Naming:** The product is **Streamclone** ([`Aron-Chu/streamclone`](https://github.com/Aron-Chu/streamclone)). This folder may be named `twitch-7tv-clone` locally; `%USERPROFILE%\streamclone` is the release install, not git. Ship fixes from this repo — see [`docs/repo-maintenance.md`](docs/repo-maintenance.md) (*Install bug fix log*).
+
 ## Task router
 
 | Task | Read first | Symbol lookup |
@@ -16,7 +18,7 @@ Read this file first. Load **one** domain steering doc, then use the code graph 
 | Local Twitch auth | `.kiro/steering/local-auth.md` | — |
 | Emotes / 7TV / FFZ | `.kiro/steering/emote-pipeline.md` | — |
 | Windows / Docker localhost | `.kiro/steering/windows-dev.md` | — |
-| Desktop install / uninstall | `docs/install-desktop.md` | `Install` / `Start` / `Stop` / `Uninstall` launchers; `scripts/uninstall-streamclone.ps1` |
+| Desktop install / uninstall | `docs/install-desktop.md`, `docs/repo-maintenance.md` (install bug fix log) | `Install` / `Start` / `Stop` / `Uninstall` launchers; `scripts/uninstall-streamclone.ps1` |
 | Security / secrets / deploy hardening | `SECURITY.md`, `docs/security.md` | — |
 | Scraper / CDP Bypass / Cloudflare | `.kiro/steering/windows-dev.md`, `.kiro/specs/scraper-optimization-notes.md`, `streamclone-scraper/main.py` | — |
 | Full feature specs | `.kiro/specs/<feature>/` | Use for planning, not every bugfix |

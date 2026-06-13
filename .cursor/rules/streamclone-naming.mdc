@@ -1,0 +1,12 @@
+---
+description: Call the product Streamclone; distinguish repo checkout from release install
+alwaysApply: true
+---
+
+# Streamclone naming (not twitch-7tv-clone)
+
+- **Product / GitHub repo:** **Streamclone** (`Aron-Chu/streamclone`). Use this in commit bodies, PR text, user replies, and bug-fix notes.
+- **Local git folder** may still be named `twitch-7tv-clone` on disk — legacy checkout path only. Do not refer to the product or repo as "twitch-7tv-clone" in docs or chat.
+- **`%USERPROFILE%\streamclone`** is the **release install** (Setup.exe / ZIP), not this source repo. Bug fixes must be committed **here** and pushed; copying scripts only into the install folder does not ship to others.
+
+After each **install / desktop / bootstrap / uninstall** bug fix, append one row to the table in [`docs/repo-maintenance.md`](../docs/repo-maintenance.md) (*Install bug fix log*).
