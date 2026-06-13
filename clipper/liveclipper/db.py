@@ -198,13 +198,14 @@ class Store:
         peak_chat_ts: int | None,
         message_count: int | None,
         duplicate_window_seconds: int,
-        moment_context: dict[str, Any] | None = None,
+        moment_context: dict[str, Any] | str | None = None,
     ) -> JobInsertResult:
         ts = now_ms()
         cutoff = ts - duplicate_window_seconds * 1000
         channel = channel.lower()
+        encoded_context = self._encode_moment_context(moment_context)
         with self._lock:
-            existing = self._find_duplicate(channel, broadcaster_id, cutoff)
+            existing = self._find_duplicate(channel, broadcaster_id, cutoff, moment_context)
             if existing:
                 existing_id = existing["id"]
                 self._conn.execute(
@@ -245,7 +246,7 @@ class Store:
                     trigger_detected_at,
                     peak_chat_ts,
                     message_count,
-                    json.dumps(moment_context) if moment_context else None,
+                    encoded_context,
                     ts,
                     ts,
                 ),
@@ -254,7 +255,63 @@ class Store:
             self._conn.commit()
             return JobInsertResult(job_id, False)
 
-    def _find_duplicate(self, channel: str, broadcaster_id: str, cutoff: int) -> sqlite3.Row | None:
+    def _encode_moment_context(self, moment_context: dict[str, Any] | str | None) -> str | None:
+        if moment_context is None:
+            return None
+        if isinstance(moment_context, str):
+            text = moment_context.strip()
+            return text or None
+        return json.dumps(moment_context)
+
+    def _parse_moment_context(self, raw: Any) -> dict[str, Any] | None:
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                return None
+            if isinstance(parsed, str):
+                try:
+                    parsed = json.loads(parsed)
+                except json.JSONDecodeError:
+                    return None
+            return parsed if isinstance(parsed, dict) else None
+        return None
+
+    def _find_duplicate(
+        self,
+        channel: str,
+        broadcaster_id: str,
+        cutoff: int,
+        moment_context: dict[str, Any] | str | None = None,
+    ) -> sqlite3.Row | None:
+        ctx = self._parse_moment_context(moment_context)
+        vod_id = str(ctx.get("vod_id") or "").strip() if ctx else ""
+        vod_offset = ctx.get("vod_offset_seconds") if ctx else None
+        if vod_id:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM jobs
+                WHERE created_at >= ?
+                  AND (
+                    state IN ('queued', 'creating_clip', 'waiting_for_clip', 'downloading', 'transcribing', 'rendering')
+                    OR (state='ready' AND created_at>=?)
+                  )
+                ORDER BY created_at DESC
+                """,
+                (cutoff, cutoff),
+            ).fetchall()
+            for row in rows:
+                existing_ctx = self._parse_moment_context(row["moment_context"])
+                if not existing_ctx or str(existing_ctx.get("vod_id") or "").strip() != vod_id:
+                    continue
+                existing_offset = existing_ctx.get("vod_offset_seconds")
+                if vod_offset is None or existing_offset is None:
+                    return row
+                if abs(float(existing_offset) - float(vod_offset)) <= 60.0:
+                    return row
+            return None
         if broadcaster_id:
             return self._conn.execute(
                 """

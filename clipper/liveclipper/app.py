@@ -20,6 +20,7 @@ from .templates import TemplateLoader, resolve_render_options
 from .transcribe import Transcriber, offset_caption_segments, write_ass
 from .twitch import TwitchClient
 from .validate import normalize_channel
+from .vod import VodDownloader
 from .worker import JobWorker
 
 
@@ -63,6 +64,11 @@ def create_app() -> FastAPI:
     store.init()
     twitch = TwitchClient(cfg.twitch_api_url, cfg.twitch_client_id, cfg.twitch_user_access_token)
     downloader = StreamlinkDownloader(cfg.twitch_user_access_token, cfg.streamlink_bin)
+    vod_downloader = VodDownloader(
+        token=cfg.twitch_user_access_token,
+        streamlink_bin=cfg.streamlink_bin,
+        ffmpeg_bin=cfg.ffmpeg_bin,
+    )
     transcriber = Transcriber(
         cfg.whisper_model,
         cfg.whisper_compute_type,
@@ -76,6 +82,7 @@ def create_app() -> FastAPI:
         store=store,
         twitch=twitch,
         downloader=downloader,
+        vod_downloader=vod_downloader,
         transcriber=transcriber,
         renderer=renderer,
     )
@@ -673,17 +680,26 @@ def create_app() -> FastAPI:
         final_duration = float(body.get("final_duration") or cfg.final_duration)
         import json as json_mod
         moment_context_raw = body.get("moment_context")
-        moment_context_value: str | None = None
+        moment_context_value: dict[str, Any] | None = None
         if isinstance(moment_context_raw, dict):
-            moment_context_value = json_mod.dumps(moment_context_raw)
+            moment_context_value = moment_context_raw
         elif isinstance(moment_context_raw, str) and moment_context_raw.strip():
-            moment_context_value = moment_context_raw.strip()
+            try:
+                parsed = json_mod.loads(moment_context_raw)
+                if isinstance(parsed, dict):
+                    moment_context_value = parsed
+            except json_mod.JSONDecodeError:
+                moment_context_value = None
+
+        effective_trigger = trigger_type
+        if moment_context_value and str(moment_context_value.get("vod_id") or "").strip():
+            effective_trigger = "vod_export"
 
         result = store.insert_job(
             channel=channel,
             broadcaster_id=str(body.get("broadcaster_id") or ""),
-            trigger_type=trigger_type,
-            reason=str(body.get("reason") or trigger_type),
+            trigger_type=effective_trigger,
+            reason=str(body.get("reason") or effective_trigger),
             title=str(body.get("title") or f"{channel} clip"),
             requested_duration=duration,
             source_duration=min(max(duration, 5.0), 60.0),

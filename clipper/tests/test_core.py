@@ -6,7 +6,13 @@ from pathlib import Path
 
 from liveclipper.db import Store
 from liveclipper.irc import ChatMessage, VelocityDetector, parse_privmsg
-from liveclipper.render import build_audio_filter, build_filter, compute_trim_start, escape_filter_path
+from liveclipper.render import (
+    build_audio_filter,
+    build_filter,
+    compute_trim_start,
+    escape_filter_path,
+    vod_moment_offset_in_source,
+)
 from liveclipper.streamlink import build_command
 from liveclipper.templates import TemplateLoader, resolve_render_options
 from liveclipper.templates import AudioEffects, IntroZoom, VideoEffects
@@ -19,6 +25,14 @@ from liveclipper.transcribe import (
     offset_caption_segments,
     write_ass,
 )
+from liveclipper.vod import (
+    build_ffmpeg_segment_argv,
+    build_streamlink_json_argv,
+    build_vod_page_url,
+    compute_vod_segment_window,
+    parse_streamlink_json,
+)
+from liveclipper.worker import JobWorker
 
 
 class IRCTests(unittest.TestCase):
@@ -119,6 +133,66 @@ class StoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_duplicate_suppression_by_vod_offset(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = Store(Path(td) / "clipper.sqlite")
+            store.init()
+            try:
+                ctx = {"vod_id": "12345", "vod_offset_seconds": 600}
+                first = store.insert_job(
+                    channel="chan",
+                    broadcaster_id="",
+                    trigger_type="vod_export",
+                    reason="one",
+                    title="title",
+                    requested_duration=60,
+                    source_duration=60,
+                    final_duration=30,
+                    event_latency_offset=8,
+                    trigger_detected_at=1000,
+                    peak_chat_ts=None,
+                    message_count=None,
+                    duplicate_window_seconds=60,
+                    moment_context=ctx,
+                )
+                second = store.insert_job(
+                    channel="chan",
+                    broadcaster_id="",
+                    trigger_type="vod_export",
+                    reason="two",
+                    title="title",
+                    requested_duration=60,
+                    source_duration=60,
+                    final_duration=30,
+                    event_latency_offset=8,
+                    trigger_detected_at=2000,
+                    peak_chat_ts=None,
+                    message_count=None,
+                    duplicate_window_seconds=60,
+                    moment_context={"vod_id": "12345", "vod_offset_seconds": 630},
+                )
+                third = store.insert_job(
+                    channel="chan",
+                    broadcaster_id="",
+                    trigger_type="vod_export",
+                    reason="three",
+                    title="title",
+                    requested_duration=60,
+                    source_duration=60,
+                    final_duration=30,
+                    event_latency_offset=8,
+                    trigger_detected_at=3000,
+                    peak_chat_ts=None,
+                    message_count=None,
+                    duplicate_window_seconds=60,
+                    moment_context={"vod_id": "12345", "vod_offset_seconds": 900},
+                )
+                self.assertFalse(first.suppressed)
+                self.assertTrue(second.suppressed)
+                self.assertFalse(third.suppressed)
+            finally:
+                store.close()
+
 
 class CommandTests(unittest.TestCase):
     def test_streamlink_bearer_header_redacted(self) -> None:
@@ -148,6 +222,30 @@ class CommandTests(unittest.TestCase):
             peak_chat_ts_ms=None,
         )
         self.assertEqual(start, 30)
+
+    def test_trim_centers_on_vod_offset(self) -> None:
+        moment_context = {
+            "vod_id": "123",
+            "vod_offset_seconds": 600,
+            "vod_segment_start": 570.0,
+            "source_kind": "vod",
+        }
+        start = compute_trim_start(
+            source_duration=60,
+            final_duration=30,
+            event_latency_offset=8,
+            trigger_detected_at_ms=10_000,
+            peak_chat_ts_ms=None,
+            moment_context=moment_context,
+        )
+        self.assertAlmostEqual(start, 19.5)
+
+    def test_vod_moment_offset_in_source(self) -> None:
+        offset = vod_moment_offset_in_source(
+            {"vod_offset_seconds": 600, "vod_segment_start": 570},
+            60,
+        )
+        self.assertAlmostEqual(offset or 0, 30.0)
 
     def test_subtitle_path_escaping(self) -> None:
         escaped = escape_filter_path(Path("C:/clipper data/captions,one.ass"))
@@ -346,6 +444,143 @@ class TemplateTests(unittest.TestCase):
         self.assertIsNotNone(chain)
         assert chain is not None
         self.assertIn("afftdn", chain)
+
+
+class VodTests(unittest.TestCase):
+    def test_build_vod_page_url(self) -> None:
+        self.assertEqual(build_vod_page_url("987654"), "https://www.twitch.tv/videos/987654")
+
+    def test_compute_vod_segment_window(self) -> None:
+        window = compute_vod_segment_window(600, 60)
+        self.assertAlmostEqual(window.segment_start, 570.0)
+        self.assertAlmostEqual(window.duration, 60.0)
+        self.assertAlmostEqual(window.moment_offset, 30.0)
+
+    def test_streamlink_json_argv_redacts_token(self) -> None:
+        preview = build_streamlink_json_argv(
+            "https://www.twitch.tv/videos/1",
+            token="secret-token",
+        )
+        joined = " ".join(preview.argv)
+        redacted = " ".join(preview.redacted)
+        self.assertIn("Authorization=Bearer secret-token", joined)
+        self.assertNotIn("secret-token", redacted)
+
+    def test_build_ffmpeg_segment_argv(self) -> None:
+        argv = build_ffmpeg_segment_argv(
+            ffmpeg_bin="ffmpeg",
+            stream_url="https://example.com/stream.m3u8",
+            output_path=Path("out.mp4"),
+            segment_start=120.5,
+            duration=60.0,
+        )
+        self.assertEqual(argv[0], "ffmpeg")
+        self.assertIn("-ss", argv)
+        self.assertIn("120.500", argv)
+        self.assertIn("60.000", argv)
+
+    def test_parse_streamlink_json(self) -> None:
+        url = parse_streamlink_json('{"type":"hls","url":"https://example.com/master.m3u8"}')
+        self.assertEqual(url, "https://example.com/master.m3u8")
+
+
+class WorkerRoutingTests(unittest.TestCase):
+    def test_worker_routes_vod_jobs_before_create_clip(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            output_dir = Path(td) / "output"
+            output_dir.mkdir(parents=True)
+            cfg = load_test_config(output_dir)
+            store = Store(output_dir / "clipper.sqlite")
+            store.init()
+
+            class FakeVodDownloader:
+                def download_segment(self, **kwargs):
+                    output_path = kwargs["output_path"]
+                    output_path.write_bytes(b"vod")
+                    from liveclipper.vod import VodSegmentWindow
+
+                    return VodSegmentWindow(segment_start=570.0, duration=60.0, moment_offset=30.0)
+
+            class FailingTwitch:
+                def create_clip(self, **kwargs):
+                    raise AssertionError("create_clip should not run for vod_export jobs")
+
+            worker = JobWorker(
+                cfg=cfg,
+                store=store,
+                twitch=FailingTwitch(),  # type: ignore[arg-type]
+                downloader=object(),  # type: ignore[arg-type]
+                vod_downloader=FakeVodDownloader(),  # type: ignore[arg-type]
+                transcriber=object(),  # type: ignore[arg-type]
+                renderer=object(),  # type: ignore[arg-type]
+            )
+
+            result = store.insert_job(
+                channel="chan",
+                broadcaster_id="",
+                trigger_type="vod_export",
+                reason="analytics",
+                title="title",
+                requested_duration=60,
+                source_duration=60,
+                final_duration=30,
+                event_latency_offset=8,
+                trigger_detected_at=1000,
+                peak_chat_ts=None,
+                message_count=None,
+                duplicate_window_seconds=60,
+                moment_context={"vod_id": "12345", "vod_offset_seconds": 600},
+            )
+            assert result.job_id is not None
+            job = store.get_job(result.job_id)
+            assert job is not None
+
+            worker._finish_from_raw = lambda *args, **kwargs: None  # type: ignore[method-assign]
+            worker._process(job)
+            updated = store.get_job(result.job_id)
+            assert updated is not None
+            self.assertTrue(Path(updated["raw_path"]).exists())
+            self.assertEqual(updated["moment_context"]["source_kind"], "vod")
+            store.close()
+
+
+def load_test_config(output_dir: Path):
+    from liveclipper.config import Config
+
+    return Config(
+        host="127.0.0.1",
+        port=8095,
+        webhook_token="",
+        twitch_client_id="",
+        twitch_user_access_token="",
+        twitch_api_url="https://api.twitch.tv/helix",
+        twitch_irc_url="wss://irc-ws.chat.twitch.tv:443",
+        data_dir=output_dir,
+        db_path=output_dir / "clipper.sqlite",
+        output_dir=output_dir,
+        source_duration=60.0,
+        final_duration=30.0,
+        event_latency_offset=8.0,
+        duplicate_window_seconds=60,
+        cooldown_seconds=120,
+        clip_poll_timeout_seconds=60,
+        clip_poll_interval_seconds=1.0,
+        chat_window_seconds=12,
+        chat_min_messages=18,
+        chat_spike_multiplier=2.5,
+        asr_enabled=False,
+        asr_required=False,
+        whisper_model="small",
+        whisper_compute_type="int8",
+        streamlink_bin="streamlink",
+        ffmpeg_encoder="libx264",
+        ffmpeg_preset="veryfast",
+        ffmpeg_bin="ffmpeg",
+        final_retention_hours=48,
+        cleanup_interval_seconds=3600,
+        stale_job_seconds=120,
+        auto_render=False,
+    )
 
 
 class ConfigTests(unittest.TestCase):

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import shutil
 import threading
 from pathlib import Path
+from typing import Any
 
 from .config import Config
 from .db import Store
@@ -10,6 +12,7 @@ from .render import RenderError, Renderer
 from .streamlink import DownloadError, StreamlinkDownloader
 from .transcribe import Transcriber, TranscriptionError
 from .twitch import TwitchClient, TwitchError
+from .vod import VodDownloader, VodDownloadError
 
 
 class JobWorker:
@@ -20,6 +23,7 @@ class JobWorker:
         store: Store,
         twitch: TwitchClient,
         downloader: StreamlinkDownloader,
+        vod_downloader: VodDownloader,
         transcriber: Transcriber,
         renderer: Renderer,
     ):
@@ -27,6 +31,7 @@ class JobWorker:
         self.store = store
         self.twitch = twitch
         self.downloader = downloader
+        self.vod_downloader = vod_downloader
         self.transcriber = transcriber
         self.renderer = renderer
         self._wake = threading.Event()
@@ -114,6 +119,33 @@ class JobWorker:
                 self._finish_from_raw(job_id, job, raw_path, captions_path, final_path, source_duration)
                 return
 
+            moment_context = self._decode_moment_context(job.get("moment_context"))
+            vod_id = str(moment_context.get("vod_id") or "").strip() if moment_context else ""
+            if vod_id:
+                vod_offset = float(moment_context.get("vod_offset_seconds") or 0)
+                source_duration = float(job.get("source_duration") or self.cfg.source_duration)
+                self.store.set_state(job_id, "downloading", "downloading VOD segment")
+                window = self.vod_downloader.download_segment(
+                    vod_id=vod_id,
+                    output_path=raw_path,
+                    offset_seconds=vod_offset,
+                    duration=source_duration,
+                )
+                enriched_context = {
+                    **moment_context,
+                    "source_kind": "vod",
+                    "vod_segment_start": window.segment_start,
+                }
+                self.store.update_job(
+                    job_id,
+                    raw_path=str(raw_path),
+                    moment_context=enriched_context,
+                    source_duration=window.duration,
+                )
+                job = {**job, "moment_context": enriched_context, "source_duration": window.duration}
+                self._finish_from_raw(job_id, job, raw_path, captions_path, final_path, window.duration)
+                return
+
             broadcaster_id = job.get("broadcaster_id") or ""
             if not broadcaster_id:
                 broadcaster_id = self.twitch.resolve_broadcaster_id(job["channel"])
@@ -145,7 +177,7 @@ class JobWorker:
             self._finish_from_raw(job_id, job, raw_path, captions_path, final_path, source_duration)
         except TwitchError as exc:
             self._fail(job_id, exc.code, exc.message)
-        except DownloadError as exc:
+        except (DownloadError, VodDownloadError) as exc:
             self._fail(job_id, exc.code, exc.message)
         except TranscriptionError as exc:
             self._fail(job_id, "transcribe_failed", str(exc))
@@ -199,6 +231,7 @@ class JobWorker:
             )
             return
 
+        moment_context = self._decode_moment_context(job.get("moment_context"))
         self.store.set_state(job_id, "rendering", "rendering vertical mp4")
         self.renderer.render(
             input_path=raw_path,
@@ -209,6 +242,7 @@ class JobWorker:
             event_latency_offset=float(job.get("event_latency_offset") or self.cfg.event_latency_offset),
             trigger_detected_at_ms=int(job.get("trigger_detected_at") or 0),
             peak_chat_ts_ms=job.get("peak_chat_ts"),
+            moment_context=moment_context,
         )
         self.store.set_state(
             job_id,
@@ -218,6 +252,17 @@ class JobWorker:
             artifact_available=1,
         )
         shutil.rmtree(job_dir, ignore_errors=True)
+
+    def _decode_moment_context(self, raw: Any) -> dict[str, Any] | None:
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+        return None
 
     def _fail(self, job_id: str, code: str, message: str) -> None:
         self.store.set_state(

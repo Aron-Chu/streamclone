@@ -19,7 +19,8 @@ These frontend surfaces are **allowed** — they are thin clients over the clipp
 | Surface | Path / file | Role |
 |---------|-------------|------|
 | Clip Studio | `/studio/:jobId` → `ClipStudio.tsx` | Trim, captions, templates, export |
-| Analytics clips | `Analytics.tsx` tabs | List jobs, queue from graph, link to studio |
+| Analytics clips | `Analytics.tsx` tabs | List jobs, queue from graph, link to studio; **Export Moment** for synced historical VODs (`trigger_type: vod_export`) |
+| VOD playback | `Channel.tsx` + `POST /v1/stream/vod/start` | Relay archived broadcasts locally via Streamlink/ffmpeg (`live/vod_{id}` HLS path); Analytics **Play in Streamclone** deep-links with `?vod=&offset=` |
 | Caddy proxy | `/v1/clipper/*` → `clipper:8095` | Same-origin API (`VITE_CLIPPER_URL: auto`) |
 
 Do not move job state, rendering, or Helix writes into Go viewer services. New clipper features belong in `clipper/liveclipper/` first; add UI in `ClipStudio.tsx` / `frontend/src/components/clipStudio/` / `Analytics.tsx` only as API consumers.
@@ -46,6 +47,7 @@ When extending clipper, prefer consuming Go stack surfaces (webhook/SSE from cha
 - The native IRC monitor must connect to `wss://irc-ws.chat.twitch.tv:443`, request tags/commands when needed, and respond to `PING :tmi.twitch.tv` with `PONG :tmi.twitch.tv`.
 - Account for chat-to-stream latency. Chat spikes normally arrive several seconds after the on-stream moment; the clipper should record trigger timestamps and apply a configurable event latency offset before final trimming.
 - Surface Twitch platform limitations directly: offline channels, disabled clips, follower/subscriber-only clip restrictions, invalid or under-scoped tokens, and clip download failures should be visible job states.
+- **Historical VOD export:** when Analytics provides `moment_context.vod_id`, the worker downloads a segment with `clipper/liveclipper/vod.py` (streamlink URL resolve + ffmpeg window) instead of Helix `POST /clips`. Live channels still use Helix clip creation.
 
 ## Streamlink And FFmpeg Guardrails
 
@@ -84,8 +86,16 @@ When extending clipper, prefer consuming Go stack surfaces (webhook/SSE from cha
 
 - Route: `frontend/src/App.tsx` → `/studio/:jobId`.
 - API base: `CLIPPER` in `frontend/src/config.ts` (auto → same origin `/v1/clipper`).
-- Job states: `queued` → `creating_clip` → `downloading` → `transcribing` → `rendering` → `ready` | `failed`.
+- Job states: `queued` → `creating_clip` | `downloading` (VOD export skips Helix) → `transcribing` → `rendering` → `ready` | `failed`.
 - After queueing from Analytics, follow **Open in Studio** or `/studio/{jobId}` directly.
+
+## Historical VOD export (shipped)
+
+- **Trigger:** `trigger_type: vod_export` when `moment_context.vod_id` is set (Analytics **Export moment** on synced historical streams).
+- **Download:** `clipper/liveclipper/vod.py` resolves the Twitch VOD URL via Streamlink `-j`, then `ffmpeg -ss/-t` into `raw_path` — no Helix `POST /clips`.
+- **Trim:** `render.compute_trim_start` centers on `vod_offset_seconds` using `vod_segment_start` from the downloaded window.
+- **Dedup:** SQLite duplicate window matches `vod_id` + offset within 60s (not broadcaster-only).
+- **Live path unchanged:** live analytics still uses Helix clip create → Streamlink clip URL download.
 
 ## Task Checklist
 

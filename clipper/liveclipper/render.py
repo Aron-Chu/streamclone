@@ -24,6 +24,18 @@ class RenderPlan:
     command: list[str]
 
 
+def vod_moment_offset_in_source(moment_context: dict | None, source_duration: float) -> float | None:
+    if not moment_context:
+        return None
+    vod_offset = moment_context.get("vod_offset_seconds")
+    if vod_offset is None:
+        return None
+    segment_start = moment_context.get("vod_segment_start")
+    if segment_start is not None:
+        return max(0.0, float(vod_offset) - float(segment_start))
+    return max(0.0, float(vod_offset) - max(0.0, float(vod_offset) - source_duration / 2))
+
+
 def compute_trim_start(
     *,
     source_duration: float,
@@ -31,6 +43,7 @@ def compute_trim_start(
     event_latency_offset: float,
     trigger_detected_at_ms: int,
     peak_chat_ts_ms: int | None,
+    moment_context: dict | None = None,
 ) -> float:
     if source_duration <= final_duration:
         return 0.0
@@ -39,7 +52,11 @@ def compute_trim_start(
         event_time = source_duration + delta - event_latency_offset
         start = event_time - final_duration * 0.35
     else:
-        start = source_duration - final_duration
+        vod_moment = vod_moment_offset_in_source(moment_context, source_duration)
+        if vod_moment is not None:
+            start = vod_moment - final_duration * 0.35
+        else:
+            start = source_duration - final_duration
     return max(0.0, min(start, source_duration - final_duration))
 
 
@@ -271,6 +288,7 @@ def build_command(
             event_latency_offset=event_latency_offset,
             trigger_detected_at_ms=trigger_detected_at_ms,
             peak_chat_ts_ms=peak_chat_ts_ms,
+            moment_context=moment_context,
         )
     audio_filter = build_audio_filter(audio_effects)
     effective_preset = "ultrafast" if preview_mode else preset
