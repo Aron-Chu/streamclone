@@ -189,7 +189,9 @@ function Invoke-StreamcloneInstall {
 
     Write-Host 'Step 1/4: Downloading latest release...' -ForegroundColor Cyan
     $tempBootstrap = Join-Path $env:TEMP 'streamclone-bootstrap.ps1'
-    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Aron-Chu/streamclone/master/scripts/bootstrap-windows-install.ps1' -OutFile $tempBootstrap -UseBasicParsing
+    $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $bootstrapUrl = "https://raw.githubusercontent.com/Aron-Chu/streamclone/master/scripts/bootstrap-windows-install.ps1?t=$cacheBust"
+    Invoke-WebRequest -Uri $bootstrapUrl -OutFile $tempBootstrap -UseBasicParsing
     & $tempBootstrap -InstallDir (Join-Path $env:USERPROFILE 'streamclone')
 }
 

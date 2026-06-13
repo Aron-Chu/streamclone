@@ -23,6 +23,7 @@ function Test-StreamcloneBootstrapScriptParses {
 
 $bootstrapLibScript = Join-Path $PSScriptRoot 'lib\install-upgrade.ps1'
 if (Test-Path $bootstrapLibScript) {
+    $script:StreamcloneBootstrapLibDir = Join-Path $PSScriptRoot 'lib'
     . $bootstrapLibScript
 } else {
     $libDir = Join-Path $env:TEMP 'streamclone-bootstrap-lib'
@@ -42,11 +43,12 @@ if (Test-Path $bootstrapLibScript) {
             throw "Downloaded $name failed PowerShell parse (encoding?). Errors: $($parse.Errors -join '; ')"
         }
     }
+    $script:StreamcloneBootstrapLibDir = $libDir
     . (Join-Path $libDir 'install-upgrade.ps1')
 }
 
 function Test-StreamcloneWebOk {
-    . (Join-Path $PSScriptRoot 'lib\env.ps1')
+    . (Join-Path $script:StreamcloneBootstrapLibDir 'env.ps1')
     return Test-StreamcloneWebReachable -Url (Get-StreamcloneAppUrl)
 }
 
@@ -66,18 +68,21 @@ $versions = if (Test-StreamcloneInstalledAt -Dir $InstallDir) {
     $null
 }
 
-if (-not $Force -and $versions -and $versions.bundleVersion -eq $meta.Tag -and (Test-Path $launcher)) {
-    if (Test-StreamcloneWebOk -and (Test-Path (Join-Path $InstallDir '.env'))) {
-        Write-Host ''
+if (-not $Force -and $versions -and $versions.bundleVersion -eq $meta.Tag -and (Test-Path $launcher) -and (Test-Path (Join-Path $InstallDir '.env'))) {
+    $webOk = Test-StreamcloneWebOk
+    Write-Host ''
+    if ($webOk) {
         Write-Host ("  Already on $($meta.Tag) and running at {0}" -f (Get-StreamcloneAppUrl)) -ForegroundColor Green
-        Write-Host '  Refreshing install scripts and shortcuts...' -ForegroundColor Yellow
-        if ($versions.bundleVersion -ne $versions.imageTag) {
-            Write-Host "  Note: bundle $($versions.bundleVersion) but images $($versions.imageTag) - run Manage -> Update." -ForegroundColor Yellow
-        }
-        Update-StreamcloneBootstrapOverlayFromMaster -Dir $InstallDir -Repo $Repo
-        & $launcher -Action install -LauncherRoot $InstallDir
-        exit $LASTEXITCODE
+    } else {
+        Write-Host "  Already on $($meta.Tag) (stack not up yet - will start Docker)" -ForegroundColor Green
     }
+    Write-Host '  Refreshing install scripts and shortcuts...' -ForegroundColor Yellow
+    if ($versions.bundleVersion -ne $versions.imageTag) {
+        Write-Host "  Note: bundle $($versions.bundleVersion) but images $($versions.imageTag) - run Manage -> Update." -ForegroundColor Yellow
+    }
+    Update-StreamcloneBootstrapOverlayFromMaster -Dir $InstallDir -Repo $Repo
+    & $launcher -Action install -LauncherRoot $InstallDir
+    exit $LASTEXITCODE
 }
 
 $existingInstall = Test-StreamcloneInstalledAt -Dir $InstallDir
