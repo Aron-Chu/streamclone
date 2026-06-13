@@ -1,0 +1,47 @@
+---
+description: Git commit author identity and message format — Aron-Chu only, no agent co-authors
+alwaysApply: true
+---
+
+# Commits (Aron-Chu)
+
+## Author (every commit)
+
+All commits must be **solely attributed to Aron-Chu**:
+
+```
+Aron-Chu <aroncloudchu@gmail.com>
+```
+
+- **Do not** add `Co-authored-by:` trailers (Cursor, agents, bots).
+- **Do not** change `user.name` / `user.email` in git config unless the user asks.
+- When committing on behalf of the user, use env vars for this commit only:
+
+```powershell
+$env:GIT_AUTHOR_NAME = 'Aron-Chu'
+$env:GIT_AUTHOR_EMAIL = 'aroncloudchu@gmail.com'
+$env:GIT_COMMITTER_NAME = 'Aron-Chu'
+$env:GIT_COMMITTER_EMAIL = 'aroncloudchu@gmail.com'
+```
+
+## Message format
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/) — see `CONTRIBUTING.md`.
+
+```
+type(scope): short imperative summary
+
+Optional body explaining why (no Co-authored-by lines).
+```
+
+Examples: `feat(video): add VOD relay start API`, `fix(ci): do not block release on scraper checkout`.
+
+## When to commit
+
+- Only when the user explicitly asks to commit.
+- Run pre-commit hooks; fix failures with a **new** commit (do not amend unless user rules allow).
+- Never commit secrets (`.env`, tokens, `oauth-bundle.env`).
+
+## Release tags
+
+`VERSION` file and git tag (e.g. `v0.2.9`) must match before tagging. Pushing a tag triggers `release-images.yml` (GHCR + Setup.exe).

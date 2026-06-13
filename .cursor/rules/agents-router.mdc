@@ -12,3 +12,4 @@ alwaysApply: true
    - **`streamclone-data`**: `emote_jobs`, `redis_channel_emotes` (local Postgres/Redis)
 3. Local stack URL: `http://localhost:8090`. Windows localhost issues → `.kiro/steering/windows-dev.md`. HLS 401 → `.kiro/steering/playback.md`.
 4. Prefer narrow tests; avoid pasting full API JSON into responses.
+5. Commits → `.cursor/rules/commits.mdc` (Aron-Chu author, Conventional Commits, no agent co-authors).

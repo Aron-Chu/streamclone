@@ -80,6 +80,10 @@ feat(clipper): add emote overlay templates
 
 Multi-line bodies are fine for context; keep the first line within ~72 characters.
 
+### Git author
+
+Every commit should be attributed only to **Aron-Chu** (`aroncloudchu@gmail.com`). Do not add `Co-authored-by:` lines for agents or Cursor. Agents: see `.cursor/rules/commits.mdc`.
+
 ## Maintainer media
 
 Regenerate README screenshots/GIF: `make docs-media` (healthy stack + ffmpeg for GIF).
