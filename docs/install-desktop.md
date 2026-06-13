@@ -149,7 +149,9 @@ For release-style verification, tag/publish images, install that bundle, then ru
 | **Start menu → Streamclone → Uninstall Streamclone** | Same uninstall wizard |
 | **`Uninstall Streamclone.cmd`** in the install folder | Type `YES` in the terminal |
 
-All paths stop Docker, delete volumes and `.env`, remove the Desktop shortcut, and delete `%USERPROFILE%\streamclone`. Interactive uninstall asks whether to also remove downloaded Streamclone Docker images. Keep images for faster reinstall/repair; remove images to reclaim disk space or simulate a first-time install. Advanced non-interactive image cleanup: `powershell -File scripts\uninstall-streamclone.ps1 -PruneImages`.
+All paths stop Docker, delete volumes and `.env`, remove the Desktop shortcut, and delete `%USERPROFILE%\streamclone`. Interactive uninstall asks whether to also remove downloaded Streamclone Docker images. Keep images for faster reinstall/repair; remove images to reclaim disk space or simulate a first-time install.
+
+**If Docker Desktop is not running**, uninstall offers to **defer Docker cleanup**: shortcuts are removed and a **Finish Streamclone Docker cleanup** Desktop shortcut is added. Start Docker Desktop, then run that shortcut to remove containers, volumes, images, and the install folder. Advanced non-interactive image cleanup: `powershell -File scripts\uninstall-streamclone.ps1 -PruneImages`.
 
 ---
 

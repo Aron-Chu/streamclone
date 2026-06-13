@@ -7,6 +7,7 @@ param(
     [switch]$SkipImagePrompt,
     [switch]$KeepInstallDir,
     [switch]$KeepVolumes,
+    [switch]$SkipDockerCleanup,
     [string]$ProgressFile = ''
 )
 
@@ -58,6 +59,124 @@ function Test-StreamcloneUseReleaseImages {
         if ($vals['STREAMCLONE_USE_IMAGES'] -eq '1') { return $true }
     }
     return $false
+}
+
+function Test-StreamcloneDockerEngineRunning {
+    $result = Invoke-EnvDockerCapturedWithTimeout -Arguments @('info') -TimeoutSec 10
+    return (-not $result.TimedOut -and $result.ExitCode -eq 0)
+}
+
+function Wait-StreamcloneDockerEngine {
+    param([int]$WaitSec = 120)
+    $preflight = Join-Path $PSScriptRoot 'preflight-deps.ps1'
+    if (Test-Path $preflight) {
+        $raw = & $preflight -Quiet -Json -TryStartDocker 2>&1 | Select-Object -Last 1
+        try {
+            $summary = $raw | ConvertFrom-Json
+            if ($summary.dockerEngineRunning) { return $true }
+        } catch { }
+    }
+    $deadline = (Get-Date).AddSeconds($WaitSec)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-StreamcloneDockerEngineRunning) { return $true }
+        Start-Sleep -Seconds 3
+    }
+    return $false
+}
+
+function Test-StreamcloneUninstallNeedsDocker {
+    param(
+        [string]$Root,
+        [bool]$RemoveImages
+    )
+    if ($RemoveImages) { return $true }
+    return (Test-Path (Join-Path $Root '.env'))
+}
+
+function Resolve-StreamcloneUninstallDockerPlan {
+    param(
+        [string]$Root,
+        [bool]$NeedsDocker,
+        [bool]$NonInteractive
+    )
+    if (-not $NeedsDocker -or $SkipDockerCleanup) { return 'proceed' }
+    if (Test-StreamcloneDockerEngineRunning) { return 'proceed' }
+    if ($NonInteractive) { return 'defer' }
+
+    Write-Host ''
+    Write-Host 'Docker Desktop is not running.' -ForegroundColor Yellow
+    Write-Host 'Containers, volumes, and images cannot be removed until the Docker engine is available.'
+    Write-Host ''
+    Write-Host '  [1] Start Docker Desktop and wait (recommended)'
+    Write-Host '  [2] Defer Docker cleanup — remove shortcuts now; run Finish Streamclone Docker cleanup later'
+    Write-Host '  [3] Cancel uninstall'
+    Write-Host ''
+
+    while ($true) {
+        $choice = Read-Host 'Choose 1, 2, or 3 (default 1)'
+        if ([string]::IsNullOrWhiteSpace($choice)) { $choice = '1' }
+        switch ($choice.Trim()) {
+            '3' { return 'cancel' }
+            '2' { return 'defer' }
+            '1' {
+                Write-Host 'Waiting for Docker Desktop...' -ForegroundColor Cyan
+                if (Wait-StreamcloneDockerEngine) {
+                    Write-Host 'Docker is ready.' -ForegroundColor Green
+                    return 'proceed'
+                }
+                Write-Host 'Docker is still not available.' -ForegroundColor Red
+                $retry = Read-Host 'Continue without Docker cleanup? [y/N] (adds Finish Streamclone Docker cleanup shortcut)'
+                if ($retry -match '^[Yy]') { return 'defer' }
+                return 'cancel'
+            }
+            default {
+                Write-Host 'Enter 1, 2, or 3.' -ForegroundColor Yellow
+            }
+        }
+    }
+}
+
+function Save-StreamclonePendingDockerUninstall {
+    param(
+        [string]$Root,
+        [bool]$RemoveImages,
+        [bool]$RemoveBaseImages,
+        [bool]$KeepVolumes
+    )
+    $dir = Join-Path $env:LOCALAPPDATA 'Streamclone'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $stateFile = Join-Path $dir 'pending-docker-uninstall.json'
+    @{
+        installDir       = $Root
+        removeImages     = $RemoveImages
+        removeBaseImages = $RemoveBaseImages
+        keepVolumes      = $KeepVolumes
+        createdAt        = (Get-Date).ToString('o')
+    } | ConvertTo-Json | Set-Content -LiteralPath $stateFile -Encoding UTF8
+    return $stateFile
+}
+
+function Install-StreamcloneFinishDockerCleanupShortcut {
+    param([string]$Root)
+    $finishScript = Join-Path $Root 'scripts\finish-docker-uninstall.ps1'
+    if (-not (Test-Path $finishScript)) {
+        Write-Warning "Missing $finishScript — cannot create deferred cleanup shortcut."
+        return
+    }
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    $cmdPath = Join-Path $desktop 'Finish Streamclone Docker cleanup.cmd'
+    @(
+        '@echo off'
+        'color 0E'
+        'title Streamclone - Finish Docker cleanup'
+        'echo.'
+        'echo   Start Docker Desktop first, then this script removes containers,'
+        'echo   volumes, images, and the Streamclone install folder.'
+        'echo.'
+        "powershell -NoProfile -ExecutionPolicy Bypass -File `"$finishScript`""
+        'if errorlevel 1 pause'
+    ) | Set-Content -LiteralPath $cmdPath -Encoding ASCII
+    Write-Host "Added Desktop\Finish Streamclone Docker cleanup.cmd" -ForegroundColor Green
 }
 
 function Stop-StreamcloneControlProcess {
@@ -124,6 +243,12 @@ function Invoke-StreamcloneComposeDown {
         Write-Host 'Stopping Docker stack...' -ForegroundColor Cyan
         $result = Invoke-EnvDockerCaptured -Arguments ($composeArgs + $downArgs)
         foreach ($line in $result.Output) { Write-Host $line }
+        if ($result.ExitCode -ne 0) {
+            $joined = ($result.Output -join ' ')
+            if ($joined -match 'cannot find the file specified|docker API|Is the docker daemon running') {
+                Write-Host 'Docker engine unavailable — stack may still be running. Start Docker Desktop and run Finish Streamclone Docker cleanup.cmd if needed.' -ForegroundColor Yellow
+            }
+        }
         if ($optionalProfiles.Count -gt 0) {
             $composeArgsNoProfiles = @(
                 'compose', '--env-file', '.env',
@@ -287,12 +412,45 @@ try {
         Write-Host ''
     }
 
+    $needsDocker = Test-StreamcloneUninstallNeedsDocker -Root $root -RemoveImages:$removeImages
+    $dockerPlan = Resolve-StreamcloneUninstallDockerPlan -Root $root -NeedsDocker:$needsDocker -NonInteractive:$NonInteractive
+    if ($dockerPlan -eq 'cancel') {
+        Write-Host 'Uninstall cancelled.' -ForegroundColor Yellow
+        exit 2
+    }
+    $deferDocker = ($dockerPlan -eq 'defer')
+
+    if ($deferDocker -and -not $ProgressFile) {
+        Write-Host 'Deferred Docker cleanup:' -ForegroundColor Yellow
+        Write-Host '  - Shortcuts removed (except Finish Streamclone Docker cleanup)'
+        Write-Host '  - Install folder and .env kept until Docker cleanup finishes'
+        Write-Host '  - Start Docker Desktop, then run Finish Streamclone Docker cleanup.cmd'
+        Write-Host ''
+    }
+
     if (-not $NonInteractive -and -not $ProgressFile) {
         $ans = Read-Host 'Type YES to continue'
-        if ($ans -ne 'YES') {
+        if ($ans.Trim().ToUpperInvariant() -ne 'YES') {
             Write-Host 'Uninstall cancelled.' -ForegroundColor Yellow
             exit 2
         }
+    }
+
+    if ($deferDocker) {
+        Set-UninstallProgress -Title 'Deferred Docker cleanup' -Detail 'Removing shortcuts; keeping install folder until Docker is running.'
+        Stop-StreamcloneControlProcess -Root $root
+        $null = Save-StreamclonePendingDockerUninstall -Root $root -RemoveImages:$removeImages `
+            -RemoveBaseImages:$removeBase -KeepVolumes:$KeepVolumes
+        Remove-StreamcloneDesktopShortcuts
+        Remove-StreamcloneMacShortcuts
+        Install-StreamcloneFinishDockerCleanupShortcut -Root $root
+        if (-not $ProgressFile) {
+            Write-Host ''
+            Write-Host 'Partial uninstall complete.' -ForegroundColor Green
+            Write-Host 'Start Docker Desktop, then double-click Finish Streamclone Docker cleanup.cmd on your Desktop.' -ForegroundColor Yellow
+        }
+        Complete-UninstallProgress -ExitCode 0
+        exit 3
     }
 
     Set-UninstallProgress -Title 'Stopping Streamclone' -Detail 'Shutting down background processes.'
