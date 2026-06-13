@@ -1202,10 +1202,12 @@ function plotY(
 
 type ActivityAxis = { min: number; max: number; mode: 'peak' | 'fit' }
 
-function activityAxisBounds(series: Series[], fitToVisible = true): ActivityAxis {
+function activityAxisBounds(series: Series[], fitToVisible = true, options: { includeAggregateEmotes?: boolean } = {}): ActivityAxis {
+  const includeAggregateEmotes = options.includeAggregateEmotes ?? true
   const visible: number[] = []
   for (const item of series) {
     if (item.key === 'chat') continue
+    if (!includeAggregateEmotes && item.key === 'emotes') continue
     for (const value of item.values) {
       if (value !== null && value > 0) visible.push(value)
     }
@@ -1640,6 +1642,12 @@ function AnalyticsChart({
   )
   const activityScaleMax = activityAxis.max
   const activityScaleMin = activityAxis.min
+  const selectedEmoteAxis = useMemo(
+    () => activityAxisBounds(perEmoteSeries, expandedScale, { includeAggregateEmotes: false }),
+    [perEmoteSeries, expandedScale],
+  )
+  const selectedEmoteScaleMax = selectedEmoteAxis.max
+  const selectedEmoteScaleMin = selectedEmoteAxis.min
   const activityLayout = useMemo(
     () => plotBandForZone(height, padTop, padBottom, 'viewer'),
     [height, padTop, padBottom],
@@ -1780,7 +1788,7 @@ function AnalyticsChart({
     color: item.color,
     areaPathD: areaPath(
       item.values,
-      activityAxis.max,
+      selectedEmoteAxis.max,
       width,
       height,
       padLeft,
@@ -1788,24 +1796,22 @@ function AnalyticsChart({
       padTop,
       padBottom,
       'viewer',
-      activityAxis.min,
+      selectedEmoteAxis.min,
     ),
-    linePathD: showSpikes
-      ? linePath(
-        item.values,
-        activityAxis.max,
-        width,
-        height,
-        padLeft,
-        padRight,
-        padTop,
-        padBottom,
-        true,
-        'viewer',
-        activityAxis.min,
-      )
-      : '',
-  })), [perEmoteSeries, activityAxis, width, height, padLeft, padRight, padTop, padBottom, showSpikes])
+    linePathD: linePath(
+      item.values,
+      selectedEmoteAxis.max,
+      width,
+      height,
+      padLeft,
+      padRight,
+      padTop,
+      padBottom,
+      true,
+      'viewer',
+      selectedEmoteAxis.min,
+    ),
+  })), [perEmoteSeries, selectedEmoteAxis, width, height, padLeft, padRight, padTop, padBottom])
   const viewerAreaPathD = useMemo(() => {
     if (!viewersItem) return ''
     return areaPath(
@@ -2007,8 +2013,8 @@ function AnalyticsChart({
                   {item.label} max {count(item.max)}
                   {syncing && item.key === 'chat' && (item.max ?? 0) <= 0 ? ' · syncing' : ''}
                   {syncing && item.key === 'emotes' && (item.max ?? 0) <= 0 ? ' · syncing' : ''}
-                  {item.dashed && activityScaleMax > activityScaleMin && item.max > 0
-                    ? ` · ${Math.round(((item.max - activityScaleMin) / (activityScaleMax - activityScaleMin)) * 100)}% peak`
+                  {item.dashed && selectedEmoteScaleMax > selectedEmoteScaleMin && item.max > 0
+                    ? ` · ${Math.round(((item.max - selectedEmoteScaleMin) / (selectedEmoteScaleMax - selectedEmoteScaleMin)) * 100)}% focus`
                     : ''}
                 </span>
               </span>
@@ -2057,8 +2063,8 @@ function AnalyticsChart({
               type="button"
               onClick={() => setExpandedScale(v => !v)}
               title={expandedScale
-                ? `Fit: viewers ${count(viewerAxis.min)}–${count(viewerAxis.max)}, emotes ${count(activityScaleMin)}–${count(activityScaleMax)}. Click for peak scale.`
-                : `Peak: viewers 0–${count(viewerPeakAxis.max)}, emotes 0–${count(activityScaleMax)}. Click to zoom into visible min–max.`}
+                ? `Fit: viewers ${count(viewerAxis.min)}–${count(viewerAxis.max)}, total emotes ${count(activityScaleMin)}–${count(activityScaleMax)}, selected emotes ${count(selectedEmoteScaleMin)}–${count(selectedEmoteScaleMax)}. Click for peak scale.`
+                : `Peak: viewers 0–${count(viewerPeakAxis.max)}, emotes 0–${count(activityScaleMax)}. Click to zoom selected emotes into visible min–max.`}
               className={`rounded border px-2 py-1 text-[10px] font-black uppercase transition ${expandedScale ? 'border-violet-400/30 bg-violet-400/10 text-violet-200' : 'border-white/10 bg-white/[0.04] text-zinc-500 hover:text-zinc-300'}`}
             >
               {expandedScale ? 'Fit' : 'Peak'}
@@ -2161,9 +2167,9 @@ function AnalyticsChart({
                 stroke={overlay.color}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeWidth="1"
+                strokeWidth="2"
                 strokeDasharray="4 4"
-                opacity={0.45}
+                opacity={0.92}
               />
             ) : null}
           </g>
@@ -2372,6 +2378,16 @@ function AnalyticsChart({
             >
               Viewers
             </text>
+            {perEmoteSeries.length > 0 ? (
+              <text
+                x={width - padRight + 2}
+                y={padTop + 26}
+                textAnchor="start"
+                className="fill-amber-200/80 text-[8px] font-black uppercase"
+              >
+                Selected max {count(selectedEmoteScaleMax)}
+              </text>
+            ) : null}
             <text
               x={width - padRight + 2}
               y={activityLayout.activityTop + activityLayout.activityHeight * 0.21}
@@ -2416,6 +2432,16 @@ function AnalyticsChart({
             >
               Emotes
             </text>
+            {perEmoteSeries.length > 0 ? (
+              <text
+                x={width - padRight + 2}
+                y={padTop + 12}
+                textAnchor="start"
+                className="fill-amber-200/80 text-[8px] font-black uppercase"
+              >
+                Selected max {count(selectedEmoteScaleMax)}
+              </text>
+            ) : null}
             <text
               x={width - padRight + 2}
               y={activityLayout.activityTop + activityLayout.activityHeight * 0.21}

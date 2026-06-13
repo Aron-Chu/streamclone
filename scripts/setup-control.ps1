@@ -416,7 +416,7 @@ function Get-StreamcloneProfileStartStatus {
         }
         if ($warmupLines.Count -gt 0) {
             $warmupBlob = ($warmupLines -join ' ').ToLowerInvariant()
-            if ($warmupBlob -match 'camoufox scrape ok|meta#ecs') {
+            if ($warmupBlob -match 'camoufox (sequential )?scrape ok|meta#ecs|chart true') {
                 $warmup = 'Camoufox profile warm — TwitchTracker probe ok'
                 if ($percent -lt 96) { $percent = 96 }
                 if ($phase -eq 'Container is up' -or $phase -eq 'Waiting for API health') {

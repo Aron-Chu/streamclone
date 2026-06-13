@@ -46,6 +46,8 @@ coverage/
 docs/images/.sync-frames/
 docs/images/.sync-load-frames/
 docs/images/.tt-scrape-frames/
+docs/images/.channel-frames/
+docs/images/.directory-frames/
 docs/images/sync-load-frames/
 docs/images/tt-scrape-frames/
 docs/images/directory-frames/
@@ -78,6 +80,7 @@ Thumbs.db
 /analytics-*.png
 /debug-mcp-*.txt
 /mcp-*.txt
+/pw-*.png
 
 .gocache/
 .gomodcache/

@@ -9,6 +9,7 @@ cd "$ROOT"
 CHECK_ONLY=false
 MAX_FIX_ATTEMPTS=2
 SCRAPE_URL="${SCRAPE_URL:-https://twitchtracker.com/jynxzi/streams/318832886110}"
+SCRAPE_SECOND_URL="${SCRAPE_SECOND_URL:-https://twitchtracker.com/ishowspeed/streams/318098150359}"
 SCRAPE_TIMEOUT_MS="${SCRAPE_TIMEOUT_MS:-120000}"
 
 usage() {
@@ -17,6 +18,7 @@ Usage: scripts/scraper-preflight.sh [options]
 
   --check-only     Probe scrape only; do not clear locks or recreate the container
   --url URL        TwitchTracker stream detail URL to probe
+  --second-url URL Second detail URL; catches pooled-browser failures after the first scrape
   -h, --help       Show this help
 
 Env:
@@ -29,6 +31,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --check-only) CHECK_ONLY=true; shift ;;
     --url) SCRAPE_URL="$2"; shift 2 ;;
+    --second-url) SCRAPE_SECOND_URL="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -68,13 +71,30 @@ wait_scraper_health() {
 }
 
 run_scrape_probe() {
+  local url="$1"
   local script="$ROOT/scripts/scrape-test-inline.py"
   docker_cmd cp "$script" streamclone-scraper:/tmp/scrape-probe.py >/dev/null
   docker_cmd exec \
-    -e SCRAPE_URL="$SCRAPE_URL" \
+    -e SCRAPE_URL="$url" \
     -e SCRAPE_TIMEOUT_MS="$SCRAPE_TIMEOUT_MS" \
     -e USE_PROXY=false \
     streamclone-scraper python /tmp/scrape-probe.py
+}
+
+run_sequential_scrape_probe() {
+  local urls=("$SCRAPE_URL")
+  if [ -n "$SCRAPE_SECOND_URL" ] && [ "$SCRAPE_SECOND_URL" != "$SCRAPE_URL" ]; then
+    urls+=("$SCRAPE_SECOND_URL")
+  fi
+
+  local total="${#urls[@]}"
+  local idx=1
+  local url
+  for url in "${urls[@]}"; do
+    echo "Probing TwitchTracker scrape $idx/$total ($url)..."
+    run_scrape_probe "$url"
+    idx=$((idx + 1))
+  done
 }
 
 clear_profile_locks() {
@@ -113,15 +133,14 @@ wait_scraper_health
 
 attempt=0
 while true; do
-  echo "Probing TwitchTracker scrape ($SCRAPE_URL)..."
   set +e
-  probe_out="$(run_scrape_probe 2>&1)"
+  probe_out="$(run_sequential_scrape_probe 2>&1)"
   probe_rc=$?
   set -e
   echo "$probe_out"
 
   if [ "$probe_rc" -eq 0 ]; then
-    echo "scraper-preflight: Camoufox scrape ok (meta#ecs or chart data present)"
+    echo "scraper-preflight: Camoufox sequential scrape ok (meta#ecs or chart data present)"
     exit 0
   fi
 

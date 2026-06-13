@@ -57,6 +57,11 @@ jobs:
             fi
             sleep 2
           done
+      - name: Probe sequential TwitchTracker scrapes
+        if: steps.scraper.outcome == 'success'
+        run: |
+          set -euo pipefail
+          bash scripts/scraper-preflight.sh --check-only
       - name: Dump compose state on failure
         if: failure() && steps.scraper.outcome == 'success'
         run: |

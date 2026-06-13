@@ -289,14 +289,6 @@ func (h *Handler) ensureEmotes(ctx context.Context, login, twitchID string, prov
 	if err != nil {
 		return ensureResponse{}, http.StatusInternalServerError, err
 	}
-	refreshProviders, err := h.providersNeedingRefresh(ctx, login, twitchID, providers)
-	if err != nil {
-		if h.log != nil {
-			h.log.Warn("provider refresh check failed", "login", login, "twitch_id", twitchID, "err", err)
-		}
-	} else {
-		providersToSeed = mergeProviders(providersToSeed, refreshProviders)
-	}
 	if !activeSetLoaded {
 		setExists, err := h.st.EmoteSetExistsByOwnerName(ctx, providerSetName(login, providers), twitchID)
 		if err != nil {
@@ -319,6 +311,14 @@ func (h *Handler) ensureEmotes(ctx context.Context, login, twitchID string, prov
 		resp.Benchmark = benchmarkFromResponse(resp, false)
 		resp.Benchmark.EnsureMs = time.Since(started).Milliseconds()
 		return resp, http.StatusAccepted, nil
+	}
+	refreshProviders, err := h.providersNeedingRefresh(ctx, login, twitchID, providers)
+	if err != nil {
+		if h.log != nil {
+			h.log.Warn("provider refresh check failed", "login", login, "twitch_id", twitchID, "err", err)
+		}
+	} else {
+		providersToSeed = mergeProviders(providersToSeed, refreshProviders)
 	}
 	if channelKnown && activeSetLoaded && len(providersToSeed) == 0 {
 		if h.seed != nil && providerListIncludes(providers, seeder.ProviderSevenTV) {

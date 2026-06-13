@@ -63,7 +63,7 @@ if [ "$NON_INTERACTIVE" = false ]; then
   cat <<'MENU'
 
 [1] Core only          — watch + chat + emotes (no Twitch login required)
-[2] + Analytics charts — needs streamclone-scraper sibling repo
+[2] + Analytics charts — uses scraper image or streamclone-scraper sibling repo
 [3] + Clip Studio      — needs Twitch device-code login
 [4] Full stack         — scraper + clipper
 
@@ -125,8 +125,11 @@ needs_scraper=false
 case "$PROFILE" in
   scraper|full) needs_scraper=true ;;
 esac
+scraper_use_images="$(env_read_value .env SCRAPER_USE_IMAGES || true)"
 
-if [ "$needs_scraper" = true ] && [ "$SKIP_SCRAPER_CLONE" = false ]; then
+if [ "$needs_scraper" = true ] && [ "$scraper_use_images" = "1" ]; then
+  echo "Scraper: GHCR image (SCRAPER_USE_IMAGES=1)"
+elif [ "$needs_scraper" = true ] && [ "$SKIP_SCRAPER_CLONE" = false ]; then
   sibling="$(env_scraper_sibling_path)"
   if [ -d "$sibling/.git" ] || [ -f "$sibling/Dockerfile" ]; then
     echo "Scraper repo: ok ($sibling)"
@@ -217,10 +220,13 @@ if [ "$SKIP_SMOKE" = false ] && [ "$SKIP_UP" = false ]; then
   echo "Running smoke checks..."
   bash "$ROOT/scripts/smoke-core.sh"
 
-  if [ "$needs_scraper" = true ] && [ -d "$(env_scraper_sibling_path)" ]; then
+  if [ "$needs_scraper" = true ] && { [ "$scraper_use_images" = "1" ] || [ -d "$(env_scraper_sibling_path)" ]; }; then
     if [ -z "${SCRAPER_SKIP_PREFLIGHT:-}" ]; then
       echo "Running scraper preflight (Camoufox TwitchTracker probe)..."
-      bash "$ROOT/scripts/scraper-preflight.sh" || echo "  scraper preflight failed — see hints above or run: make scraper-warm" >&2
+      if ! bash "$ROOT/scripts/scraper-preflight.sh"; then
+        echo "  scraper preflight failed — see hints above or run: make scraper-warm" >&2
+        exit 1
+      fi
     else
       echo "Checking scraper health (SCRAPER_SKIP_PREFLIGHT=1)..."
       for i in $(seq 1 30); do

@@ -28,7 +28,7 @@ if (-not $NonInteractive) {
     Write-Host @'
 
 [1] Core only          — watch + chat + emotes (no Twitch login required)
-[2] + Analytics charts — needs streamclone-scraper sibling repo
+[2] + Analytics charts — uses scraper image or streamclone-scraper sibling repo
 [3] + Clip Studio      — needs Twitch device-code login
 [4] Full stack         — scraper + clipper
 
@@ -183,17 +183,28 @@ if (-not $NoSmoke -and -not $NoUp) {
     }
 
     if ($needsScraper -and ($scraperUseImages -or (Test-Path (Get-EnvScraperSiblingPath)))) {
-        Write-Host 'Checking scraper health...'
-        $ok = $false
-        for ($i = 1; $i -le 30; $i++) {
-            try {
-                Invoke-WebRequest -Uri 'http://localhost:8000/health' -UseBasicParsing -TimeoutSec 3 | Out-Null
-                Write-Host '  scraper ok'
-                $ok = $true
-                break
-            } catch { Start-Sleep -Seconds 2 }
+        $preflight = Join-Path $PSScriptRoot 'scraper-preflight.ps1'
+        if (Test-Path $preflight) {
+            Write-Host 'Running scraper preflight (sequential TwitchTracker probes)...'
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $preflight -CheckOnly
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host 'Setup failed: scraper could not fetch TwitchTracker charts reliably.' -ForegroundColor Red
+                Write-Host 'Run scripts\scraper-preflight.ps1 or scripts\warm-camoufox-profile.ps1, then retry setup.' -ForegroundColor Yellow
+                exit $LASTEXITCODE
+            }
+        } else {
+            Write-Warning 'scraper-preflight.ps1 missing; falling back to scraper health check only.'
+            $ok = $false
+            for ($i = 1; $i -le 30; $i++) {
+                try {
+                    Invoke-WebRequest -Uri 'http://localhost:8000/health' -UseBasicParsing -TimeoutSec 3 | Out-Null
+                    Write-Host '  scraper ok'
+                    $ok = $true
+                    break
+                } catch { Start-Sleep -Seconds 2 }
+            }
+            if (-not $ok) { Write-Warning '  scraper health check timed out' }
         }
-        if (-not $ok) { Write-Warning '  scraper health check timed out' }
     }
 
     if ($Profile -in @('clipper', 'full')) {
