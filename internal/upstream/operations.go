@@ -13,3 +13,5 @@ const MetadataChannelOperation = `query ChannelByLogin($login: String!) { user(l
 const MetadataChannelAboutOperation = `query ChannelAbout($login: String!) { user(login: $login) { id panels(hideExtensions: false) { id type ... on DefaultPanel { title description imageURL linkURL } } } }`
 
 const PlaybackAccessTokenOperation = `query PlaybackAccessTokenLive($login: String!, $playerType: String!) { streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) { value signature __typename } }`
+
+const VodPlaybackAccessTokenOperation = `query PlaybackAccessTokenVod($vodID: ID!, $playerType: String!) { videoPlaybackAccessToken(id: $vodID, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) { value signature __typename } }`

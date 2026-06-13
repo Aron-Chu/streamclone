@@ -43,10 +43,12 @@ type DirectSpawnFunc func(channel, sourceURL, rtmp string, logw io.Writer) (regi
 
 type TokenClient interface {
 	Live(ctx context.Context, login string) (token.Token, error)
+	Vod(ctx context.Context, vodID string) (token.Token, error)
 }
 
 type UsherClient interface {
 	Discover(ctx context.Context, login, tokenValue, signature string) ([]usher.Rendition, error)
+	DiscoverVod(ctx context.Context, vodID, tokenValue, signature string) ([]usher.Rendition, error)
 }
 
 type Options struct {
@@ -67,6 +69,8 @@ type Options struct {
 	DefaultQuality  string
 	Spawn           SpawnFunc
 	DirectSpawn     DirectSpawnFunc
+	VodSpawn        VodSpawnFunc
+	VodDirectSpawn  VodDirectSpawnFunc
 }
 
 type Orchestrator struct {
@@ -85,6 +89,16 @@ func New(o Options) *Orchestrator {
 	if o.DirectSpawn == nil {
 		o.DirectSpawn = func(ch, src, rtmp string, logw io.Writer) (registry.Streamer, error) {
 			return worker.StartDirectHLS(ch, src, rtmp, logw)
+		}
+	}
+	if o.VodSpawn == nil {
+		o.VodSpawn = func(vodID, quality string, offsetSeconds int, rtmp string, logw io.Writer) (registry.Streamer, error) {
+			return worker.StartVod(vodID, quality, offsetSeconds, rtmp, logw)
+		}
+	}
+	if o.VodDirectSpawn == nil {
+		o.VodDirectSpawn = func(vodID, src string, offsetSeconds int, rtmp string, logw io.Writer) (registry.Streamer, error) {
+			return worker.StartVodDirectHLS(vodID, src, offsetSeconds, rtmp, logw)
 		}
 	}
 	if len(o.WorkerBackends) == 0 {
@@ -117,6 +131,7 @@ func New(o Options) *Orchestrator {
 
 func (h *Orchestrator) Routes(r chi.Router) {
 	r.Post("/v1/stream/start", h.start)
+	r.Post("/v1/stream/vod/start", h.startVod)
 	r.Post("/v1/stream/keepalive", h.keepalive)
 	r.Post("/v1/stream/stop", h.stop)
 	r.Get("/v1/stream/status", h.status)

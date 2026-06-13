@@ -50,7 +50,10 @@ func New(e upstream.Endpoints) *Client {
 	}
 }
 
-const query = upstream.PlaybackAccessTokenOperation
+const (
+	query    = upstream.PlaybackAccessTokenOperation
+	vodQuery = upstream.VodPlaybackAccessTokenOperation
+)
 
 type response struct {
 	Data struct {
@@ -58,6 +61,18 @@ type response struct {
 			Value     string `json:"value"`
 			Signature string `json:"signature"`
 		} `json:"streamPlaybackAccessToken"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+type vodResponse struct {
+	Data struct {
+		Video *struct {
+			Value     string `json:"value"`
+			Signature string `json:"signature"`
+		} `json:"videoPlaybackAccessToken"`
 	} `json:"data"`
 	Errors []struct {
 		Message string `json:"message"`
@@ -151,4 +166,77 @@ func (c *Client) fetchLive(ctx context.Context, login string) (Token, error) {
 		return Token{}, errors.Join(upstream.ErrPlaybackToken, upstream.ErrUpstreamSchema)
 	}
 	return Token{Value: r.Data.Stream.Value, Signature: r.Data.Stream.Signature}, nil
+}
+
+func vodCacheKey(vodID string) string { return "vod:" + vodID }
+
+func (c *Client) Vod(ctx context.Context, vodID string) (Token, error) {
+	vodID = strings.TrimSpace(vodID)
+	if vodID == "" {
+		return Token{}, fmt.Errorf("%w: empty vod id", upstream.ErrPlaybackToken)
+	}
+	key := vodCacheKey(vodID)
+	if tok, ok := c.cached(key); ok {
+		return tok, nil
+	}
+	v, err, _ := c.sf.Do(key, func() (any, error) {
+		if tok, ok := c.cached(key); ok {
+			return tok, nil
+		}
+		tok, err := c.fetchVod(ctx, vodID)
+		if err != nil {
+			return Token{}, err
+		}
+		c.store(key, tok)
+		return tok, nil
+	})
+	if err != nil {
+		return Token{}, err
+	}
+	return v.(Token), nil
+}
+
+func (c *Client) fetchVod(ctx context.Context, vodID string) (Token, error) {
+	playerType := os.Getenv("TWITCH_PLAYER_TYPE")
+	if playerType == "" {
+		playerType = "embed"
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"operationName": "PlaybackAccessTokenVod",
+		"query":         vodQuery,
+		"variables": map[string]any{
+			"vodID":      vodID,
+			"playerType": playerType,
+		},
+	})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(payload))
+	if err != nil {
+		return Token{}, err
+	}
+	req.Header.Set("Client-ID", c.clientID)
+	req.Header.Set("User-Agent", c.ua)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return Token{}, fmt.Errorf("%w: %v", upstream.ErrPlaybackToken, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Token{}, fmt.Errorf("%w: status %d", upstream.ErrPlaybackToken, resp.StatusCode)
+	}
+
+	var r vodResponse
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return Token{}, errors.Join(upstream.ErrPlaybackToken, fmt.Errorf("%w: %v", upstream.ErrUpstreamSchema, err))
+	}
+	if len(r.Errors) > 0 {
+		return Token{}, fmt.Errorf("%w: %s", upstream.ErrPlaybackToken, r.Errors[0].Message)
+	}
+	if r.Data.Video == nil || r.Data.Video.Value == "" {
+		return Token{}, errors.Join(upstream.ErrPlaybackToken, upstream.ErrUpstreamSchema)
+	}
+	return Token{Value: r.Data.Video.Value, Signature: r.Data.Video.Signature}, nil
 }

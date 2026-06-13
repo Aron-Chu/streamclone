@@ -20,6 +20,7 @@ import (
 	"streamclone/internal/video/registry"
 	"streamclone/internal/video/token"
 	"streamclone/internal/video/usher"
+	"streamclone/internal/video/worker"
 )
 
 type fakeStream struct {
@@ -37,15 +38,27 @@ func (fakeToken) Live(context.Context, string) (token.Token, error) {
 	return token.Token{Value: "v", Signature: "s"}, nil
 }
 
+func (fakeToken) Vod(context.Context, string) (token.Token, error) {
+	return token.Token{Value: "v", Signature: "s"}, nil
+}
+
 type failingToken struct{ err error }
 
 func (f failingToken) Live(context.Context, string) (token.Token, error) {
 	return token.Token{}, f.err
 }
 
+func (f failingToken) Vod(context.Context, string) (token.Token, error) {
+	return token.Token{}, f.err
+}
+
 type fakeUsher struct{}
 
 func (fakeUsher) Discover(context.Context, string, string, string) ([]usher.Rendition, error) {
+	return []usher.Rendition{{Name: "720p60"}}, nil
+}
+
+func (fakeUsher) DiscoverVod(context.Context, string, string, string) ([]usher.Rendition, error) {
 	return []usher.Rendition{{Name: "720p60"}}, nil
 }
 
@@ -381,5 +394,97 @@ func TestBackendProbeTimeout(t *testing.T) {
 	}
 	if got := backendProbeTimeout(full, 0, 1); got != full {
 		t.Fatalf("single backend: got %v want %v", got, full)
+	}
+}
+
+func newVodOrch(maxStreams int, spawned *int32, hlsBase string) *Orchestrator {
+	return New(Options{
+		Token:           fakeToken{},
+		Usher:           fakeUsher{},
+		Registry:        registry.New(),
+		Log:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		RTMPBase:        "mediamtx:1935",
+		HLSBase:         "http://localhost:8888",
+		HLSProbeBase:    hlsBase,
+		HLSProbeTimeout: 500 * time.Millisecond,
+		MaxStreams:      maxStreams,
+		IdleTimeout:     time.Hour,
+		WorkerBackends:  []string{"streamlink"},
+		VodSpawn: func(string, string, int, string, io.Writer) (registry.Streamer, error) {
+			atomic.AddInt32(spawned, 1)
+			return newFakeStream(), nil
+		},
+	})
+}
+
+func TestVodStartSuccess(t *testing.T) {
+	hls := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "vod_1234567890") {
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-TARGETDURATION:2\nseg.ts\n"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer hls.Close()
+
+	var spawned int32
+	h := newVodOrch(5, &spawned, hls.URL)
+	rec := post(h, "/v1/stream/vod/start", `{"vod_id":"1234567890","offset_seconds":120,"quality":"720p60"}`)
+	if rec.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body vodStartResp
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.VodID != "1234567890" || body.OffsetSeconds != 120 || body.SeekSeconds != 90 {
+		t.Fatalf("unexpected body: %+v", body)
+	}
+	if !strings.Contains(body.HLSURL, "/live/vod_1234567890/index.m3u8") {
+		t.Fatalf("unexpected hls url: %q", body.HLSURL)
+	}
+	if spawned != 1 {
+		t.Fatalf("expected 1 spawn, got %d", spawned)
+	}
+}
+
+func TestVodStartDedupe(t *testing.T) {
+	hls := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "vod_1234567890") {
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-TARGETDURATION:2\nseg.ts\n"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer hls.Close()
+
+	var spawned int32
+	h := newVodOrch(5, &spawned, hls.URL)
+	if rec := post(h, "/v1/stream/vod/start", `{"vod_id":"1234567890"}`); rec.Code != 200 {
+		t.Fatalf("first start code %d", rec.Code)
+	}
+	if rec := post(h, "/v1/stream/vod/start", `{"vod_id":"1234567890"}`); rec.Code != 200 {
+		t.Fatalf("second start code %d", rec.Code)
+	}
+	if spawned != 1 {
+		t.Fatalf("expected 1 spawn, got %d", spawned)
+	}
+	s, _ := h.o.Registry.Get(worker.VodRegistryKey("1234567890"))
+	if s.Listeners() != 2 {
+		t.Fatalf("expected 2 listeners, got %d", s.Listeners())
+	}
+}
+
+func TestVodStartInvalidID(t *testing.T) {
+	var spawned int32
+	h := newVodOrch(5, &spawned, "")
+	rec := post(h, "/v1/stream/vod/start", `{"vod_id":"abc"}`)
+	if rec.Code != 400 {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if spawned != 0 {
+		t.Fatal("invalid vod id must not spawn")
 	}
 }

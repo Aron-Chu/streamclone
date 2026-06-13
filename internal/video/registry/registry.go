@@ -35,6 +35,9 @@ type Session struct {
 	QualityRestarted  bool
 	LatencyMode       string
 	LiveEdge          int
+	VodID             string
+	OffsetSeconds     int
+	SeekSeconds       int
 	StartedAt         time.Time
 
 	listeners atomic.Int64
