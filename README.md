@@ -4,59 +4,33 @@
 
 # Streamclone
 
-Self-hosted Twitch-style directory with HLS playback, analytics, and optional Clip Studio — no ads, fast 7TV emotes.
+Self-hosted Twitch-style directory — HLS playback, chat, 7TV emotes, analytics, optional Clip Studio. **Apache-2.0** · not affiliated with Twitch or 7TV.
 
-## Install
+## Quick start
 
-**Prerequisites:** [Docker Desktop](https://docs.docker.com/desktop/) running.
+**Need:** [Docker Desktop](https://docs.docker.com/desktop/) running.
 
-1. Download **`Streamclone-Setup-*.exe`** (or **`Install Streamclone.cmd`**) from **[latest release](https://github.com/Aron-Chu/streamclone/releases/latest)**
-2. Run the installer (~3–5 min) — sets up Docker, opens **`http://localhost:8090/`**
-3. Next time: double-click **`Start Streamclone`** on your Desktop
-4. Pause: **`Stop Streamclone`** · Remove everything: **`Uninstall Streamclone`**
+1. Get **`Streamclone-Setup-*.exe`** from **[Releases](https://github.com/Aron-Chu/streamclone/releases/latest)**
+2. Run installer → open **`http://localhost:8090/`**
+3. Daily: **Start Streamclone** · Stop / uninstall via Desktop shortcuts or launchers
 
-| Platform | Install | Daily | Pause | Uninstall |
-|----------|---------|-------|-------|-----------|
-| Windows | `Streamclone-Setup-*.exe` or `Install Streamclone.cmd` | `Start Streamclone.cmd` | `Stop Streamclone.cmd` | Settings → Apps, or `Uninstall Streamclone.cmd` |
-| macOS | `launchers/Install Streamclone.command` | `launchers/Start Streamclone.command` | `launchers/Stop Streamclone.command` | `launchers/Uninstall Streamclone.command` |
-| Developers | `git clone` + `make setup` | `make start` | `make down` | `scripts/uninstall-streamclone.ps1` |
+| | Windows | macOS / Linux dev |
+|--|---------|-------------------|
+| Install | Setup.exe or `Install Streamclone.cmd` | [install-desktop.md](docs/install-desktop.md) |
+| Develop | `git clone` + `make setup` | same |
 
-Full guide: [docs/install-desktop.md](docs/install-desktop.md) · Optional features: [docs/options.md](docs/options.md)
+**Docs:** [Install](docs/install-desktop.md) · [Options](docs/options.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-**Profiles:** `core` (default) · `scraper` · `clipper` · `full`
+## Preview
 
----
+<img src="docs/images/directory.gif" alt="Directory" width="720" /> · <img src="docs/images/channel.gif" alt="Channel" width="720" />
 
-## See it in action
-
-Regenerate (stack must be up): `powershell -File scripts/capture-readme-media.ps1`
-
-**Directory**
-
-<img src="docs/images/directory.gif" alt="Live channel directory" width="960" />
-
-**Channel — live playback + chat**
-
-<img src="docs/images/channel.gif" alt="Channel player and chat" width="960" />
-
-**Analytics — sync in progress**
-
-<img src="docs/images/analytics-sync-load.gif" alt="Analytics VOD sync" width="960" />
-
-**Analytics — finished chart**
-
-<img src="docs/images/image.png" alt="Synced analytics chart" width="960" />
-
----
+Regenerate: `make docs-media` (stack must be up)
 
 ## Stack
 
-```
-Browser :8090 → Caddy → frontend, metadata, video, chat, emote, analytics, MediaMTX, MinIO
-```
-
-PostgreSQL + Redis behind the Go services.
+Browser `:8090` → Caddy → Go services (metadata, video, chat, emote, analytics) + MediaMTX + MinIO · Postgres + Redis
 
 ## License
 
-Apache License 2.0 (open source) — [LICENSE](LICENSE). Not affiliated with Twitch or 7TV; compliance is your responsibility.
+[Apache License 2.0](LICENSE) — open source. You are responsible for compliance with Twitch/7TV terms when operating this software.

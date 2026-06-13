@@ -17,7 +17,7 @@ Read this file first. Load **one** domain steering doc, then use the code graph 
 | Emotes / 7TV / FFZ | `.kiro/steering/emote-pipeline.md` | — |
 | Windows / Docker localhost | `.kiro/steering/windows-dev.md` | — |
 | Desktop install / uninstall | `docs/install-desktop.md` | `Install` / `Start` / `Stop` / `Uninstall` launchers; `scripts/uninstall-streamclone.ps1` |
-| Security / secrets / deploy hardening | `docs/security.md` | — |
+| Security / secrets / deploy hardening | `SECURITY.md`, `docs/security.md` | — |
 | Scraper / CDP Bypass / Cloudflare | `.kiro/steering/windows-dev.md`, `.kiro/specs/scraper-optimization-notes.md`, `streamclone-scraper/main.py` | — |
 | Full feature specs | `.kiro/specs/<feature>/` | Use for planning, not every bugfix |
 

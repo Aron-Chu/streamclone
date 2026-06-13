@@ -1,91 +1,44 @@
 # Contributing
 
-## Clone layout
+Thanks for helping with Streamclone. **End users:** you do not need this file — see [docs/install-desktop.md](docs/install-desktop.md).
 
-```
-parent/
-  streamclone/          ← this repo (make bootstrap → http://localhost:8090)
-  streamclone-scraper/  ← optional sibling for `make up-scraper`
-```
-
-## Local setup
-
-End-user install: [docs/install-desktop.md](docs/install-desktop.md) (release ZIP, ~3–5 min). Contributors:
-
-1. `make setup` (or `scripts/setup.ps1` on Windows) — interactive wizard; CI parity: `scripts/setup.sh --profile core --non-interactive`
-2. `make smoke` when services are healthy
-3. `make validate-env` — check `.env` for your profile
-4. `make install-hooks` — requires `pip install pre-commit`
-
-Legacy one-liner: `make bootstrap` still works (core profile only).
-
-### Clean re-test (contributors)
-
-Simulate a new-user install from the same clone:
-
-```powershell
-# Stop stack, wipe volumes + .env, keep repo folder
-powershell -File scripts\reset-local-install.ps1 -RemoveVolumes
-
-# Full teardown (also deletes install folder — use from a release extract, not git clone)
-powershell -File scripts\uninstall-streamclone.ps1
-```
-
-End-user lifecycle docs: [docs/install-desktop.md](docs/install-desktop.md#lifecycle).
-
-## Tests before PR
+## Setup
 
 ```sh
-make install-hooks   # once per clone
-make security-scan   # gitleaks + validate-env
+git clone https://github.com/Aron-Chu/streamclone.git
+cd streamclone
+make install-hooks    # once — pre-commit (gitleaks, fmt, tsc)
+make setup            # or: scripts/setup.ps1
+```
+
+Optional sibling repo for Analytics scraper: [streamclone-scraper](https://github.com/Aron-Chu/streamclone-scraper).
+
+## Before you push
+
+```sh
+make security-scan
 go test ./... && go vet ./...
 cd frontend && npm ci && npm run build
-make smoke          # stack must be up
-make smoke-ui       # adds Playwright smoke-core
+make clipper-test
+make smoke            # stack up
 ```
 
-## CI
+CI runs the same on `master` — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml): **gitleaks** secret scan, backend (incl. govulncheck), frontend build (incl. npm audit), docker image builds, **smoke-core** (no scraper).
+## Commits
 
-[`.github/workflows/smoke-scraper.yml`](.github/workflows/smoke-scraper.yml): nightly / manual scraper profile smoke.
+[Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary`
 
-See [`docs/security.md`](docs/security.md) for deployment hardening, dev-token import caveats, and the pre-PR security checklist.
+Author: **Aron-Chu** `<aroncloudchu@gmail.com>` — no `Co-authored-by` agent trailers. Details: [`.cursor/rules/commits.mdc`](.cursor/rules/commits.mdc).
 
-## Secrets — never commit
+## Secrets
 
-`.env` and any `.env.*` except `.env.example` / `.env.dev`, Twitch/clipper tokens, `PROXY_*` credentials, `node_modules/`, `frontend/dist/`, `clipper/.venv/`, `clipper-data/`, `*.sqlite`, `.codegraph/`, `out.json`
+Never commit `.env`, tokens, `oauth-bundle.env`, `clipper-data/`, or build artifacts. Templates only: `.env.example`, `.env.dev`.
 
-Use `.env.dev` for local bootstrap; `.env.example` for the full reference.
+## More
 
-## Commit messages
-
-Use [Conventional Commits](https://www.conventionalcommits.org/) for every commit:
-
-```
-type(scope): short imperative summary
-```
-
-- **type** — `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`, `build`, etc.
-- **scope** — optional area, e.g. `analytics`, `clipper`, `frontend`, `repo`
-- **summary** — lowercase, imperative mood, no trailing period; explain *why* when the diff alone is unclear
-
-Examples from this repo:
-
-```
-fix(analytics): stop double IRC part on untrack
-chore(repo): add bootstrap setup and README media
-feat(clipper): add emote overlay templates
-```
-
-Multi-line bodies are fine for context; keep the first line within ~72 characters.
-
-### Git author
-
-Every commit should be attributed only to **Aron-Chu** (`aroncloudchu@gmail.com`). Do not add `Co-authored-by:` lines for agents or Cursor. Agents: see `.cursor/rules/commits.mdc`.
-
-## Maintainer media
-
-Regenerate README screenshots/GIF: `make docs-media` (healthy stack + ffmpeg for GIF).
-
-Agent/developer docs live under `.kiro/steering/` — not linked from this README.
+| Topic | Doc |
+|-------|-----|
+| Security / hardening | [SECURITY.md](SECURITY.md) → [docs/security.md](docs/security.md) |
+| Agent steering | `.kiro/steering/` (maintainers) |
+| Repo cleanup index | [docs/repo-maintenance.md](docs/repo-maintenance.md) |
