@@ -82,19 +82,22 @@ if ($isReleaseInstall) {
 $oauthId = $envValues['TWITCH_OAUTH_CLIENT_ID']
 $oauthSecret = $envValues['TWITCH_OAUTH_CLIENT_SECRET']
 if ([string]::IsNullOrWhiteSpace($oauthId) -or [string]::IsNullOrWhiteSpace($oauthSecret)) {
-    if ($Profile -in @('scraper', 'full')) {
-        Add-ValidateError -Message 'TWITCH_OAUTH_CLIENT_ID/SECRET missing from .env' -Fix 'Run twitch configure then make twitch-sync (analytics emote seeding and Helix need these)'
+    if ($Profile -in @('scraper', 'full', 'clipper')) {
+        Add-ValidateWarning -Message 'TWITCH_OAUTH_CLIENT_ID/SECRET missing from .env' -Hint 'Streamclone can still start; Helix VOD lookup/token refresh may be limited until you run twitch configure then make twitch-sync'
     } else {
-        Add-ValidateWarning -Message 'TWITCH_OAUTH_CLIENT_ID/SECRET missing from .env' -Hint 'Analytics emote charts and Helix will fail until you run: make twitch-sync'
+        Add-ValidateWarning -Message 'TWITCH_OAUTH_CLIENT_ID/SECRET missing from .env' -Hint 'Optional Helix enrichment and token refresh are limited until you run: make twitch-sync'
     }
 }
 
 if ($Profile -in @('scraper', 'full')) {
     Test-Required -Key 'SCRAPER_API_URL' -Fix 'Profile scraper sets SCRAPER_API_URL=http://scraper:8000/v2/scrape'
     Test-NotPlaceholder -Key 'SCRAPER_API_KEY' -Placeholder 'local-dev-key' -Fix 'Run make setup or scripts/validate-env.ps1 -Fix'
-    $sibling = Get-EnvScraperSiblingPath
-    if (-not (Test-Path (Join-Path $sibling '.git')) -and -not (Test-Path (Join-Path $sibling 'Dockerfile'))) {
-        Add-ValidateError -Message "streamclone-scraper sibling missing at $sibling" -Fix "git clone https://github.com/Aron-Chu/streamclone-scraper.git $sibling"
+    $scraperUseImages = ($envValues['SCRAPER_USE_IMAGES'] -eq '1')
+    if (-not $scraperUseImages) {
+        $sibling = Get-EnvScraperSiblingPath
+        if (-not (Test-Path (Join-Path $sibling '.git')) -and -not (Test-Path (Join-Path $sibling 'Dockerfile'))) {
+            Add-ValidateError -Message "streamclone-scraper sibling missing at $sibling" -Fix "git clone https://github.com/Aron-Chu/streamclone-scraper.git $sibling or set SCRAPER_USE_IMAGES=1"
+        }
     }
 }
 

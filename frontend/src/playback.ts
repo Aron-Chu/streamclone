@@ -201,6 +201,7 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     const src = options.src
     recoveryRef.current = 0
     let unauthorizedReloadCount = 0
+    let unauthorizedEscalated = false
     stallsRef.current = 0
     rebufferStartedRef.current = null
     firstFrameRef.current = null
@@ -342,13 +343,21 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
             unauthorizedReloadCount += 1
             stageRef.current = data.details || 'hls-unauthorized'
             updateMetrics()
-            if (unauthorizedReloadCount <= 4) {
+            if (unauthorizedReloadCount <= 2) {
               setState('retrying')
               hls.loadSource(src)
               return
             }
-            options.onUnauthorizedHls?.()
-            if (!data?.fatal) return
+            hls.stopLoad()
+            if (!unauthorizedEscalated) {
+              unauthorizedEscalated = true
+              setState('retrying')
+              options.onUnauthorizedHls?.()
+              return
+            }
+            setState('error')
+            setError(normalizePlaybackError('HLS stream unauthorized — relay may be down. Try Retry.'))
+            return
           }
 
           if (!data?.fatal) return

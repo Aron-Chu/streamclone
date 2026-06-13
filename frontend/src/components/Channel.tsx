@@ -30,6 +30,7 @@ import { useThemeEffect, useUiSettings, type BottomDensityMode, type ClipPeriod,
 import { autoHighStableQuality, defaultQualityOptions, requestQuality } from '../streamQuality'
 import { emoteLoadPercent, formatEmoteProviderProgress, sortChannelEmotesByUsage } from '../emoteUtils'
 import BrandLogo from './BrandLogo'
+import ChannelSearchInput from './ChannelSearchInput'
 import Chat, { type ChatEmoteStatus } from './Chat'
 import ChannelRail from './ChannelRail'
 import LocalTokenImportButton from './LocalTokenImportButton'
@@ -1531,7 +1532,12 @@ export default function Channel() {
     setRetryKey(k => k + 1)
   }, [])
   const handleUnauthorizedHls = useCallback(() => {
-    if (autoRetryAttemptsRef.current >= 2) return
+    if (autoRetryAttemptsRef.current >= 2) {
+      setRelayState('error')
+      setError('Video relay unavailable. Try Retry in a moment or switch channels.')
+      setHlsUrl('')
+      return
+    }
     autoRetryAttemptsRef.current += 1
     retryStream()
   }, [retryStream])
@@ -1907,7 +1913,7 @@ export default function Channel() {
           viewerOverrides={railViewerOverrides}
         />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="relative z-30 flex min-h-16 items-center justify-between gap-3 border-b border-white/10 bg-black/45 px-3 py-3 backdrop-blur-xl lg:px-5">
+          <header className="relative z-30 flex min-h-16 flex-wrap items-center gap-2 border-b border-white/10 bg-black/45 px-3 py-2 backdrop-blur-xl lg:gap-3 lg:px-5 lg:py-3">
             <div className="flex min-w-0 items-center gap-2">
               <button onClick={() => setMobileRailOpen(true)} className="rounded border border-white/10 bg-white/[0.06] px-3 py-2 text-sm font-black text-white lg:hidden">
                 Menu
@@ -1916,12 +1922,15 @@ export default function Channel() {
                 <BrandLogo size="sm" showText />
                 <span className="hidden rounded bg-white/10 px-2 py-0.5 text-xs font-bold text-zinc-300 sm:inline">Browse</span>
               </Link>
-              <div className="hidden min-w-0 border-l border-white/10 pl-3 md:block">
+              <div className="hidden min-w-0 max-w-[12rem] border-l border-white/10 pl-3 lg:block 2xl:max-w-xs">
                 <div className="truncate text-sm font-black text-white">{headerTitle}</div>
                 <div className="truncate text-xs font-semibold text-zinc-500">{details.data?.streamTitle || details.data?.category || 'Channel workspace'}</div>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="order-last w-full min-w-0 md:order-none md:flex-1 md:px-2 lg:max-w-xl xl:max-w-2xl">
+              <ChannelSearchInput />
+            </div>
+            <div className="ml-auto flex shrink-0 items-center gap-2">
               <div className="hidden items-center gap-2 text-xs font-bold uppercase sm:flex">
                 <span className={`rounded px-2 py-1 ${playbackState === 'playing' ? 'bg-emerald-400/15 text-emerald-200' : playbackState === 'error' ? 'bg-red-400/15 text-red-200' : 'bg-amber-400/15 text-amber-100'}`}>
                   {playbackState}

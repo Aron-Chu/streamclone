@@ -111,11 +111,11 @@ oauth_id="$(env_read_value "$ENV_FILE" TWITCH_OAUTH_CLIENT_ID || true)"
 oauth_secret="$(env_read_value "$ENV_FILE" TWITCH_OAUTH_CLIENT_SECRET || true)"
 if [ -z "$oauth_id" ] || [ -z "$oauth_secret" ]; then
   case "$PROFILE" in
-    scraper|full)
-      fail "TWITCH_OAUTH_CLIENT_ID/SECRET missing from $ENV_FILE" "Run twitch configure then make twitch-sync (analytics emote seeding and Helix need these)"
+    scraper|full|clipper)
+      warn "TWITCH_OAUTH_CLIENT_ID/SECRET missing from $ENV_FILE" "Streamclone can still start; Helix VOD lookup/token refresh may be limited until you run twitch configure then make twitch-sync"
       ;;
     *)
-      warn "TWITCH_OAUTH_CLIENT_ID/SECRET missing from $ENV_FILE" "Analytics emote charts and Helix will fail until you run: make twitch-sync"
+      warn "TWITCH_OAUTH_CLIENT_ID/SECRET missing from $ENV_FILE" "Optional Helix enrichment and token refresh are limited until you run: make twitch-sync"
       ;;
   esac
 fi
@@ -124,9 +124,12 @@ case "$PROFILE" in
   scraper|full)
     require_nonempty SCRAPER_API_URL "Profile scraper sets SCRAPER_API_URL=http://scraper:8000/v2/scrape"
     require_not_placeholder SCRAPER_API_KEY local-dev-key "Run make setup or scripts/validate-env.sh --fix"
-    sibling="$(env_scraper_sibling_path)"
-    if [ ! -d "$sibling/.git" ] && [ ! -f "$sibling/Dockerfile" ]; then
-      fail "streamclone-scraper sibling missing at $sibling" "git clone https://github.com/Aron-Chu/streamclone-scraper.git $sibling"
+    scraper_use_images="$(env_read_value "$ENV_FILE" SCRAPER_USE_IMAGES || true)"
+    if [ "$scraper_use_images" != "1" ]; then
+      sibling="$(env_scraper_sibling_path)"
+      if [ ! -d "$sibling/.git" ] && [ ! -f "$sibling/Dockerfile" ]; then
+        fail "streamclone-scraper sibling missing at $sibling" "git clone https://github.com/Aron-Chu/streamclone-scraper.git $sibling or set SCRAPER_USE_IMAGES=1"
+      fi
     fi
     ;;
 esac

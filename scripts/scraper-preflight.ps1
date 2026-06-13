@@ -2,6 +2,7 @@
 param(
     [switch]$CheckOnly,
     [string]$Url = "https://twitchtracker.com/jynxzi/streams/318832886110",
+    [string]$SecondUrl = "https://twitchtracker.com/ishowspeed/streams/318098150359",
     [int]$ScrapeTimeoutMs = 120000,
     [int]$MaxFixAttempts = 2
 )
@@ -56,16 +57,37 @@ function Wait-ScraperHealth {
 }
 
 function Invoke-ScrapeProbe {
+    param([string]$ProbeUrl)
     $script = Join-Path $repoRoot "scripts\scrape-test-inline.py"
     docker cp $script streamclone-scraper:/tmp/scrape-probe.py | Out-Null
     $out = docker exec `
-        -e "SCRAPE_URL=$Url" `
+        -e "SCRAPE_URL=$ProbeUrl" `
         -e "SCRAPE_TIMEOUT_MS=$ScrapeTimeoutMs" `
         -e USE_PROXY=false `
         streamclone-scraper python /tmp/scrape-probe.py 2>&1
     $rc = $LASTEXITCODE
     Write-Host $out
     return @{ Output = ($out -join "`n"); ExitCode = $rc }
+}
+
+function Invoke-SequentialScrapeProbe {
+    $urls = @($Url)
+    if ($SecondUrl -and $SecondUrl -ne $Url) {
+        $urls += $SecondUrl
+    }
+
+    $combined = @()
+    for ($i = 0; $i -lt $urls.Count; $i++) {
+        $probeUrl = $urls[$i]
+        Write-Host "Probing TwitchTracker scrape $($i + 1)/$($urls.Count) ($probeUrl)..."
+        $probe = Invoke-ScrapeProbe -ProbeUrl $probeUrl
+        $combined += $probe.Output
+        if ($probe.ExitCode -ne 0) {
+            return @{ Output = ($combined -join "`n"); ExitCode = $probe.ExitCode }
+        }
+    }
+
+    return @{ Output = ($combined -join "`n"); ExitCode = 0 }
 }
 
 function Clear-ProfileLocks {
@@ -92,10 +114,9 @@ Wait-ScraperHealth
 
 $attempt = 0
 while ($true) {
-    Write-Host "Probing TwitchTracker scrape ($Url)..."
-    $probe = Invoke-ScrapeProbe
+    $probe = Invoke-SequentialScrapeProbe
     if ($probe.ExitCode -eq 0) {
-        Write-Host "scraper-preflight: Camoufox scrape ok (meta#ecs or chart data present)"
+        Write-Host "scraper-preflight: Camoufox sequential scrape ok (meta#ecs or chart data present)"
         exit 0
     }
 

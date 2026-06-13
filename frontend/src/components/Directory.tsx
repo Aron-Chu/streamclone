@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { Category, getCategories, getCategoryStreams, getRandomStream, getStreams, keepaliveStream, search, startStream, stopStream, Stream } from '../api'
 import { useAuth } from '../auth'
 import { normalizeBrowserOriginUrl } from '../config'
@@ -8,6 +8,7 @@ import { useStreamPrewarm } from '../hooks/useStreamPrewarm'
 import { useHlsPlayback } from '../playback'
 import { useThemeEffect, useUiSettings } from '../settings'
 import BrandLogo from './BrandLogo'
+import { DirectorySearchField } from './ChannelSearchInput'
 import ChannelRail from './ChannelRail'
 import LocalTokenImportButton from './LocalTokenImportButton'
 import ServiceStatusBanner from './ServiceStatusBanner'
@@ -320,8 +321,30 @@ export default function Directory() {
   const [mobileRailOpen, setMobileRailOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
   const settings = useUiSettings(s => s.settings)
+  const location = useLocation()
   const query = q.trim()
   useThemeEffect(settings.theme)
+
+  useEffect(() => {
+    const state = location.state as {
+      directorySearch?: string
+      directoryCategoryId?: string
+      directoryCategoryName?: string
+    } | null
+    if (!state) return
+    if (state.directorySearch) {
+      setQ(state.directorySearch)
+      setSelectedCategory(null)
+    } else if (state.directoryCategoryId && state.directoryCategoryName) {
+      setQ('')
+      setSelectedCategory({
+        id: state.directoryCategoryId,
+        name: state.directoryCategoryName,
+        thumbnailUrl: '',
+      })
+    }
+    window.history.replaceState({}, '', location.pathname)
+  }, [location.pathname, location.state])
 
   const streams = useQuery<Stream[]>({
     queryKey: ['streams'],
@@ -389,28 +412,13 @@ export default function Directory() {
               </div>
             </div>
             <div className="flex w-full items-center gap-3 lg:max-w-3xl">
-            <div className="relative min-w-0 flex-1">
-              <input
-                className="w-full rounded-lg border border-white/10 bg-white/[0.07] px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-zinc-500 focus:border-violet-300 focus:bg-white/[0.1] focus:ring-4 focus:ring-violet-500/15"
-                placeholder="Search channels or categories"
-                spellCheck={false}
-                autoCorrect="off"
-                autoCapitalize="off"
-                value={q}
-                onChange={e => {
-                  setQ(e.target.value)
-                  if (e.target.value.trim()) setSelectedCategory(null)
-                }}
-              />
-              {query ? (
-                <button
-                  onClick={() => setQ('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                >
-                  Clear
-                </button>
-              ) : null}
-            </div>
+            <DirectorySearchField
+              value={q}
+              onChange={value => {
+                setQ(value)
+                if (value.trim()) setSelectedCategory(null)
+              }}
+            />
             <div className="hidden lg:block">
               <div className="flex items-center gap-2">
                 <StackStatusButton />
