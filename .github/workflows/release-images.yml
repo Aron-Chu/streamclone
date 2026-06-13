@@ -60,7 +60,7 @@ jobs:
             context: .
             build_args: ""
           - image: scraper
-            dockerfile: Dockerfile
+            dockerfile: scraper/Dockerfile
             context: scraper
             build_args: ""
             checkout: scraper
