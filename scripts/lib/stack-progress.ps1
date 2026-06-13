@@ -16,6 +16,18 @@ function Test-StreamcloneUseImagesFromRoot {
     return $false
 }
 
+function Test-StreamcloneLocalTunnelHlsCaddyConfig {
+    param([string]$Root = '')
+    if ([string]::IsNullOrWhiteSpace($Root)) { $Root = Get-EnvRepoRoot }
+    $caddyFile = Join-Path $Root 'deploy\Caddyfile.local-tunnel'
+    if (-not (Test-Path $caddyFile)) { return $true }
+    $content = Get-Content $caddyFile -Raw
+    if ($content -match '@hls_local') { return $false }
+    if ($content -notmatch 'header_up Authorization "Bearer streamclone-local-hls-cdn"') { return $false }
+    if ($content -notmatch '@hls[\s\S]*path /live/\*') { return $false }
+    return $true
+}
+
 function Get-StreamcloneProfileFromRoot {
     param([string]$Root, [string]$Default = 'core')
     $profileFile = Join-Path $Root '.streamclone-profile'

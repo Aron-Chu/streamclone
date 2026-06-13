@@ -99,6 +99,10 @@ function Get-StreamcloneDiagnostics {
     if ($upgradeNeeded) {
         [void]$suggestions.Add('Run Manage Streamclone -> Update to sync Docker images with the bundle version.')
     }
+    $hlsProxyConfigOk = Test-StreamcloneLocalTunnelHlsCaddyConfig -Root $Root
+    if (-not $hlsProxyConfigOk) {
+        [void]$suggestions.Add('HLS proxy config is outdated — run Manage Streamclone -> Update, then recreate local-proxy.')
+    }
     if ($coreImages -and $coreImages.present -lt $coreImages.total) {
         [void]$suggestions.Add("$($coreImages.present)/$($coreImages.total) core images downloaded - run Start Streamclone to resume.")
     }
@@ -178,6 +182,7 @@ function Get-StreamcloneDiagnostics {
         configReady      = $configReady
         webOk            = $webOk
         webUrl           = $WebUrl
+        hlsProxyConfigOk = $hlsProxyConfigOk
         setupControl     = $setupControl
         containers       = @($containers)
         optionalServices = @{

@@ -107,13 +107,13 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
 
   async function beginDeviceAuth() {
     const started = await startDevTwitchDeviceAuth()
-    let twitchTabBlocked = !twitchTabRef.current || twitchTabRef.current.closed
-    if (twitchTabRef.current && !twitchTabRef.current.closed) {
-      try {
-        twitchTabRef.current.location.replace(started.verificationUri)
-      } catch {
-        twitchTabBlocked = true
-      }
+    let twitchTabBlocked = true
+    const tab = window.open(started.verificationUri, '_blank')
+    if (tab && !tab.closed) {
+      twitchTabRef.current = tab
+      twitchTabBlocked = false
+    } else {
+      twitchTabRef.current = null
     }
     setNow(Date.now())
     setDeviceAuth({
@@ -145,15 +145,7 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
       return
     }
 
-    // Pre-open a tab synchronously on click so popup blockers allow it, then navigate
-    // once device auth starts. Do not pass noopener here — it makes window.open return
-    // null while still opening about:blank, which we can no longer redirect.
-    const tab = window.open('about:blank', '_blank')
-    if (tab) {
-      tab.opener = null
-    }
-    twitchTabRef.current = tab
-
+    // Device auth opens the Twitch tab directly in beginDeviceAuth().
     try {
       await auth.claimPreparedLocalToken()
       closeTwitchTab()

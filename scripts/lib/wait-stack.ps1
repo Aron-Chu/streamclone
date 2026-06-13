@@ -112,14 +112,21 @@ function Wait-StreamcloneAppsReady {
 function Wait-StreamcloneProxyReady {
     param(
         [string]$Url = 'http://127.0.0.1:8090/',
+        [string]$Root = '',
         [int]$TimeoutSec = 300,
         [int]$IntervalSec = 3
     )
     Write-Host "Tier 3/3: Caddy proxy ($Url)" -ForegroundColor Cyan
-    return (Wait-StreamclonePollUntil -Label 'Caddy proxy' -TimeoutSec $TimeoutSec -IntervalSec $IntervalSec -Test {
+    $proxyOk = Wait-StreamclonePollUntil -Label 'Caddy proxy' -TimeoutSec $TimeoutSec -IntervalSec $IntervalSec -Test {
         $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
         $resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500
-    })
+    }
+    if (-not $proxyOk) { return $false }
+    $resolvedRoot = Get-WaitStackRoot -Requested $Root
+    if (-not (Test-StreamcloneLocalTunnelHlsCaddyConfig -Root $resolvedRoot)) {
+        Write-Host '  HLS proxy config outdated — playback may 401 on main_stream.m3u8. Run Manage Streamclone -> Update.' -ForegroundColor Yellow
+    }
+    return $true
 }
 
 function Wait-StreamcloneHLSReady {
@@ -192,7 +199,7 @@ function Wait-StreamcloneTieredReadiness {
         Write-Host 'Required tier failed: application services' -ForegroundColor Red
         return $false
     }
-    if (-not (Wait-StreamcloneProxyReady -Url $Url -TimeoutSec $perTier -IntervalSec $IntervalSec)) {
+    if (-not (Wait-StreamcloneProxyReady -Url $Url -Root $Root -TimeoutSec $perTier -IntervalSec $IntervalSec)) {
         Write-Host 'Required tier failed: Caddy proxy' -ForegroundColor Red
         Write-Host 'See: docs/install-desktop.md' -ForegroundColor Yellow
         return $false

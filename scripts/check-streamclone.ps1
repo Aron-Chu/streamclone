@@ -94,6 +94,14 @@ if (-not $Json) {
         Write-StatusLine 'Web UI' 'fail' "Not reachable at $($report.webUrl)"
     }
 
+    if ($null -ne $report.hlsProxyConfigOk) {
+        if ($report.hlsProxyConfigOk) {
+            Write-StatusLine 'HLS proxy' 'ok' 'Caddy injects MediaMTX CDN bearer on /live/*'
+        } else {
+            Write-StatusLine 'HLS proxy' 'warn' 'Outdated Caddyfile.local-tunnel — update install bundle'
+        }
+    }
+
     if ($report.setupControl) {
         Write-StatusLine 'Setup helper' 'ok' 'Ready for Start Analytics / Clip Studio (port 9191)'
     } else {
