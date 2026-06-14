@@ -3,8 +3,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /emote ./cmd/emote \
-    && CGO_ENABLED=0 go build -o /healthcheck ./cmd/healthcheck
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /emote ./cmd/emote \
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /healthcheck ./cmd/healthcheck
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates vips-tools

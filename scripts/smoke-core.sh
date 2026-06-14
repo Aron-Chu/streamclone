@@ -21,7 +21,7 @@ wait_url() {
   local label="$2"
   echo "Checking $label ($url)..."
   for i in $(seq 1 60); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if curl --connect-timeout 2 --max-time 5 -fsS "$url" >/dev/null 2>&1; then
       echo "  ok"
       return 0
     fi

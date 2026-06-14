@@ -90,6 +90,7 @@ jobs:
             -f deploy/docker-compose.prod.yml config --quiet
       - uses: azure/setup-helm@v4
       - name: Validate Emote Pulse Helm chart
+        if: hashFiles('charts/pulse/Chart.yaml') != ''
         run: |
           helm lint charts/pulse
           helm template streamclone-pulse charts/pulse \
