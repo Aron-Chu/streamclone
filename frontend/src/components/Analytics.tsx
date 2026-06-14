@@ -42,19 +42,26 @@ import {
 import TierIndicator from './analytics/TierIndicator'
 import ClipsTabEmptyState from './analytics/ClipsTabEmptyState'
 import LiveStatsBand from './analytics/LiveStatsBand'
+import LiveCollectionWarmup from './analytics/LiveCollectionWarmup'
 import MostReactedLive from './analytics/MostReactedLive'
 import type { HeatmapEmote, ReplayHeatmapDetailPoint, ReplayHeatmapPoint } from '../types/heatmap'
 import { syncCtaLabel, type SyncStreamState } from '../utils/syncLabel'
 import {
   analyticsStreamPathSlug,
   pickSyncedLiveStreamTarget,
+  streamIsSidebarVisible,
 } from '../utils/syncedLiveStream.ts'
 import {
   classifyStatCards,
   STAT_PLACEHOLDER_MUTED_CLASS,
   type StreamCollectionState,
 } from '../utils/statCards'
-import { classifyLiveEmptyState, COLLECTING_FIRST_MINUTES_MESSAGE } from '../utils/liveEmptyState'
+import { classifyLiveEmptyState } from '../utils/liveEmptyState'
+import {
+  isActiveLiveCollectorStream,
+  isPlaceholderStreamTitle,
+  isSyncPrefetchPlaceholder,
+} from '../utils/analyticsStreamRow'
 
 import { coreMinuteChartsNeedScraper } from '../setupProfile'
 import { buildTwitchVodUrl, resolveAnalyticsVodId } from '../utils/twitchVodUrl'
@@ -196,11 +203,6 @@ function streamStateLabel(state?: AnalyticsStreamDetail['state'] | 'not found' |
   if (state === 'historical') return 'historical'
   if (state === 'not_collected') return 'stats only'
   return state || 'loading'
-}
-
-function isPlaceholderStreamTitle(title?: string) {
-  const trimmed = title?.trim() ?? ''
-  return trimmed === '' || trimmed === 'Syncing...' || trimmed === 'Syncing…'
 }
 
 function displayStreamTitle(stream?: AnalyticsStream, login?: string, fallbacks: Array<string | undefined> = []) {
@@ -2036,17 +2038,14 @@ function AnalyticsChart({
       rollupCount: rollups.filter(point => !point.missing).length,
     })
     if (liveEmpty.kind === 'collecting-first-minutes') {
+      const minuteDataCount = rollups.filter(point => rollupHasMinuteData(point)).length
       return (
-        <div className="grid min-h-80 place-items-center rounded border border-white/10 bg-[#0d0d12]/50 backdrop-blur-md px-4 text-center">
-          <div>
-            <div className="flex items-center justify-center gap-2">
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-500/30 border-t-violet-400" />
-              <div className="text-base font-black text-zinc-100">{COLLECTING_FIRST_MINUTES_MESSAGE}</div>
-            </div>
-            <div className="mt-1 text-sm font-semibold text-zinc-500 max-w-md">
-              Live collection is active. The chart appears as soon as the first minutes of viewer, chat, and emote data arrive.
-            </div>
-          </div>
+        <div className="grid min-h-80 place-items-center rounded border border-white/10 bg-[#0d0d12]/50 backdrop-blur-md px-4 py-8 text-center">
+          <LiveCollectionWarmup
+            rollupMinuteCount={minuteDataCount}
+            viewerSamples={detail?.stream?.viewerSamples}
+            chatMessages={detail?.stream?.chatMessages}
+          />
         </div>
       )
     }
@@ -2835,7 +2834,6 @@ function StreamSidebar({
   activeID,
   isLiveView,
   liveState,
-  liveLinkSlug,
   onPrefetchStream,
   syncing,
   syncedOnly,
@@ -2848,7 +2846,6 @@ function StreamSidebar({
   activeID?: string
   isLiveView: boolean
   liveState?: string
-  liveLinkSlug?: string
   onPrefetchStream?: (streamId: string) => void
   syncing?: boolean
   syncedOnly?: boolean
@@ -2866,8 +2863,7 @@ function StreamSidebar({
   }, [streams])
 
   const visibleStreams = useMemo(() => {
-    if (!syncedOnly) return streams
-    return streams.filter(s => (s.viewerSamples ?? 0) > 0 || (s.chatMessages ?? 0) > 0)
+    return streams.filter(s => streamIsSidebarVisible(s, Boolean(syncedOnly)))
   }, [streams, syncedOnly])
 
   // Below the lg breakpoint (1024px) the archive starts collapsed to at most
@@ -2897,9 +2893,7 @@ function StreamSidebar({
       ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Link
-          to={liveLinkSlug
-            ? `/analytics/${encodeURIComponent(login)}/${encodeURIComponent(liveLinkSlug)}`
-            : `/analytics/${encodeURIComponent(login)}`}
+          to={`/analytics/${encodeURIComponent(login)}`}
           className={`block border-b border-white/5 px-3 py-2.5 transition hover:bg-white/[0.05] ${
             isLiveView ? 'border-l-2 border-l-red-400 bg-red-500/10' : 'border-l-2 border-l-transparent'
           }`}
@@ -2909,7 +2903,7 @@ function StreamSidebar({
             <span className="text-sm font-black text-white">Live / Current</span>
           </div>
           <div className="mt-1 text-[10px] font-semibold text-zinc-500">
-            {liveState === 'live' ? 'Collecting now' : 'Most recent session'}
+            {liveState === 'live' ? 'Live tracking' : 'Most recent session'}
           </div>
         </Link>
         {streams.length === 0 ? (
@@ -3646,25 +3640,26 @@ export default function Analytics() {
     })
   }, [streamsQuery.data?.items, historyQuery.data?.items, login])
 
+  const routableStreams = useMemo(
+    () => combinedStreams.filter(stream => !isSyncPrefetchPlaceholder(stream)),
+    [combinedStreams],
+  )
+
   const matchedStream = useMemo(() => {
     if (!streamId) return undefined
 
-    // 1. Try to find by streamId (numeric or date alias)
     const exactMatch = combinedStreams.find(s => s.streamId === streamId)
     if (exactMatch) return exactMatch
 
-    // 2. If streamId is a date alias (YYYY-MM-DD), find a stream starting on that date
     if (/^\d{4}-\d{2}-\d{2}$/.test(streamId)) {
-      return combinedStreams.find(s => {
+      return routableStreams.find(s => {
         if (!s.startedAt) return false
         const date = new Date(s.startedAt)
         if (isNaN(date.getTime())) return false
 
-        // Match UTC date YYYY-MM-DD
         const utcDateStr = date.toISOString().slice(0, 10)
         if (utcDateStr === streamId) return true
 
-        // Match local date YYYY-MM-DD
         const year = date.getFullYear()
         const month = String(date.getMonth() + 1).padStart(2, '0')
         const day = String(date.getDate()).padStart(2, '0')
@@ -3674,7 +3669,7 @@ export default function Analytics() {
     }
 
     return undefined
-  }, [streamId, combinedStreams])
+  }, [streamId, combinedStreams, routableStreams])
 
   const dateSlugUnresolved = useMemo(() => {
     if (!streamId || !/^\d{4}-\d{2}-\d{2}$/.test(streamId)) return false
@@ -3691,13 +3686,21 @@ export default function Analytics() {
     if (matchedStream) {
       return matchedStream.streamId
     }
-    // Date slug: wait while loading, never pass the date string as a stream ID
+    // Date slug: resolve from tracker history first so detail fetch does not wait on local merge.
     if (/^\d{4}-\d{2}-\d{2}$/.test(streamId)) {
+      if (historyQuery.data?.items?.length) {
+        const fromHistory = historyQuery.data.items.find(s => {
+          if (!s.startedAt) return false
+          if (s.startedAt.slice(0, 10) === streamId) return true
+          return getLocalDateString(s.startedAt) === streamId
+        })
+        if (fromHistory) return fromHistory.id
+      }
       if (streamsQuery.isLoading || historyQuery.isLoading) return undefined
       return undefined
     }
     return undefined
-  }, [streamId, matchedStream, streamsQuery.isLoading, historyQuery.isLoading])
+  }, [streamId, matchedStream, streamsQuery.isLoading, historyQuery.isLoading, historyQuery.data?.items])
 
   useEffect(() => {
     setSyncing(false)
@@ -4099,15 +4102,46 @@ export default function Analytics() {
     return combinedStreams.some(s => (s.viewerSamples ?? 0) > 0 || (s.chatMessages ?? 0) > 0)
   }, [isLiveRoute, detail?.rollups, combinedStreams])
 
-  const syncedLiveStreamTarget = useMemo(() => {
+  const sidebarStreams = routableStreams
+
+  const isActiveLiveCollector = isActiveLiveCollectorStream(detail?.stream, detail?.state)
+
+  const needsLiveCollectorRedirect = useMemo(() => {
+    if (detailQuery.isLoading || streamsQuery.isLoading) return false
+    if (isHistoricalRoute) {
+      if (historyQuery.isLoading) return false
+      // Historical slug resolved — stay on that session (stats-only or synced).
+      if (matchedStream) return false
+      if (historicalStream?.endedAt) return false
+      if (!isSyncPrefetchPlaceholder(detail?.stream)) return false
+      return true
+    }
+    if (!isLiveRoute) return false
     const rollups = detail?.rollups ?? []
-    const hasChartRollups = rollups.some(rollupHasMinuteData) || rollupsHaveViewerData(rollups)
-    if (hasChartRollups) return undefined
+    if (rollups.some(rollupHasMinuteData) || rollupsHaveViewerData(rollups)) return false
+    // Active live collector: show warmup panel instead of bouncing to an older synced session.
+    if (isActiveLiveCollectorStream(detail?.stream, detail?.state)) return false
+    if ((detail?.stream?.currentViewers ?? 0) > 0) return false
+    return true
+  }, [
+    detail?.rollups,
+    detail?.stream,
+    detailQuery.isLoading,
+    historicalStream?.endedAt,
+    historyQuery.isLoading,
+    isHistoricalRoute,
+    isLiveRoute,
+    matchedStream,
+    streamsQuery.isLoading,
+  ])
+
+  const syncedLiveStreamTarget = useMemo(() => {
+    if (!needsLiveCollectorRedirect) return undefined
     return pickSyncedLiveStreamTarget(combinedStreams, {
       liveStreamId: detail?.stream?.streamId,
-      channelLive: detail?.state === 'live' || detail?.state === 'not_collected',
+      channelLive: true,
     })
-  }, [combinedStreams, detail?.rollups, detail?.state, detail?.stream?.streamId])
+  }, [combinedStreams, detail?.stream?.streamId, needsLiveCollectorRedirect])
 
   const syncedLiveStreamSlug = useMemo(() => {
     if (!syncedLiveStreamTarget) return undefined
@@ -4115,19 +4149,22 @@ export default function Analytics() {
   }, [syncedLiveStreamTarget, combinedStreams])
 
   useEffect(() => {
-    if (!isLiveRoute || !login || !syncedLiveStreamSlug) return
+    if (!login || !syncedLiveStreamSlug || !needsLiveCollectorRedirect) return
     if (detailQuery.isLoading || streamsQuery.isLoading) return
+    if (syncedLiveStreamTarget?.streamId === targetQueryStreamId) return
     navigate(
       `/analytics/${encodeURIComponent(login)}/${encodeURIComponent(syncedLiveStreamSlug)}`,
       { replace: true },
     )
   }, [
     detailQuery.isLoading,
-    isLiveRoute,
     login,
     navigate,
+    needsLiveCollectorRedirect,
     streamsQuery.isLoading,
     syncedLiveStreamSlug,
+    syncedLiveStreamTarget?.streamId,
+    targetQueryStreamId,
   ])
 
   const chatOnlySyncAvailable = useMemo(() => {
@@ -4336,11 +4373,10 @@ export default function Analytics() {
           <aside className="order-3 min-w-0 xl:order-none xl:sticky xl:top-4 xl:self-start">
             <StreamSidebar
               login={login}
-              streams={combinedStreams}
+              streams={sidebarStreams}
               activeID={isHistoricalRoute ? (targetQueryStreamId || streamId) : undefined}
-              isLiveView={isLiveRoute}
-              liveState={detail?.state === 'live' ? 'live' : (isLiveRoute ? detail?.state : undefined)}
-              liveLinkSlug={syncedLiveStreamSlug}
+              isLiveView={isLiveRoute || isActiveLiveCollector}
+              liveState={isActiveLiveCollector ? 'live' : (isLiveRoute ? detail?.state : undefined)}
               onPrefetchStream={prefetchStreamDetail}
               syncing={syncing}
               syncedOnly={syncedOnlyFilter}
@@ -4368,7 +4404,7 @@ export default function Analytics() {
                 loading={detailQuery.isLoading && !matchedStream && !historicalStream}
                 games={gamesQuery.data ?? []}
                 canSync={!coreMinuteChartsBlocked && (Boolean(streamId) || needsSync)}
-                isLive={detail?.state === 'live'}
+                isLive={isActiveLiveCollector}
                 coreMinuteChartsBlocked={coreMinuteChartsBlocked}
                 liveHasRichHistory={liveHasRichHistory}
                 chatOnlySyncAvailable={chatOnlySyncAvailable}

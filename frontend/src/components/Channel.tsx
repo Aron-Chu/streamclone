@@ -57,8 +57,11 @@ import VodErrorState from './channel/VodErrorState'
 import type { VodErrorInput } from './channel/vodError'
 import { HLS_NOT_READY_MAX_AUTO_RETRIES } from './channel/vodError'
 import PlayerHeatmap from './channel/PlayerHeatmap'
+import StreamPulsePanel from './channel/StreamPulsePanel'
+import { isLsfWarming } from '../utils/pulseEmptyState.ts'
 
 type ChannelTab = 'about' | 'stats' | 'clips' | 'vods' | 'diagnostics' | 'emotes'
+type ChatSidebarTab = 'chat' | 'pulse'
 type MobileChannelPane = 'watch' | 'chat' | 'workspace'
 
 const mobileChannelPanes: Array<{ id: MobileChannelPane; label: string }> = [
@@ -1019,17 +1022,21 @@ function TrackAnalyticsToggle({
   tracked,
   pending,
   onToggle,
+  prominent = false,
 }: {
   tracked: boolean
   pending: boolean
   onToggle: (next: boolean) => void
+  prominent?: boolean
 }) {
   return (
     <button
       type="button"
       disabled={pending}
       onClick={() => onToggle(!tracked)}
-      className={`rounded px-2.5 py-0.5 text-[11px] font-black uppercase tracking-wide transition disabled:opacity-60 ${
+      className={`rounded font-black uppercase tracking-wide transition disabled:opacity-60 ${
+        prominent ? 'px-4 py-2 text-xs' : 'px-2.5 py-0.5 text-[11px]'
+      } ${
         tracked
           ? 'bg-violet-600 text-white hover:bg-violet-500'
           : 'border border-violet-400/30 bg-violet-500/10 text-violet-200 hover:border-violet-300/50'
@@ -1041,6 +1048,19 @@ function TrackAnalyticsToggle({
   )
 }
 
+function OpenFullAnalyticsLink({ channel, prominent = false }: { channel: string; prominent?: boolean }) {
+  return (
+    <a
+      href={`/analytics/${encodeURIComponent(channel)}`}
+      className={`rounded bg-violet-600 font-black text-white transition hover:bg-violet-500 ${
+        prominent ? 'px-4 py-2 text-xs' : 'px-3 py-1 text-xs uppercase tracking-wide'
+      }`}
+    >
+      Open Full Analytics →
+    </a>
+  )
+}
+
 function ChannelMeta({
   login,
   details,
@@ -1048,9 +1068,6 @@ function ChannelMeta({
   quality,
   listeners,
   dense,
-  trackLiveAnalytics,
-  trackAnalyticsPending,
-  onTrackAnalytics,
 }: {
   login: string
   details?: ChannelDetails
@@ -1058,9 +1075,6 @@ function ChannelMeta({
   quality: string
   listeners: number | null
   dense: boolean
-  trackLiveAnalytics?: boolean
-  trackAnalyticsPending?: boolean
-  onTrackAnalytics?: (track: boolean) => void
 }) {
   if (detailsLoading && !details) {
     return <ChannelMetaSkeleton dense={dense} />
@@ -1095,13 +1109,7 @@ function ChannelMeta({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <FollowButton login={login} />
-          {details?.isLive && onTrackAnalytics ? (
-            <TrackAnalyticsToggle
-              tracked={Boolean(trackLiveAnalytics)}
-              pending={Boolean(trackAnalyticsPending)}
-              onToggle={onTrackAnalytics}
-            />
-          ) : null}
+          <OpenFullAnalyticsLink channel={login} />
         </div>
       </div>
       {listeners != null && listeners > 0 ? (
@@ -1338,6 +1346,9 @@ function ChannelTabs({
   isVod = false,
   analyticsStreams,
   liveStreamId,
+  trackLiveAnalytics,
+  trackAnalyticsPending,
+  onTrackAnalytics,
 }: {
   activeTab: ChannelTab
   onTab: (tab: ChannelTab) => void
@@ -1357,6 +1368,9 @@ function ChannelTabs({
   isVod?: boolean
   analyticsStreams?: AnalyticsStream[]
   liveStreamId?: string | null
+  trackLiveAnalytics?: boolean
+  trackAnalyticsPending?: boolean
+  onTrackAnalytics?: (track: boolean) => void
 }) {
   const statsSources = (insights?.sources ?? []).filter(source => sourceMatchesGroup(source, 'stats'))
   const clipSources = (insights?.sources ?? []).filter(source => sourceMatchesGroup(source, 'clips'))
@@ -1431,12 +1445,14 @@ function ChannelTabs({
         <div className={dense ? 'space-y-3' : 'space-y-4'}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-xs font-black uppercase text-zinc-500">Stream History & VODs</div>
-            <a
-              href={`/analytics/${encodeURIComponent(channel)}`}
-              className="rounded bg-violet-600 px-4 py-2 text-xs font-black text-white transition hover:bg-violet-500"
-            >
-              Open Full Analytics →
-            </a>
+            {details?.isLive && onTrackAnalytics ? (
+              <TrackAnalyticsToggle
+                tracked={Boolean(trackLiveAnalytics)}
+                pending={Boolean(trackAnalyticsPending)}
+                onToggle={onTrackAnalytics}
+                prominent
+              />
+            ) : null}
           </div>
           <ChannelVodsPanel
             rows={insights?.streamHistory}
@@ -1574,6 +1590,9 @@ export default function Channel() {
   const [detailsExpanded, setDetailsExpanded] = useState(false)
   const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>('7d')
   const [clipPeriod, setClipPeriod] = useState<ClipPeriod>('7d')
+  const [chatSidebarTab, setChatSidebarTab] = useState<ChatSidebarTab>('chat')
+  const [pulseAutoUpdate, setPulseAutoUpdate] = useState(true)
+  const lsfRefreshRef = useRef(false)
   const [emoteStatus, setEmoteStatus] = useState<ChatEmoteStatus>({ state: 'idle', count: 0, pending: 0 })
   const [emoteLoadRequest, setEmoteLoadRequest] = useState<{ providers: EmoteProvider[]; token: number } | null>(null)
   const [muted, setMuted] = useState(true)
@@ -1722,6 +1741,9 @@ export default function Channel() {
     staleTime: 5000,
     refetchInterval: emoteStatus.state === 'loading' || emoteStatus.state === 'processing' ? 5000 : false,
   })
+  const isLiveStream = Boolean(details.data?.isLive && !isVodPlayback)
+  const showPulseSidebarTab = isLiveStream
+
   const liveAnalytics = useQuery({
     queryKey: ['channel-live-analytics', channelLogin],
     queryFn: () => getAnalyticsLive(channelLogin),
@@ -1729,6 +1751,30 @@ export default function Channel() {
     staleTime: 15_000,
     refetchInterval: query => (query.state.data?.state === 'live' ? 15_000 : 60_000),
   })
+
+  const pulseInsights = useQuery({
+    queryKey: ['channel-pulse-lsf', channelLogin, '7d', 'top'],
+    queryFn: () => {
+      const lsfRefresh = lsfRefreshRef.current
+      lsfRefreshRef.current = false
+      return getChannelInsights(channelLogin, '7d', '24h', '7d', 'top', { lsfRefresh })
+    },
+    enabled: Boolean(channelLogin && isLiveStream && chatSidebarTab === 'pulse'),
+    refetchInterval: query => {
+      const warming = isLsfWarming(query.state.data?.sources)
+      const hasLsf = (query.state.data?.lsf?.length ?? 0) > 0
+      if (warming && !hasLsf) return 15_000
+      if (!pulseAutoUpdate) return false
+      if (query.state.status !== 'success') return false
+      return 60_000
+    },
+    staleTime: 15_000,
+  })
+
+  const handleLoadPulseLsf = useCallback(() => {
+    lsfRefreshRef.current = true
+    void pulseInsights.refetch()
+  }, [pulseInsights])
 
   const alwaysTracked = useQuery({
     queryKey: ['analytics-always-tracked'],
@@ -1783,6 +1829,12 @@ export default function Channel() {
     if (!channelLogin || !trackLiveAnalytics) return
     watchAnalyticsChannel(channelLogin).catch(() => undefined)
   }, [channelLogin, trackLiveAnalytics])
+
+  useEffect(() => {
+    if (!showPulseSidebarTab && chatSidebarTab === 'pulse') {
+      setChatSidebarTab('chat')
+    }
+  }, [showPulseSidebarTab, chatSidebarTab])
 
   useEffect(() => {
     if (!channelLogin) return
@@ -2543,9 +2595,6 @@ export default function Channel() {
                   quality={loadedQuality}
                   listeners={listeners}
                   dense={isDenseBottom}
-                  trackLiveAnalytics={trackLiveAnalytics}
-                  trackAnalyticsPending={trackAnalyticsMutation.isPending}
-                  onTrackAnalytics={track => trackAnalyticsMutation.mutate(track)}
                 />
                 <ChannelTabs
                   activeTab={activeTab}
@@ -2566,6 +2615,9 @@ export default function Channel() {
                   isVod={isVodPlayback}
                   analyticsStreams={analyticsStreamsQuery.data?.items}
                   liveStreamId={liveAnalytics.data?.stream?.streamId ?? null}
+                  trackLiveAnalytics={trackLiveAnalytics}
+                  trackAnalyticsPending={trackAnalyticsMutation.isPending}
+                  onTrackAnalytics={track => trackAnalyticsMutation.mutate(track)}
                 />
                 {showLiveActivityWaveform ? (
                   <div className="border-t border-white/10 bg-[#0a0a0e] px-3 py-2 lg:px-5">
@@ -2588,6 +2640,34 @@ export default function Channel() {
                 </div>
             </div>
             <aside className={`${mobilePane === 'chat' ? 'flex' : 'hidden'} min-h-0 shrink-0 flex-col overflow-hidden border-t border-white/10 bg-[#111117] lg:flex lg:w-[400px] lg:border-l lg:border-t-0`}>
+              {showPulseSidebarTab ? (
+                <div className="shrink-0 border-b border-white/10 px-3 py-2">
+                  <div className="flex rounded border border-white/10 bg-black/25 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setChatSidebarTab('chat')}
+                      className={`flex-1 rounded px-3 py-1.5 text-[11px] font-black uppercase tracking-wide transition ${
+                        chatSidebarTab === 'chat'
+                          ? 'bg-violet-600 text-white'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      Chat
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChatSidebarTab('pulse')}
+                      className={`flex-1 rounded px-3 py-1.5 text-[11px] font-black uppercase tracking-wide transition ${
+                        chatSidebarTab === 'pulse'
+                          ? 'bg-violet-600 text-white'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      Pulse
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {isVodPlayback && vodAnalyticsStreamId ? (
                   <VodChatReplayPanel
@@ -2604,6 +2684,24 @@ export default function Channel() {
                       Sync chat and emotes for this VOD in Analytics first so the URL includes <code className="text-violet-200">sid=</code> and synced chat can load.
                     </p>
                   </div>
+                ) : chatSidebarTab === 'pulse' && showPulseSidebarTab ? (
+                  <StreamPulsePanel
+                    channelLogin={channelLogin}
+                    insights={pulseInsights.data}
+                    insightsLoading={pulseInsights.isLoading}
+                    insightsFetching={pulseInsights.isFetching}
+                    insightsError={pulseInsights.isError}
+                    lsfLoadPending={Boolean(pulseInsights.isFetching && isLsfWarming(pulseInsights.data?.sources))}
+                    onLoadLsf={handleLoadPulseLsf}
+                    liveAnalytics={liveAnalytics.data}
+                    liveAnalyticsLoading={liveAnalytics.isLoading}
+                    trackLiveAnalytics={trackLiveAnalytics}
+                    trackAnalyticsPending={trackAnalyticsMutation.isPending}
+                    onTrackAnalytics={track => trackAnalyticsMutation.mutate(track)}
+                    liveActivityRollups={liveActivityRollups}
+                    autoUpdate={pulseAutoUpdate}
+                    onAutoUpdateChange={setPulseAutoUpdate}
+                  />
                 ) : (
                   <Chat
                     channel={channelLogin}

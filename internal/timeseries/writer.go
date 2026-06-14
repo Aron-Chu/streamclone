@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	DefaultBackend      = "influxdb"
-	DefaultBucket       = "streamclone"
-	DefaultWriteTimeout = time.Second
-	DefaultQueueSize    = 1024
+	DefaultBackend       = "influxdb"
+	DefaultBucket        = "streamclone"
+	DefaultWriteTimeout  = time.Second
+	DefaultQueueSize     = 1024
+	maxStreamTitleTagLen = 80
 )
 
 type Config struct {
@@ -37,6 +38,8 @@ type Config struct {
 type Rollup struct {
 	ChannelLogin      string
 	StreamID          string
+	StreamTitle       string
+	StreamStartedAt   time.Time
 	MinuteTS          time.Time
 	ViewerAvg         int
 	ViewerMax         int
@@ -164,7 +167,8 @@ func (w *AsyncWriter) write(batch []Rollup) {
 	ctx, cancel := context.WithTimeout(context.Background(), w.writeTimeout)
 	defer cancel()
 	metrics.TimeseriesWriteBatchSize.WithLabelValues(w.backend).Observe(float64(len(batch)))
-	if err := w.sink.WriteRollups(ctx, batch); err != nil {
+	err := w.sink.WriteRollups(ctx, batch)
+	if err != nil {
 		result = "error"
 		if w.logger != nil {
 			w.logger.Warn("time-series write failed", "backend", w.backend, "rollups", len(batch), "err", err)
@@ -256,12 +260,12 @@ func BuildInfluxLineProtocol(rollups []Rollup) string {
 			b.WriteString("emote_usage_1m")
 			writeTag(&b, "channel_login", rollup.ChannelLogin)
 			writeTag(&b, "stream_id", rollup.StreamID)
+			writeStreamMetaTags(&b, rollup)
 			writeTag(&b, "provider", provider)
 			writeTag(&b, "emote_id", id)
+			writeTag(&b, "emote_name", name)
 			b.WriteByte(' ')
-			b.WriteString("emote_name=")
-			b.WriteString(quoteStringField(name))
-			b.WriteString(",count=")
+			b.WriteString("count=")
 			b.WriteString(strconv.Itoa(count))
 			b.WriteByte('i')
 			b.WriteByte(' ')
@@ -276,6 +280,7 @@ func writeStreamActivityLine(b *strings.Builder, rollup Rollup, ts int64) {
 	b.WriteString("stream_activity_1m")
 	writeTag(b, "channel_login", rollup.ChannelLogin)
 	writeTag(b, "stream_id", rollup.StreamID)
+	writeStreamMetaTags(b, rollup)
 	b.WriteByte(' ')
 	writeIntField(b, "viewer_avg", rollup.ViewerAvg)
 	b.WriteByte(',')
@@ -289,6 +294,24 @@ func writeStreamActivityLine(b *strings.Builder, rollup Rollup, ts int64) {
 	b.WriteByte(' ')
 	b.WriteString(strconv.FormatInt(ts, 10))
 	b.WriteByte('\n')
+}
+
+func writeStreamMetaTags(b *strings.Builder, rollup Rollup) {
+	if !rollup.StreamStartedAt.IsZero() {
+		writeTag(b, "stream_started", strconv.FormatInt(rollup.StreamStartedAt.UTC().Unix(), 10))
+	}
+	title := sanitizeStreamTitle(rollup.StreamTitle)
+	if title != "" {
+		writeTag(b, "stream_title", title)
+	}
+}
+
+func sanitizeStreamTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if len(title) > maxStreamTitleTagLen {
+		title = title[:maxStreamTitleTagLen]
+	}
+	return title
 }
 
 func writeTag(b *strings.Builder, key, value string) {

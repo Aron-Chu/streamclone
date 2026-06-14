@@ -18,9 +18,15 @@ import (
 )
 
 type Store struct {
-	db         *pgxpool.Pool
-	telemetry  timeseries.Writer
-	loginCache sync.Map
+	db        *pgxpool.Pool
+	telemetry timeseries.Writer
+	metaCache sync.Map
+}
+
+type streamMeta struct {
+	login     string
+	title     string
+	startedAt time.Time
 }
 
 func NewStore(db *pgxpool.Pool) *Store {
@@ -91,7 +97,11 @@ func (s *Store) UpsertLiveStream(ctx context.Context, stream LiveStream, profile
 		stream.Title, stream.GameName, string(tags), stream.Language, stream.ThumbnailURL, stream.StartedAt, seenAt, stream.ViewerCount,
 	)
 	if err == nil && stream.ID != "" {
-		s.loginCache.Store(stream.ID, normalizeLogin(stream.Login))
+		s.metaCache.Store(stream.ID, streamMeta{
+			login:     normalizeLogin(stream.Login),
+			title:     stream.Title,
+			startedAt: stream.StartedAt,
+		})
 	}
 	return err
 }
@@ -218,7 +228,7 @@ func (s *Store) LatestStreamByLogin(ctx context.Context, login string) (*StreamR
 			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,'')
 		FROM analytics_streams
 		WHERE login=$1
-		ORDER BY ended_at IS NULL DESC, started_at DESC
+		ORDER BY ended_at IS NULL DESC, last_seen_at DESC, started_at DESC
 		LIMIT 1`, normalizeLogin(login))
 	if err != nil {
 		return nil, err
@@ -268,7 +278,7 @@ func (s *Store) StreamsByLogin(ctx context.Context, login string, limit int) ([]
 			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,'')
 		FROM analytics_streams
 		WHERE login=$1
-		ORDER BY started_at DESC
+		ORDER BY ended_at IS NULL DESC, last_seen_at DESC, started_at DESC
 		LIMIT $2`, normalizeLogin(login), limit)
 	if err != nil {
 		return nil, err
@@ -394,7 +404,11 @@ func (s *Store) UpsertStreamPlaceholder(ctx context.Context, streamID, broadcast
 		streamID, broadcasterID, login, title, startedAt,
 	)
 	if err == nil {
-		s.loginCache.Store(streamID, normalizeLogin(login))
+		s.metaCache.Store(streamID, streamMeta{
+			login:     normalizeLogin(login),
+			title:     title,
+			startedAt: startedAt,
+		})
 	}
 	return err
 }
@@ -865,8 +879,8 @@ func (s *Store) enqueueRollupTelemetry(ctx context.Context, streamID string, rol
 	if s == nil || s.telemetry == nil || streamID == "" || len(rollups) == 0 {
 		return
 	}
-	login := s.streamLogin(ctx, streamID)
-	if login == "" {
+	meta, ok := s.streamMeta(ctx, streamID)
+	if !ok {
 		return
 	}
 	out := make([]timeseries.Rollup, 0, len(rollups))
@@ -875,8 +889,10 @@ func (s *Store) enqueueRollupTelemetry(ctx context.Context, streamID string, rol
 			continue
 		}
 		out = append(out, timeseries.Rollup{
-			ChannelLogin:      login,
+			ChannelLogin:      meta.login,
 			StreamID:          streamID,
+			StreamTitle:       meta.title,
+			StreamStartedAt:   meta.startedAt,
 			MinuteTS:          rollup.MinuteTS,
 			ViewerAvg:         rollup.ViewerAvg,
 			ViewerMax:         rollup.ViewerMax,
@@ -889,20 +905,28 @@ func (s *Store) enqueueRollupTelemetry(ctx context.Context, streamID string, rol
 	s.telemetry.EnqueueRollups(out)
 }
 
-func (s *Store) streamLogin(ctx context.Context, streamID string) string {
-	if cached, ok := s.loginCache.Load(streamID); ok {
-		if login, ok := cached.(string); ok && login != "" {
-			return login
+func (s *Store) streamMeta(ctx context.Context, streamID string) (streamMeta, bool) {
+	if cached, ok := s.metaCache.Load(streamID); ok {
+		if meta, ok := cached.(streamMeta); ok && meta.login != "" {
+			return meta, true
 		}
 	}
-	var login string
-	err := s.db.QueryRow(ctx, `SELECT login FROM analytics_streams WHERE stream_id=$1`, streamID).Scan(&login)
+	var login, title string
+	var startedAt time.Time
+	err := s.db.QueryRow(ctx, `
+		SELECT login, COALESCE(title, ''), started_at
+		FROM analytics_streams
+		WHERE stream_id=$1`, streamID).Scan(&login, &title, &startedAt)
 	if err != nil {
-		return ""
+		return streamMeta{}, false
 	}
-	login = normalizeLogin(login)
-	if login != "" {
-		s.loginCache.Store(streamID, login)
+	meta := streamMeta{
+		login:     normalizeLogin(login),
+		title:     title,
+		startedAt: startedAt,
 	}
-	return login
+	if meta.login != "" {
+		s.metaCache.Store(streamID, meta)
+	}
+	return meta, meta.login != ""
 }

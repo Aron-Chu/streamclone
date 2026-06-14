@@ -12,6 +12,7 @@ const (
 	setupProbeRequestTimeout = 500 * time.Millisecond
 	setupProbeRetryDelay     = 100 * time.Millisecond
 	setupProbeBudget         = 1300 * time.Millisecond
+	scraperReadyCacheTTL     = 15 * time.Second
 )
 
 type SetupWelcomeOptions struct {
@@ -159,4 +160,27 @@ func (h *Handler) probeServiceHealth(ctx context.Context, rawURL string) bool {
 		}
 	}
 	return false
+}
+
+// scraperServiceReady reports whether the optional Analytics scraper is reachable.
+// When REDDIT_PROVIDER=off, LSF auto-enables via scraper once this returns true.
+func (h *Handler) scraperServiceReady(ctx context.Context) bool {
+	if h.scraperAPIKey == "" {
+		return false
+	}
+	h.scraperReadyMu.RLock()
+	if !h.scraperReadyAt.IsZero() && time.Since(h.scraperReadyAt) < scraperReadyCacheTTL {
+		ready := h.scraperReadyCached
+		h.scraperReadyMu.RUnlock()
+		return ready
+	}
+	h.scraperReadyMu.RUnlock()
+
+	ready := h.probeServiceHealth(ctx, scraperHealthURL(h.scraperAPIURL))
+
+	h.scraperReadyMu.Lock()
+	h.scraperReadyAt = time.Now()
+	h.scraperReadyCached = ready
+	h.scraperReadyMu.Unlock()
+	return ready
 }

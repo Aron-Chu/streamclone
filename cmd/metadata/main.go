@@ -4,8 +4,8 @@ import (
 	"context"
 	"os"
 
-	goredis "github.com/redis/go-redis/v9"
 	"github.com/jackc/pgx/v5/pgxpool"
+	goredis "github.com/redis/go-redis/v9"
 
 	"streamclone/internal/config"
 	"streamclone/internal/httpx"
@@ -59,18 +59,19 @@ func main() {
 		WithHelix(helixClient).
 		WithExternalSources(cfg.TwitchTrackerAPIURL, cfg.RedditAPIURL, cfg.Upstream.UserAgent).
 		WithRedditOptions(api.RedditOptions{
-			Provider:      cfg.RedditProvider,
-			BaseURL:       cfg.RedditAPIURL,
-			OAuthAPIURL:   cfg.RedditOAuthAPIURL,
-			TokenURL:      cfg.RedditTokenURL,
-			ClientID:      cfg.RedditClientID,
-			ClientSecret:  cfg.RedditClientSecret,
-			AccessToken:   cfg.RedditAccessToken,
-			HTMLFallback:  cfg.RedditHTMLFallback,
-			ThirdPartyURL: cfg.RedditThirdPartyURL,
-			ThirdPartyKey: cfg.RedditThirdPartyKey,
-			ScraperURL:    cfg.ScraperAPIURL,
-			ScraperKey:    cfg.ScraperAPIKey,
+			Provider:       cfg.RedditProvider,
+			BaseURL:        cfg.RedditAPIURL,
+			OAuthAPIURL:    cfg.RedditOAuthAPIURL,
+			TokenURL:       cfg.RedditTokenURL,
+			ClientID:       cfg.RedditClientID,
+			ClientSecret:   cfg.RedditClientSecret,
+			AccessToken:    cfg.RedditAccessToken,
+			HTMLFallback:   cfg.RedditHTMLFallback,
+			ThirdPartyURL:  cfg.RedditThirdPartyURL,
+			ThirdPartyKey:  cfg.RedditThirdPartyKey,
+			ScraperURL:     cfg.ScraperAPIURL,
+			ScraperKey:     cfg.ScraperAPIKey,
+			LSFLowPriority: cfg.RedditLSFLowPriority,
 		}).
 		WithYouTubeOptions(api.YouTubeOptions{
 			Provider: cfg.YouTubeProvider,

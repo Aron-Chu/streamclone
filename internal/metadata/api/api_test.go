@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,12 @@ import (
 
 type testStore struct {
 	data map[string][]byte
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }
 
 func newTestCache() *cache.Cache {
@@ -403,6 +410,177 @@ func TestRedditLSFAutoUsesFirecrawlBeforeHTML(t *testing.T) {
 	}
 }
 
+func TestRedditLSFOffUsesPublicJSONWithoutScraper(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/r/LivestreamFail/search.json" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":{"children":[{"data":{"id":"json1","title":"ohnepixel clutch","url":"https://reddit.com/x","permalink":"/r/LivestreamFail/comments/json1/post/","subreddit":"LivestreamFail","score":12,"num_comments":3,"created_utc":1700000000}}]}}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	h := New(newTestCache(), &fakeGQL{}).
+		WithExternalSources("", srv.URL, "test-agent").
+		WithRedditOptions(RedditOptions{BaseURL: srv.URL, Provider: "off"})
+	posts, statuses := h.fetchRedditLSF(context.Background(), "ohnepixel", "7d", "hot")
+	if len(posts) != 1 || posts[0].ID != "json1" {
+		t.Fatalf("expected public json fetch, got posts=%+v statuses=%+v", posts, statuses)
+	}
+	if statuses[0].Provider != "public_json" || statuses[0].State != "ready" {
+		t.Fatalf("unexpected statuses: %+v", statuses)
+	}
+}
+
+func TestRedditLSFOffFallsBackToHotFeedWhenSearchEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/r/LivestreamFail/search.json":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":{"children":[]}}`))
+		case "/r/LivestreamFail/hot.json":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":{"children":[{"data":{"id":"hot1","title":"ohnepixel loses it on stream","url":"https://reddit.com/x","permalink":"/r/LivestreamFail/comments/hot1/post/","subreddit":"LivestreamFail","score":99,"num_comments":8,"created_utc":1700000000}}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	h := New(newTestCache(), &fakeGQL{}).
+		WithExternalSources("", srv.URL, "test-agent").
+		WithRedditOptions(RedditOptions{BaseURL: srv.URL, Provider: "off"})
+	posts, statuses := h.fetchRedditLSF(context.Background(), "ohnepixel", "7d", "hot")
+	if len(posts) != 1 || posts[0].ID != "hot1" {
+		t.Fatalf("expected hot fallback, got posts=%+v statuses=%+v", posts, statuses)
+	}
+	if statuses[len(statuses)-1].Provider != "public_json_hot" || statuses[len(statuses)-1].State != "ready" {
+		t.Fatalf("unexpected statuses: %+v", statuses)
+	}
+}
+
+func TestRedditLSFOffAutoEnablesWhenScraperReady(t *testing.T) {
+	var sawScrape bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/r/LivestreamFail/search.json":
+			w.WriteHeader(http.StatusForbidden)
+		case "/v2/scrape":
+			sawScrape = true
+			if r.Header.Get("Authorization") != "Bearer fc-test" {
+				t.Fatalf("expected scraper auth, got %q", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"data":{"html":"<shreddit-post permalink=\"/r/LivestreamFail/comments/sc1/post/\" post-title=\"streamer big moment\"></shreddit-post>"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	h := New(newTestCache(), &fakeGQL{}).
+		WithExternalSources("", "https://reddit.test", "test-agent").
+		WithRedditOptions(RedditOptions{
+			BaseURL:    "https://reddit.test",
+			Provider:   "off",
+			ScraperURL: srv.URL + "/v2/scrape",
+			ScraperKey: "fc-test",
+		})
+	posts, statuses := h.fetchRedditLSF(context.Background(), "streamer", "7d", "top")
+	if !sawScrape || len(posts) != 1 || posts[0].ID != "sc1" {
+		t.Fatalf("expected scraper search auto-enable, sawScrape=%v posts=%+v", sawScrape, posts)
+	}
+	if statuses[len(statuses)-1].Provider != "scraper" || statuses[len(statuses)-1].State != "ready" {
+		t.Fatalf("unexpected statuses: %+v", statuses)
+	}
+}
+
+func TestParseRedditHTMLListingShredditPost(t *testing.T) {
+	body := `<shreddit-post permalink="/r/LivestreamFail/comments/abc123/some_title/" post-title="ohnepixel throws keyboard"></shreddit-post>`
+	posts := parseRedditHTMLListing(body, "https://www.reddit.com", "ohnepixel")
+	if len(posts) != 1 || posts[0].ID != "abc123" {
+		t.Fatalf("expected shreddit post parse, got %+v", posts)
+	}
+}
+
+func TestRedditLSFOffBlockedJSONUsesScraperHotFeed(t *testing.T) {
+	var sawHotScrape bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/r/LivestreamFail/search.json":
+			w.WriteHeader(http.StatusForbidden)
+		case "/r/LivestreamFail/hot.json":
+			w.WriteHeader(http.StatusForbidden)
+		case "/v2/scrape":
+			var payload struct {
+				URL string `json:"url"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if strings.Contains(payload.URL, "/r/LivestreamFail/hot") {
+				sawHotScrape = true
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"success":true,"data":{"html":"<a href=\"/r/LivestreamFail/comments/hotsc1/post/\">ohnepixel big fail</a>"}}`))
+				return
+			}
+			w.WriteHeader(http.StatusGatewayTimeout)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	h := New(newTestCache(), &fakeGQL{}).
+		WithExternalSources("", srv.URL, "test-agent").
+		WithRedditOptions(RedditOptions{
+			BaseURL:      srv.URL,
+			Provider:     "off",
+			HTMLFallback: false,
+			ScraperURL:   srv.URL + "/v2/scrape",
+			ScraperKey:   "fc-test",
+		})
+	posts, statuses := h.fetchRedditLSF(context.Background(), "ohnepixel", "24h", "hot")
+	if !sawHotScrape || len(posts) != 1 || posts[0].ID != "hotsc1" {
+		t.Fatalf("expected scraper hot fallback, sawHotScrape=%v posts=%+v statuses=%+v", sawHotScrape, posts, statuses)
+	}
+	if statuses[len(statuses)-1].Provider != "scraper_hot" || statuses[len(statuses)-1].State != "ready" {
+		t.Fatalf("unexpected statuses: %+v", statuses)
+	}
+}
+
+func TestRedditLSFOffWhenJSONBlockedAndScraperOffline(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/r/LivestreamFail/search.json":
+			w.WriteHeader(http.StatusForbidden)
+		case "/r/LivestreamFail/hot.json":
+			w.WriteHeader(http.StatusForbidden)
+		case "/v2/scrape":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	h := New(newTestCache(), &fakeGQL{}).
+		WithExternalSources("", srv.URL, "test-agent").
+		WithRedditOptions(RedditOptions{
+			BaseURL:      srv.URL,
+			Provider:     "off",
+			HTMLFallback: false,
+			ScraperURL:   srv.URL + "/v2/scrape",
+			ScraperKey:   "fc-test",
+		})
+	posts, statuses := h.fetchRedditLSF(context.Background(), "streamer", "7d", "top")
+	if len(posts) != 0 {
+		t.Fatalf("expected no posts, got %+v", posts)
+	}
+	if len(statuses) == 0 || statuses[0].Provider != "public_json" || statuses[0].State != "blocked" {
+		t.Fatalf("expected blocked public json first, got %+v", statuses)
+	}
+}
+
 func TestRedditLSFFirecrawlProviderSkipsOfficialAndJSON(t *testing.T) {
 	var sawFirecrawl bool
 	var sawJSON bool
@@ -703,5 +881,51 @@ func TestChannelYouTubeRoute(t *testing.T) {
 	}
 	if body.Channel != "streamer" || body.YouTube == nil || body.YouTube.Title != "Streamer YT" {
 		t.Fatalf("unexpected response: %+v", body)
+	}
+}
+
+func TestRedditLSFCachedMissReturnsPendingWithoutAutoWarm(t *testing.T) {
+	h := New(newTestCache(), &fakeGQL{})
+	started := make(chan struct{}, 1)
+	h.http = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		time.Sleep(2 * time.Second)
+		return &http.Response{
+			StatusCode: http.StatusForbidden,
+			Body:       http.NoBody,
+			Header:     make(http.Header),
+		}, nil
+	})}
+	h.redditProvider = "off"
+	h.redditHTMLFallback = false
+	h.scraperAPIKey = ""
+
+	posts, sources := h.fetchRedditLSFCached(context.Background(), "ohnepixel", "7d", "top", false)
+	if len(posts) != 0 {
+		t.Fatalf("expected no posts on cache miss, got %d", len(posts))
+	}
+	if len(sources) != 1 || sources[0].Provider != "pending" {
+		t.Fatalf("expected pending source, got %+v", sources)
+	}
+	select {
+	case <-started:
+		t.Fatal("did not expect background warm without refresh")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	posts, sources = h.fetchRedditLSFCached(context.Background(), "ohnepixel", "7d", "top", true)
+	if len(posts) != 0 {
+		t.Fatalf("expected no posts while warming, got %d", len(posts))
+	}
+	if len(sources) != 1 || !strings.Contains(sources[0].Message, "fetching from Reddit") {
+		t.Fatalf("expected warming source, got %+v", sources)
+	}
+	select {
+	case <-started:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected background warm after refresh")
 	}
 }

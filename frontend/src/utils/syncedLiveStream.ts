@@ -5,6 +5,14 @@ export function streamHasSyncedMinutes(stream: AnalyticsStream): boolean {
   return (stream.viewerSamples ?? 0) > 0 || (stream.chatMessages ?? 0) > 0
 }
 
+/** Sidebar row is navigable when it has minute data or TwitchTracker session stats. */
+export function streamIsSidebarVisible(stream: AnalyticsStream, syncedOnly: boolean): boolean {
+  if (!syncedOnly) return true
+  if (streamHasSyncedMinutes(stream)) return true
+  if (stream.endedAt?.trim()) return true
+  return (stream.peakViewers ?? 0) > 0 || (stream.avgViewers ?? 0) > 0
+}
+
 export function getAnalyticsStreamDateSlug(startedAt?: string): string {
   if (!startedAt) return ''
   const date = new Date(startedAt)

@@ -17,29 +17,30 @@ type Config struct {
 	RedisURL    string `env:"REDIS_URL" envDefault:"redis://redis:6379/0"`
 	DatabaseURL string `env:"DATABASE_URL"`
 
-	MetaCacheTTL        time.Duration `env:"META_CACHE_TTL" envDefault:"30s"`
-	StaleTTL            time.Duration `env:"STALE_TTL" envDefault:"24h"`
-	TwitchTrackerAPIURL string        `env:"TWITCHTRACKER_API_URL" envDefault:"https://twitchtracker.com/api"`
-	RedditAPIURL        string        `env:"REDDIT_API_URL" envDefault:"https://www.reddit.com"`
-	RedditProvider      string        `env:"REDDIT_PROVIDER" envDefault:"auto"`
-	RedditClientID      string        `env:"REDDIT_CLIENT_ID"`
-	RedditClientSecret  string        `env:"REDDIT_CLIENT_SECRET"`
-	RedditAccessToken   string        `env:"REDDIT_ACCESS_TOKEN"`
-	RedditTokenURL      string        `env:"REDDIT_TOKEN_URL" envDefault:"https://www.reddit.com/api/v1/access_token"`
-	RedditOAuthAPIURL   string        `env:"REDDIT_OAUTH_API_URL" envDefault:"https://oauth.reddit.com"`
-	RedditHTMLFallback  bool          `env:"REDDIT_HTML_FALLBACK" envDefault:"false"`
-	RedditThirdPartyURL string        `env:"REDDIT_THIRD_PARTY_URL"`
-	RedditThirdPartyKey string        `env:"REDDIT_THIRD_PARTY_KEY"`
-	ScraperAPIURL       string        `env:"SCRAPER_API_URL"`
-	ScraperAPIKey       string        `env:"SCRAPER_API_KEY"`
-	FirecrawlAPIURL     string        `env:"FIRECRAWL_API_URL"` // deprecated alias for SCRAPER_API_URL
-	FirecrawlAPIKey     string        `env:"FIRECRAWL_API_KEY"` // deprecated alias for SCRAPER_API_KEY
-	YouTubeAPIKey       string        `env:"YOUTUBE_API_KEY"`
-	YouTubeProvider     string        `env:"YOUTUBE_PROVIDER" envDefault:"auto"`
-	YouTubeAPIBaseURL   string        `env:"YOUTUBE_API_BASE_URL" envDefault:"https://www.googleapis.com/youtube/v3"`
-	TwitchGQLURL        string        `env:"TWITCH_GQL_URL" envDefault:"https://gql.twitch.tv/gql"`
-	TwitchClientID      string        `env:"TWITCH_CLIENT_ID" envDefault:"kimne78kx3ncx6brgo4mv6wki5h1ko"`
-	EmoteServiceURL     string        `env:"EMOTE_SERVICE_URL"`
+	MetaCacheTTL         time.Duration `env:"META_CACHE_TTL" envDefault:"30s"`
+	StaleTTL             time.Duration `env:"STALE_TTL" envDefault:"24h"`
+	TwitchTrackerAPIURL  string        `env:"TWITCHTRACKER_API_URL" envDefault:"https://twitchtracker.com/api"`
+	RedditAPIURL         string        `env:"REDDIT_API_URL" envDefault:"https://www.reddit.com"`
+	RedditProvider       string        `env:"REDDIT_PROVIDER" envDefault:"auto"`
+	RedditClientID       string        `env:"REDDIT_CLIENT_ID"`
+	RedditClientSecret   string        `env:"REDDIT_CLIENT_SECRET"`
+	RedditAccessToken    string        `env:"REDDIT_ACCESS_TOKEN"`
+	RedditTokenURL       string        `env:"REDDIT_TOKEN_URL" envDefault:"https://www.reddit.com/api/v1/access_token"`
+	RedditOAuthAPIURL    string        `env:"REDDIT_OAUTH_API_URL" envDefault:"https://oauth.reddit.com"`
+	RedditHTMLFallback   bool          `env:"REDDIT_HTML_FALLBACK" envDefault:"true"`
+	RedditThirdPartyURL  string        `env:"REDDIT_THIRD_PARTY_URL"`
+	RedditThirdPartyKey  string        `env:"REDDIT_THIRD_PARTY_KEY"`
+	RedditLSFLowPriority bool          `env:"REDDIT_LSF_LOW_PRIORITY" envDefault:"true"`
+	ScraperAPIURL        string        `env:"SCRAPER_API_URL"`
+	ScraperAPIKey        string        `env:"SCRAPER_API_KEY"`
+	FirecrawlAPIURL      string        `env:"FIRECRAWL_API_URL"` // deprecated alias for SCRAPER_API_URL
+	FirecrawlAPIKey      string        `env:"FIRECRAWL_API_KEY"` // deprecated alias for SCRAPER_API_KEY
+	YouTubeAPIKey        string        `env:"YOUTUBE_API_KEY"`
+	YouTubeProvider      string        `env:"YOUTUBE_PROVIDER" envDefault:"auto"`
+	YouTubeAPIBaseURL    string        `env:"YOUTUBE_API_BASE_URL" envDefault:"https://www.googleapis.com/youtube/v3"`
+	TwitchGQLURL         string        `env:"TWITCH_GQL_URL" envDefault:"https://gql.twitch.tv/gql"`
+	TwitchClientID       string        `env:"TWITCH_CLIENT_ID" envDefault:"kimne78kx3ncx6brgo4mv6wki5h1ko"`
+	EmoteServiceURL      string        `env:"EMOTE_SERVICE_URL"`
 
 	StreamIdleTimeout    time.Duration `env:"STREAM_IDLE_TIMEOUT" envDefault:"60s"`
 	MaxConcurrentStreams int           `env:"MAX_CONCURRENT_STREAMS" envDefault:"20"`

@@ -51,77 +51,84 @@ type HelixClient interface {
 }
 
 type Handler struct {
-	c                   *cache.Cache
-	g                   GQLClient
-	hx                  HelixClient
-	follows             FollowStore
-	http                *http.Client
-	scrapeHTTP          *http.Client
-	twitchTrackerAPIURL string
-	redditBaseURL       string
-	redditOAuthAPIURL   string
-	redditTokenURL      string
-	redditProvider      string
-	redditClientID      string
-	redditClientSecret  string
-	redditAccessToken   string
-	redditHTMLFallback  bool
-	redditThirdPartyURL string
-	redditThirdPartyKey string
-	scraperAPIURL     string
-	scraperAPIKey     string
-	streamcloneProfile  string
+	c                     *cache.Cache
+	g                     GQLClient
+	hx                    HelixClient
+	follows               FollowStore
+	http                  *http.Client
+	scrapeHTTP            *http.Client
+	twitchTrackerAPIURL   string
+	redditBaseURL         string
+	redditOAuthAPIURL     string
+	redditTokenURL        string
+	redditProvider        string
+	redditClientID        string
+	redditClientSecret    string
+	redditAccessToken     string
+	redditHTMLFallback    bool
+	redditThirdPartyURL   string
+	redditThirdPartyKey   string
+	redditLSFLowPriority  bool
+	scraperAPIURL         string
+	scraperAPIKey         string
+	streamcloneProfile    string
 	devTokenImportEnabled bool
-	oauthClientID       string
-	oauthClientSecret   string
-	clipperServiceURL   string
-	youtubeProvider     string
-	youtubeAPIKey       string
-	youtubeAPIBaseURL   string
-	userAgent           string
-	sf                  singleflight.Group
-	redditMu            sync.Mutex
-	redditToken         redditToken
-	redditBackoff       map[string]time.Time
-	youtubeMu           sync.Mutex
-	youtubeBackoff      map[string]time.Time
+	oauthClientID         string
+	oauthClientSecret     string
+	clipperServiceURL     string
+	youtubeProvider       string
+	youtubeAPIKey         string
+	youtubeAPIBaseURL     string
+	userAgent             string
+	sf                    singleflight.Group
+	redditMu              sync.Mutex
+	redditToken           redditToken
+	redditBackoff         map[string]time.Time
+	scraperReadyMu        sync.RWMutex
+	scraperReadyAt        time.Time
+	scraperReadyCached    bool
+	lsfWarmInFlight       sync.Map
+	youtubeMu             sync.Mutex
+	youtubeBackoff        map[string]time.Time
 }
 
 func New(c *cache.Cache, g GQLClient) *Handler {
 	return &Handler{
-		c:                   c,
-		g:                   g,
-		http:                &http.Client{Timeout: 8 * time.Second},
-		scrapeHTTP:          &http.Client{Timeout: 45 * time.Second},
-		twitchTrackerAPIURL: "https://twitchtracker.com/api",
-		redditBaseURL:       "https://www.reddit.com",
-		redditOAuthAPIURL:   "https://oauth.reddit.com",
-		redditTokenURL:      "https://www.reddit.com/api/v1/access_token",
-		redditProvider:      "auto",
-		scraperAPIURL:     "http://scraper:8000/v2/scrape",
-		youtubeProvider:     "auto",
-		youtubeAPIBaseURL:   defaultYouTubeAPIBase,
-		userAgent:           "streamclone/1.0",
-		redditBackoff:       map[string]time.Time{},
-		youtubeBackoff:      map[string]time.Time{},
+		c:                    c,
+		g:                    g,
+		http:                 &http.Client{Timeout: 8 * time.Second},
+		scrapeHTTP:           &http.Client{Timeout: 210 * time.Second},
+		twitchTrackerAPIURL:  "https://twitchtracker.com/api",
+		redditBaseURL:        "https://www.reddit.com",
+		redditOAuthAPIURL:    "https://oauth.reddit.com",
+		redditTokenURL:       "https://www.reddit.com/api/v1/access_token",
+		redditProvider:       "auto",
+		scraperAPIURL:        "http://scraper:8000/v2/scrape",
+		youtubeProvider:      "auto",
+		youtubeAPIBaseURL:    defaultYouTubeAPIBase,
+		userAgent:            "streamclone/1.0",
+		redditBackoff:        map[string]time.Time{},
+		youtubeBackoff:       map[string]time.Time{},
+		redditLSFLowPriority: true,
 	}
 }
 
 type RedditOptions struct {
-	Provider      string
-	BaseURL       string
-	OAuthAPIURL   string
-	TokenURL      string
-	ClientID      string
-	ClientSecret  string
-	AccessToken   string
-	HTMLFallback  bool
-	ThirdPartyURL string
-	ThirdPartyKey string
-	ScraperURL   string
-	ScraperKey   string
-	FirecrawlURL string // deprecated alias for ScraperURL
-	FirecrawlKey string // deprecated alias for ScraperKey
+	Provider       string
+	BaseURL        string
+	OAuthAPIURL    string
+	TokenURL       string
+	ClientID       string
+	ClientSecret   string
+	AccessToken    string
+	HTMLFallback   bool
+	ThirdPartyURL  string
+	ThirdPartyKey  string
+	ScraperURL     string
+	ScraperKey     string
+	LSFLowPriority bool
+	FirecrawlURL   string // deprecated alias for ScraperURL
+	FirecrawlKey   string // deprecated alias for ScraperKey
 }
 
 type redditToken struct {
@@ -180,6 +187,7 @@ func (h *Handler) WithRedditOptions(opts RedditOptions) *Handler {
 		scraperKey = opts.FirecrawlKey
 	}
 	h.scraperAPIKey = scraperKey
+	h.redditLSFLowPriority = opts.LSFLowPriority
 	return h
 }
 
@@ -301,7 +309,7 @@ func (h *Handler) fetchAndCache(ctx context.Context, key string, fetch func() (a
 		if merr != nil {
 			return nil, merr
 		}
-		_ = h.c.Set(ctx, key, b)
+		_ = h.c.Set(context.WithoutCancel(ctx), key, b)
 		return sfVal{data: b}, nil
 	})
 	if err != nil {
@@ -548,21 +556,7 @@ func (h *Handler) channelLSF(w http.ResponseWriter, r *http.Request) {
 	login := normalizeLogin(chi.URLParam(r, "login"))
 	period, _, _ := parsePeriod(r.URL.Query().Get("period"))
 	sort := normalizeSort(r.URL.Query().Get("sort"))
-	key := "meta:channellsf:" + login + ":" + period + ":" + sort
-	data, stale, err := h.fetchAndCache(r.Context(), key, func() (any, error) {
-		posts, sources := h.fetchRedditLSF(r.Context(), login, period, sort)
-		if posts == nil {
-			posts = []model.RedditPost{}
-		}
-		return map[string]any{
-			"items":     posts,
-			"sources":   sources,
-			"period":    period,
-			"sort":      sort,
-			"updatedAt": time.Now().UnixMilli(),
-		}, nil
-	})
-	respond(w, data, stale, err)
+	h.writeRedditLSFResponse(w, r.Context(), login, period, sort, parseLSFRefresh(r))
 }
 
 func (h *Handler) channelInsights(w http.ResponseWriter, r *http.Request) {
@@ -577,11 +571,23 @@ func (h *Handler) channelInsights(w http.ResponseWriter, r *http.Request) {
 		lsfPeriod = period
 	}
 	sort := normalizeSort(r.URL.Query().Get("lsfSort"))
+	lsfRefresh := parseLSFRefresh(r)
 	key := "meta:channelinsights:" + login + ":" + period + ":" + clipPeriod + ":" + lsfPeriod + ":" + sort
 	data, stale, err := h.fetchAndCache(r.Context(), key, func() (any, error) {
 		return h.fetchChannelInsights(r.Context(), login, period, clipPeriod, lsfPeriod, sort)
 	})
+	if err == nil {
+		data = h.patchInsightsLSF(r.Context(), data, login, lsfPeriod, sort, lsfRefresh)
+	}
 	respond(w, data, stale, err)
+}
+
+func parseLSFRefresh(r *http.Request) bool {
+	v := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("lsfRefresh")))
+	if v == "" {
+		v = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("refresh")))
+	}
+	return v == "1" || v == "true" || v == "yes"
 }
 
 func (h *Handler) channelStreamHistory(w http.ResponseWriter, r *http.Request) {
@@ -768,7 +774,7 @@ func (h *Handler) fetchChannelInsights(ctx context.Context, login, period, clipP
 	}
 	resp.Sources = append(resp.Sources, statsSource, historySource)
 
-	posts, redditSources := h.fetchRedditLSF(ctx, login, lsfPeriod, lsfSort)
+	posts, redditSources := h.fetchRedditLSFCached(ctx, login, lsfPeriod, lsfSort, false)
 	if posts == nil {
 		posts = []model.RedditPost{}
 	}
@@ -1044,28 +1050,160 @@ func looksLikeCloudflareChallenge(body string) bool {
 	return strings.Contains(lower, "just a moment") || strings.Contains(lower, "performing security verification") || strings.Contains(lower, "cf_chl_opt")
 }
 
+func redditLSFCacheKey(login, period, sort string) string {
+	return "meta:channellsf:" + login + ":" + period + ":" + sort
+}
+
+type redditLSFCacheValue struct {
+	Items     []model.RedditPost   `json:"items"`
+	Sources   []model.SourceStatus `json:"sources"`
+	Period    string               `json:"period"`
+	Sort      string               `json:"sort"`
+	UpdatedAt int64                `json:"updatedAt"`
+}
+
+func (h *Handler) kickRedditLSFWarm(login, period, sort string) {
+	key := redditLSFCacheKey(login, period, sort)
+	if _, loaded := h.lsfWarmInFlight.LoadOrStore(key, struct{}{}); loaded {
+		return
+	}
+	go func() {
+		defer h.lsfWarmInFlight.Delete(key)
+		ctx := context.Background()
+		_, _, _ = h.fetchAndCache(ctx, key, func() (any, error) {
+			posts, sources := h.fetchRedditLSF(ctx, login, period, sort)
+			if posts == nil {
+				posts = []model.RedditPost{}
+			}
+			return redditLSFCacheValue{
+				Items:     posts,
+				Sources:   sources,
+				Period:    period,
+				Sort:      sort,
+				UpdatedAt: time.Now().UnixMilli(),
+			}, nil
+		})
+	}()
+}
+
+func redditLSFWarmingStatus() model.SourceStatus {
+	return sourceWithProvider("reddit_lsf", "warmup", "unavailable", "fetching from Reddit; first load may take a couple of minutes")
+}
+
+func redditLSFPendingStatus() model.SourceStatus {
+	return sourceWithProvider("reddit_lsf", "pending", "unavailable", "ready to search Reddit when Analytics is idle")
+}
+
+func (h *Handler) fetchRedditLSFCached(ctx context.Context, login, period, sort string, refresh bool) ([]model.RedditPost, []model.SourceStatus) {
+	key := redditLSFCacheKey(login, period, sort)
+	if _, warming := h.lsfWarmInFlight.Load(key); warming {
+		return []model.RedditPost{}, []model.SourceStatus{redditLSFWarmingStatus()}
+	}
+	if v, ok := h.c.GetFresh(ctx, key); ok {
+		var cached redditLSFCacheValue
+		if json.Unmarshal(v, &cached) == nil {
+			return cached.Items, cached.Sources
+		}
+	}
+	if result, err := h.c.Get(ctx, key); err == nil {
+		var cached redditLSFCacheValue
+		if json.Unmarshal(result.Data, &cached) == nil {
+			if refresh && result.Stale {
+				h.kickRedditLSFWarm(login, period, sort)
+				return []model.RedditPost{}, []model.SourceStatus{redditLSFWarmingStatus()}
+			}
+			return cached.Items, cached.Sources
+		}
+	}
+	if refresh {
+		h.kickRedditLSFWarm(login, period, sort)
+		return []model.RedditPost{}, []model.SourceStatus{redditLSFWarmingStatus()}
+	}
+	return []model.RedditPost{}, []model.SourceStatus{redditLSFPendingStatus()}
+}
+
+func replaceRedditLSFSources(sources, reddit []model.SourceStatus) []model.SourceStatus {
+	out := make([]model.SourceStatus, 0, len(sources)+len(reddit))
+	for _, s := range sources {
+		if !strings.HasPrefix(s.Source, "reddit_lsf") {
+			out = append(out, s)
+		}
+	}
+	return append(out, reddit...)
+}
+
+func (h *Handler) patchInsightsLSF(ctx context.Context, raw []byte, login, lsfPeriod, sort string, refresh bool) []byte {
+	var resp model.InsightsResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return raw
+	}
+	posts, sources := h.fetchRedditLSFCached(ctx, login, lsfPeriod, sort, refresh)
+	if posts == nil {
+		posts = []model.RedditPost{}
+	}
+	resp.LSF = posts
+	resp.Sources = replaceRedditLSFSources(resp.Sources, sources)
+	updated, err := json.Marshal(resp)
+	if err != nil {
+		return raw
+	}
+	return updated
+}
+
+func (h *Handler) writeRedditLSFResponse(w http.ResponseWriter, ctx context.Context, login, period, sort string, refresh bool) {
+	key := redditLSFCacheKey(login, period, sort)
+	posts, sources := h.fetchRedditLSFCached(ctx, login, period, sort, refresh)
+	if posts == nil {
+		posts = []model.RedditPost{}
+	}
+	stale := false
+	if result, err := h.c.Get(ctx, key); err == nil {
+		stale = result.Stale
+	}
+	payload, err := json.Marshal(map[string]any{
+		"items":     posts,
+		"sources":   sources,
+		"period":    period,
+		"sort":      sort,
+		"updatedAt": time.Now().UnixMilli(),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	respond(w, payload, stale, nil)
+}
+
+func redditLSFRequestContext(parent context.Context) (context.Context, context.CancelFunc) {
+	// LSF scraper runs can take several minutes across JSON + old.reddit search URLs.
+	return context.WithTimeout(context.WithoutCancel(parent), 12*time.Minute)
+}
+
+func redditLSFStatusInterrupted(status model.SourceStatus) bool {
+	msg := strings.ToLower(status.Message)
+	return strings.Contains(msg, "context canceled") || strings.Contains(msg, "context deadline exceeded")
+}
+
+func normalizeRedditLSFStatus(status model.SourceStatus) model.SourceStatus {
+	if status.State == "error" && redditLSFStatusInterrupted(status) {
+		status.State = "unavailable"
+		status.Message = "fetching from Reddit; first load may take a couple of minutes"
+	}
+	return status
+}
+
 func (h *Handler) fetchRedditLSF(ctx context.Context, login, period, sort string) ([]model.RedditPost, []model.SourceStatus) {
 	if h.redditBaseURL == "" {
 		return nil, []model.SourceStatus{sourceWithProvider("reddit_lsf", "none", "unavailable", "api url not configured")}
 	}
 
+	ctx, cancel := redditLSFRequestContext(ctx)
+	defer cancel()
+
 	provider := normalizeRedditProvider(h.redditProvider)
-	if provider == "off" {
-		return nil, []model.SourceStatus{sourceWithProvider("reddit_lsf", "off", "unavailable", "reddit provider disabled")}
-	}
+	providersToTry := h.redditLSFProvidersToTry(provider)
 
 	var statuses []model.SourceStatus
-
-	// Build the prioritized list of providers to try.
-	// We always try the primary configured provider first.
-	// If it fails/is blocked/unavailable, we roll over to try the others.
-	providersToTry := []string{provider}
-	allProviders := []string{"official", "public_json", "third_party", "scraper"}
-	for _, p := range allProviders {
-		if p != provider {
-			providersToTry = append(providersToTry, p)
-		}
-	}
 
 	for _, p := range providersToTry {
 		var posts []model.RedditPost
@@ -1094,15 +1232,34 @@ func (h *Handler) fetchRedditLSF(ctx context.Context, login, period, sort string
 		}
 
 		if tried {
+			status = normalizeRedditLSFStatus(status)
 			statuses = append(statuses, status)
 			if status.State == "ready" && len(posts) > 0 {
 				return posts, statuses
 			}
+			if p == "public_json" && status.State == "ready" && len(posts) == 0 && !h.redditLSFLowPriority {
+				if recent, recentStatus := h.fetchRedditLSFRecentHot(ctx, login); len(recent) > 0 {
+					statuses = append(statuses, recentStatus)
+					return recent, statuses
+				} else if recentStatus.State != "" {
+					statuses = append(statuses, recentStatus)
+				}
+			}
 		}
 	}
 
-	if h.redditHTMLFallback {
+	if !h.redditLSFLowPriority && (provider == "off" || provider == "auto") && !redditStatusContainsProvider(statuses, "public_json_hot") && !redditStatusContainsProvider(statuses, "scraper_hot") {
+		if recent, recentStatus := h.fetchRedditLSFRecentHot(ctx, login); len(recent) > 0 {
+			statuses = append(statuses, recentStatus)
+			return recent, statuses
+		} else if recentStatus.State != "" && !redditStatusContainsProvider(statuses, recentStatus.Provider) {
+			statuses = append(statuses, recentStatus)
+		}
+	}
+
+	if h.redditHTMLFallback && provider != "scraper" && provider != "firecrawl" {
 		htmlPosts, htmlStatus := h.fetchRedditLSFHTML(ctx, login, period, sort)
+		htmlStatus = normalizeRedditLSFStatus(htmlStatus)
 		statuses = append(statuses, htmlStatus)
 		if htmlStatus.State == "fallback" && len(htmlPosts) > 0 {
 			return htmlPosts, statuses
@@ -1111,6 +1268,114 @@ func (h *Handler) fetchRedditLSF(ctx context.Context, login, period, sort string
 		statuses = append(statuses, sourceWithProvider("reddit_lsf_html", "html", "unavailable", "html fallback disabled"))
 	}
 	return nil, statuses
+}
+
+func redditStatusContainsProvider(statuses []model.SourceStatus, provider string) bool {
+	for _, s := range statuses {
+		if s.Provider == provider {
+			return true
+		}
+	}
+	return false
+}
+
+// redditLSFProvidersToTry picks fetch paths for LSF highlights.
+// When REDDIT_PROVIDER=off (compose default), use a lightweight chain:
+// public Reddit JSON first, optional scraper when Reddit blocks JSON, then HTML fallback.
+func (h *Handler) redditLSFProvidersToTry(provider string) []string {
+	if provider != "off" {
+		providers := []string{provider}
+		allProviders := []string{"official", "public_json", "third_party", "scraper"}
+		for _, p := range allProviders {
+			if p != provider {
+				providers = append(providers, p)
+			}
+		}
+		return providers
+	}
+	providers := []string{"public_json"}
+	if h.scraperAPIKey != "" {
+		providers = append(providers, "scraper")
+	}
+	return providers
+}
+
+// fetchRedditLSFRecentHot scans the LSF hot feed and keeps posts that mention the streamer.
+func (h *Handler) fetchRedditLSFRecentHot(ctx context.Context, login string) ([]model.RedditPost, model.SourceStatus) {
+	if until, ok := h.redditBackoffActive("public_json_hot"); ok {
+		return nil, model.SourceStatus{Source: "reddit_lsf", Provider: "public_json_hot", State: "blocked", Message: "provider in backoff", BackoffUntil: until.UnixMilli()}
+	}
+	u, err := url.Parse(strings.TrimRight(h.redditBaseURL, "/") + "/r/LivestreamFail/hot.json")
+	if err != nil {
+		status := sourceWithProvider("reddit_lsf", "public_json_hot", "error", err.Error())
+		h.markRedditBackoff("public_json_hot", status)
+		return nil, status
+	}
+	q := u.Query()
+	q.Set("limit", "25")
+	q.Set("raw_json", "1")
+	u.RawQuery = q.Encode()
+
+	req, err := h.newRedditGet(ctx, u.String())
+	if err != nil {
+		status := sourceWithProvider("reddit_lsf", "public_json_hot", "error", err.Error())
+		h.markRedditBackoff("public_json_hot", status)
+		return nil, status
+	}
+	posts, status := h.doRedditListing(req, "public_json_hot", login)
+	if status.State == "ready" {
+		h.markRedditBackoff("public_json_hot", status)
+		filtered := filterRedditPostsForLogin(posts, login)
+		if len(filtered) > 0 {
+			return filtered, sourceWithProvider("reddit_lsf", "public_json_hot", "ready", "")
+		}
+		return nil, sourceWithProvider("reddit_lsf", "public_json_hot", "unavailable", "no recent hot posts matched this streamer")
+	}
+	if h.scraperAPIKey != "" && (status.State == "blocked" || status.State == "error") {
+		hotURL := strings.TrimRight(h.redditBaseURL, "/") + "/r/LivestreamFail/hot/"
+		scrapePosts, scrapeStatus := h.scrapeRedditListingURL(ctx, hotURL, login, "scraper_hot", 30000)
+		filtered := filterRedditPostsForLogin(scrapePosts, login)
+		if len(filtered) > 0 {
+			return filtered, scrapeStatus
+		}
+		if len(scrapePosts) > 0 {
+			scrapeStatus = sourceWithProvider("reddit_lsf", "scraper_hot", "unavailable", "no recent hot posts matched this streamer")
+		}
+		if scrapeStatus.State != "" {
+			return nil, scrapeStatus
+		}
+	}
+	h.markRedditBackoff("public_json_hot", status)
+	return nil, status
+}
+
+func filterRedditPostsForLogin(posts []model.RedditPost, login string) []model.RedditPost {
+	login = strings.ToLower(strings.TrimSpace(login))
+	if login == "" {
+		return posts
+	}
+	out := make([]model.RedditPost, 0, len(posts))
+	for _, post := range posts {
+		if redditPostMatchesLogin(post, login) {
+			out = append(out, post)
+		}
+	}
+	return out
+}
+
+func redditPostMatchesLogin(post model.RedditPost, login string) bool {
+	if strings.Contains(strings.ToLower(post.Title), login) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(post.FlairText), login) {
+		return true
+	}
+	for _, tag := range post.StreamerTags {
+		if strings.Contains(strings.ToLower(tag), login) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeRedditProvider(value string) string {
@@ -1215,24 +1480,67 @@ func (h *Handler) fetchRedditLSFScraper(ctx context.Context, login, period, sort
 	if until, ok := h.redditBackoffActive("scraper"); ok {
 		return nil, model.SourceStatus{Source: "reddit_lsf", Provider: "scraper", State: "blocked", Message: "provider in backoff", BackoffUntil: until.UnixMilli()}
 	}
-	searchURL, err := h.redditSearchURL(h.redditBaseURL, "", login, period, sort)
-	if err != nil {
-		status := sourceWithProvider("reddit_lsf", "scraper", "error", err.Error())
-		h.markRedditBackoff("scraper", status)
-		return nil, status
+	if h.redditLSFLowPriority {
+		if oldURL := h.redditOldSearchURL(login, period, sort); oldURL != "" {
+			posts, status := h.scrapeRedditListingURL(ctx, oldURL, login, "scraper", 45000)
+			h.markRedditBackoff("scraper", status)
+			if len(posts) > 0 {
+				return posts, status
+			}
+			if status.State == "" || status.State == "ready" {
+				status = sourceWithProvider("reddit_lsf", "scraper", "unavailable", "search did not contain posts for this streamer")
+			}
+			return nil, status
+		}
+		return nil, sourceWithProvider("reddit_lsf", "scraper", "unavailable", "search url not configured")
+	}
+	var lastStatus model.SourceStatus
+	for _, pageURL := range h.redditScraperSearchURLs(login, period, sort) {
+		posts, status := h.scrapeRedditListingURL(ctx, pageURL, login, "scraper", 120000)
+		lastStatus = status
+		if len(posts) > 0 {
+			h.markRedditBackoff("scraper", status)
+			return posts, status
+		}
+	}
+	status := lastStatus
+	if status.State == "" {
+		status = sourceWithProvider("reddit_lsf", "scraper", "unavailable", "search did not contain posts for this streamer")
+	} else if status.State == "ready" {
+		status = sourceWithProvider("reddit_lsf", "scraper", "unavailable", "search did not contain posts for this streamer")
+	}
+	hotURL := strings.TrimRight(h.redditBaseURL, "/") + "/r/LivestreamFail/hot/"
+	hotPosts, hotStatus := h.scrapeRedditListingURL(ctx, hotURL, login, "scraper_hot", 90000)
+	filteredHot := filterRedditPostsForLogin(hotPosts, login)
+	if len(filteredHot) > 0 {
+		h.markRedditBackoff("scraper", hotStatus)
+		return filteredHot, hotStatus
+	}
+	if len(hotPosts) > 0 {
+		hotStatus = sourceWithProvider("reddit_lsf", "scraper_hot", "unavailable", "no recent hot posts matched this streamer")
+	}
+	if hotStatus.State != "" && hotStatus.State != "ready" {
+		h.markRedditBackoff("scraper", hotStatus)
+		return nil, hotStatus
+	}
+	h.markRedditBackoff("scraper", status)
+	return nil, status
+}
+
+func (h *Handler) scrapeRedditListingURL(ctx context.Context, pageURL, login, provider string, timeoutMs int) ([]model.RedditPost, model.SourceStatus) {
+	if timeoutMs <= 0 {
+		timeoutMs = 30000
 	}
 	body, _ := json.Marshal(map[string]any{
-		"url":             searchURL.String(),
+		"url":             pageURL,
 		"formats":         []string{"html"},
 		"onlyMainContent": false,
 		"maxAge":          300000,
-		"timeout":         30000,
+		"timeout":         timeoutMs,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.scraperAPIURL, bytes.NewReader(body))
 	if err != nil {
-		status := sourceWithProvider("reddit_lsf", "scraper", "error", err.Error())
-		h.markRedditBackoff("scraper", status)
-		return nil, status
+		return nil, sourceWithProvider("reddit_lsf", provider, "error", err.Error())
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+h.scraperAPIKey)
@@ -1241,9 +1549,7 @@ func (h *Handler) fetchRedditLSFScraper(ctx context.Context, login, period, sort
 	}
 	resp, err := h.scrapeHTTP.Do(req)
 	if err != nil {
-		status := sourceWithProvider("reddit_lsf", "scraper", "error", err.Error())
-		h.markRedditBackoff("scraper", status)
-		return nil, status
+		return nil, sourceWithProvider("reddit_lsf", provider, "error", err.Error())
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -1251,9 +1557,7 @@ func (h *Handler) fetchRedditLSFScraper(ctx context.Context, login, period, sort
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusTooManyRequests {
 			state = "blocked"
 		}
-		status := sourceWithProvider("reddit_lsf", "scraper", state, fmt.Sprintf("status %d", resp.StatusCode))
-		h.markRedditBackoff("scraper", status)
-		return nil, status
+		return nil, sourceWithProvider("reddit_lsf", provider, state, fmt.Sprintf("status %d", resp.StatusCode))
 	}
 	var out struct {
 		Success bool   `json:"success"`
@@ -1264,15 +1568,11 @@ func (h *Handler) fetchRedditLSFScraper(ctx context.Context, login, period, sort
 			Markdown string `json:"markdown"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 512*1024)).Decode(&out); err != nil {
-		status := sourceWithProvider("reddit_lsf", "scraper", "error", err.Error())
-		h.markRedditBackoff("scraper", status)
-		return nil, status
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2*1024*1024)).Decode(&out); err != nil {
+		return nil, sourceWithProvider("reddit_lsf", provider, "error", err.Error())
 	}
 	if !out.Success && out.Error != "" {
-		status := sourceWithProvider("reddit_lsf", "scraper", "error", out.Error)
-		h.markRedditBackoff("scraper", status)
-		return nil, status
+		return nil, sourceWithProvider("reddit_lsf", provider, "error", out.Error)
 	}
 	htmlBody := out.Data.HTML
 	if htmlBody == "" {
@@ -1281,12 +1581,17 @@ func (h *Handler) fetchRedditLSFScraper(ctx context.Context, login, period, sort
 	if htmlBody == "" {
 		htmlBody = out.Data.Markdown
 	}
-	posts := parseRedditHTMLListing(htmlBody, h.redditBaseURL, login)
-	status := sourceWithProvider("reddit_lsf", "scraper", "ready", "")
-	if len(posts) == 0 {
-		status = sourceWithProvider("reddit_lsf", "scraper", "unavailable", "scrape did not contain usable posts")
+	trimmed := strings.TrimSpace(htmlBody)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		if posts, err := decodeRedditPosts([]byte(trimmed), h.redditBaseURL, login); err == nil && len(posts) > 0 {
+			return posts, sourceWithProvider("reddit_lsf", provider, "ready", "")
+		}
 	}
-	h.markRedditBackoff("scraper", status)
+	posts := parseRedditHTMLListing(htmlBody, h.redditBaseURL, login)
+	status := sourceWithProvider("reddit_lsf", provider, "ready", "")
+	if len(posts) == 0 {
+		status = sourceWithProvider("reddit_lsf", provider, "unavailable", "scrape did not contain usable posts")
+	}
 	return posts, status
 }
 
@@ -1301,9 +1606,37 @@ func (h *Handler) redditSearchURL(base, suffix, login, period, sort string) (*ur
 	q.Set("sort", normalizeSort(sort))
 	q.Set("t", redditTime(period))
 	q.Set("limit", "8")
-	q.Set("raw_json", "1")
+	if strings.HasSuffix(suffix, ".json") {
+		q.Set("raw_json", "1")
+	}
 	u.RawQuery = q.Encode()
 	return u, nil
+}
+
+func (h *Handler) redditOldSearchURL(login, period, sort string) string {
+	u, err := url.Parse("https://old.reddit.com/r/LivestreamFail/search")
+	if err != nil {
+		return ""
+	}
+	q := u.Query()
+	q.Set("q", login)
+	q.Set("restrict_sr", "on")
+	q.Set("sort", normalizeSort(sort))
+	q.Set("t", redditTime(period))
+	q.Set("limit", "8")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func (h *Handler) redditScraperSearchURLs(login, period, sort string) []string {
+	urls := make([]string, 0, 2)
+	if u, err := h.redditSearchURL(h.redditBaseURL, ".json", login, period, sort); err == nil {
+		urls = append(urls, u.String())
+	}
+	if oldURL := h.redditOldSearchURL(login, period, sort); oldURL != "" {
+		urls = append(urls, oldURL)
+	}
+	return urls
 }
 
 func (h *Handler) newRedditGet(ctx context.Context, raw string) (*http.Request, error) {
@@ -1511,20 +1844,26 @@ func (h *Handler) redditBearer(ctx context.Context) (string, model.SourceStatus)
 
 func (h *Handler) redditBackoffActive(provider string) (time.Time, bool) {
 	h.redditMu.Lock()
-	defer h.redditMu.Unlock()
 	until, ok := h.redditBackoff[provider]
-	if !ok || time.Now().After(until) {
+	active := ok && time.Now().Before(until)
+	if !active {
 		if ok {
 			delete(h.redditBackoff, provider)
 		}
+		h.redditMu.Unlock()
 		return time.Time{}, false
 	}
+	h.redditMu.Unlock()
 	return until, true
 }
 
 func (h *Handler) markRedditBackoff(provider string, status model.SourceStatus) {
 	h.redditMu.Lock()
 	defer h.redditMu.Unlock()
+	if redditLSFStatusInterrupted(status) {
+		delete(h.redditBackoff, provider)
+		return
+	}
 	if status.State == "blocked" || status.State == "error" {
 		h.redditBackoff[provider] = time.Now().Add(45 * time.Second)
 		return
@@ -1533,6 +1872,9 @@ func (h *Handler) markRedditBackoff(provider string, status model.SourceStatus) 
 }
 
 var redditPostRe = regexp.MustCompile(`(?is)<a[^>]+href="([^"]*/r/LivestreamFail/comments/[^"]+)"[^>]*>(.*?)</a>`)
+var redditShredditPostRe = regexp.MustCompile(`(?is)<shreddit-post\b[^>]*>`)
+var redditPermalinkAttrRe = regexp.MustCompile(`(?i)permalink="(/r/LivestreamFail/comments/[^"]+)"`)
+var redditPostTitleAttrRe = regexp.MustCompile(`(?i)post-title="([^"]+)"`)
 var tagRe = regexp.MustCompile(`(?is)<[^>]+>`)
 var twitchTrackerRowRe = regexp.MustCompile(`(?is)<tr\b[^>]*>(.*?)</tr>`)
 var twitchTrackerCellRe = regexp.MustCompile(`(?is)<td\b([^>]*)>(.*?)</td>`)
@@ -1624,16 +1966,15 @@ func postSafeFlair(source string) string {
 }
 
 func parseRedditHTMLListing(body, redditBaseURL, login string) []model.RedditPost {
-	matches := redditPostRe.FindAllStringSubmatch(body, 16)
-	out := make([]model.RedditPost, 0, len(matches))
+	out := make([]model.RedditPost, 0, 16)
 	seen := map[string]struct{}{}
-	for _, match := range matches {
-		href := html.UnescapeString(match[1])
-		title := strings.TrimSpace(html.UnescapeString(tagRe.ReplaceAllString(match[2], "")))
+	appendPost := func(href, title string) {
+		title = strings.TrimSpace(html.UnescapeString(title))
 		title = strings.Join(strings.Fields(title), " ")
 		if title == "" || len(title) < 4 {
-			continue
+			return
 		}
+		href = html.UnescapeString(href)
 		if strings.HasPrefix(href, "/") {
 			href = strings.TrimRight(redditBaseURL, "/") + href
 		}
@@ -1642,7 +1983,7 @@ func parseRedditHTMLListing(body, redditBaseURL, login string) []model.RedditPos
 			id = href
 		}
 		if _, exists := seen[id]; exists {
-			continue
+			return
 		}
 		seen[id] = struct{}{}
 		post := model.RedditPost{
@@ -1654,6 +1995,18 @@ func parseRedditHTMLListing(body, redditBaseURL, login string) []model.RedditPos
 		}
 		enrichRedditTag(&post, login)
 		out = append(out, post)
+	}
+	for _, tag := range redditShredditPostRe.FindAllString(body, 16) {
+		permalinkMatch := redditPermalinkAttrRe.FindStringSubmatch(tag)
+		titleMatch := redditPostTitleAttrRe.FindStringSubmatch(tag)
+		if len(permalinkMatch) < 2 || len(titleMatch) < 2 {
+			continue
+		}
+		appendPost(permalinkMatch[1], titleMatch[1])
+	}
+	for _, match := range redditPostRe.FindAllStringSubmatch(body, 16) {
+		title := strings.TrimSpace(html.UnescapeString(tagRe.ReplaceAllString(match[2], "")))
+		appendPost(match[1], title)
 	}
 	if len(out) > 8 {
 		return out[:8]

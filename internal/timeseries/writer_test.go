@@ -20,9 +20,12 @@ func TestNoopWriter(t *testing.T) {
 
 func TestBuildInfluxLineProtocol(t *testing.T) {
 	ts := time.Unix(1710000000, 0).UTC()
+	started := time.Unix(1709999000, 0).UTC()
 	body := BuildInfluxLineProtocol([]Rollup{{
 		ChannelLogin:      "ohnepixel",
 		StreamID:          "316963854947",
+		StreamTitle:       "Opening 1000 cases",
+		StreamStartedAt:   started,
 		MinuteTS:          ts,
 		ViewerAvg:         36900,
 		ViewerMax:         54100,
@@ -36,9 +39,9 @@ func TestBuildInfluxLineProtocol(t *testing.T) {
 	}})
 
 	wantParts := []string{
-		"stream_activity_1m,channel_login=ohnepixel,stream_id=316963854947 viewer_avg=36900i,viewer_max=54100i,chat_count=658i,total_emote_count=833i,seventv_emote_count=555i 1710000000",
-		"emote_usage_1m,channel_login=ohnepixel,stream_id=316963854947,provider=seventv,emote_id=abc123 emote_name=\"OMEGALUL\",count=42i 1710000000",
-		"emote_usage_1m,channel_login=ohnepixel,stream_id=316963854947,provider=twitch,emote_id=def456 emote_name=\"Kappa\",count=7i 1710000000",
+		"stream_activity_1m,channel_login=ohnepixel,stream_id=316963854947,stream_started=1709999000,stream_title=Opening\\ 1000\\ cases viewer_avg=36900i,viewer_max=54100i,chat_count=658i,total_emote_count=833i,seventv_emote_count=555i 1710000000",
+		"emote_usage_1m,channel_login=ohnepixel,stream_id=316963854947,stream_started=1709999000,stream_title=Opening\\ 1000\\ cases,provider=seventv,emote_id=abc123,emote_name=OMEGALUL count=42i 1710000000",
+		"emote_usage_1m,channel_login=ohnepixel,stream_id=316963854947,stream_started=1709999000,stream_title=Opening\\ 1000\\ cases,provider=twitch,emote_id=def456,emote_name=Kappa count=7i 1710000000",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(body, part) {

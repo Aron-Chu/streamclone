@@ -5,6 +5,7 @@ import {
   analyticsStreamPathSlug,
   pickSyncedLiveStreamTarget,
   streamHasSyncedMinutes,
+  streamIsSidebarVisible,
 } from '../src/utils/syncedLiveStream.ts'
 
 function stream(partial: Partial<AnalyticsStream> & Pick<AnalyticsStream, 'streamId'>): AnalyticsStream {
@@ -31,6 +32,17 @@ it('streamHasSyncedMinutes detects viewer or chat minute data', () => {
   assert.equal(streamHasSyncedMinutes(stream({ streamId: '1' })), false)
   assert.equal(streamHasSyncedMinutes(stream({ streamId: '1', viewerSamples: 3 })), true)
   assert.equal(streamHasSyncedMinutes(stream({ streamId: '1', chatMessages: 1 })), true)
+})
+
+it('streamIsSidebarVisible keeps tracker stats-only rows when synced-only filter is on', () => {
+  const statsOnly = stream({
+    streamId: '1',
+    startedAt: '2026-06-12T10:00:00.000Z',
+    endedAt: '2026-06-12T18:00:00.000Z',
+    peakViewers: 12000,
+  })
+  assert.equal(streamIsSidebarVisible(statsOnly, true), true)
+  assert.equal(streamIsSidebarVisible(stream({ streamId: '2' }), true), false)
 })
 
 it('pickSyncedLiveStreamTarget prefers the live endpoint stream id when synced', () => {
@@ -94,6 +106,28 @@ it('pickSyncedLiveStreamTarget does not redirect live channels to stale synced h
     pickSyncedLiveStreamTarget(rows, { liveStreamId: '200', channelLive: true }),
     undefined,
   )
+})
+
+it('pickSyncedLiveStreamTarget redirects from stale prefetch placeholder to collector stream', () => {
+  const rows = [
+    stream({
+      streamId: '316913497954',
+      title: 'Syncing...',
+      startedAt: '2026-06-14T20:23:51.726Z',
+    }),
+    stream({
+      streamId: '317014684259',
+      viewerSamples: 1010,
+      chatMessages: 94000,
+      startedAt: '2026-06-14T15:00:14Z',
+      title: 'Live CS2',
+    }),
+  ]
+  const picked = pickSyncedLiveStreamTarget(rows, {
+    liveStreamId: '316913497954',
+    channelLive: true,
+  })
+  assert.equal(picked?.streamId, '317014684259')
 })
 
 it('pickSyncedLiveStreamTarget still picks ended-only sync when channel is offline', () => {
