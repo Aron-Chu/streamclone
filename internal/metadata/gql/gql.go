@@ -29,6 +29,7 @@ type Category struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
 	ThumbnailURL string `json:"thumbnailUrl"`
+	Viewers      int    `json:"viewers,omitempty"`
 }
 
 type Channel struct {
@@ -242,6 +243,7 @@ func (c *Client) Categories(ctx context.Context, limit int, cursor string) (Page
 					Node   struct {
 						ID        string `json:"id"`
 						Name      string `json:"name"`
+						Viewers   int    `json:"viewersCount"`
 						BoxArtURL string `json:"boxArtURL"`
 					} `json:"node"`
 				} `json:"edges"`
@@ -256,7 +258,7 @@ func (c *Client) Categories(ctx context.Context, limit int, cursor string) (Page
 	}
 	var page Page[Category]
 	for _, e := range r.Data.Games.Edges {
-		page.Items = append(page.Items, Category{ID: e.Node.ID, Name: e.Node.Name, ThumbnailURL: normalizeThumbnail(e.Node.BoxArtURL)})
+		page.Items = append(page.Items, Category{ID: e.Node.ID, Name: e.Node.Name, ThumbnailURL: normalizeThumbnail(e.Node.BoxArtURL), Viewers: e.Node.Viewers})
 		page.Cursor = e.Cursor
 	}
 	return page, nil

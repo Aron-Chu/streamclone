@@ -35,6 +35,7 @@ export interface Category {
   id: string
   name: string
   thumbnailUrl: string
+  viewers?: number
 }
 
 export interface ChannelInfo {
@@ -572,17 +573,65 @@ export interface FollowedChannel {
   thumbnailUrl?: string
 }
 
-export const getStreams = (): Promise<Stream[]> =>
-  fetch(`${METADATA}/v1/streams`).then(r => json<Page<Stream>>(r)).then(p => p.items ?? [])
+export interface StreamsPage {
+  items: Stream[]
+  cursor: string
+}
+
+export interface CategoriesPage {
+  items: Category[]
+  cursor: string
+}
+
+export const getStreamsPage = ({
+  limit = 30,
+  cursor,
+}: {
+  limit?: number
+  cursor?: string
+} = {}): Promise<StreamsPage> => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return fetch(`${METADATA}/v1/streams?${params}`)
+    .then(r => json<Page<Stream>>(r))
+    .then(p => ({ items: p.items ?? [], cursor: p.cursor ?? '' }))
+}
+
+export const getCategoriesPage = ({
+  limit = 30,
+  cursor,
+}: {
+  limit?: number
+  cursor?: string
+} = {}): Promise<CategoriesPage> => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return fetch(`${METADATA}/v1/categories?${params}`)
+    .then(r => json<Page<Category>>(r))
+    .then(p => ({ items: p.items ?? [], cursor: p.cursor ?? '' }))
+}
+
+export const getCategoryStreamsPage = (
+  categoryId: string,
+  { limit = 30, cursor }: { limit?: number; cursor?: string } = {},
+): Promise<StreamsPage> => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return fetch(`${METADATA}/v1/categories/${encodeURIComponent(categoryId)}/streams?${params}`)
+    .then(r => json<Page<Stream>>(r))
+    .then(p => ({ items: p.items ?? [], cursor: p.cursor ?? '' }))
+}
+
+export const getStreams = (): Promise<Stream[]> => getStreamsPage({ limit: 20 }).then(p => p.items)
 
 export const getRandomStream = (pool = 20000): Promise<RandomStreamResponse> =>
   fetch(`${METADATA}/v1/streams/random?pool=${encodeURIComponent(pool)}`).then(r => json<RandomStreamResponse>(r))
 
 export const getCategories = (): Promise<Category[]> =>
-  fetch(`${METADATA}/v1/categories?limit=12`).then(r => json<Page<Category>>(r)).then(p => p.items ?? [])
+  getCategoriesPage({ limit: 12 }).then(p => p.items)
 
 export const getCategoryStreams = (categoryId: string): Promise<Stream[]> =>
-  fetch(`${METADATA}/v1/categories/${encodeURIComponent(categoryId)}/streams?limit=24`).then(r => json<Page<Stream>>(r)).then(p => p.items ?? [])
+  getCategoryStreamsPage(categoryId, { limit: 24 }).then(p => p.items)
 
 export const search = (q: string): Promise<SearchResult> =>
   fetch(`${METADATA}/v1/search?q=${encodeURIComponent(q)}&limit=24`).then(r => json<SearchResult>(r))
@@ -596,8 +645,23 @@ export const getChannelBadges = (login: string): Promise<ChatBadgeCatalog> =>
 export const getChannelDetails = (login: string): Promise<ChannelDetails> =>
   fetch(`${METADATA}/v1/channels/${encodeURIComponent(login)}/details`).then(r => json<ChannelDetails>(r))
 
-export const getChannelInsights = (login: string, period: StatsPeriod = '7d', clipPeriod: ClipPeriod = period, lsfPeriod: ClipPeriod = period, lsfSort: 'top' | 'hot' | 'new' = 'top'): Promise<ChannelInsights> =>
-  fetch(`${METADATA}/v1/channels/${encodeURIComponent(login)}/insights?period=${encodeURIComponent(period)}&clipPeriod=${encodeURIComponent(clipPeriod)}&lsfPeriod=${encodeURIComponent(lsfPeriod)}&lsfSort=${encodeURIComponent(lsfSort)}`).then(r => json<ChannelInsights>(r))
+export const getChannelInsights = (
+  login: string,
+  period: StatsPeriod = '7d',
+  clipPeriod: ClipPeriod = period,
+  lsfPeriod: ClipPeriod = period,
+  lsfSort: 'top' | 'hot' | 'new' = 'top',
+  options?: { lsfRefresh?: boolean },
+): Promise<ChannelInsights> => {
+  const params = new URLSearchParams({
+    period,
+    clipPeriod,
+    lsfPeriod,
+    lsfSort,
+  })
+  if (options?.lsfRefresh) params.set('lsfRefresh', '1')
+  return fetch(`${METADATA}/v1/channels/${encodeURIComponent(login)}/insights?${params}`).then(r => json<ChannelInsights>(r))
+}
 
 export interface StreamHistoryResponse {
   channel: string

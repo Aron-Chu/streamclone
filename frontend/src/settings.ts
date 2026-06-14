@@ -18,6 +18,7 @@ export interface UiSettings {
     live: boolean
     offline: boolean
     top: boolean
+    categories: boolean
   }
   emoteProviders: EmoteProvider[]
   emoteAutoLoad: boolean
@@ -34,7 +35,7 @@ const defaults: UiSettings = {
   previewMuted: true,
   playerVolume: 0.8,
   theme: 'obsidian',
-  railSections: { live: true, offline: true, top: true },
+  railSections: { live: true, offline: true, top: true, categories: true },
   emoteProviders: ['seventv', 'twitch'],
   emoteAutoLoad: false,
   preferredQuality: 'auto-high-stable',

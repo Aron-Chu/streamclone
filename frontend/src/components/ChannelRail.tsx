@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation } from 'react-router-dom'
-import { getFollowedChannels, getStreams } from '../api'
-import type { FollowedChannel } from '../api'
+import { getCategories, getFollowedChannels, getStreams } from '../api'
+import type { Category, FollowedChannel } from '../api'
 import { useAuth } from '../auth'
 import { useStreamPrewarm } from '../hooks/useStreamPrewarm'
 import { useUiSettings } from '../settings'
+import { formatCategoryViewers } from '../utils/categorySort'
 
 interface ChannelRailProps {
   collapsed: boolean
@@ -25,6 +26,10 @@ function fromLiveDirectory(streams: Awaited<ReturnType<typeof getStreams>> | und
     viewers: stream.viewers,
     thumbnailUrl: stream.thumbnailUrl,
   }))
+}
+
+function thumb(url: string | undefined, w = 56, h = 74) {
+  return (url ?? '').replace('{width}', String(w)).replace('{height}', String(h))
 }
 
 function Avatar({ channel, collapsed }: { channel: FollowedChannel; collapsed: boolean }) {
@@ -138,6 +143,65 @@ function ChannelList({
   )
 }
 
+function CategoryItem({
+  category,
+  collapsed,
+  onClick,
+}: {
+  category: Category
+  collapsed: boolean
+  onClick?: () => void
+}) {
+  return (
+    <Link
+      to="/"
+      state={{ directoryCategoryId: category.id, directoryCategoryName: category.name }}
+      onClick={onClick}
+      className="group flex items-center gap-3 rounded px-2 py-1.5 text-zinc-300 transition hover:bg-white/[0.07] hover:text-white"
+      title={collapsed ? category.name : undefined}
+    >
+      <div className={`${collapsed ? 'h-9 w-9' : 'h-10 w-8'} grid shrink-0 place-items-center overflow-hidden rounded bg-white/10 text-xs font-black text-violet-100`}>
+        {category.thumbnailUrl ? (
+          <img src={thumb(category.thumbnailUrl)} alt="" className="h-full w-full object-cover" />
+        ) : (
+          category.name.slice(0, 1).toUpperCase()
+        )}
+      </div>
+      {!collapsed ? (
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-black">{category.name}</div>
+          <div className="truncate text-xs font-semibold text-zinc-500">
+            {category.viewers ? formatCategoryViewers(category.viewers) : 'Browse live channels'}
+          </div>
+        </div>
+      ) : null}
+    </Link>
+  )
+}
+
+function CategoryList({
+  categories,
+  collapsed,
+  onCloseMobile,
+}: {
+  categories: Category[]
+  collapsed: boolean
+  onCloseMobile?: () => void
+}) {
+  return (
+    <div className="space-y-1">
+      {categories.map(category => (
+        <CategoryItem
+          key={`${category.id}-${category.name}`}
+          category={category}
+          collapsed={collapsed}
+          onClick={onCloseMobile}
+        />
+      ))}
+    </div>
+  )
+}
+
 function RailContent({ collapsed, onCloseMobile, viewerOverrides }: { collapsed: boolean; onCloseMobile?: () => void; viewerOverrides?: Record<string, number | undefined> }) {
   const settings = useUiSettings(s => s.settings)
   const toggleRailSection = useUiSettings(s => s.toggleRailSection)
@@ -153,12 +217,18 @@ function RailContent({ collapsed, onCloseMobile, viewerOverrides }: { collapsed:
     queryFn: getStreams,
     staleTime: 30_000,
   })
+  const categories = useQuery({
+    queryKey: ['categories'],
+    queryFn: getCategories,
+    staleTime: 60_000,
+  })
   const followedChannels = followed.data ?? []
   const fallback = fromLiveDirectory(live.data)
   const liveFollowing = followedChannels.filter(channel => channel.isLive)
   const offlineFollowing = followedChannels.filter(channel => !channel.isLive)
   const showFollowing = followedChannels.length > 0
   const topLive = showFollowing ? fallback.filter(channel => !followedChannels.some(followedChannel => followedChannel.login === channel.login)).slice(0, 20) : fallback
+  const recommendedCategories = (categories.data ?? []).slice(0, 8)
   const sections = [
     { id: 'live' as const, label: showFollowing ? 'Following live' : 'Live channels', channels: showFollowing ? liveFollowing : topLive },
     { id: 'offline' as const, label: 'Following offline', channels: showFollowing ? offlineFollowing : [] },
@@ -194,6 +264,24 @@ function RailContent({ collapsed, onCloseMobile, viewerOverrides }: { collapsed:
             </div>
           )
         })}
+        {recommendedCategories.length ? (
+          <div className={collapsed ? 'mb-2' : 'mb-4'}>
+            <SectionHeader
+              label="Recommended categories"
+              count={recommendedCategories.length}
+              open={settings.railSections.categories}
+              onToggle={() => toggleRailSection('categories')}
+              collapsed={collapsed}
+            />
+            {settings.railSections.categories ? (
+              <CategoryList
+                categories={recommendedCategories}
+                collapsed={collapsed}
+                onCloseMobile={onCloseMobile}
+              />
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
     </>

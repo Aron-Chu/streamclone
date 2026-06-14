@@ -79,6 +79,20 @@
   input {
     font: inherit;
   }
+
+  .horizontal-scroll-row {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    scroll-padding-inline: 0;
+  }
+
+  .horizontal-scroll-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .horizontal-scroll-row > * {
+    scroll-snap-align: start;
+  }
 }
 
 @layer utilities {

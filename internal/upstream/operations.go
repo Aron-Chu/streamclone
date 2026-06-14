@@ -2,7 +2,7 @@ package upstream
 
 const MetadataTopStreamsOperation = `query TopStreams($first: Int!, $after: Cursor) { streams(first: $first, after: $after) { edges { cursor node { id title viewersCount previewImageURL(width: 440, height: 248) broadcaster { login displayName } game { name } } } } }`
 
-const MetadataCategoriesOperation = `query TopCategories($first: Int!, $after: Cursor) { games(first: $first, after: $after) { edges { cursor node { id name boxArtURL(width: 148, height: 198) } } } }`
+const MetadataCategoriesOperation = `query TopCategories($first: Int!, $after: Cursor) { games(first: $first, after: $after) { edges { cursor node { id name viewersCount boxArtURL(width: 148, height: 198) } } } }`
 
 const MetadataCategoryStreamsOperation = `query CategoryStreams($id: ID!, $first: Int!, $after: Cursor) { game(id: $id) { streams(first: $first, after: $after) { edges { cursor node { id title viewersCount previewImageURL(width: 440, height: 248) broadcaster { login displayName } game { name } } } } } }`
 

@@ -53,7 +53,7 @@ func TestTopStreamsSchemaMismatch(t *testing.T) {
 
 func TestCategories(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"data":{"games":{"edges":[{"cursor":"c2","node":{"id":"2","name":"Fortnite","boxArtURL":"https://box.tv/%{width}x%{height}.jpg"}}]}}}`))
+		w.Write([]byte(`{"data":{"games":{"edges":[{"cursor":"c2","node":{"id":"2","name":"Fortnite","viewersCount":123456,"boxArtURL":"https://box.tv/%{width}x%{height}.jpg"}}]}}}`))
 	}))
 	defer srv.Close()
 
@@ -62,6 +62,27 @@ func TestCategories(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(page.Items) != 1 || page.Items[0].Name != "Fortnite" {
+		t.Fatalf("unexpected categories: %+v", page.Items)
+	}
+	if page.Items[0].Viewers != 123456 {
+		t.Fatalf("unexpected category viewers: %+v", page.Items[0])
+	}
+	if page.Items[0].ThumbnailURL != "https://box.tv/{width}x{height}.jpg" {
+		t.Fatalf("category thumbnail not normalized: %s", page.Items[0].ThumbnailURL)
+	}
+}
+
+func TestCategoriesMissingViewersDefaultsToZero(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"data":{"games":{"edges":[{"cursor":"c2","node":{"id":"2","name":"Fortnite","boxArtURL":"https://box.tv/%{width}x%{height}.jpg"}}]}}}`))
+	}))
+	defer srv.Close()
+
+	page, err := newClient(srv).Categories(context.Background(), 10, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Viewers != 0 {
 		t.Fatalf("unexpected categories: %+v", page.Items)
 	}
 }

@@ -1,316 +1,112 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Link, useLocation } from 'react-router-dom'
-import { Category, getCategories, getCategoryStreams, getRandomStream, getStreams, keepaliveStream, search, startStream, stopStream, Stream } from '../api'
+import { useEffect, useMemo, useState } from 'react'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useLocation } from 'react-router-dom'
+import {
+  type Category,
+  getCategoriesPage,
+  getCategoryStreamsPage,
+  getFollowedChannels,
+  getStreamsPage,
+  search,
+} from '../api'
 import { useAuth } from '../auth'
-import { normalizeBrowserOriginUrl } from '../config'
-import { useStreamPrewarm } from '../hooks/useStreamPrewarm'
-import { useHlsPlayback } from '../playback'
 import { useThemeEffect, useUiSettings } from '../settings'
-import BrandLogo from './BrandLogo'
-import { DirectorySearchField } from './ChannelSearchInput'
-import ChannelRail from './ChannelRail'
-import LocalTokenImportButton from './LocalTokenImportButton'
-import ServiceStatusBanner from './ServiceStatusBanner'
-import StackStatusButton from './StackStatusButton'
-import SettingsButton from './SettingsPanel'
+import {
+  getStoredDirectorySort,
+  setStoredDirectorySort,
+  sortDirectoryStreams,
+  type DirectorySort,
+} from '../utils/directorySort'
+import {
+  sortCategories,
+  type CategorySort,
+} from '../utils/categorySort'
+import {
+  getStoredBrowseTab,
+  setStoredBrowseTab,
+  type BrowseTab,
+} from '../utils/browseTabs'
+import { buildHomeFeed, followedChannelToStream } from '../utils/homeFeed'
+import { CategoryBrowseGrid } from './directory/CategoryBrowseGrid'
+import { CategorySortBar } from './directory/CategorySortBar'
+import { DirectoryLayout } from './directory/DirectoryLayout'
+import { DirectorySection } from './directory/DirectorySection'
+import { DirectorySortBar } from './directory/DirectorySortBar'
+import { EmptyStreams } from './directory/EmptyStreams'
+import { RandomLiveHero } from './directory/RandomLiveHero'
+import {
+  CategoryGridSkeleton,
+  SkeletonGrid,
+  StreamGrid,
+  StreamShelf,
+  StreamShelfSkeleton,
+} from './directory/StreamShelf'
 
-const W = 440
-const H = 248
+const PAGE_SIZE = 30
+const CATEGORY_PAGE_SIZE = 42
 
-function thumb(url: string | undefined, w = W, h = H) {
-  return (url ?? '').replace('{width}', String(w)).replace('{height}', String(h))
-}
-
-function StreamCard({ stream, index }: { stream: Stream; index: number }) {
-  const isLive = stream.isLive ?? Boolean(stream.thumbnailUrl && (stream.viewers ?? 0) > 0)
-  const title = stream.title || stream.displayName || stream.login
-  const previewUrl = stream.thumbnailUrl || stream.profileImageUrl
-  const { prewarm, cancelPrewarm } = useStreamPrewarm()
-  return (
-    <Link
-      to={`/c/${stream.login}`}
-      onMouseEnter={() => prewarm(stream.login, isLive)}
-      onMouseLeave={cancelPrewarm}
-      onFocus={() => prewarm(stream.login, isLive)}
-      onBlur={cancelPrewarm}
-      className="group block overflow-hidden rounded-lg border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/20 transition duration-300 hover:-translate-y-1 hover:border-violet-400/60 hover:bg-white/[0.07]"
-      style={{ animationDelay: `${Math.min(index, 10) * 35}ms` }}
-    >
-      <div className="relative aspect-video overflow-hidden bg-zinc-900">
-        {previewUrl ? (
-          isLive ? (
-            <img
-              src={thumb(stream.thumbnailUrl || previewUrl)}
-              alt={title}
-              className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#202027,#050507)]">
-              <img
-                src={thumb(stream.profileImageUrl, 140, 140)}
-                alt={stream.displayName || stream.login}
-                className="h-24 w-24 rounded-full border border-white/10 object-cover shadow-lg"
-              />
-            </div>
-          )
-        ) : (
-          <div className="h-full w-full bg-[linear-gradient(135deg,#202027,#050507)]" />
-        )}
-        <div className={`absolute left-3 top-3 rounded px-2 py-0.5 text-[11px] font-black uppercase tracking-wide text-white shadow-lg ${
-          isLive ? 'bg-red-600' : 'bg-zinc-700'
-        }`}>
-          {isLive ? 'Live' : 'Offline'}
-        </div>
-        {isLive ? (
-          <div className="absolute bottom-3 right-3 rounded bg-black/75 px-2 py-0.5 text-xs font-semibold text-zinc-100 backdrop-blur">
-            {(stream.viewers ?? 0).toLocaleString()} viewers
-          </div>
-        ) : null}
-      </div>
-      <div className="space-y-1 p-3">
-        <div className="line-clamp-2 min-h-10 text-sm font-bold leading-5 text-zinc-50">{title}</div>
-        <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
-          <span className="truncate font-semibold text-violet-200">{stream.displayName || stream.login}</span>
-          <span className="truncate text-zinc-500">{isLive ? (stream.category || 'Live') : 'Offline'}</span>
-        </div>
-      </div>
-    </Link>
-  )
-}
-
-function CategoryPill({
-  category,
-  selected,
+function ShowMoreButton({
+  loading,
   onClick,
 }: {
-  category: Category
-  selected: boolean
+  loading: boolean
   onClick: () => void
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={`group flex min-w-44 items-center gap-3 rounded-lg border px-3 py-2 text-left transition duration-300 ${
-        selected
-          ? 'border-violet-400 bg-violet-500/20 text-white shadow-lg shadow-violet-950/30'
-          : 'border-white/10 bg-white/[0.045] text-zinc-300 hover:border-cyan-300/50 hover:bg-white/[0.08]'
-      }`}
-    >
-      <div className="h-12 w-9 shrink-0 overflow-hidden rounded bg-zinc-800">
-        {category.thumbnailUrl ? (
-          <img src={thumb(category.thumbnailUrl, 72, 96)} alt={category.name} className="h-full w-full object-cover transition duration-300 group-hover:scale-110" />
-        ) : null}
-      </div>
-      <span className="line-clamp-2 text-sm font-bold">{category.name}</span>
-    </button>
-  )
-}
-
-function SkeletonGrid() {
-  return (
-    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
-          <div className="aspect-video animate-pulse bg-white/10" />
-          <div className="space-y-2 p-3">
-            <div className="h-4 w-5/6 animate-pulse rounded bg-white/10" />
-            <div className="h-3 w-2/3 animate-pulse rounded bg-white/10" />
-          </div>
-        </div>
-      ))}
+    <div className="flex justify-center pt-2">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={loading}
+        className="rounded-md bg-[#9147ff] px-6 py-2.5 text-sm font-bold text-white transition hover:bg-[#772ce8] disabled:opacity-60"
+      >
+        {loading ? 'Loading...' : 'Show more'}
+      </button>
     </div>
   )
 }
 
-function RandomLiveHero() {
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const sessionRef = useRef<{ channel: string; sessionId?: string } | null>(null)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const settings = useUiSettings(s => s.settings)
-  const updateSettings = useUiSettings(s => s.updateSettings)
-  const [previewEnabled, setPreviewEnabled] = useState(settings.previewAutoplay)
-  const [hlsUrl, setHlsUrl] = useState('')
-  const [relayStatus, setRelayStatus] = useState<'idle' | 'loading' | 'playing' | 'error'>('idle')
-  const [error, setError] = useState<string | null>(null)
-  const playback = useHlsPlayback(videoRef, { src: hlsUrl, enabled: Boolean(hlsUrl && previewEnabled), muted: settings.previewMuted, autoPlay: true })
-
-  const random = useQuery({
-    queryKey: ['random-stream'],
-    queryFn: () => getRandomStream(20000),
-    staleTime: 0,
-  })
-  const stream = random.data?.stream
-
-  const stopPreview = async () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
-    setHlsUrl('')
-    const session = sessionRef.current
-    sessionRef.current = null
-    if (session) {
-      await stopStream(session.channel, session.sessionId).catch(() => undefined)
-    }
-  }
-
-  useEffect(() => {
-    setPreviewEnabled(settings.previewAutoplay)
-  }, [settings.previewAutoplay])
-
-  useEffect(() => {
-    let alive = true
-    if (!stream?.login || !previewEnabled) {
-      setRelayStatus('idle')
-      stopPreview().catch(() => undefined)
-      return () => {
-        alive = false
-      }
-    }
-
-    const start = async () => {
-      setRelayStatus('loading')
-      setError(null)
-      await stopPreview()
-      try {
-        const response = await startStream(stream.login, '480p,360p,best')
-        if (!alive) {
-          await stopStream(stream.login, response.session_id).catch(() => undefined)
-          return
-        }
-        sessionRef.current = { channel: stream.login, sessionId: response.session_id }
-        setHlsUrl(normalizeBrowserOriginUrl(response.hlsUrl, ['/live/']))
-        setRelayStatus('playing')
-        intervalRef.current = setInterval(() => {
-          keepaliveStream(stream.login, sessionRef.current?.sessionId).catch(() => undefined)
-        }, 20000)
-      } catch (err) {
-        if (alive) {
-          setRelayStatus('error')
-          setError((err as Error).message || 'preview failed')
-        }
-      }
-    }
-    start()
-
-    return () => {
-      alive = false
-      stopPreview().catch(() => undefined)
-    }
-  }, [stream?.login, previewEnabled, settings.previewMuted])
-
-  const next = async () => {
-    setPreviewEnabled(settings.previewAutoplay)
-    await stopPreview()
-    random.refetch().catch(() => undefined)
-  }
-
-  const title = stream?.title || stream?.displayName || stream?.login || 'Finding a live channel'
-  const previewImage = stream?.thumbnailUrl ? thumb(stream.thumbnailUrl, 960, 540) : ''
-  const status = error ? 'error' : hlsUrl ? playback.state : relayStatus
-  const previewError = error || playback.error
-
+function BrowseTabButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean
+  children: string
+  onClick: () => void
+}) {
   return (
-    <section className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/30">
-      <div className="grid min-h-[360px] lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,.9fr)]">
-        <div className="relative min-h-[260px] bg-black">
-          {previewImage ? <img src={previewImage} alt="" className="absolute inset-0 h-full w-full object-cover opacity-30 blur-sm" /> : null}
-          <video ref={videoRef} className={`relative z-10 h-full w-full bg-black object-contain ${previewError ? 'opacity-0' : ''}`} muted={settings.previewMuted} playsInline autoPlay poster={previewImage || undefined} />
-          <div className="absolute left-4 top-4 z-20 flex flex-wrap items-center gap-2">
-            <span className="rounded bg-red-600 px-2 py-1 text-[11px] font-black uppercase text-white">Random live</span>
-            <span className="rounded bg-black/70 px-2 py-1 text-[11px] font-black uppercase text-zinc-200">{status}</span>
-            {random.data?.poolSize ? <span className="rounded bg-black/70 px-2 py-1 text-[11px] font-black uppercase text-zinc-200">{random.data.poolSize.toLocaleString()} pool</span> : null}
-          </div>
-          {previewError || status !== 'playing' ? (
-            <div className="absolute inset-0 z-10 grid place-items-center bg-black/45">
-              {previewImage && previewError ? (
-                <img src={previewImage} alt="" className="absolute inset-0 h-full w-full object-contain opacity-40" />
-              ) : null}
-              <div className="relative rounded border border-white/10 bg-zinc-950/85 px-5 py-4 text-center shadow-2xl">
-                <div className="text-sm font-black text-white">{previewError ? 'Preview unavailable' : random.isLoading ? 'Finding stream' : previewEnabled ? 'Preview loading' : 'Preview paused'}</div>
-                <div className="mt-1 max-w-xs text-xs font-semibold text-zinc-400">
-                  {previewError ? `${previewError} — showing stream thumbnail instead of live video.` : (previewEnabled ? `Relay ${playback.metrics.hlsStage}` : 'Autoplay is off.')}
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-        <div className="flex flex-col justify-between gap-6 p-5 sm:p-6">
-          <div>
-            <div className="mb-3 flex items-center gap-3">
-              <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-white/10 text-sm font-black text-violet-100">
-                {previewImage ? <img src={previewImage} alt="" className="h-full w-full object-cover" /> : stream?.login?.slice(0, 1).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-lg font-black text-white">{stream?.displayName || stream?.login || 'Live channel'}</div>
-                <div className="truncate text-sm font-semibold text-zinc-400">{stream?.category || 'Top live'}</div>
-              </div>
-            </div>
-            <h2 className="line-clamp-2 text-2xl font-black leading-tight text-white sm:text-3xl">{title}</h2>
-            <div className="mt-4 grid grid-cols-2 gap-2 text-sm font-bold text-zinc-300">
-              <div className="rounded border border-white/10 bg-white/[0.05] px-3 py-2">
-                <div className="text-[11px] uppercase text-zinc-500">Viewers</div>
-                <div className="text-base text-white">{(stream?.viewers ?? 0).toLocaleString()}</div>
-              </div>
-              <div className="rounded border border-white/10 bg-white/[0.05] px-3 py-2">
-                <div className="text-[11px] uppercase text-zinc-500">Relay</div>
-                <div className="text-base text-white">{previewEnabled ? 'Local HLS' : 'Paused'}</div>
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setPreviewEnabled(value => !value)}
-              className="rounded bg-violet-500 px-4 py-2 text-sm font-black text-white transition hover:bg-violet-400"
-            >
-              {previewEnabled ? 'Pause' : 'Start'}
-            </button>
-            <button
-              type="button"
-              onClick={() => updateSettings({ previewMuted: !settings.previewMuted })}
-              className="rounded border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-black text-zinc-200 transition hover:bg-white/10"
-            >
-              {settings.previewMuted ? 'Unmute' : 'Mute'}
-            </button>
-            <button
-              type="button"
-              onClick={next}
-              className="rounded border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-black text-zinc-200 transition hover:bg-white/10"
-            >
-              Next
-            </button>
-            {stream?.login ? (
-              <Link to={`/c/${stream.login}`} className="rounded border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-black text-cyan-100 transition hover:bg-cyan-400/20">
-                Open channel
-              </Link>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    </section>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`rounded-md px-3 py-1.5 text-sm font-bold transition ${
+        active
+          ? 'bg-[#9147ff] text-white'
+          : 'border border-[#3a3a3d] bg-[#18181b] text-zinc-300 hover:border-[#53535a] hover:bg-[#1f1f23] hover:text-white'
+      }`}
+    >
+      {children}
+    </button>
   )
 }
 
-function HeaderAuth() {
-  const auth = useAuth()
-  if (auth.isAuthenticated) {
-    return (
-      <div className="flex shrink-0 items-center gap-2">
-        <div className="hidden min-w-0 text-right sm:block">
-          <div className="max-w-32 truncate text-xs font-black text-white">{auth.user?.displayName || auth.user?.display_name || auth.user?.login}</div>
-          <div className="text-[11px] font-semibold text-emerald-300">Connected</div>
-        </div>
-        <button onClick={auth.logout} className="rounded border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-white/10">
-          Log out
-        </button>
-      </div>
-    )
-  }
+function HomeBrowseTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: BrowseTab
+  onChange: (tab: BrowseTab) => void
+}) {
   return (
-    <div className="flex shrink-0 items-center gap-2">
-      <LocalTokenImportButton compact />
+    <div className="flex items-center gap-2" role="tablist" aria-label="Browse">
+      <BrowseTabButton active={activeTab === 'categories'} onClick={() => onChange('categories')}>
+        Categories
+      </BrowseTabButton>
+      <BrowseTabButton active={activeTab === 'live'} onClick={() => onChange('live')}>
+        Live Channels
+      </BrowseTabButton>
     </div>
   )
 }
@@ -318,12 +114,31 @@ function HeaderAuth() {
 export default function Directory() {
   const [q, setQ] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null)
-  const [mobileRailOpen, setMobileRailOpen] = useState(false)
-  const [railCollapsed, setRailCollapsed] = useState(false)
   const settings = useUiSettings(s => s.settings)
+  const auth = useAuth()
   const location = useLocation()
   const query = q.trim()
+  const homeMode = !query && !selectedCategory
   useThemeEffect(settings.theme)
+
+  const [sort, setSort] = useState<DirectorySort>(() => getStoredDirectorySort())
+  const [categorySort, setCategorySort] = useState<CategorySort>('viewers')
+  const [browseTab, setBrowseTab] = useState<BrowseTab>(() => getStoredBrowseTab())
+
+  const handleSortChange = (value: DirectorySort) => {
+    setSort(value)
+    setStoredDirectorySort(value)
+  }
+
+  const handleBrowseTabChange = (value: BrowseTab) => {
+    setBrowseTab(value)
+    setStoredBrowseTab(value)
+  }
+
+  const handleSearchChange = (value: string) => {
+    setQ(value)
+    if (value.trim()) setSelectedCategory(null)
+  }
 
   useEffect(() => {
     const state = location.state as {
@@ -342,24 +157,34 @@ export default function Directory() {
         name: state.directoryCategoryName,
         thumbnailUrl: '',
       })
+    } else {
+      return
     }
     window.history.replaceState({}, '', location.pathname)
   }, [location.pathname, location.state])
 
-  const streams = useQuery<Stream[]>({
-    queryKey: ['streams'],
-    queryFn: getStreams,
+  const streamsQuery = useInfiniteQuery({
+    queryKey: ['streams', { limit: PAGE_SIZE }],
+    queryFn: ({ pageParam }) => getStreamsPage({ limit: PAGE_SIZE, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: lastPage => (lastPage.cursor ? lastPage.cursor : undefined),
+    enabled: homeMode,
   })
 
-  const categories = useQuery<Category[]>({
-    queryKey: ['categories'],
-    queryFn: getCategories,
+  const categoriesQuery = useInfiniteQuery({
+    queryKey: ['categories-browse-home', { limit: CATEGORY_PAGE_SIZE }],
+    queryFn: ({ pageParam }) => getCategoriesPage({ limit: CATEGORY_PAGE_SIZE, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: lastPage => (lastPage.cursor ? lastPage.cursor : undefined),
+    enabled: homeMode && browseTab === 'categories',
   })
 
-  const categoryStreams = useQuery<Stream[]>({
-    queryKey: ['category-streams', selectedCategory?.id],
-    queryFn: () => getCategoryStreams(selectedCategory!.id),
-    enabled: Boolean(selectedCategory && !query),
+  const followed = useQuery({
+    queryKey: ['followed', auth.isAuthenticated],
+    queryFn: () => getFollowedChannels(auth.isAuthenticated),
+    enabled: homeMode,
+    retry: false,
+    staleTime: 30_000,
   })
 
   const searchResults = useQuery({
@@ -368,135 +193,223 @@ export default function Directory() {
     enabled: query.length > 0,
   })
 
-  const shownCategories = useMemo(() => {
-    if (query) return searchResults.data?.categories ?? []
-    return categories.data ?? []
-  }, [categories.data, query, searchResults.data?.categories])
+  const categoryStreamsQuery = useInfiniteQuery({
+    queryKey: ['category-streams', selectedCategory?.id, { limit: PAGE_SIZE }],
+    queryFn: ({ pageParam }) =>
+      getCategoryStreamsPage(selectedCategory!.id, { limit: PAGE_SIZE, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: lastPage => (lastPage.cursor ? lastPage.cursor : undefined),
+    enabled: Boolean(selectedCategory && !query),
+  })
 
-  const shownStreams = useMemo(() => {
-    if (query) return searchResults.data?.streams ?? []
-    if (selectedCategory) return categoryStreams.data ?? []
-    return streams.data ?? []
-  }, [categoryStreams.data, query, searchResults.data?.streams, selectedCategory, streams.data])
+  const topStreams = useMemo(
+    () => streamsQuery.data?.pages.flatMap(p => p.items) ?? [],
+    [streamsQuery.data?.pages],
+  )
 
-  const loading = streams.isLoading || categories.isLoading || categoryStreams.isLoading || searchResults.isLoading
-  const error = streams.error || categories.error || categoryStreams.error || searchResults.error
+  const homeFeed = useMemo(() => buildHomeFeed({
+    followedChannels: followed.data ?? [],
+    topStreams,
+    recommendationLimit: 12,
+  }), [followed.data, topStreams])
+
+  const browseCategories = useMemo(
+    () => categoriesQuery.data?.pages.flatMap(p => p.items) ?? [],
+    [categoriesQuery.data?.pages],
+  )
+
+  const shownBrowseCategories = useMemo(
+    () => sortCategories(browseCategories, categorySort),
+    [browseCategories, categorySort],
+  )
+
+  const shownBrowseStreams = useMemo(
+    () => sortDirectoryStreams(topStreams, sort),
+    [topStreams, sort],
+  )
+
+  const rawSearchStreams = searchResults.data?.streams ?? []
+  const shownSearchStreams = useMemo(
+    () => sortDirectoryStreams(rawSearchStreams, sort),
+    [rawSearchStreams, sort],
+  )
+
+  const selectedCategoryStreams = useMemo(
+    () => categoryStreamsQuery.data?.pages.flatMap(p => p.items) ?? [],
+    [categoryStreamsQuery.data?.pages],
+  )
+
+  const shownCategoryStreams = useMemo(
+    () => sortDirectoryStreams(selectedCategoryStreams, sort),
+    [selectedCategoryStreams, sort],
+  )
+
+  const loading = query ? searchResults.isLoading : streamsQuery.isLoading
+  const error = query ? searchResults.error : streamsQuery.error
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#07070a] text-zinc-100">
-      <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(135deg,rgba(139,92,246,.16),transparent_28%),linear-gradient(180deg,rgba(255,255,255,.045),transparent_34%)]" />
-      <div className="relative flex min-h-screen">
-        <ChannelRail
-          collapsed={railCollapsed}
-          mobileOpen={mobileRailOpen}
-          onToggleCollapsed={() => setRailCollapsed(v => !v)}
-          onCloseMobile={() => setMobileRailOpen(false)}
-        />
-        <div className="min-w-0 flex-1 overflow-hidden">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
-        <header className="sticky top-0 z-20 -mx-4 border-b border-white/10 bg-[#07070a]/85 px-4 py-4 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-              <button onClick={() => setMobileRailOpen(true)} className="rounded border border-white/10 bg-white/[0.06] px-3 py-2 text-sm font-black text-white lg:hidden">
-                Menu
-              </button>
-              <Link to="/" className="flex items-center gap-3">
-                <BrandLogo subtitle="Live directory" />
-              </Link>
-              </div>
-              <div className="flex items-center gap-2 lg:hidden">
-                <StackStatusButton />
-                <SettingsButton />
-                <HeaderAuth />
-              </div>
-            </div>
-            <div className="flex w-full items-center gap-3 lg:max-w-3xl">
-            <DirectorySearchField
-              value={q}
-              onChange={value => {
-                setQ(value)
-                if (value.trim()) setSelectedCategory(null)
-              }}
-            />
-            <div className="hidden lg:block">
-              <div className="flex items-center gap-2">
-                <StackStatusButton />
-                <SettingsButton />
-                <HeaderAuth />
-              </div>
-            </div>
-            </div>
-          </div>
-        </header>
-        <ServiceStatusBanner />
+    <DirectoryLayout
+      searchValue={q}
+      onSearchChange={handleSearchChange}
+    >
+      {homeMode ? (
+        <>
+          <RandomLiveHero />
 
-        <section className="flex flex-1 flex-col gap-6 py-6">
-          {!query && !selectedCategory ? <RandomLiveHero /> : null}
-
-          <div className="flex flex-col gap-3">
-            <div className="flex items-end justify-between gap-4">
-              <div>
-                <h1 className="text-3xl font-black tracking-tight sm:text-4xl">{query ? `Search: ${query}` : selectedCategory ? selectedCategory.name : 'Live channels'}</h1>
-                <p className="mt-1 text-sm font-medium text-zinc-400">{selectedCategory && !query ? 'Category streams' : 'Streams, games, and chat-ready channels'}</p>
-              </div>
-              {selectedCategory && !query ? (
-                <button onClick={() => setSelectedCategory(null)} className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-sm font-bold text-zinc-200 transition hover:border-violet-300 hover:bg-white/[0.1]">
-                  All live
-                </button>
-              ) : null}
-            </div>
-          </div>
-
-          {shownCategories.length ? (
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {shownCategories.map(category => (
-                <CategoryPill
-                  key={category.id}
-                  category={category}
-                  selected={selectedCategory?.id === category.id}
-                  onClick={() => {
-                    setQ('')
-                    setSelectedCategory(category)
-                  }}
-                />
-              ))}
-            </div>
+          {followed.isLoading ? (
+            <DirectorySection title="Following Live" subtitle="Channels from your Twitch and Streamclone follows">
+              <StreamShelfSkeleton />
+            </DirectorySection>
+          ) : homeFeed.followingLive.length ? (
+            <DirectorySection title="Following Live" subtitle="Channels from your Twitch and Streamclone follows">
+              <StreamShelf streams={homeFeed.followingLive.map(followedChannelToStream)} />
+            </DirectorySection>
           ) : null}
 
+          <DirectorySection
+            title="Recommended Live Channels"
+            subtitle="Top live channels outside your follows"
+          >
+            {error ? (
+              <div className="rounded-md border border-red-400/30 bg-red-500/10 p-5 text-sm font-semibold text-red-100">
+                Metadata service is not responding yet.
+              </div>
+            ) : loading ? (
+              <StreamShelfSkeleton />
+            ) : homeFeed.recommendedLive.length ? (
+              <StreamShelf streams={homeFeed.recommendedLive} />
+            ) : (
+              <EmptyStreams />
+            )}
+          </DirectorySection>
+
+          <DirectorySection
+            title="Browse"
+            subtitle={browseTab === 'categories' ? 'Categories sorted by live viewers' : 'Live channels sorted by viewers'}
+            action={
+              <div className="flex flex-col items-end gap-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <HomeBrowseTabs activeTab={browseTab} onChange={handleBrowseTabChange} />
+                  {browseTab === 'categories' ? (
+                    <CategorySortBar sort={categorySort} onSortChange={setCategorySort} />
+                  ) : (
+                    <DirectorySortBar sort={sort} onSortChange={handleSortChange} />
+                  )}
+                </div>
+                {browseTab === 'categories' && categorySort === 'name' ? (
+                  <p className="text-xs text-zinc-500">Name sort applies to loaded categories only</p>
+                ) : null}
+              </div>
+            }
+          >
+            {browseTab === 'categories' ? (
+              categoriesQuery.error ? (
+                <div className="rounded-md border border-red-400/30 bg-red-500/10 p-5 text-sm font-semibold text-red-100">
+                  Metadata service is not responding yet.
+                </div>
+              ) : categoriesQuery.isLoading ? (
+                <CategoryGridSkeleton />
+              ) : shownBrowseCategories.length ? (
+                <>
+                  <CategoryBrowseGrid
+                    categories={shownBrowseCategories}
+                    onSelect={category => {
+                      setQ('')
+                      setSelectedCategory(category)
+                    }}
+                  />
+                  {categoriesQuery.hasNextPage ? (
+                    <ShowMoreButton
+                      loading={categoriesQuery.isFetchingNextPage}
+                      onClick={() => categoriesQuery.fetchNextPage()}
+                    />
+                  ) : null}
+                </>
+              ) : (
+                <div className="grid min-h-64 place-items-center rounded-md bg-[#18181b] px-6 text-center">
+                  <div>
+                    <div className="text-lg font-bold text-white">No categories loaded yet</div>
+                    <div className="mt-2 text-sm text-zinc-400">Categories will appear when metadata finishes loading.</div>
+                  </div>
+                </div>
+              )
+            ) : error ? (
+              <div className="rounded-md border border-red-400/30 bg-red-500/10 p-5 text-sm font-semibold text-red-100">
+                Metadata service is not responding yet.
+              </div>
+            ) : loading ? (
+              <SkeletonGrid />
+            ) : shownBrowseStreams.length ? (
+              <>
+                <StreamGrid streams={shownBrowseStreams} />
+                {streamsQuery.hasNextPage ? (
+                  <ShowMoreButton
+                    loading={streamsQuery.isFetchingNextPage}
+                    onClick={() => streamsQuery.fetchNextPage()}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <EmptyStreams />
+            )}
+          </DirectorySection>
+        </>
+      ) : selectedCategory && !query ? (
+        <DirectorySection
+          title={selectedCategory.name}
+          subtitle="Category streams"
+          action={
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedCategory(null)}
+                className="rounded-md border border-[#3a3a3d] bg-[#18181b] px-3 py-1.5 text-sm font-semibold text-zinc-200 transition hover:border-[#53535a] hover:bg-[#1f1f23]"
+              >
+                All categories
+              </button>
+              <DirectorySortBar sort={sort} onSortChange={handleSortChange} />
+            </div>
+          }
+        >
+          {categoryStreamsQuery.error ? (
+            <div className="rounded-md border border-red-400/30 bg-red-500/10 p-5 text-sm font-semibold text-red-100">
+              Metadata service is not responding yet.
+            </div>
+          ) : categoryStreamsQuery.isLoading ? (
+            <SkeletonGrid />
+          ) : shownCategoryStreams.length ? (
+            <>
+              <StreamGrid streams={shownCategoryStreams} />
+              {categoryStreamsQuery.hasNextPage ? (
+                <ShowMoreButton
+                  loading={categoryStreamsQuery.isFetchingNextPage}
+                  onClick={() => categoryStreamsQuery.fetchNextPage()}
+                />
+              ) : null}
+            </>
+          ) : (
+            <EmptyStreams categoryName={selectedCategory.name} />
+          )}
+        </DirectorySection>
+      ) : (
+        <DirectorySection
+          title={`Search: ${query}`}
+          subtitle="Streams matching your search"
+          action={<DirectorySortBar sort={sort} onSortChange={handleSortChange} />}
+        >
           {error ? (
-            <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-5 text-sm font-semibold text-red-100">
+            <div className="rounded-md border border-red-400/30 bg-red-500/10 p-5 text-sm font-semibold text-red-100">
               Metadata service is not responding yet.
             </div>
           ) : loading ? (
             <SkeletonGrid />
-          ) : shownStreams.length ? (
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-              {shownStreams.map((s, i) => (
-                <StreamCard key={`${s.login}-${s.id ?? i}`} stream={s} index={i} />
-              ))}
-            </div>
+          ) : shownSearchStreams.length ? (
+            <StreamGrid streams={shownSearchStreams} />
           ) : (
-            <div className="grid min-h-80 place-items-center rounded-lg border border-white/10 bg-white/[0.04] px-6 text-center">
-              <div className="max-w-md">
-                <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-3xl">
-                  📡
-                </div>
-                <div className="text-lg font-black text-white">No channels match right now</div>
-                <div className="mt-2 text-sm leading-6 text-zinc-400">
-                  {query
-                    ? `Nothing turned up for "${query}". Try another spelling or browse a category.`
-                    : selectedCategory
-                      ? `No live streams in ${selectedCategory.name} at the moment — check back soon or pick another category.`
-                      : 'Live channels will appear here when metadata finishes loading.'}
-                </div>
-              </div>
-            </div>
+            <EmptyStreams query={query} />
           )}
-        </section>
-      </div>
-        </div>
-      </div>
-    </main>
+        </DirectorySection>
+      )}
+    </DirectoryLayout>
   )
 }
