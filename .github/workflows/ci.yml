@@ -52,7 +52,7 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -95,7 +95,7 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
         with:
           node-version: "22"
