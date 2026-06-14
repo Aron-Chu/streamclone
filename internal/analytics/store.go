@@ -7,18 +7,31 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"streamclone/internal/metrics"
+	"streamclone/internal/timeseries"
 )
 
 type Store struct {
-	db *pgxpool.Pool
+	db         *pgxpool.Pool
+	telemetry  timeseries.Writer
+	loginCache sync.Map
 }
 
 func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
+}
+
+func (s *Store) WithTelemetry(writer timeseries.Writer) *Store {
+	if s != nil {
+		s.telemetry = writer
+	}
+	return s
 }
 
 // Pool exposes the underlying connection pool so sibling stores (such as the
@@ -77,6 +90,9 @@ func (s *Store) UpsertLiveStream(ctx context.Context, stream LiveStream, profile
 		stream.ID, broadcasterID, normalizeLogin(stream.Login), displayName, profile.ProfileImageURL, profile.Description,
 		stream.Title, stream.GameName, string(tags), stream.Language, stream.ThumbnailURL, stream.StartedAt, seenAt, stream.ViewerCount,
 	)
+	if err == nil && stream.ID != "" {
+		s.loginCache.Store(stream.ID, normalizeLogin(stream.Login))
+	}
 	return err
 }
 
@@ -95,15 +111,22 @@ func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup 
 	if streamID == "" || rollup.MinuteTS.IsZero() {
 		return nil
 	}
+	started := time.Now()
+	result := "success"
+	defer func() {
+		metrics.AnalyticsRollupWriteDuration.WithLabelValues("upsert", result).Observe(time.Since(started).Seconds())
+	}()
 	if rollup.Emotes == nil {
 		rollup.Emotes = map[string]int{}
 	}
 	emotes, err := json.Marshal(rollup.Emotes)
 	if err != nil {
+		result = "error"
 		return err
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
+		result = "error"
 		return err
 	}
 	defer tx.Rollback(ctx)
@@ -127,12 +150,19 @@ func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup 
 		rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount, string(emotes),
 	)
 	if err != nil {
+		result = "error"
 		return err
 	}
 	if err := refreshStreamSummary(ctx, tx, streamID); err != nil {
+		result = "error"
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		result = "error"
+		return err
+	}
+	s.enqueueRollupTelemetry(ctx, streamID, []MinuteRollup{rollup})
+	return nil
 }
 
 func refreshStreamSummary(ctx context.Context, tx pgx.Tx, streamID string) error {
@@ -359,10 +389,13 @@ func (s *Store) UpsertStreamPlaceholder(ctx context.Context, streamID, broadcast
 			broadcaster_id = CASE
 				WHEN COALESCE(analytics_streams.broadcaster_id, '') = '' THEN EXCLUDED.broadcaster_id
 				ELSE analytics_streams.broadcaster_id
-			END,
+		END,
 			updated_at = now()`,
 		streamID, broadcasterID, login, title, startedAt,
 	)
+	if err == nil {
+		s.loginCache.Store(streamID, normalizeLogin(login))
+	}
 	return err
 }
 
@@ -646,9 +679,15 @@ func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, ro
 	if streamID == "" || len(rollups) == 0 {
 		return nil
 	}
+	started := time.Now()
+	result := "success"
+	defer func() {
+		metrics.AnalyticsRollupWriteDuration.WithLabelValues("bulk_upsert", result).Observe(time.Since(started).Seconds())
+	}()
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
+		result = "error"
 		return err
 	}
 	defer tx.Rollback(ctx)
@@ -660,6 +699,7 @@ func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, ro
 		}
 		emotes, err := json.Marshal(rollup.Emotes)
 		if err != nil {
+			result = "error"
 			return err
 		}
 		batch.Queue(`
@@ -685,23 +725,36 @@ func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, ro
 
 	br := tx.SendBatch(ctx, batch)
 	if err := br.Close(); err != nil {
+		result = "error"
 		return err
 	}
 
 	if err := refreshStreamSummary(ctx, tx, streamID); err != nil {
+		result = "error"
 		return err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		result = "error"
+		return err
+	}
+	s.enqueueRollupTelemetry(ctx, streamID, rollups)
+	return nil
 }
 
 func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollups []MinuteRollup) error {
 	if streamID == "" || len(rollups) == 0 {
 		return nil
 	}
+	started := time.Now()
+	result := "success"
+	defer func() {
+		metrics.AnalyticsRollupWriteDuration.WithLabelValues("bulk_patch_chat", result).Observe(time.Since(started).Seconds())
+	}()
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
+		result = "error"
 		return err
 	}
 	defer tx.Rollback(ctx)
@@ -713,6 +766,7 @@ func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollu
 		}
 		emotes, err := json.Marshal(rollup.Emotes)
 		if err != nil {
+			result = "error"
 			return err
 		}
 		batch.Queue(`
@@ -733,23 +787,36 @@ func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollu
 
 	br := tx.SendBatch(ctx, batch)
 	if err := br.Close(); err != nil {
+		result = "error"
 		return err
 	}
 
 	if err := refreshStreamSummary(ctx, tx, streamID); err != nil {
+		result = "error"
 		return err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		result = "error"
+		return err
+	}
+	s.enqueueRollupTelemetry(ctx, streamID, rollups)
+	return nil
 }
 
 func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rollups []MinuteRollup) error {
 	if streamID == "" || len(rollups) == 0 {
 		return nil
 	}
+	started := time.Now()
+	result := "success"
+	defer func() {
+		metrics.AnalyticsRollupWriteDuration.WithLabelValues("bulk_patch_viewer", result).Observe(time.Since(started).Seconds())
+	}()
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
+		result = "error"
 		return err
 	}
 	defer tx.Rollback(ctx)
@@ -777,12 +844,65 @@ func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rol
 
 	br := tx.SendBatch(ctx, batch)
 	if err := br.Close(); err != nil {
+		result = "error"
 		return err
 	}
 
 	if err := refreshStreamSummary(ctx, tx, streamID); err != nil {
+		result = "error"
 		return err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		result = "error"
+		return err
+	}
+	s.enqueueRollupTelemetry(ctx, streamID, rollups)
+	return nil
+}
+
+func (s *Store) enqueueRollupTelemetry(ctx context.Context, streamID string, rollups []MinuteRollup) {
+	if s == nil || s.telemetry == nil || streamID == "" || len(rollups) == 0 {
+		return
+	}
+	login := s.streamLogin(ctx, streamID)
+	if login == "" {
+		return
+	}
+	out := make([]timeseries.Rollup, 0, len(rollups))
+	for _, rollup := range rollups {
+		if rollup.MinuteTS.IsZero() {
+			continue
+		}
+		out = append(out, timeseries.Rollup{
+			ChannelLogin:      login,
+			StreamID:          streamID,
+			MinuteTS:          rollup.MinuteTS,
+			ViewerAvg:         rollup.ViewerAvg,
+			ViewerMax:         rollup.ViewerMax,
+			ChatCount:         rollup.ChatCount,
+			TotalEmoteCount:   rollup.TotalEmoteCount,
+			SevenTVEmoteCount: rollup.SevenTVEmoteCount,
+			Emotes:            rollup.Emotes,
+		})
+	}
+	s.telemetry.EnqueueRollups(out)
+}
+
+func (s *Store) streamLogin(ctx context.Context, streamID string) string {
+	if cached, ok := s.loginCache.Load(streamID); ok {
+		if login, ok := cached.(string); ok && login != "" {
+			return login
+		}
+	}
+	var login string
+	err := s.db.QueryRow(ctx, `SELECT login FROM analytics_streams WHERE stream_id=$1`, streamID).Scan(&login)
+	if err != nil {
+		return ""
+	}
+	login = normalizeLogin(login)
+	if login != "" {
+		s.loginCache.Store(streamID, login)
+	}
+	return login
 }

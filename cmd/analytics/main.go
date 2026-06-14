@@ -17,6 +17,7 @@ import (
 	"streamclone/internal/httpx"
 	"streamclone/internal/log"
 	"streamclone/internal/metrics"
+	"streamclone/internal/timeseries"
 )
 
 func main() {
@@ -43,7 +44,25 @@ func main() {
 	rdb := redis.NewClient(opt)
 	defer rdb.Close()
 
-	store := analytics.NewStore(pool)
+	tsWriter := timeseries.NewAsyncWriter(timeseries.Config{
+		Enabled:      cfg.TimeseriesEnabled,
+		Backend:      cfg.TimeseriesBackend,
+		URL:          cfg.InfluxDBURL,
+		Token:        cfg.InfluxDBToken,
+		Org:          cfg.InfluxDBOrg,
+		Bucket:       cfg.InfluxDBBucket,
+		WriteTimeout: time.Duration(cfg.TimeseriesWriteTimeoutMS) * time.Millisecond,
+		QueueSize:    cfg.TimeseriesQueueSize,
+	}, logger)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := tsWriter.Close(shutdownCtx); err != nil {
+			logger.Warn("time-series writer shutdown timed out", "err", err)
+		}
+	}()
+
+	store := analytics.NewStore(pool).WithTelemetry(tsWriter)
 	helix := analytics.NewHelixClient(
 		cfg.TwitchAPIURL,
 		cfg.TwitchTokenURL,

@@ -56,6 +56,7 @@ docs/images/qa/
 deploy/tmp-*
 deploy/env/oauth-bundle.env
 deploy/env/release-bundle.env
+deploy/env/helm-local.yaml
 runtime/clipper-twitch.env
 # local output / scratch
 *.bin
@@ -81,6 +82,7 @@ test.md
 Thumbs.db
 # agent screenshot stash (not README media)
 .kiro/assets/
+.kiro/settings/
 # MCP / agent debug captures (repo root)
 /analytics-*.png
 /debug-mcp-*.txt

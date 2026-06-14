@@ -1,0 +1,59 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": "InfluxDB",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"query": "from(bucket: v.bucket) |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\") |> group(columns: [\"channel_login\", \"provider\", \"emote_id\", \"emote_name\"]) |> aggregateWindow(every: 5m, fn: sum) |> top(n: 20)", "refId": "A"}],
+      "title": "Top Emotes Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "InfluxDB",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [{"query": "from(bucket: v.bucket) |> range(start: -30m) |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\") |> group(columns: [\"channel_login\", \"provider\", \"emote_id\", \"emote_name\"]) |> increase() |> sort(columns: [\"_value\"], desc: true) |> limit(n: 25)", "refId": "A"}],
+      "title": "Fastest Rising Emotes",
+      "type": "table"
+    },
+    {
+      "datasource": "InfluxDB",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+      "id": 3,
+      "targets": [{"query": "from(bucket: v.bucket) |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\") |> group(columns: [\"provider\"]) |> aggregateWindow(every: 5m, fn: sum)", "refId": "A"}],
+      "title": "Provider Share",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "InfluxDB",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+      "id": 4,
+      "targets": [{"query": "from(bucket: v.bucket) |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and (r._field == \"chat_count\" or r._field == \"viewer_max\" or r._field == \"total_emote_count\")) |> aggregateWindow(every: 1m, fn: max)", "refId": "A"}],
+      "title": "Chat, Viewers, Emotes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "InfluxDB",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+      "id": 5,
+      "targets": [{"query": "from(bucket: v.bucket) |> range(start: -10m) |> filter(fn: (r) => r._measurement == \"stream_activity_1m\") |> filter(fn: (r) => r._field == \"chat_count\" or r._field == \"total_emote_count\" or r._field == \"seventv_emote_count\") |> last() |> pivot(rowKey:[\"_time\"], columnKey:[\"_field\"], valueColumn:\"_value\") |> group(columns:[\"channel_login\", \"stream_id\"])", "refId": "A"}],
+      "title": "Current Live Pulse",
+      "type": "table"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["streamclone", "emotes", "influxdb"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "Emote Pulse",
+  "uid": "streamclone-emote-pulse",
+  "version": 1
+}

@@ -38,4 +38,34 @@ if (Get-Command rg -ErrorAction SilentlyContinue) {
     }
 }
 
+Write-Host '==> tracked artifact denylist'
+$denyPatterns = @(
+    '.kiro/settings/*',
+    'deploy/cookies.txt',
+    'runtime/clipper-twitch.env',
+    'out.json',
+    'test.md',
+    'pw-*.png',
+    'analytics',
+    'tmp-vod-*',
+    'tmp-metadata-*',
+    'debug-*.log',
+    '.cursor/debug-*.log',
+    '*/testdata/rapid/*.fail'
+)
+$badPaths = @()
+git ls-files | ForEach-Object {
+    $path = $_
+    foreach ($pattern in $denyPatterns) {
+        if ($path -like $pattern) {
+            $badPaths += $path
+            break
+        }
+    }
+}
+if ($badPaths.Count -gt 0) {
+    $badPaths | ForEach-Object { Write-Host $_ }
+    throw 'Tracked local artifacts found; remove or untrack them before committing.'
+}
+
 Write-Host 'security-scan ok'

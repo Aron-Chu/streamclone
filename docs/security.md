@@ -11,7 +11,9 @@ Streamclone uses unofficial Twitch/7TV endpoints for **personal self-hosting**. 
 - Watch, directory, and chat read work without login.
 - OAuth tokens live in Redis when you sign in.
 - `make setup` generates random secrets (`CURATOR_API_TOKEN`, `CLIPPER_WEBHOOK_TOKEN`, etc.).
+- Raw compose ports bind to `127.0.0.1` by default. Treat `http://localhost:8090` as the browser entrypoint.
 - **Do not** expose raw compose ports (`5432`, `6379`, `8095`, …) to the internet.
+- Do not paste raw `docker compose config`, `.env`, setup-control diagnostics, or container env dumps into issues/PRs. They can contain OAuth tokens, setup-control tokens, clipper tokens, and generated install secrets.
 
 ### Empty secrets = no auth
 
@@ -23,9 +25,18 @@ Streamclone uses unofficial Twitch/7TV endpoints for **personal self-hosting**. 
 
 Run `make validate-env` before treating an install as production-ready.
 
+## Tunnels
+
+Local tunnels should forward the loopback proxy (`127.0.0.1:8090`) only. When `PUBLIC_ORIGIN` or `FRONTEND_ORIGIN` is not loopback:
+
+- Set `TWITCH_DEV_TOKEN_IMPORT_ENABLED=false`.
+- Treat `SETUP_CONTROL_TOKEN` and `VITE_CLIPPER_TOKEN` as browser-visible. Any visitor who can load `/config.js` can read them.
+- Leave `SETUP_CONTROL_TOKEN` unset unless every tunnel visitor is trusted to start optional profiles or sync clipper auth.
+- Leave `VITE_CLIPPER_TOKEN` unset unless every tunnel visitor is trusted to call clipper mutation APIs.
+
 ## Public VM deploy
 
-Use TLS (Caddy), firewall (443 only), rate limits, `TWITCH_DEV_TOKEN_IMPORT_ENABLED=false`, strong rotated secrets. Checklist: [deploy/FREE_DEPLOYMENT.md](../deploy/FREE_DEPLOYMENT.md).
+Use TLS (Caddy), firewall (443 only), rate limits, `TWITCH_DEV_TOKEN_IMPORT_ENABLED=false`, strong rotated secrets. The production compose overlay removes raw service ports; Caddy on `80/443` should be the only public entrypoint. Checklist: [deploy/FREE_DEPLOYMENT.md](../deploy/FREE_DEPLOYMENT.md).
 
 ## Developers
 
@@ -33,7 +44,9 @@ Use TLS (Caddy), firewall (443 only), rate limits, `TWITCH_DEV_TOKEN_IMPORT_ENAB
 make install-hooks && make security-scan
 ```
 
-CI: gitleaks, govulncheck, npm audit on `master`. Never commit `.env` or tokens.
+CI: gitleaks, govulncheck, npm audit, tests, and compose validation. Never commit `.env` or tokens.
+
+Before sharing support bundles, redact `.env`, rendered compose config, setup-control output, clipper diagnostics, cookies, and screenshots that show tokens or local account data.
 
 ## Uninstall
 

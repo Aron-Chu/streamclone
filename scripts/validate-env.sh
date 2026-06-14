@@ -97,6 +97,15 @@ loopback_install=false
 if env_loopback_public_origin "$ENV_FILE" 2>/dev/null; then
   loopback_install=true
 fi
+non_loopback_origin=false
+public_origin="$(env_read_value "$ENV_FILE" PUBLIC_ORIGIN || true)"
+frontend_origin="$(env_read_value "$ENV_FILE" FRONTEND_ORIGIN || true)"
+if [ "$loopback_install" != true ] && { [ -n "$public_origin" ] || [ -n "$frontend_origin" ]; }; then
+  non_loopback_origin=true
+fi
+if [ "$dev_import" = "true" ] && [ "$non_loopback_origin" = true ]; then
+  fail "TWITCH_DEV_TOKEN_IMPORT_ENABLED=true with a non-loopback PUBLIC_ORIGIN/FRONTEND_ORIGIN" "Set TWITCH_DEV_TOKEN_IMPORT_ENABLED=false before using a tunnel or public domain"
+fi
 if [ "$use_images" = "1" ]; then
   if [ "$dev_import" = "true" ] && [ "$loopback_install" != true ]; then
     warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED=true on a non-loopback release install" "Dev-only token import should stay false outside localhost (docs/security.md)"
@@ -105,6 +114,22 @@ if [ "$use_images" = "1" ]; then
   fi
 elif [ "$dev_import" != "true" ]; then
   warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true" "Run make setup (.env.dev sets this for in-app local token import)"
+fi
+
+if [ "$non_loopback_origin" = true ]; then
+  setup_token="$(env_read_value "$ENV_FILE" SETUP_CONTROL_TOKEN || true)"
+  clipper_browser_token="$(env_read_value "$ENV_FILE" VITE_CLIPPER_TOKEN || true)"
+  if [ -n "$setup_token" ]; then
+    warn "SETUP_CONTROL_TOKEN is exposed to browsers through /config.js on a non-loopback origin" "Unset SETUP_CONTROL_TOKEN or restrict tunnel access; setup-control mutations are intended for trusted localhost only"
+  fi
+  if [ -n "$clipper_browser_token" ]; then
+    warn "VITE_CLIPPER_TOKEN is exposed to browsers through /config.js on a non-loopback origin" "Unset VITE_CLIPPER_TOKEN unless every visitor is trusted to call clipper mutation APIs"
+  fi
+  s3_access="$(env_read_value "$ENV_FILE" S3_ACCESS_KEY || true)"
+  s3_secret="$(env_read_value "$ENV_FILE" S3_SECRET_KEY || true)"
+  if [ "$s3_access" = "minioadmin" ] || [ "$s3_secret" = "minioadmin" ]; then
+    warn "MinIO root credentials are still the local defaults on a non-loopback origin" "Rotate S3_ACCESS_KEY/S3_SECRET_KEY before treating this install as production-ready"
+  fi
 fi
 
 oauth_id="$(env_read_value "$ENV_FILE" TWITCH_OAUTH_CLIENT_ID || true)"

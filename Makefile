@@ -1,12 +1,14 @@
 GO ?= go
 ENV_FILE ?= .env
 COMPOSE_CORE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml
-COMPOSE ?= $(COMPOSE_CORE)
 COMPOSE_SCRAPER ?= $(COMPOSE_CORE) --profile scraper
 COMPOSE_FULL ?= $(COMPOSE_CORE) --profile scraper --profile clipper
-OBS_COMPOSE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml
-PROD_COMPOSE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml
-BASE_COMPOSE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml
+HELM ?= helm
+HELM_RELEASE ?= streamclone-pulse
+HELM_CHART ?= charts/pulse
+HELM_NAMESPACE ?= streamclone
+HELM_LOCAL_VALUES ?= deploy/env/helm-local.yaml
+HELM_EXAMPLE_VALUES ?= deploy/env/helm-local.example.yaml
 POWERSHELL ?= powershell.exe
 TWITCH_SCOPES ?= chat:read chat:edit user:read:follows clips:edit
 TWITCH_LOCAL_AUTH_URL ?= http://localhost:8090
@@ -19,44 +21,44 @@ CODEGRAPH_VENV ?= .codegraph/.venv
 CODEGRAPH_PY ?= $(CODEGRAPH_VENV)/bin/python
 CODEGRAPH_DB ?= .codegraph/streamclone.kuzu
 
-# Services that read TWITCH_OAUTH_* / session env at container create time (restart is not enough).
 ENV_RELOAD_SERVICES ?= chat metadata analytics emote
 
-.PHONY: env ensure-oauth ensure-clipper-auth ensure-frontend-config refresh-auth rebuild app stop restart up down down-clean ps ports migrate logs obs-up obs-down obs-logs obs-config test vet build tidy twitch twitch-debug twitch-version twitch-configure twitch-sync twitch-token twitch-local-auth clipper-test clipper-run clipper-restart codegraph-install codegraph codegraph-mcp docs-screenshots docs-media frontend-build frontend-restart frontend-logs up-scraper up-full bootstrap setup setup-core setup-full validate-env security-scan smoke smoke-ui install-hooks reload-env reload-env-if-stale scraper-reload scraper-check scraper-preflight scraper-warm preflight-deps start stop-user
+.PHONY: help env up app stop down down-clean nuke restart rebuild up-scraper up-full \
+	refresh-auth reload-env reload-env-if-stale ensure-oauth ensure-clipper-auth ensure-frontend-config \
+	scraper-reload scraper-check scraper-preflight scraper-warm ps ports migrate logs \
+	helm-kubeconfig helm-up helm-down helm-status helm-lint \
+	test vet build tidy integration-up integration-down integration-test \
+	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
+	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp \
+	docs-screenshots docs-media frontend-build frontend-restart frontend-logs \
+	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
+	preflight-deps start stop-user
 
-preflight-deps:
-	@bash scripts/preflight-deps.sh --install-hints
-
-start:
-	@bash scripts/start-streamclone.sh
-
-stop-user:
-	@bash scripts/stop-streamclone.sh
-
-reload-env: env
-	@echo "Recreating env-sensitive services ($(ENV_RELOAD_SERVICES))..."
-	$(COMPOSE_CORE) up -d --no-deps --force-recreate $(ENV_RELOAD_SERVICES)
-
-reload-env-if-stale: env
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/reload-env-if-stale.ps1 -EnvFile $(ENV_FILE)
-
-ensure-oauth: env
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-oauth-env.ps1 -EnvFile $(ENV_FILE) || true
-
-# Validate/refresh clipper user token and force-recreate clipper when .env drifted (restart is not enough).
-ensure-clipper-auth: env
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-clipper-auth.ps1 -EnvFile $(ENV_FILE) || true
-
-ensure-frontend-config: env
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-frontend-config.ps1 -EnvFile $(ENV_FILE) || true
-
-# Sync OAuth app creds, reload stale Go services, refresh clipper token when possible.
-refresh-auth: env ensure-oauth reload-env-if-stale ensure-clipper-auth
+help:
+	@printf 'Streamclone — common targets\n\n'
+	@printf 'Stack:\n'
+	@printf '  make up / app        Start core stack\n'
+	@printf '  make up-scraper      Core + TwitchTracker scraper\n'
+	@printf '  make up-full         Scraper + clipper\n'
+	@printf '  make stop / down     Stop compose (keep data)\n'
+	@printf '  make down-clean      Stop + remove pg/minio/clipper volumes\n'
+	@printf '  make nuke            down-clean + helm pulse + integration + orphans\n'
+	@printf '  make restart         stop + up\n'
+	@printf '  make rebuild         stop + up-full\n'
+	@printf '  make ps / ports / logs / migrate\n\n'
+	@printf 'Auth:\n'
+	@printf '  make refresh-auth        OAuth sync + reload stale services\n'
+	@printf '  make twitch-local-auth   Device-code login for localhost:8090\n'
+	@printf '  make twitch-sync         Sync Twitch CLI creds into .env\n\n'
+	@printf 'Helm (Emote Pulse sandbox): docs/helm-pulse.md\n'
+	@printf '  make helm-kubeconfig  Link Docker Desktop kubeconfig (WSL)\n'
+	@printf '  make helm-up / down / status / lint\n\n'
+	@printf 'Quality: make test | vet | build | clipper-test | smoke | security-scan\n'
 
 env:
 	@test -f .env || cp .env.dev .env
 
-app: env ensure-oauth
+up app: env ensure-oauth
 	$(COMPOSE_CORE) up -d --build --remove-orphans
 	@$(MAKE) reload-env-if-stale
 
@@ -71,8 +73,35 @@ up-full: env ensure-oauth
 	@$(MAKE) ensure-clipper-auth
 	@if [ -z "$$SCRAPER_SKIP_PREFLIGHT" ]; then $(MAKE) scraper-preflight; fi
 
-# Full teardown + standup with OAuth/clipper token hygiene. Prefer over bare restart after .env or auth changes.
+stop down:
+	@ENV_FILE=$(ENV_FILE) bash scripts/compose-down.sh
+
+down-clean:
+	@ENV_FILE=$(ENV_FILE) bash scripts/compose-down.sh --volumes
+
+nuke:
+	@ENV_FILE=$(ENV_FILE) bash scripts/nuke.sh
+
+restart: stop up
 rebuild: stop up-full
+
+reload-env: env
+	@echo "Recreating env-sensitive services ($(ENV_RELOAD_SERVICES))..."
+	$(COMPOSE_CORE) up -d --no-deps --force-recreate $(ENV_RELOAD_SERVICES)
+
+reload-env-if-stale: env
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/reload-env-if-stale.ps1 -EnvFile $(ENV_FILE)
+
+ensure-oauth: env
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-oauth-env.ps1 -EnvFile $(ENV_FILE) || true
+
+ensure-clipper-auth: env
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-clipper-auth.ps1 -EnvFile $(ENV_FILE) || true
+
+ensure-frontend-config: env
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-frontend-config.ps1 -EnvFile $(ENV_FILE) || true
+
+refresh-auth: env ensure-oauth reload-env-if-stale ensure-clipper-auth
 
 scraper-reload: env
 	$(COMPOSE_SCRAPER) up -d --no-deps --force-recreate scraper
@@ -86,32 +115,6 @@ scraper-preflight: env
 scraper-warm:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/warm-camoufox-profile.ps1
 
-stop: env
-	@echo "Stopping all Streamclone compose stacks..."
-	-$(COMPOSE_FULL) down --remove-orphans --timeout 30
-	-$(COMPOSE_CORE) down --remove-orphans --timeout 30
-	-$(OBS_COMPOSE) down --remove-orphans --timeout 30
-	-$(PROD_COMPOSE) down --remove-orphans --timeout 30
-	-$(BASE_COMPOSE) down --remove-orphans --timeout 30
-	-@docker rm -f streamclone-chat-tunnel 2>/dev/null || true
-	@echo "Done. Run 'make ps' to verify nothing is still listening on app ports."
-
-# Full teardown + standup. Use after .env changes if you prefer a clean slate over make reload-env.
-restart: stop app
-
-up: app
-
-down: stop
-
-down-clean: env
-	@echo "Stopping stacks and removing named volumes (pg-data, minio-data, clipper-data)..."
-	-$(COMPOSE_FULL) down --remove-orphans -v --timeout 30
-	-$(COMPOSE_CORE) down --remove-orphans -v --timeout 30
-	-$(OBS_COMPOSE) down --remove-orphans -v --timeout 30
-	-$(PROD_COMPOSE) down --remove-orphans -v --timeout 30
-	-$(BASE_COMPOSE) down --remove-orphans -v --timeout 30
-	-@docker rm -f streamclone-chat-tunnel 2>/dev/null || true
-
 ps: env
 	@docker ps -a --filter "name=streamclone" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
@@ -124,17 +127,24 @@ migrate: env
 logs: env
 	$(COMPOSE_CORE) logs -f
 
-obs-up: env
-	$(OBS_COMPOSE) up -d --build
+helm-kubeconfig:
+	@bash scripts/helm-preflight.sh
 
-obs-down: env
-	$(OBS_COMPOSE) down
+helm-up: helm-kubeconfig
+	@values=""; \
+	if [ -f "$(HELM_LOCAL_VALUES)" ]; then values="-f $(HELM_LOCAL_VALUES)"; \
+	elif [ -f "$(HELM_EXAMPLE_VALUES)" ]; then values="-f $(HELM_EXAMPLE_VALUES)"; fi; \
+	$(HELM) upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
+		-n $(HELM_NAMESPACE) --create-namespace $$values --wait
 
-obs-logs: env
-	$(OBS_COMPOSE) logs -f prometheus grafana loki promtail
+helm-down:
+	-$(HELM) uninstall $(HELM_RELEASE) -n $(HELM_NAMESPACE)
 
-obs-config:
-	$(OBS_COMPOSE) config
+helm-status:
+	kubectl -n $(HELM_NAMESPACE) get pods,svc
+
+helm-lint:
+	$(HELM) lint $(HELM_CHART)
 
 test:
 	$(GO) test ./...
@@ -160,9 +170,6 @@ tidy:
 clipper-test:
 	PYTHONPATH=clipper $(CLIPPER_PYTHON) -m unittest discover -s clipper/tests
 
-clipper-run:
-	PYTHONPATH=clipper $(CLIPPER_PYTHON) -m liveclipper
-
 codegraph-install:
 	python3 -m venv $(CODEGRAPH_VENV)
 	$(CODEGRAPH_PY) -m pip install -r tools/codegraph/requirements.txt
@@ -175,13 +182,7 @@ codegraph-mcp:
 	$(CODEGRAPH_PY) tools/codegraph/codegraph_mcp.py --repo "$(CURDIR)" --db "$(CURDIR)/$(CODEGRAPH_DB)"
 
 twitch: env
-	@if [ "$(TWITCH_ACTION)" = "version" ]; then \
-		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action version; \
-	elif [ "$(TWITCH_ACTION)" = "configure" ]; then \
-		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action configure; \
-	elif [ "$(TWITCH_ACTION)" = "token" ]; then \
-		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action token -Scopes "$(TWITCH_SCOPES)"; \
-	elif [ "$(TWITCH_ACTION)" = "sync" ]; then \
+	@if [ "$(TWITCH_ACTION)" = "sync" ]; then \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action sync-env -EnvFile $(ENV_FILE); \
 		$(MAKE) reload-env; \
 	elif [ "$(TWITCH_ACTION)" = "local-auth" ]; then \
@@ -192,8 +193,7 @@ twitch: env
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action refresh-clipper-token -EnvFile $(ENV_FILE); \
 		$(COMPOSE_FULL) up -d --force-recreate clipper; \
 	else \
-		echo "Unsupported TWITCH_ACTION=$(TWITCH_ACTION). Use version, configure, token, sync, local-auth, or refresh-clipper-token."; \
-		exit 1; \
+		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action $(TWITCH_ACTION) -EnvFile $(ENV_FILE) -Scopes "$(TWITCH_SCOPES)" -ChatHttp "$(TWITCH_LOCAL_AUTH_URL)"; \
 	fi
 
 twitch-debug: env
@@ -203,17 +203,8 @@ twitch-debug: env
 	@curl -fsS "$(TWITCH_LOCAL_AUTH_URL)/v1/channels/$(TWITCH_CLIP_LOGIN)/clips?limit=1"
 	@printf '\n'
 
-twitch-version:
-	@$(MAKE) twitch TWITCH_ACTION=version
-
-twitch-configure:
-	@$(MAKE) twitch TWITCH_ACTION=configure
-
 twitch-sync:
 	@$(MAKE) twitch TWITCH_ACTION=sync
-
-twitch-token:
-	@$(MAKE) twitch TWITCH_ACTION=token
 
 twitch-local-auth:
 	@$(MAKE) twitch TWITCH_ACTION=local-auth
@@ -226,9 +217,6 @@ docs-screenshots:
 
 docs-media:
 	cd frontend && npx playwright install chromium && npm run docs:media
-
-docs-media-analytics:
-	cd frontend && npx playwright install chromium && npm run docs:media:analytics
 
 frontend-build:
 	cd frontend && npm run build
@@ -250,12 +238,6 @@ bootstrap:
 setup:
 	@bash scripts/setup.sh
 
-setup-core:
-	@bash scripts/setup.sh --profile core --non-interactive
-
-setup-full:
-	@bash scripts/setup.sh --profile full --non-interactive
-
 validate-env:
 	@bash scripts/validate-env.sh --profile $(PROFILE)
 
@@ -271,3 +253,12 @@ install-hooks:
 
 security-scan:
 	@bash scripts/security-scan.sh
+
+preflight-deps:
+	@bash scripts/preflight-deps.sh --install-hints
+
+start:
+	@bash scripts/start-streamclone.sh
+
+stop-user:
+	@bash scripts/stop-streamclone.sh

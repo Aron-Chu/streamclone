@@ -69,6 +69,13 @@ Test-Required -Key 'FRONTEND_ORIGIN' -Fix 'Set FRONTEND_ORIGIN=http://localhost:
 
 $isReleaseInstall = ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1')
 $loopbackInstall = Test-EnvLoopbackPublicOrigin -EnvValues $envValues
+$nonLoopbackOrigin = (-not $loopbackInstall) -and (
+    -not [string]::IsNullOrWhiteSpace($envValues['PUBLIC_ORIGIN']) -or
+    -not [string]::IsNullOrWhiteSpace($envValues['FRONTEND_ORIGIN'])
+)
+if ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -eq 'true' -and $nonLoopbackOrigin) {
+    Add-ValidateError -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED=true with a non-loopback PUBLIC_ORIGIN/FRONTEND_ORIGIN' -Fix 'Set TWITCH_DEV_TOKEN_IMPORT_ENABLED=false before using a tunnel or public domain'
+}
 if ($isReleaseInstall) {
     if ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -eq 'true' -and -not $loopbackInstall) {
         Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED=true on a non-loopback release install' -Hint 'Dev-only token import should stay false outside localhost (docs/security.md)'
@@ -77,6 +84,18 @@ if ($isReleaseInstall) {
     }
 } elseif ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -ne 'true') {
     Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true' -Hint 'Run make setup (.env.dev sets this for in-app local token import)'
+}
+
+if ($nonLoopbackOrigin) {
+    if (-not [string]::IsNullOrWhiteSpace($envValues['SETUP_CONTROL_TOKEN'])) {
+        Add-ValidateWarning -Message 'SETUP_CONTROL_TOKEN is exposed to browsers through /config.js on a non-loopback origin' -Hint 'Unset SETUP_CONTROL_TOKEN or restrict tunnel access; setup-control mutations are intended for trusted localhost only'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($envValues['VITE_CLIPPER_TOKEN'])) {
+        Add-ValidateWarning -Message 'VITE_CLIPPER_TOKEN is exposed to browsers through /config.js on a non-loopback origin' -Hint 'Unset VITE_CLIPPER_TOKEN unless every visitor is trusted to call clipper mutation APIs'
+    }
+    if ($envValues['S3_ACCESS_KEY'] -eq 'minioadmin' -or $envValues['S3_SECRET_KEY'] -eq 'minioadmin') {
+        Add-ValidateWarning -Message 'MinIO root credentials are still the local defaults on a non-loopback origin' -Hint 'Rotate S3_ACCESS_KEY/S3_SECRET_KEY before treating this install as production-ready'
+    }
 }
 
 $oauthId = $envValues['TWITCH_OAUTH_CLIENT_ID']

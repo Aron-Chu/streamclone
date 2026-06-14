@@ -1,0 +1,26 @@
+namespace: streamclone
+
+influxdb:
+  enabled: true
+  org: streamclone
+  bucket: streamclone
+  adminToken: dev-pulse-token
+  image: influxdb:2.7-alpine
+  username: admin
+  password: devpulse
+  persistence:
+    enabled: true
+    size: 20Gi
+
+grafana:
+  enabled: true
+  adminUser: admin
+  adminPassword: devpulse
+  serviceType: NodePort
+  servicePort: 3000
+  image: grafana/grafana:11.5.0
+
+prometheus:
+  enabled: true
+  image: prom/prometheus:v3.2.1
+  retention: 15d

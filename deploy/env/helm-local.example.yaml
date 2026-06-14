@@ -1,0 +1,8 @@
+# Copy to deploy/env/helm-local.yaml (gitignored) and override dev defaults.
+# Used by: make helm-up
+
+influxdb:
+  adminToken: "change-me-influx-token"
+
+grafana:
+  adminPassword: "change-me"
