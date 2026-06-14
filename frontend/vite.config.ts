@@ -12,7 +12,6 @@ const usePollingWatch = Boolean(
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5174,
     watch: usePollingWatch
       ? {
           usePolling: true,

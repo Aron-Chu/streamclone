@@ -24,7 +24,7 @@ Read `.kiro/steering/windows-dev.md` first.
 
 ## UI verification
 
-Use **Playwright MCP** only against **`http://localhost:8090`** (Caddy proxy). Do not point Playwright at `:5174`, `:8081`, or raw service ports unless intentionally bypassing the proxy.
+Use **Playwright MCP** only against **`http://localhost:8090`** (Caddy proxy). Do not point Playwright at raw service ports unless intentionally bypassing the proxy.
 
 ## Probes
 

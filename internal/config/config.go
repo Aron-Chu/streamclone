@@ -30,10 +30,10 @@ type Config struct {
 	RedditHTMLFallback  bool          `env:"REDDIT_HTML_FALLBACK" envDefault:"false"`
 	RedditThirdPartyURL string        `env:"REDDIT_THIRD_PARTY_URL"`
 	RedditThirdPartyKey string        `env:"REDDIT_THIRD_PARTY_KEY"`
-	ScraperAPIURL  string `env:"SCRAPER_API_URL"`
-	ScraperAPIKey  string `env:"SCRAPER_API_KEY"`
-	FirecrawlAPIURL string `env:"FIRECRAWL_API_URL"` // deprecated alias for SCRAPER_API_URL
-	FirecrawlAPIKey string `env:"FIRECRAWL_API_KEY"` // deprecated alias for SCRAPER_API_KEY
+	ScraperAPIURL       string        `env:"SCRAPER_API_URL"`
+	ScraperAPIKey       string        `env:"SCRAPER_API_KEY"`
+	FirecrawlAPIURL     string        `env:"FIRECRAWL_API_URL"` // deprecated alias for SCRAPER_API_URL
+	FirecrawlAPIKey     string        `env:"FIRECRAWL_API_KEY"` // deprecated alias for SCRAPER_API_KEY
 	YouTubeAPIKey       string        `env:"YOUTUBE_API_KEY"`
 	YouTubeProvider     string        `env:"YOUTUBE_PROVIDER" envDefault:"auto"`
 	YouTubeAPIBaseURL   string        `env:"YOUTUBE_API_BASE_URL" envDefault:"https://www.googleapis.com/youtube/v3"`
@@ -56,32 +56,32 @@ type Config struct {
 	MaxChannelsPerSocket int `env:"MAX_CHANNELS_PER_SOCKET" envDefault:"30"`
 	DeltaDebounceMS      int `env:"DELTA_DEBOUNCE_MS" envDefault:"300"`
 
-	MaxConcurrentTrackedChannels int           `env:"MAX_CONCURRENT_TRACKED_CHANNELS" envDefault:"50"`
-	AnalyticsPollInterval        time.Duration `env:"ANALYTICS_POLL_INTERVAL" envDefault:"15s"`
-	AnalyticsRetentionDays       int           `env:"ANALYTICS_RETENTION_DAYS" envDefault:"30"`
-	AnalyticsVODChatRetentionDays int          `env:"ANALYTICS_VOD_CHAT_RETENTION_DAYS" envDefault:"90"`
-	AnalyticsTopEmotesPerMinute  int           `env:"ANALYTICS_TOP_EMOTES_PER_MINUTE" envDefault:"200"`
-	AnalyticsVODGQLPageDelayMS        int `env:"ANALYTICS_VOD_GQL_PAGE_DELAY_MS" envDefault:"0"`
-	AnalyticsVODGQLConcurrency        int `env:"ANALYTICS_VOD_GQL_CONCURRENCY" envDefault:"3"`
-	AnalyticsVODGQLConcurrencyMin     int `env:"ANALYTICS_VOD_GQL_CONCURRENCY_MIN" envDefault:"0"`
-	AnalyticsVODGQLConcurrencyMax     int `env:"ANALYTICS_VOD_GQL_CONCURRENCY_MAX" envDefault:"0"`
-	AnalyticsVODGQLSegmentSeconds          int  `env:"ANALYTICS_VOD_GQL_SEGMENT_SECONDS" envDefault:"600"`
-	AnalyticsVODGQLDenseSegmentSeconds     int  `env:"ANALYTICS_VOD_GQL_DENSE_SEGMENT_SECONDS" envDefault:"120"`
-	AnalyticsVODGQLHotSegmentPageThreshold int  `env:"ANALYTICS_VOD_GQL_HOT_SEGMENT_PAGE_THRESHOLD" envDefault:"10"`
-	AnalyticsVODGQLHotSlowAdvanceSec       int  `env:"ANALYTICS_VOD_GQL_HOT_SLOW_ADVANCE_SEC" envDefault:"30"`
-	AnalyticsVODGQLHotSlowAdvancePages     int  `env:"ANALYTICS_VOD_GQL_HOT_SLOW_ADVANCE_PAGES" envDefault:"5"`
-	AnalyticsVODGQLHotCommentsPerPage        int  `env:"ANALYTICS_VOD_GQL_HOT_COMMENTS_PER_PAGE" envDefault:"80"`
-	AnalyticsVODGQLPriorityEdgeSeconds     int  `env:"ANALYTICS_VOD_GQL_PRIORITY_EDGE_SECONDS" envDefault:"600"`
-	AnalyticsVODGQLIncrementalDB             bool `env:"ANALYTICS_VOD_GQL_INCREMENTAL_DB" envDefault:"true"`
-	AnalyticsTrackerScrapeMS        int  `env:"ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS" envDefault:"120000"`
-	AnalyticsPassTTMaxAge             bool `env:"ANALYTICS_PASS_TT_MAXAGE" envDefault:"true"`
-	AnalyticsTTMaxAgeMS               int  `env:"ANALYTICS_TT_MAX_AGE_MS" envDefault:"0"`
-	AnalyticsTTStaleMaxAgeMS          int  `env:"ANALYTICS_TT_STALE_MAX_AGE_MS" envDefault:"604800000"`
-	AnalyticsTTPrefetchEnabled        bool `env:"ANALYTICS_TT_PREFETCH_ENABLED" envDefault:"true"`
-	AnalyticsTTDirectHTTPEnabled      bool `env:"ANALYTICS_TT_DIRECT_HTTP_ENABLED" envDefault:"true"`
-	AnalyticsTTDirectHTTPStaleOnly    bool `env:"ANALYTICS_TT_DIRECT_HTTP_STALE_ONLY" envDefault:"false"`
-	AnalyticsTTDirectHTTPTimeoutMS    int  `env:"ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS" envDefault:"1200"`
-	AlwaysTrackedChannels        []string      `env:"ALWAYS_TRACKED_CHANNELS" envSeparator:","`
+	MaxConcurrentTrackedChannels           int           `env:"MAX_CONCURRENT_TRACKED_CHANNELS" envDefault:"50"`
+	AnalyticsPollInterval                  time.Duration `env:"ANALYTICS_POLL_INTERVAL" envDefault:"15s"`
+	AnalyticsRetentionDays                 int           `env:"ANALYTICS_RETENTION_DAYS" envDefault:"30"`
+	AnalyticsVODChatRetentionDays          int           `env:"ANALYTICS_VOD_CHAT_RETENTION_DAYS" envDefault:"90"`
+	AnalyticsTopEmotesPerMinute            int           `env:"ANALYTICS_TOP_EMOTES_PER_MINUTE" envDefault:"200"`
+	AnalyticsVODGQLPageDelayMS             int           `env:"ANALYTICS_VOD_GQL_PAGE_DELAY_MS" envDefault:"0"`
+	AnalyticsVODGQLConcurrency             int           `env:"ANALYTICS_VOD_GQL_CONCURRENCY" envDefault:"3"`
+	AnalyticsVODGQLConcurrencyMin          int           `env:"ANALYTICS_VOD_GQL_CONCURRENCY_MIN" envDefault:"0"`
+	AnalyticsVODGQLConcurrencyMax          int           `env:"ANALYTICS_VOD_GQL_CONCURRENCY_MAX" envDefault:"0"`
+	AnalyticsVODGQLSegmentSeconds          int           `env:"ANALYTICS_VOD_GQL_SEGMENT_SECONDS" envDefault:"600"`
+	AnalyticsVODGQLDenseSegmentSeconds     int           `env:"ANALYTICS_VOD_GQL_DENSE_SEGMENT_SECONDS" envDefault:"120"`
+	AnalyticsVODGQLHotSegmentPageThreshold int           `env:"ANALYTICS_VOD_GQL_HOT_SEGMENT_PAGE_THRESHOLD" envDefault:"10"`
+	AnalyticsVODGQLHotSlowAdvanceSec       int           `env:"ANALYTICS_VOD_GQL_HOT_SLOW_ADVANCE_SEC" envDefault:"30"`
+	AnalyticsVODGQLHotSlowAdvancePages     int           `env:"ANALYTICS_VOD_GQL_HOT_SLOW_ADVANCE_PAGES" envDefault:"5"`
+	AnalyticsVODGQLHotCommentsPerPage      int           `env:"ANALYTICS_VOD_GQL_HOT_COMMENTS_PER_PAGE" envDefault:"80"`
+	AnalyticsVODGQLPriorityEdgeSeconds     int           `env:"ANALYTICS_VOD_GQL_PRIORITY_EDGE_SECONDS" envDefault:"600"`
+	AnalyticsVODGQLIncrementalDB           bool          `env:"ANALYTICS_VOD_GQL_INCREMENTAL_DB" envDefault:"true"`
+	AnalyticsTrackerScrapeMS               int           `env:"ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS" envDefault:"120000"`
+	AnalyticsPassTTMaxAge                  bool          `env:"ANALYTICS_PASS_TT_MAXAGE" envDefault:"true"`
+	AnalyticsTTMaxAgeMS                    int           `env:"ANALYTICS_TT_MAX_AGE_MS" envDefault:"0"`
+	AnalyticsTTStaleMaxAgeMS               int           `env:"ANALYTICS_TT_STALE_MAX_AGE_MS" envDefault:"604800000"`
+	AnalyticsTTPrefetchEnabled             bool          `env:"ANALYTICS_TT_PREFETCH_ENABLED" envDefault:"true"`
+	AnalyticsTTDirectHTTPEnabled           bool          `env:"ANALYTICS_TT_DIRECT_HTTP_ENABLED" envDefault:"true"`
+	AnalyticsTTDirectHTTPStaleOnly         bool          `env:"ANALYTICS_TT_DIRECT_HTTP_STALE_ONLY" envDefault:"false"`
+	AnalyticsTTDirectHTTPTimeoutMS         int           `env:"ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS" envDefault:"1200"`
+	AlwaysTrackedChannels                  []string      `env:"ALWAYS_TRACKED_CHANNELS" envSeparator:","`
 
 	TwitchOAuthClientID     string `env:"TWITCH_OAUTH_CLIENT_ID"`
 	TwitchOAuthClientSecret string `env:"TWITCH_OAUTH_CLIENT_SECRET"`
@@ -95,7 +95,7 @@ type Config struct {
 	ClipperAuthSyncPath     string `env:"CLIPPER_AUTH_SYNC_PATH"`
 	StreamcloneProfile      string `env:"STREAMCLONE_PROFILE" envDefault:"core"`
 	ClipperServiceURL       string `env:"CLIPPER_SERVICE_URL" envDefault:"http://clipper:8095"`
-	FrontendOrigin          string `env:"FRONTEND_ORIGIN" envDefault:"http://localhost:5174"`
+	FrontendOrigin          string `env:"FRONTEND_ORIGIN" envDefault:"http://localhost:8090"`
 	AuthCookieSecret        string `env:"AUTH_COOKIE_SECRET" envDefault:"dev-insecure-cookie-secret"`
 	AuthCookieSameSite      string `env:"AUTH_COOKIE_SAMESITE" envDefault:"lax"`
 

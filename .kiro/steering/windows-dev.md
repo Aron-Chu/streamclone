@@ -8,7 +8,7 @@ Streamclone is developed on Windows with Docker Desktop and often WSL2. Localhos
 
 - **Use `http://localhost:8090`** for browser, curl, OAuth, chat WebSocket, and HLS.
 - Frontend runtime `VITE_*_URL` values should stay **`auto`** (same-origin proxy) in `deploy/docker-compose.yml`.
-- Do not point the browser at `5174`, `8081`, `8086`, `8095`, etc. unless intentionally bypassing the proxy.
+- Do not point the browser at raw service ports (`8081`, `8086`, `8095`, etc.) unless intentionally bypassing the proxy.
 
 ## Stale localhost / wslrelay
 

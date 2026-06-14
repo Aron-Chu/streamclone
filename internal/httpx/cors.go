@@ -17,7 +17,7 @@ func CORS(next http.Handler) http.Handler {
 
 func CORSForOrigin(origin string) func(http.Handler) http.Handler {
 	if origin == "" {
-		origin = "http://localhost:5174"
+		origin = "http://localhost:8090"
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,5 @@
 # Shows which process holds Streamclone-related host ports.
-$ports = @(8090, 5174, 8081, 8082, 8083, 8084, 8086, 8095, 1935, 8888, 5432, 6379, 9000, 9001, 3001, 9090)
+$ports = @(8090, 8081, 8082, 8083, 8084, 8086, 8095, 1935, 8888, 5432, 6379, 9000, 9001, 3001, 9090)
 
 Write-Host "Streamclone port check:" -ForegroundColor Cyan
 foreach ($port in $ports) {

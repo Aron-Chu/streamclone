@@ -116,7 +116,7 @@ type importedSession struct {
 
 func New(store Store, cfg Config, logger *slog.Logger) *Handler {
 	if cfg.FrontendURL == "" {
-		cfg.FrontendURL = "http://localhost:5174"
+		cfg.FrontendURL = "http://localhost:8090"
 	}
 	if cfg.AuthURL == "" {
 		cfg.AuthURL = "https://id.twitch.tv/oauth2/authorize"
@@ -528,7 +528,7 @@ func (h *Handler) writeImportError(w http.ResponseWriter, err error) {
 func (h *Handler) redirectAuthStatus(w http.ResponseWriter, r *http.Request, status, code, message string) {
 	u, err := url.Parse(h.cfg.FrontendURL)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		u = &url.URL{Scheme: "http", Host: "localhost:5174"}
+		u = &url.URL{Scheme: "http", Host: "localhost:8090"}
 	}
 	q := u.Query()
 	q.Set("auth", status)

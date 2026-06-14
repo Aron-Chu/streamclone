@@ -1,4 +1,16 @@
 services:
+  redis:
+    ports: !reset []
+
+  postgres:
+    ports: !reset []
+
+  minio:
+    ports: !reset []
+
+  mediamtx:
+    ports: !reset []
+
   caddy:
     image: caddy:2
     restart: unless-stopped
@@ -28,20 +40,30 @@ services:
       emote:
         condition: service_healthy
 
+  metadata:
+    ports: !reset []
+
   video:
+    ports: !reset []
     environment:
       HLS_PUBLIC_BASE: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
 
   chat:
+    ports: !reset []
     environment:
       FRONTEND_ORIGIN: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
       AUTH_COOKIE_SAMESITE: lax
 
+  analytics:
+    ports: !reset []
+
   emote:
+    ports: !reset []
     environment:
       CDN_PUBLIC_BASE: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}/emotes
 
   frontend:
+    ports: !reset []
     environment:
       VITE_METADATA_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
       VITE_VIDEO_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
@@ -50,6 +72,12 @@ services:
       VITE_CHAT_HTTP: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
       VITE_CHAT_WS: wss://${APP_DOMAIN:?Set APP_DOMAIN in .env}/v1/ws
       VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}
+
+  clipper:
+    ports: !reset []
+
+  scraper:
+    ports: !reset []
 
 volumes:
   caddy-data:

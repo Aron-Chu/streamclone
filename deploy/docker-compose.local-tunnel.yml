@@ -3,7 +3,7 @@ services:
     image: caddy:2
     restart: unless-stopped
     ports:
-      - "8090:80"
+      - "127.0.0.1:8090:80"
     volumes:
       - ./Caddyfile.local-tunnel:/etc/caddy/Caddyfile:ro
     depends_on:

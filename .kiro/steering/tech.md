@@ -29,6 +29,8 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - Backend vet: `make vet`
 - Full stack: `make up`
 - Compose profiles (tier fragments in `deploy/env/`): `profile-core` (directory/playback/chat/emotes), `profile-scraper` (minute charts + TwitchTracker), `profile-clipper` (Clip Studio worker), `profile-full` (all optional services). Bootstrap/setup scripts merge these into `.env`; UI **Start Analytics** / clipper toggles start services via setup-control — not raw `docker compose` from the browser.
+- Default compose publishes raw service ports on `127.0.0.1` only; the intended browser/API boundary is Caddy at `http://localhost:8090`. Production compose removes raw service ports so Caddy on `80/443` is the public entrypoint.
+- Browser runtime config exposes setup-control and clipper mutation tokens when configured. Treat those tokens as trusted-local-only; for tunnels/public origins keep `TWITCH_DEV_TOKEN_IMPORT_ENABLED=false` and avoid exposing `SETUP_CONTROL_TOKEN` / `VITE_CLIPPER_TOKEN` unless every visitor is trusted.
 - Release installs use prebuilt images selected by `.env` `IMAGE_TAG` and bundle `VERSION`; source checkouts use local builds unless `-UseImages` / `--use-images` is passed. Keep this distinction clear when debugging "my install does not have my commit".
 - Host **setup-control** daemon: loopback `:9191`, started by `scripts/ensure-setup-control.ps1` on setup/start/install. Caddy proxies `/v1/setup-control/*` → `host.docker.internal:9191`. PID file: `.streamclone-setup-control.pid`.
 - Stop stack (keep data): `make down` or `scripts/stop-streamclone.ps1` / **Stop Streamclone** launcher
@@ -37,7 +39,7 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - Windows install overlay: `scripts/bootstrap-windows-install.ps1` resolves latest GitHub commit SHA for script/Caddyfile overlay; `scripts/start-streamclone.ps1` repairs `deploy/Caddyfile.local-tunnel` if Docker created a directory mount
 - Migrations: `make migrate`
 - Instant local Twitch login: `make twitch-local-auth`
-- Frontend dev from WSL: `cd /mnt/c/Users/Aron/twitch-7tv-clone/frontend && npm run dev -- --host 127.0.0.1 --port 5174`
+- Frontend dev from WSL: `cd /mnt/c/Users/Aron/twitch-7tv-clone/frontend && npm run dev -- --host 127.0.0.1` (optional; prefer `make app` and browse `http://localhost:8090`)
 - Frontend build: `cd frontend && npm run build`
 - Scraper Dashboard Web UI: `http://localhost:8000/`
 - Security scan (gitleaks + secret patterns): `make security-scan`
@@ -48,7 +50,7 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - Backend code belongs in the existing `cmd/*` service entrypoints and `internal/*` packages.
 - Keep code comments out of source unless the user explicitly asks for comments. Explain behavior in docs instead.
 - Keep configs environment-driven. Do not hardcode secrets, upstream credentials, or deployment-specific hostnames.
-- Local frontend, auth, chat, and HLS should default to the single-origin proxy at `http://localhost:8090`; do not point the browser at `5174`, `8081`, `8082`, or `8083` unless intentionally bypassing the proxy for development.
+- Local frontend, auth, chat, and HLS should use the single-origin proxy at `http://localhost:8090`; do not point the browser at raw service ports (`8081`, `8082`, `8083`, etc.) unless intentionally bypassing the proxy for development.
 - The nginx frontend image generates `/config.js` from `VITE_*` runtime env vars so API origins can change without rebuilding.
 - On the proxied local stack, keep frontend runtime URLs on same-origin/`auto` values so `GET /v1/me`, chat cookies, and websocket URLs stay aligned.
 - The localhost-only token import button is backend-driven through `GET /v1/me` and `canImportLocalToken`; do not treat it as a frontend-only feature flag.

@@ -28,13 +28,12 @@ SERVICE_PORTS = {
     "chat": 8083,
     "emote": 8084,
     "analytics": 8086,
-    "frontend": 5174,
     "clipper": 8095,
     "scraper": 8000,
     "proxy": 8090,
     "mediamtx_hls": 8888,
 }
-WATCH_PORTS = [8090, 5174, 8081, 8082, 8083, 8084, 8086, 8095, 1935, 8888, 5432, 6379, 9000, 8000]
+WATCH_PORTS = [8090, 8081, 8082, 8083, 8084, 8086, 8095, 1935, 8888, 5432, 6379, 9000, 8000]
 
 
 def parse_args() -> argparse.Namespace:
@@ -177,12 +176,10 @@ def stack_health(base_url: str = BASE_URL) -> dict[str, Any]:
     proxy_root = http_request("GET", f"{base}/")
     services: dict[str, Any] = {}
     for name, port in SERVICE_PORTS.items():
-        if name in {"proxy", "frontend"}:
+        if name in {"proxy"}:
             continue
         url = f"http://127.0.0.1:{port}/healthz"
         if name == "scraper":
-            url = f"http://127.0.0.1:{port}/"
-        elif name == "frontend":
             url = f"http://127.0.0.1:{port}/"
         services[name] = http_request("GET", url, timeout=8.0)
     containers = run_cmd(

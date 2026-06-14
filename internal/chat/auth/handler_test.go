@@ -120,7 +120,7 @@ func TestDebugReportsFrontendOriginMismatch(t *testing.T) {
 	h := New(newMemoryStore(), Config{
 		ClientID:       "cid",
 		ClientSecret:   "secret",
-		FrontendURL:    "http://localhost:5174",
+		FrontendURL:    "http://localhost:8090",
 		CookieSecret:   "cookie-secret",
 		CookieSameSite: "lax",
 	}, slog.Default())
