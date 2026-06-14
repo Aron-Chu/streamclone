@@ -1,0 +1,386 @@
+{
+  "streamDetail": {
+    "channel": "caedrel",
+    "state": "historical",
+    "stream": {
+      "streamId": "test-visual-regression-stream",
+      "broadcasterId": "123456789",
+      "login": "caedrel",
+      "displayName": "Caedrel",
+      "profileImageUrl": "https://static-cdn.jtvnw.net/jtv_user_pictures/caedrel-profile_image-70x70.png",
+      "title": "LEC Watch Party - Finals Day | !socials",
+      "category": "League of Legends",
+      "tags": ["English", "Esports", "WatchParty"],
+      "language": "en",
+      "startedAt": "2026-06-11T14:00:00Z",
+      "endedAt": "2026-06-11T15:12:00Z",
+      "lastSeenAt": "2026-06-11T15:12:00Z",
+      "currentViewers": 0,
+      "avgViewers": 42150,
+      "peakViewers": 68200,
+      "viewerSamples": 72,
+      "chatMessages": 185420,
+      "totalEmoteUses": 47300,
+      "seventvEmoteUses": 31200
+    },
+    "rollups": [
+      { "minuteTs": "2026-06-11T14:00:00Z", "viewerAvg": 12400, "viewerMax": 13100, "viewerLatest": 12800, "viewerSamples": 3, "chatCount": 320, "totalEmoteCount": 85, "seventvEmoteCount": 62, "emotes": { "KEKW": 18, "PogChamp": 12, "LUL": 8, "catJAM": 14, "Sadge": 10 } },
+      { "minuteTs": "2026-06-11T14:01:00Z", "viewerAvg": 13200, "viewerMax": 14000, "viewerLatest": 13500, "viewerSamples": 3, "chatCount": 380, "totalEmoteCount": 102, "seventvEmoteCount": 74, "emotes": { "KEKW": 22, "PogChamp": 15, "catJAM": 18, "Sadge": 12, "LULW": 9 } },
+      { "minuteTs": "2026-06-11T14:02:00Z", "viewerAvg": 15800, "viewerMax": 16500, "viewerLatest": 16200, "viewerSamples": 3, "chatCount": 410, "totalEmoteCount": 118, "seventvEmoteCount": 82, "emotes": { "KEKW": 25, "PogChamp": 20, "catJAM": 16, "monkaW": 14, "LULW": 11 } },
+      { "minuteTs": "2026-06-11T14:03:00Z", "viewerAvg": 18500, "viewerMax": 19200, "viewerLatest": 18900, "viewerSamples": 3, "chatCount": 520, "totalEmoteCount": 145, "seventvEmoteCount": 98, "emotes": { "KEKW": 32, "PogChamp": 28, "monkaW": 22, "catJAM": 18, "OMEGALUL": 15 } },
+      { "minuteTs": "2026-06-11T14:04:00Z", "viewerAvg": 21200, "viewerMax": 22100, "viewerLatest": 21800, "viewerSamples": 3, "chatCount": 610, "totalEmoteCount": 172, "seventvEmoteCount": 115, "emotes": { "KEKW": 38, "PogChamp": 32, "monkaW": 28, "OMEGALUL": 22, "catJAM": 16 } },
+      { "minuteTs": "2026-06-11T14:05:00Z", "viewerAvg": 24500, "viewerMax": 25800, "viewerLatest": 25200, "viewerSamples": 3, "chatCount": 780, "totalEmoteCount": 210, "seventvEmoteCount": 142, "emotes": { "KEKW": 45, "PogChamp": 38, "monkaW": 32, "OMEGALUL": 28, "EZ": 20 } },
+      { "minuteTs": "2026-06-11T14:06:00Z", "viewerAvg": 28100, "viewerMax": 29500, "viewerLatest": 28800, "viewerSamples": 3, "chatCount": 920, "totalEmoteCount": 248, "seventvEmoteCount": 168, "emotes": { "PogChamp": 52, "KEKW": 42, "monkaW": 35, "OMEGALUL": 32, "EZ": 24 } },
+      { "minuteTs": "2026-06-11T14:07:00Z", "viewerAvg": 31500, "viewerMax": 33000, "viewerLatest": 32200, "viewerSamples": 3, "chatCount": 1050, "totalEmoteCount": 285, "seventvEmoteCount": 192, "emotes": { "PogChamp": 62, "KEKW": 48, "monkaW": 38, "OMEGALUL": 35, "EZ": 28 } },
+      { "minuteTs": "2026-06-11T14:08:00Z", "viewerAvg": 34200, "viewerMax": 35800, "viewerLatest": 35000, "viewerSamples": 3, "chatCount": 1180, "totalEmoteCount": 320, "seventvEmoteCount": 218, "emotes": { "PogChamp": 72, "KEKW": 55, "monkaW": 42, "OMEGALUL": 38, "Sadge": 22 } },
+      { "minuteTs": "2026-06-11T14:09:00Z", "viewerAvg": 36800, "viewerMax": 38200, "viewerLatest": 37500, "viewerSamples": 3, "chatCount": 1320, "totalEmoteCount": 358, "seventvEmoteCount": 242, "emotes": { "PogChamp": 82, "KEKW": 62, "monkaW": 48, "OMEGALUL": 42, "EZ": 30 } },
+      { "minuteTs": "2026-06-11T14:10:00Z", "viewerAvg": 38500, "viewerMax": 40100, "viewerLatest": 39200, "viewerSamples": 3, "chatCount": 1480, "totalEmoteCount": 395, "seventvEmoteCount": 268, "emotes": { "PogChamp": 92, "KEKW": 68, "monkaW": 52, "OMEGALUL": 48, "Sadge": 28 } },
+      { "minuteTs": "2026-06-11T14:11:00Z", "viewerAvg": 39800, "viewerMax": 41200, "viewerLatest": 40500, "viewerSamples": 3, "chatCount": 1280, "totalEmoteCount": 342, "seventvEmoteCount": 230, "emotes": { "KEKW": 72, "PogChamp": 58, "monkaW": 45, "OMEGALUL": 40, "EZ": 25 } },
+      { "minuteTs": "2026-06-11T14:12:00Z", "viewerAvg": 40500, "viewerMax": 42000, "viewerLatest": 41200, "viewerSamples": 3, "chatCount": 980, "totalEmoteCount": 262, "seventvEmoteCount": 178, "emotes": { "KEKW": 55, "PogChamp": 42, "monkaW": 35, "Sadge": 28, "LULW": 22 } },
+      { "minuteTs": "2026-06-11T14:13:00Z", "viewerAvg": 41200, "viewerMax": 42500, "viewerLatest": 41800, "viewerSamples": 3, "chatCount": 850, "totalEmoteCount": 228, "seventvEmoteCount": 155, "emotes": { "KEKW": 48, "LUL": 35, "Sadge": 30, "monkaW": 25, "catJAM": 18 } },
+      { "minuteTs": "2026-06-11T14:14:00Z", "viewerAvg": 41800, "viewerMax": 43000, "viewerLatest": 42400, "viewerSamples": 3, "chatCount": 780, "totalEmoteCount": 205, "seventvEmoteCount": 138, "emotes": { "KEKW": 42, "LUL": 30, "Sadge": 25, "catJAM": 22, "LULW": 18 } },
+      { "minuteTs": "2026-06-11T14:15:00Z", "viewerAvg": 42200, "viewerMax": 43500, "viewerLatest": 42800, "viewerSamples": 3, "chatCount": 720, "totalEmoteCount": 188, "seventvEmoteCount": 125, "emotes": { "KEKW": 38, "catJAM": 28, "LUL": 25, "Sadge": 20, "LULW": 15 } },
+      { "minuteTs": "2026-06-11T14:16:00Z", "viewerAvg": 42500, "viewerMax": 43800, "viewerLatest": 43200, "viewerSamples": 3, "chatCount": 680, "totalEmoteCount": 175, "seventvEmoteCount": 118, "emotes": { "KEKW": 35, "catJAM": 25, "LUL": 22, "Sadge": 18, "EZ": 14 } },
+      { "minuteTs": "2026-06-11T14:17:00Z", "viewerAvg": 42800, "viewerMax": 44100, "viewerLatest": 43500, "viewerSamples": 3, "chatCount": 650, "totalEmoteCount": 168, "seventvEmoteCount": 112, "emotes": { "KEKW": 32, "catJAM": 24, "LUL": 20, "EZ": 16, "Sadge": 15 } },
+      { "minuteTs": "2026-06-11T14:18:00Z", "viewerAvg": 43000, "viewerMax": 44500, "viewerLatest": 43800, "viewerSamples": 3, "chatCount": 720, "totalEmoteCount": 192, "seventvEmoteCount": 130, "emotes": { "KEKW": 38, "PogChamp": 28, "catJAM": 25, "monkaW": 20, "EZ": 18 } },
+      { "minuteTs": "2026-06-11T14:19:00Z", "viewerAvg": 43200, "viewerMax": 44800, "viewerLatest": 44000, "viewerSamples": 3, "chatCount": 820, "totalEmoteCount": 225, "seventvEmoteCount": 152, "emotes": { "KEKW": 45, "PogChamp": 35, "monkaW": 28, "catJAM": 22, "OMEGALUL": 18 } },
+      { "minuteTs": "2026-06-11T14:20:00Z", "viewerAvg": 43500, "viewerMax": 45200, "viewerLatest": 44500, "viewerSamples": 3, "chatCount": 950, "totalEmoteCount": 258, "seventvEmoteCount": 175, "emotes": { "PogChamp": 55, "KEKW": 48, "monkaW": 35, "OMEGALUL": 28, "EZ": 22 } },
+      { "minuteTs": "2026-06-11T14:21:00Z", "viewerAvg": 44200, "viewerMax": 46000, "viewerLatest": 45500, "viewerSamples": 3, "chatCount": 1150, "totalEmoteCount": 312, "seventvEmoteCount": 212, "emotes": { "PogChamp": 72, "KEKW": 58, "monkaW": 42, "OMEGALUL": 38, "EZ": 28 } },
+      { "minuteTs": "2026-06-11T14:22:00Z", "viewerAvg": 45800, "viewerMax": 48000, "viewerLatest": 47200, "viewerSamples": 3, "chatCount": 1450, "totalEmoteCount": 395, "seventvEmoteCount": 268, "emotes": { "PogChamp": 95, "KEKW": 72, "monkaW": 55, "OMEGALUL": 48, "EZ": 32 } },
+      { "minuteTs": "2026-06-11T14:23:00Z", "viewerAvg": 48500, "viewerMax": 51200, "viewerLatest": 50000, "viewerSamples": 3, "chatCount": 1820, "totalEmoteCount": 498, "seventvEmoteCount": 338, "emotes": { "PogChamp": 125, "KEKW": 88, "monkaW": 68, "OMEGALUL": 58, "EZ": 42 } },
+      { "minuteTs": "2026-06-11T14:24:00Z", "viewerAvg": 52000, "viewerMax": 55800, "viewerLatest": 54500, "viewerSamples": 3, "chatCount": 2250, "totalEmoteCount": 620, "seventvEmoteCount": 422, "emotes": { "PogChamp": 158, "KEKW": 112, "monkaW": 82, "OMEGALUL": 72, "EZ": 52 } },
+      { "minuteTs": "2026-06-11T14:25:00Z", "viewerAvg": 55200, "viewerMax": 58500, "viewerLatest": 57000, "viewerSamples": 3, "chatCount": 2580, "totalEmoteCount": 715, "seventvEmoteCount": 488, "emotes": { "PogChamp": 182, "KEKW": 128, "monkaW": 95, "OMEGALUL": 82, "EZ": 58 } },
+      { "minuteTs": "2026-06-11T14:26:00Z", "viewerAvg": 57800, "viewerMax": 60200, "viewerLatest": 59500, "viewerSamples": 3, "chatCount": 2850, "totalEmoteCount": 792, "seventvEmoteCount": 540, "emotes": { "PogChamp": 198, "KEKW": 142, "monkaW": 105, "OMEGALUL": 88, "EZ": 62 } },
+      { "minuteTs": "2026-06-11T14:27:00Z", "viewerAvg": 60500, "viewerMax": 63200, "viewerLatest": 62000, "viewerSamples": 3, "chatCount": 3200, "totalEmoteCount": 885, "seventvEmoteCount": 602, "emotes": { "PogChamp": 220, "KEKW": 158, "monkaW": 118, "OMEGALUL": 98, "EZ": 68 } },
+      { "minuteTs": "2026-06-11T14:28:00Z", "viewerAvg": 63800, "viewerMax": 66500, "viewerLatest": 65200, "viewerSamples": 3, "chatCount": 3580, "totalEmoteCount": 992, "seventvEmoteCount": 675, "emotes": { "PogChamp": 248, "KEKW": 178, "monkaW": 132, "OMEGALUL": 108, "EZ": 72 } },
+      { "minuteTs": "2026-06-11T14:29:00Z", "viewerAvg": 66200, "viewerMax": 68200, "viewerLatest": 67500, "viewerSamples": 3, "chatCount": 3850, "totalEmoteCount": 1068, "seventvEmoteCount": 728, "emotes": { "PogChamp": 268, "KEKW": 192, "monkaW": 142, "OMEGALUL": 118, "EZ": 78 } },
+      { "minuteTs": "2026-06-11T14:30:00Z", "viewerAvg": 65500, "viewerMax": 67800, "viewerLatest": 66200, "viewerSamples": 3, "chatCount": 3200, "totalEmoteCount": 880, "seventvEmoteCount": 598, "emotes": { "PogChamp": 218, "KEKW": 165, "monkaW": 120, "OMEGALUL": 98, "EZ": 65 } },
+      { "minuteTs": "2026-06-11T14:31:00Z", "viewerAvg": 62800, "viewerMax": 65000, "viewerLatest": 63500, "viewerSamples": 3, "chatCount": 2650, "totalEmoteCount": 728, "seventvEmoteCount": 495, "emotes": { "KEKW": 148, "PogChamp": 135, "monkaW": 98, "OMEGALUL": 82, "EZ": 55 } },
+      { "minuteTs": "2026-06-11T14:32:00Z", "viewerAvg": 59200, "viewerMax": 61500, "viewerLatest": 60000, "viewerSamples": 3, "chatCount": 2100, "totalEmoteCount": 575, "seventvEmoteCount": 390, "emotes": { "KEKW": 125, "PogChamp": 98, "monkaW": 72, "Sadge": 55, "LUL": 42 } },
+      { "minuteTs": "2026-06-11T14:33:00Z", "viewerAvg": 55800, "viewerMax": 58000, "viewerLatest": 56500, "viewerSamples": 3, "chatCount": 1650, "totalEmoteCount": 448, "seventvEmoteCount": 305, "emotes": { "KEKW": 98, "Sadge": 72, "PogChamp": 62, "LUL": 48, "monkaW": 38 } },
+      { "minuteTs": "2026-06-11T14:34:00Z", "viewerAvg": 52500, "viewerMax": 54800, "viewerLatest": 53200, "viewerSamples": 3, "chatCount": 1280, "totalEmoteCount": 348, "seventvEmoteCount": 235, "emotes": { "KEKW": 78, "Sadge": 58, "LUL": 42, "catJAM": 32, "monkaW": 28 } },
+      { "minuteTs": "2026-06-11T14:35:00Z", "viewerAvg": 49500, "viewerMax": 51500, "viewerLatest": 50200, "viewerSamples": 3, "chatCount": 980, "totalEmoteCount": 265, "seventvEmoteCount": 180, "emotes": { "KEKW": 58, "Sadge": 42, "LUL": 35, "catJAM": 28, "LULW": 22 } },
+      { "minuteTs": "2026-06-11T14:36:00Z", "viewerAvg": 47200, "viewerMax": 49000, "viewerLatest": 48000, "viewerSamples": 3, "chatCount": 780, "totalEmoteCount": 208, "seventvEmoteCount": 140, "emotes": { "KEKW": 45, "catJAM": 32, "LUL": 28, "Sadge": 22, "LULW": 18 } },
+      { "minuteTs": "2026-06-11T14:37:00Z", "viewerAvg": 45500, "viewerMax": 47200, "viewerLatest": 46200, "viewerSamples": 3, "chatCount": 680, "totalEmoteCount": 178, "seventvEmoteCount": 120, "emotes": { "KEKW": 38, "catJAM": 28, "LUL": 22, "EZ": 18, "Sadge": 15 } },
+      { "minuteTs": "2026-06-11T14:38:00Z", "viewerAvg": 44200, "viewerMax": 45800, "viewerLatest": 44800, "viewerSamples": 3, "chatCount": 620, "totalEmoteCount": 162, "seventvEmoteCount": 108, "emotes": { "KEKW": 32, "catJAM": 25, "LUL": 20, "EZ": 15, "LULW": 12 } },
+      { "minuteTs": "2026-06-11T14:39:00Z", "viewerAvg": 43500, "viewerMax": 45000, "viewerLatest": 44200, "viewerSamples": 3, "chatCount": 580, "totalEmoteCount": 152, "seventvEmoteCount": 102, "emotes": { "KEKW": 30, "catJAM": 22, "LUL": 18, "EZ": 14, "Sadge": 12 } },
+      { "minuteTs": "2026-06-11T14:40:00Z", "viewerAvg": 43000, "viewerMax": 44500, "viewerLatest": 43800, "viewerSamples": 3, "chatCount": 550, "totalEmoteCount": 145, "seventvEmoteCount": 98, "emotes": { "KEKW": 28, "catJAM": 20, "LUL": 16, "EZ": 12, "LULW": 10 } },
+      { "minuteTs": "2026-06-11T14:41:00Z", "viewerAvg": 42800, "viewerMax": 44200, "viewerLatest": 43500, "viewerSamples": 3, "chatCount": 620, "totalEmoteCount": 165, "seventvEmoteCount": 112, "emotes": { "KEKW": 35, "PogChamp": 25, "catJAM": 22, "monkaW": 18, "EZ": 15 } },
+      { "minuteTs": "2026-06-11T14:42:00Z", "viewerAvg": 43200, "viewerMax": 44800, "viewerLatest": 44000, "viewerSamples": 3, "chatCount": 750, "totalEmoteCount": 202, "seventvEmoteCount": 138, "emotes": { "KEKW": 42, "PogChamp": 35, "monkaW": 28, "catJAM": 22, "OMEGALUL": 18 } },
+      { "minuteTs": "2026-06-11T14:43:00Z", "viewerAvg": 44000, "viewerMax": 45800, "viewerLatest": 45200, "viewerSamples": 3, "chatCount": 920, "totalEmoteCount": 252, "seventvEmoteCount": 172, "emotes": { "PogChamp": 55, "KEKW": 48, "monkaW": 35, "OMEGALUL": 28, "EZ": 22 } },
+      { "minuteTs": "2026-06-11T14:44:00Z", "viewerAvg": 45200, "viewerMax": 47000, "viewerLatest": 46500, "viewerSamples": 3, "chatCount": 1120, "totalEmoteCount": 308, "seventvEmoteCount": 210, "emotes": { "PogChamp": 72, "KEKW": 58, "monkaW": 42, "OMEGALUL": 35, "EZ": 28 } },
+      { "minuteTs": "2026-06-11T14:45:00Z", "viewerAvg": 46800, "viewerMax": 48500, "viewerLatest": 48000, "viewerSamples": 3, "chatCount": 1380, "totalEmoteCount": 378, "seventvEmoteCount": 258, "emotes": { "PogChamp": 92, "KEKW": 72, "monkaW": 55, "OMEGALUL": 45, "EZ": 32 } },
+      { "minuteTs": "2026-06-11T14:46:00Z", "viewerAvg": 48500, "viewerMax": 50500, "viewerLatest": 49800, "viewerSamples": 3, "chatCount": 1580, "totalEmoteCount": 435, "seventvEmoteCount": 295, "emotes": { "PogChamp": 108, "KEKW": 82, "monkaW": 62, "OMEGALUL": 52, "EZ": 35 } },
+      { "minuteTs": "2026-06-11T14:47:00Z", "viewerAvg": 50200, "viewerMax": 52500, "viewerLatest": 51800, "viewerSamples": 3, "chatCount": 1820, "totalEmoteCount": 502, "seventvEmoteCount": 342, "emotes": { "PogChamp": 128, "KEKW": 95, "monkaW": 72, "OMEGALUL": 58, "EZ": 40 } },
+      { "minuteTs": "2026-06-11T14:48:00Z", "viewerAvg": 52500, "viewerMax": 55000, "viewerLatest": 54200, "viewerSamples": 3, "chatCount": 2100, "totalEmoteCount": 582, "seventvEmoteCount": 395, "emotes": { "PogChamp": 148, "KEKW": 108, "monkaW": 82, "OMEGALUL": 68, "EZ": 45 } },
+      { "minuteTs": "2026-06-11T14:49:00Z", "viewerAvg": 55000, "viewerMax": 57500, "viewerLatest": 56800, "viewerSamples": 3, "chatCount": 2450, "totalEmoteCount": 678, "seventvEmoteCount": 462, "emotes": { "PogChamp": 172, "KEKW": 125, "monkaW": 95, "OMEGALUL": 78, "EZ": 52 } },
+      { "minuteTs": "2026-06-11T14:50:00Z", "viewerAvg": 57200, "viewerMax": 59800, "viewerLatest": 58500, "viewerSamples": 3, "chatCount": 2680, "totalEmoteCount": 742, "seventvEmoteCount": 505, "emotes": { "PogChamp": 188, "KEKW": 135, "monkaW": 102, "OMEGALUL": 85, "EZ": 55 } },
+      { "minuteTs": "2026-06-11T14:51:00Z", "viewerAvg": 58500, "viewerMax": 60800, "viewerLatest": 59800, "viewerSamples": 3, "chatCount": 2250, "totalEmoteCount": 618, "seventvEmoteCount": 420, "emotes": { "KEKW": 148, "PogChamp": 132, "monkaW": 85, "OMEGALUL": 72, "EZ": 48 } },
+      { "minuteTs": "2026-06-11T14:52:00Z", "viewerAvg": 56800, "viewerMax": 58500, "viewerLatest": 57200, "viewerSamples": 3, "chatCount": 1850, "totalEmoteCount": 508, "seventvEmoteCount": 345, "emotes": { "KEKW": 122, "Sadge": 85, "PogChamp": 72, "LUL": 55, "monkaW": 42 } },
+      { "minuteTs": "2026-06-11T14:53:00Z", "viewerAvg": 54200, "viewerMax": 56000, "viewerLatest": 54800, "viewerSamples": 3, "chatCount": 1450, "totalEmoteCount": 395, "seventvEmoteCount": 268, "emotes": { "KEKW": 95, "Sadge": 68, "LUL": 52, "catJAM": 38, "monkaW": 32 } },
+      { "minuteTs": "2026-06-11T14:54:00Z", "viewerAvg": 51800, "viewerMax": 53500, "viewerLatest": 52200, "viewerSamples": 3, "chatCount": 1120, "totalEmoteCount": 305, "seventvEmoteCount": 208, "emotes": { "KEKW": 72, "Sadge": 52, "LUL": 42, "catJAM": 32, "LULW": 25 } },
+      { "minuteTs": "2026-06-11T14:55:00Z", "viewerAvg": 49500, "viewerMax": 51200, "viewerLatest": 50000, "viewerSamples": 3, "chatCount": 880, "totalEmoteCount": 238, "seventvEmoteCount": 162, "emotes": { "KEKW": 55, "catJAM": 38, "LUL": 32, "Sadge": 25, "LULW": 20 } },
+      { "minuteTs": "2026-06-11T14:56:00Z", "viewerAvg": 47500, "viewerMax": 49000, "viewerLatest": 48200, "viewerSamples": 3, "chatCount": 720, "totalEmoteCount": 192, "seventvEmoteCount": 130, "emotes": { "KEKW": 42, "catJAM": 30, "LUL": 25, "EZ": 18, "Sadge": 15 } },
+      { "minuteTs": "2026-06-11T14:57:00Z", "viewerAvg": 45800, "viewerMax": 47500, "viewerLatest": 46500, "viewerSamples": 3, "chatCount": 650, "totalEmoteCount": 172, "seventvEmoteCount": 115, "emotes": { "KEKW": 35, "catJAM": 25, "LUL": 22, "EZ": 15, "LULW": 12 } },
+      { "minuteTs": "2026-06-11T14:58:00Z", "viewerAvg": 44500, "viewerMax": 46000, "viewerLatest": 45200, "viewerSamples": 3, "chatCount": 580, "totalEmoteCount": 152, "seventvEmoteCount": 102, "emotes": { "KEKW": 30, "catJAM": 22, "LUL": 18, "EZ": 12, "Sadge": 10 } },
+      { "minuteTs": "2026-06-11T14:59:00Z", "viewerAvg": 43500, "viewerMax": 45000, "viewerLatest": 44200, "viewerSamples": 3, "chatCount": 520, "totalEmoteCount": 138, "seventvEmoteCount": 92, "emotes": { "KEKW": 28, "catJAM": 20, "LUL": 15, "EZ": 10, "Sadge": 8 } },
+      { "minuteTs": "2026-06-11T15:00:00Z", "viewerAvg": 42500, "viewerMax": 44000, "viewerLatest": 43200, "viewerSamples": 3, "chatCount": 480, "totalEmoteCount": 125, "seventvEmoteCount": 85, "emotes": { "KEKW": 25, "catJAM": 18, "LUL": 14, "EZ": 8, "LULW": 7 } },
+      { "minuteTs": "2026-06-11T15:01:00Z", "viewerAvg": 41200, "viewerMax": 42800, "viewerLatest": 41800, "viewerSamples": 3, "chatCount": 450, "totalEmoteCount": 118, "seventvEmoteCount": 78, "emotes": { "KEKW": 22, "catJAM": 16, "LUL": 12, "Sadge": 8, "LULW": 6 } },
+      { "minuteTs": "2026-06-11T15:02:00Z", "viewerAvg": 40000, "viewerMax": 41500, "viewerLatest": 40800, "viewerSamples": 3, "chatCount": 420, "totalEmoteCount": 110, "seventvEmoteCount": 72, "emotes": { "KEKW": 20, "catJAM": 15, "LUL": 11, "Sadge": 7, "EZ": 5 } },
+      { "minuteTs": "2026-06-11T15:03:00Z", "viewerAvg": 38800, "viewerMax": 40200, "viewerLatest": 39500, "viewerSamples": 3, "chatCount": 680, "totalEmoteCount": 182, "seventvEmoteCount": 125, "emotes": { "PogChamp": 42, "KEKW": 35, "monkaW": 28, "EZ": 22, "catJAM": 15 } },
+      { "minuteTs": "2026-06-11T15:04:00Z", "viewerAvg": 37500, "viewerMax": 39000, "viewerLatest": 38200, "viewerSamples": 3, "chatCount": 920, "totalEmoteCount": 252, "seventvEmoteCount": 172, "emotes": { "PogChamp": 62, "KEKW": 48, "monkaW": 38, "OMEGALUL": 28, "EZ": 22 } },
+      { "minuteTs": "2026-06-11T15:05:00Z", "viewerAvg": 36200, "viewerMax": 37800, "viewerLatest": 37000, "viewerSamples": 3, "chatCount": 1150, "totalEmoteCount": 318, "seventvEmoteCount": 215, "emotes": { "PogChamp": 78, "KEKW": 62, "monkaW": 48, "OMEGALUL": 38, "EZ": 28 } },
+      { "minuteTs": "2026-06-11T15:06:00Z", "viewerAvg": 35200, "viewerMax": 36800, "viewerLatest": 36000, "viewerSamples": 3, "chatCount": 1380, "totalEmoteCount": 382, "seventvEmoteCount": 260, "emotes": { "PogChamp": 95, "KEKW": 72, "monkaW": 55, "OMEGALUL": 45, "EZ": 32 } },
+      { "minuteTs": "2026-06-11T15:07:00Z", "viewerAvg": 34000, "viewerMax": 35500, "viewerLatest": 34800, "viewerSamples": 3, "chatCount": 1580, "totalEmoteCount": 438, "seventvEmoteCount": 298, "emotes": { "PogChamp": 112, "KEKW": 82, "monkaW": 62, "OMEGALUL": 52, "EZ": 35 } },
+      { "minuteTs": "2026-06-11T15:08:00Z", "viewerAvg": 32500, "viewerMax": 34000, "viewerLatest": 33200, "viewerSamples": 3, "chatCount": 1250, "totalEmoteCount": 342, "seventvEmoteCount": 232, "emotes": { "KEKW": 82, "PogChamp": 68, "monkaW": 48, "Sadge": 38, "LUL": 28 } },
+      { "minuteTs": "2026-06-11T15:09:00Z", "viewerAvg": 30200, "viewerMax": 32000, "viewerLatest": 31000, "viewerSamples": 3, "chatCount": 980, "totalEmoteCount": 268, "seventvEmoteCount": 182, "emotes": { "KEKW": 65, "Sadge": 48, "PogChamp": 42, "LUL": 32, "catJAM": 22 } },
+      { "minuteTs": "2026-06-11T15:10:00Z", "viewerAvg": 27800, "viewerMax": 29500, "viewerLatest": 28500, "viewerSamples": 3, "chatCount": 750, "totalEmoteCount": 202, "seventvEmoteCount": 135, "emotes": { "KEKW": 48, "Sadge": 35, "LUL": 28, "catJAM": 18, "LULW": 14 } },
+      { "minuteTs": "2026-06-11T15:11:00Z", "viewerAvg": 24500, "viewerMax": 26200, "viewerLatest": 25200, "viewerSamples": 3, "chatCount": 580, "totalEmoteCount": 155, "seventvEmoteCount": 105, "emotes": { "KEKW": 35, "Sadge": 25, "LUL": 20, "catJAM": 12, "LULW": 8 } },
+      { "minuteTs": "2026-06-11T15:12:00Z", "viewerAvg": 20800, "viewerMax": 22500, "viewerLatest": 21500, "viewerSamples": 3, "chatCount": 420, "totalEmoteCount": 112, "seventvEmoteCount": 75, "emotes": { "KEKW": 25, "Sadge": 18, "LUL": 15, "catJAM": 8, "LULW": 6 } }
+    ],
+    "topEmotes": [
+      { "key": "PogChamp", "name": "PogChamp", "id": "emote-pogchamp-001", "provider": "7tv", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 3842 },
+      { "key": "KEKW", "name": "KEKW", "id": "emote-kekw-002", "provider": "7tv", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 3215 },
+      { "key": "monkaW", "name": "monkaW", "id": "emote-monkaw-003", "provider": "7tv", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 2180 },
+      { "key": "OMEGALUL", "name": "OMEGALUL", "id": "emote-omegalul-004", "provider": "7tv", "imageUrl": "/emotes/emote-omegalul-004/1x.webp", "count": 1890 },
+      { "key": "EZ", "name": "EZ", "id": "emote-ez-005", "provider": "7tv", "imageUrl": "/emotes/emote-ez-005/1x.webp", "count": 1245 },
+      { "key": "catJAM", "name": "catJAM", "id": "emote-catjam-006", "provider": "7tv", "imageUrl": "/emotes/emote-catjam-006/1x.webp", "count": 982 },
+      { "key": "Sadge", "name": "Sadge", "id": "emote-sadge-007", "provider": "7tv", "imageUrl": "/emotes/emote-sadge-007/1x.webp", "count": 875 },
+      { "key": "LUL", "name": "LUL", "id": "emote-lul-008", "provider": "7tv", "imageUrl": "/emotes/emote-lul-008/1x.webp", "count": 720 },
+      { "key": "LULW", "name": "LULW", "id": "emote-lulw-009", "provider": "7tv", "imageUrl": "/emotes/emote-lulw-009/1x.webp", "count": 385 }
+    ],
+    "sources": [
+      { "source": "helix", "state": "ready" },
+      { "source": "twitchtracker", "state": "ready" },
+      { "source": "gql_vod", "state": "ready" }
+    ],
+    "updatedAt": 1718114400000,
+    "vodId": "2185432100",
+    "vodSource": "helix_stream_match",
+    "chatCoveragePct": 92.5,
+    "vodDurationSec": 4320,
+    "chatCoverage": {
+      "chatSpanMinutes": 68,
+      "streamSpanMinutes": 72,
+      "coveragePct": 92.5,
+      "partial": false,
+      "vodDurationSec": 4320
+    }
+  },
+  "replayHeatmap": {
+    "streamId": "test-visual-regression-stream",
+    "windowSeconds": 60,
+    "confidence": 0.91,
+    "scoringVersion": "v1",
+    "updatedAt": 1718114400000,
+    "points": [
+      {
+        "offsetSeconds": 300,
+        "durationSeconds": 60,
+        "score": 28,
+        "confidence": 0.88,
+        "reason": "viewer_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 38, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:05:00Z"
+      },
+      {
+        "offsetSeconds": 420,
+        "durationSeconds": 60,
+        "score": 42,
+        "confidence": 0.91,
+        "reason": "chat_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 62, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 48, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:07:00Z"
+      },
+      {
+        "offsetSeconds": 540,
+        "durationSeconds": 60,
+        "score": 55,
+        "confidence": 0.93,
+        "reason": "seventv_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 82, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 62, "provider": "7tv" },
+          { "id": "emote-monkaw-003", "name": "monkaW", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 48, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:09:00Z"
+      },
+      {
+        "offsetSeconds": 600,
+        "durationSeconds": 60,
+        "score": 62,
+        "confidence": 0.94,
+        "reason": "seventv_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 92, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 68, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:10:00Z"
+      },
+      {
+        "offsetSeconds": 1260,
+        "durationSeconds": 60,
+        "score": 45,
+        "confidence": 0.90,
+        "reason": "chat_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 55, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 48, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:21:00Z"
+      },
+      {
+        "offsetSeconds": 1380,
+        "durationSeconds": 60,
+        "score": 68,
+        "confidence": 0.95,
+        "reason": "seventv_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 95, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 72, "provider": "7tv" },
+          { "id": "emote-monkaw-003", "name": "monkaW", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 55, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:23:00Z"
+      },
+      {
+        "offsetSeconds": 1500,
+        "durationSeconds": 60,
+        "score": 82,
+        "confidence": 0.97,
+        "reason": "viewer_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 158, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 112, "provider": "7tv" },
+          { "id": "emote-monkaw-003", "name": "monkaW", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 82, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:25:00Z"
+      },
+      {
+        "offsetSeconds": 1620,
+        "durationSeconds": 60,
+        "score": 92,
+        "confidence": 0.98,
+        "reason": "chat_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 198, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 142, "provider": "7tv" },
+          { "id": "emote-monkaw-003", "name": "monkaW", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 105, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:27:00Z"
+      },
+      {
+        "offsetSeconds": 1740,
+        "durationSeconds": 60,
+        "score": 100,
+        "confidence": 0.99,
+        "reason": "seventv_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 268, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 192, "provider": "7tv" },
+          { "id": "emote-monkaw-003", "name": "monkaW", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 142, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:29:00Z"
+      },
+      {
+        "offsetSeconds": 1860,
+        "durationSeconds": 60,
+        "score": 78,
+        "confidence": 0.96,
+        "reason": "chat_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 135, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 148, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:31:00Z"
+      },
+      {
+        "offsetSeconds": 2580,
+        "durationSeconds": 60,
+        "score": 38,
+        "confidence": 0.89,
+        "reason": "chat_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 72, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 58, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:43:00Z"
+      },
+      {
+        "offsetSeconds": 2700,
+        "durationSeconds": 60,
+        "score": 52,
+        "confidence": 0.92,
+        "reason": "seventv_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 92, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 72, "provider": "7tv" },
+          { "id": "emote-monkaw-003", "name": "monkaW", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 55, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:45:00Z"
+      },
+      {
+        "offsetSeconds": 2880,
+        "durationSeconds": 60,
+        "score": 72,
+        "confidence": 0.95,
+        "reason": "viewer_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 128, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 95, "provider": "7tv" },
+          { "id": "emote-monkaw-003", "name": "monkaW", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 72, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:48:00Z"
+      },
+      {
+        "offsetSeconds": 3000,
+        "durationSeconds": 60,
+        "score": 85,
+        "confidence": 0.97,
+        "reason": "chat_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 188, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 135, "provider": "7tv" },
+          { "id": "emote-monkaw-003", "name": "monkaW", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 102, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T14:50:00Z"
+      },
+      {
+        "offsetSeconds": 3840,
+        "durationSeconds": 60,
+        "score": 35,
+        "confidence": 0.87,
+        "reason": "chat_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 62, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 48, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T15:04:00Z"
+      },
+      {
+        "offsetSeconds": 3960,
+        "durationSeconds": 60,
+        "score": 48,
+        "confidence": 0.90,
+        "reason": "seventv_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 78, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 62, "provider": "7tv" },
+          { "id": "emote-monkaw-003", "name": "monkaW", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 48, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T15:06:00Z"
+      },
+      {
+        "offsetSeconds": 4020,
+        "durationSeconds": 60,
+        "score": 58,
+        "confidence": 0.93,
+        "reason": "chat_spike",
+        "topEmotes": [
+          { "id": "emote-pogchamp-001", "name": "PogChamp", "imageUrl": "/emotes/emote-pogchamp-001/1x.webp", "count": 112, "provider": "7tv" },
+          { "id": "emote-kekw-002", "name": "KEKW", "imageUrl": "/emotes/emote-kekw-002/1x.webp", "count": 82, "provider": "7tv" },
+          { "id": "emote-monkaw-003", "name": "monkaW", "imageUrl": "/emotes/emote-monkaw-003/1x.webp", "count": 62, "provider": "7tv" }
+        ],
+        "vodId": "2185432100",
+        "streamId": "test-visual-regression-stream",
+        "minuteTs": "2026-06-11T15:07:00Z"
+      }
+    ]
+  }
+}

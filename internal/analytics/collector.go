@@ -29,6 +29,7 @@ type RollupStore interface {
 	RemoveAlwaysTracked(ctx context.Context, login string) error
 	StreamByID(ctx context.Context, streamID string) (*StreamRecord, error)
 	SetStreamVodID(ctx context.Context, streamID, vodID, source string) error
+	MarkStreamVodUnlinked(ctx context.Context, streamID string) error
 }
 
 type channelJoiner interface {
@@ -46,6 +47,11 @@ type Collector struct {
 	pollInterval time.Duration
 	retention    time.Duration
 	topEmotes    int
+
+	// vodResolveOffsets are the post-close offsets (relative to stream close)
+	// at which the live collector attempts to resolve the VOD id via Helix.
+	// The final offset bounds the 5-minute resolution window (Requirement 19.3).
+	vodResolveOffsets []time.Duration
 
 	mu            sync.Mutex
 	tracked       map[string]*trackedChannel
@@ -116,6 +122,9 @@ func NewCollector(
 		runCtx:        context.Background(),
 		stop:          make(chan struct{}),
 		alwaysTracked: map[string]bool{},
+		// Resolve the VOD id at close, then at 30s / 2m / 5m after close; the
+		// 5m offset is the upper bound of the resolution window (Req 19.3/19.4).
+		vodResolveOffsets: []time.Duration{0, 30 * time.Second, 2 * time.Minute, 5 * time.Minute},
 	}
 }
 
@@ -479,14 +488,28 @@ func (c *Collector) cleanup(ctx context.Context) {
 }
 
 func (c *Collector) scheduleVodIDResolve(streamID string) {
-	go c.resolveVodIDWithRetry(streamID)
+	go c.resolveVodIDWithRetry(streamID, time.Now().UTC())
 }
 
-func (c *Collector) resolveVodIDWithRetry(streamID string) {
-	delays := []time.Duration{0, 30 * time.Second, 2 * time.Minute, 5 * time.Minute}
-	for attempt, delay := range delays {
-		if delay > 0 {
-			time.Sleep(delay)
+// resolveVodIDWithRetry attempts to resolve the VOD id for a just-closed stream
+// via Helix and stitch the live-collected heatmap points to the historical
+// record. Live rollups are already stored under the stream id at minute-bucket
+// offsets, so the stitch is the VOD association itself: once SetStreamVodID
+// links the VOD, the historical stream record exposes the same minute-bucket
+// scored points the live session produced (Requirement 19.3).
+//
+// Resolution is bounded to a 5-minute window (offsets 0 / 30s / 2m / 5m after
+// close). If the VOD id does not resolve within that window, the rollups are
+// retained under the live stream id and the record is marked "unlinked" so a
+// later sync or manual trigger can complete the association (Requirement 19.4).
+func (c *Collector) resolveVodIDWithRetry(streamID string, closedAt time.Time) {
+	offsets := c.vodResolveOffsets
+	if len(offsets) == 0 {
+		offsets = []time.Duration{0}
+	}
+	for attempt, offset := range offsets {
+		if wait := time.Until(closedAt.Add(offset)); wait > 0 {
+			time.Sleep(wait)
 		}
 		ctx := context.Background()
 		rec, err := c.store.StreamByID(ctx, streamID)
@@ -498,11 +521,13 @@ func (c *Collector) resolveVodIDWithRetry(streamID string) {
 			return
 		}
 		if strings.TrimSpace(rec.VodID) != "" {
+			// Already linked (e.g. by a concurrent sync); nothing left to stitch.
 			return
 		}
 		broadcasterID := strings.TrimSpace(rec.BroadcasterID)
 		if broadcasterID == "" {
 			c.log.Debug("vod resolve skipped; broadcaster_id missing", "stream_id", streamID)
+			c.markVodUnlinked(ctx, streamID)
 			return
 		}
 		vodID, err := c.helix.VideoIDByStreamID(ctx, broadcasterID, streamID)
@@ -511,18 +536,28 @@ func (c *Collector) resolveVodIDWithRetry(streamID string) {
 			continue
 		}
 		if vodID == "" {
-			if attempt == len(delays)-1 {
-				c.log.Info("vod not published yet after stream close", "stream_id", streamID)
-			}
 			continue
 		}
+		// Stitch: link the live-collected rollups (same stream id + minute-bucket
+		// offsets) to the historical VOD record.
 		if err := c.store.SetStreamVodID(ctx, streamID, vodID, "helix_stream_match"); err != nil {
 			c.log.Warn("failed to persist vod_id on stream close", "stream_id", streamID, "err", err)
 			return
 		}
-		c.log.Info("persisted vod_id on stream close", "stream_id", streamID, "vod_id", vodID, "attempt", attempt+1)
+		c.log.Info("stitched live heatmap points to historical vod", "stream_id", streamID, "vod_id", vodID, "attempt", attempt+1)
 		return
 	}
+	// VOD id did not resolve within the 5-minute window: retain live points under
+	// the live stream id and mark the record unlinked.
+	c.markVodUnlinked(context.Background(), streamID)
+}
+
+func (c *Collector) markVodUnlinked(ctx context.Context, streamID string) {
+	if err := c.store.MarkStreamVodUnlinked(ctx, streamID); err != nil {
+		c.log.Warn("failed to mark stream vod unlinked", "stream_id", streamID, "err", err)
+		return
+	}
+	c.log.Info("vod unresolved within window; retained live heatmap points as unlinked", "stream_id", streamID)
 }
 
 func (a *minuteAccumulator) rollup(topN int) MinuteRollup {

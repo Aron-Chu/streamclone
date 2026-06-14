@@ -108,7 +108,7 @@ function Resolve-StreamcloneUninstallDockerPlan {
     Write-Host 'Containers, volumes, and images cannot be removed until the Docker engine is available.'
     Write-Host ''
     Write-Host '  [1] Start Docker Desktop and wait (recommended)'
-    Write-Host '  [2] Defer Docker cleanup — remove shortcuts now; run Finish Streamclone Docker cleanup later'
+    Write-Host '  [2] Defer Docker cleanup - remove shortcuts now; run Finish Streamclone Docker cleanup later'
     Write-Host '  [3] Cancel uninstall'
     Write-Host ''
 
@@ -160,7 +160,7 @@ function Install-StreamcloneFinishDockerCleanupShortcut {
     param([string]$Root)
     $finishScript = Join-Path $Root 'scripts\finish-docker-uninstall.ps1'
     if (-not (Test-Path $finishScript)) {
-        Write-Warning "Missing $finishScript — cannot create deferred cleanup shortcut."
+        Write-Warning "Missing $finishScript - cannot create deferred cleanup shortcut."
         return
     }
     $desktop = [Environment]::GetFolderPath('Desktop')
@@ -173,7 +173,7 @@ function Install-StreamcloneFinishDockerCleanupShortcut {
         'echo   Start Docker Desktop first, then this script removes containers,'
         'echo   volumes, images, and the Streamclone install folder.'
         'echo.'
-        "powershell -NoProfile -ExecutionPolicy Bypass -File `"$finishScript`""
+        ('powershell -NoProfile -ExecutionPolicy Bypass -File "' + $finishScript + '"')
         'if errorlevel 1 pause'
     ) | Set-Content -LiteralPath $cmdPath -Encoding ASCII
     Write-Host "Added Desktop\Finish Streamclone Docker cleanup.cmd" -ForegroundColor Green
@@ -246,7 +246,7 @@ function Invoke-StreamcloneComposeDown {
         if ($result.ExitCode -ne 0) {
             $joined = ($result.Output -join ' ')
             if ($joined -match 'cannot find the file specified|docker API|Is the docker daemon running') {
-                Write-Host 'Docker engine unavailable — stack may still be running. Start Docker Desktop and run Finish Streamclone Docker cleanup.cmd if needed.' -ForegroundColor Yellow
+                Write-Host 'Docker engine unavailable - stack may still be running. Start Docker Desktop and run Finish Streamclone Docker cleanup.cmd if needed.' -ForegroundColor Yellow
             }
         }
         if ($optionalProfiles.Count -gt 0) {
@@ -349,11 +349,11 @@ function Remove-StreamcloneImages {
 function Remove-InstallDirectoryDeferred {
     param([string]$Root)
     $escaped = $Root.Replace("'", "''")
-    $cleanup = @"
-Set-Location `$env:TEMP
-Start-Sleep -Seconds 2
-Remove-Item -LiteralPath '$escaped' -Recurse -Force -ErrorAction SilentlyContinue
-"@
+    $cleanup = @(
+        'Set-Location $env:TEMP',
+        'Start-Sleep -Seconds 2',
+        "Remove-Item -LiteralPath '$escaped' -Recurse -Force -ErrorAction SilentlyContinue"
+    ) -join '; '
     Start-Process -FilePath 'powershell.exe' `
         -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-Command', $cleanup) `
         -WorkingDirectory $env:TEMP | Out-Null
@@ -397,7 +397,7 @@ try {
             Write-Host '  - Stop containers (keep Docker volumes)'
         }
         Write-Host '  - Remove .env and local secrets'
-        Write-Host '  - Remove Desktop / macOS shortcuts (Start, Stop, Manage, Check, Uninstall)'
+        Write-Host '  - Remove the Streamclone Desktop shortcut and legacy shortcuts'
         if ($removeImages) {
             Write-Host '  - Remove downloaded ghcr.io/aron-chu/streamclone images'
             if ($removeBase) {

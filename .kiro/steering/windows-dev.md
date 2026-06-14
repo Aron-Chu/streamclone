@@ -70,7 +70,9 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 
 ## Release install sync
 
-`C:\Users\Aron\streamclone` from Setup.exe / ZIP is a release install, not a git checkout. Its running app is controlled by extracted `VERSION`, `.env` `IMAGE_TAG`, and Docker images. Source commits in `C:\Users\Aron\twitch-7tv-clone` do not affect that install until images are rebuilt/published and the install is updated.
+`%USERPROFILE%\streamclone` from Setup.exe / ZIP is a **release install**, not a git checkout. The product repo is [`Aron-Chu/streamclone`](https://github.com/Aron-Chu/streamclone); this workspace folder may still be named `twitch-7tv-clone` locally. Its running app is controlled by extracted `VERSION`, `.env` `IMAGE_TAG`, and Docker images. Source commits here do not affect that install until images are rebuilt/published and the install is updated.
+
+**Install/bootstrap fixes ship from git:** `launchers/Install Streamclone.cmd` and **Start Streamclone** overlay scripts from the latest GitHub commit SHA (`Get-StreamcloneGitHubMasterSha` in `scripts/bootstrap-windows-install.ps1` — raw `/master/` CDN can lag). Log end-user fixes in `docs/repo-maintenance.md` (*Install bug fix log*).
 
 Check drift:
 
@@ -80,6 +82,15 @@ Select-String '^IMAGE_TAG=' C:\Users\Aron\streamclone\.env
 ```
 
 If they differ, run **Manage Streamclone → Update** or `Invoke-StreamcloneUpgrade` from `scripts\lib\install-upgrade.ps1`. Copying source files into the install folder only updates scripts/docs; it does not update Go/frontend code baked into images.
+
+**Common install repairs (2026-06):**
+
+| Issue | Fix in repo |
+|-------|-------------|
+| Bootstrap `%TEMP%\lib\env.ps1` not found | `$StreamcloneBootstrapLibDir` in `bootstrap-windows-install.ps1` |
+| Stale bootstrap after push | Overlay fetched by commit SHA, not `/master/` raw URL |
+| `:8090` down, `Caddyfile.local-tunnel` is a directory | `Repair-StreamcloneCaddyfileLocalTunnel` on start; overlay includes `deploy/Caddyfile.local-tunnel` |
+| Uninstall fails when Docker offline | Deferred cleanup + `Finish Streamclone Docker cleanup.cmd` |
 
 ## Twitch local auth (Windows)
 

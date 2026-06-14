@@ -15,15 +15,21 @@ import {
   getClipperFinalVideoUrl,
   describeClipperFailure,
   describeClipperJobState,
+  isClipperAuthFailure,
+  isClipperAuthFailureMessage,
+  isClipperJobRetryable,
+  retryClipperJob,
   getSyncStatus,
   startHistoricalSync,
   getStreamGameSegments,
+  getReplayHeatmap,
+  getReplayHeatmapDetail,
+  getClipperTwitchStatus,
+  triggerClipperManual,
   type SyncPhase,
   type SyncStatus,
   type SyncChatProgress,
   getTwitchDayClips,
-  getClipperTwitchStatus,
-  triggerClipperManual,
   getSetupWelcome,
   type AnalyticsStream,
   type AnalyticsStreamDetail,
@@ -33,10 +39,29 @@ import {
   type ClipperJob,
   type GameSegment,
 } from '../api'
+import TierIndicator from './analytics/TierIndicator'
+import ClipsTabEmptyState from './analytics/ClipsTabEmptyState'
+import MomentDrawer from './analytics/MomentDrawer'
+import LiveStatsBand from './analytics/LiveStatsBand'
+import MostReactedLive from './analytics/MostReactedLive'
+import type { HeatmapEmote, ReplayHeatmapDetailPoint, ReplayHeatmapPoint } from '../types/heatmap'
+import { syncCtaLabel, type SyncStreamState } from '../utils/syncLabel'
+import {
+  classifyStatCards,
+  STAT_PLACEHOLDER_MUTED_CLASS,
+  type StreamCollectionState,
+} from '../utils/statCards'
+import { classifyLiveEmptyState, COLLECTING_FIRST_MINUTES_MESSAGE } from '../utils/liveEmptyState'
 
 import { coreMinuteChartsNeedScraper } from '../setupProfile'
+import { buildTwitchVodUrl, resolveAnalyticsVodId } from '../utils/twitchVodUrl'
+import { buildVodDeepLink } from '../utils/vodDeepLink'
+import { usePlayheadStore } from '../stores/playheadStore'
+import { computeChartCursorSync } from '../utils/chartCursorSync'
+import { buildMomentScoreModel, clampMomentScore } from '../utils/momentScore'
 import { CHART_THEME, hexToRgba, legendDotStyle } from './analytics/chartTheme'
 import OptionalServicesPanel, { CoreMinuteChartsNotice } from './OptionalServicesPanel'
+import ClipperAuthHelp from './ClipperAuthHelp'
 import StackStatusButton from './StackStatusButton'
 import {
   emoteCountForProvider,
@@ -77,6 +102,14 @@ function relativeTime(value?: string | number) {
   const hours = Math.round(minutes / 60)
   if (hours < 48) return `${hours}h ago`
   return `${Math.round(hours / 24)}d ago`
+}
+
+function rollupOffsetSeconds(rollup: AnalyticsMinuteRollup, startedAt?: string): number {
+  if (!startedAt) return 0
+  const startMs = new Date(startedAt).getTime()
+  const minuteMs = new Date(rollup.minuteTs).getTime()
+  if (!Number.isFinite(startMs) || !Number.isFinite(minuteMs)) return 0
+  return Math.max(0, Math.floor((minuteMs - startMs) / 1000))
 }
 
 function clock(value?: string) {
@@ -243,18 +276,6 @@ type MomentReason =
   | 'ffz_spike'
   | 'manual'
 
-function momentReasonLabel(reason: MomentReason): string {
-  switch (reason) {
-    case 'viewer_spike': return 'Viewer spike'
-    case 'chat_spike': return 'Chat spike'
-    case 'seventv_spike': return '7TV emote spike'
-    case 'twitch_emote_spike': return 'Twitch emote spike'
-    case 'ffz_spike': return 'FFZ emote spike'
-    case 'emote_spike': return 'Emote spike'
-    default: return 'Moment'
-  }
-}
-
 function detectPickReason(
   rollup: AnalyticsMinuteRollup,
   baselines: { chat: number; emotes: number; viewers: number },
@@ -342,6 +363,28 @@ function topEmotesFromRollup(
         image_url: match ? getEmoteImageUrl(match) : (parsed.id ? `/emotes/${parsed.id}/1x.webp` : undefined),
       }
     })
+}
+
+function computeMomentScore100(
+  rollup: AnalyticsMinuteRollup,
+  baselines: { chat: number; emotes: number; viewers: number },
+  rollups?: AnalyticsMinuteRollup[],
+): number {
+  return clampMomentScore(computeMomentScore(rollup, baselines, rollups) * 10)
+}
+
+function heatmapEmotesFromRollup(
+  rollup: AnalyticsMinuteRollup,
+  limit = 5,
+  catalog?: AnalyticsTopEmote[],
+): HeatmapEmote[] {
+  return topEmotesFromRollup(rollup, limit, catalog).map(emote => ({
+    id: emote.key,
+    name: emote.name,
+    imageUrl: emote.image_url ?? '',
+    count: emote.count,
+    provider: emote.provider ?? 'unknown',
+  }))
 }
 
 function peakEmoteCount(rollup: AnalyticsMinuteRollup): number {
@@ -542,6 +585,21 @@ function syncPollChartCallbacks(
       refetchChart()
     },
   }
+}
+
+function friendlySyncNotice(message: string | null | undefined, fallback = 'Sync completed.') {
+  const text = message?.trim()
+  if (!text) return fallback
+  if (text === 'Stream synced (viewers only — VOD comments unavailable)') {
+    return 'Viewer timeline synced; Twitch VOD comments are unavailable right now.'
+  }
+  if (text === 'Stream synced (viewers only — VOD not found in Helix/TwitchTracker; chat/7TV skipped)') {
+    return 'Viewer timeline synced; VOD was not found in Helix/TwitchTracker, so chat/7TV were skipped.'
+  }
+  if (text === 'Stream synced (viewers only — VOD chat skipped: broadcaster ID missing; re-sync after Helix credentials are set)') {
+    return 'Viewer timeline synced; VOD chat skipped because broadcaster ID is missing. Re-sync after Helix credentials are set.'
+  }
+  return text
 }
 
 type SegmentCellState = 'done' | 'active' | 'queued' | 'retry'
@@ -1045,15 +1103,33 @@ async function pollSyncUntilDone(
 }
 
 function normalizeGameSegments(games: GameSegment[], rollupCount: number): GameSegment[] {
-  if (!games.length || rollupCount <= 0) return games
-  const needsRepair = games.every(game => (game.durationSeconds ?? 0) <= 0)
-  if (!needsRepair) return games
+  if (!games.length || rollupCount <= 0) return []
+
+  const cleaned = games
+    .filter(game =>
+      Number.isFinite(game.offsetSeconds)
+      && Number.isFinite(game.durationSeconds)
+      && game.offsetSeconds >= 0,
+    )
+    .map(game => ({
+      ...game,
+      offsetSeconds: Math.max(0, game.offsetSeconds),
+      durationSeconds: Math.max(0, game.durationSeconds),
+    }))
+
+  if (!cleaned.length) return []
+
+  const needsRepair = cleaned.every(game => game.durationSeconds <= 0)
+  if (!needsRepair) {
+    return cleaned.filter(game => game.durationSeconds > 0)
+  }
 
   const totalDurationSec = rollupCount * 60
-  const each = Math.max(60, Math.floor(totalDurationSec / games.length))
+  if (!Number.isFinite(totalDurationSec) || totalDurationSec <= 0) return []
+  const each = Math.max(60, Math.floor(totalDurationSec / cleaned.length))
   let offset = 0
-  return games.map((game, index) => {
-    const durationSeconds = index === games.length - 1
+  return cleaned.map((game, index) => {
+    const durationSeconds = index === cleaned.length - 1
       ? Math.max(60, totalDurationSec - offset)
       : each
     const segment = { ...game, offsetSeconds: offset, durationSeconds }
@@ -1564,6 +1640,7 @@ function AnalyticsChart({
   liveHasRichHistory = false,
   chatOnlySyncAvailable = false,
   onChatOnlySync,
+  syncCtaLabel: syncCtaLabelText,
 }: {
   detail?: AnalyticsStreamDetail;
   selectedEmotes: Set<string>;
@@ -1585,10 +1662,24 @@ function AnalyticsChart({
   liveHasRichHistory?: boolean;
   chatOnlySyncAvailable?: boolean;
   onChatOnlySync?: () => void;
+  /** Canonical sync CTA label (Req 4.1) shared with header/right-rail placements. */
+  syncCtaLabel?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const [expandedScale, setExpandedScale] = useState(true)
   const [showDots, setShowDots] = useState(false)
+  // Same-page playhead sync (Req 22.1, 22.3): when a VOD player is mounted on
+  // the same page for THIS stream and is actively playing, the chart shows a
+  // playback cursor tracking the shared playhead. When no player is present,
+  // the stream id does not match, or the player is inactive, sync is disabled
+  // and the chart uses its standard hover cursor.
+  const playheadStreamId = usePlayheadStore(s => s.streamId)
+  const playheadOffsetSeconds = usePlayheadStore(s => s.offsetSeconds)
+  const playheadPlaying = usePlayheadStore(s => s.isPlaying)
+  const cursorSync = computeChartCursorSync({
+    chartStreamId: detail?.stream?.streamId ?? null,
+    playhead: { streamId: playheadStreamId, isPlaying: playheadPlaying, offsetSeconds: playheadOffsetSeconds },
+  })
   const [showSpikes, setShowSpikes] = useState(false)
   const [focusedSeriesKey, setFocusedSeriesKey] = useState<string | null>(null)
   const seriesFocusOpacity = useCallback((seriesKey: string, base: number) => {
@@ -1917,6 +2008,28 @@ function AnalyticsChart({
     }
     const isTwitchTracker = detail?.sources?.some(s => s.source === 'twitchtracker')
     const canShowSync = canSync || detail?.state === 'historical' || isTwitchTracker
+    // Req 7.1/7.2: never contradict a "Collecting now" rail with "No recent data".
+    // While the stream is live and fewer than two rollup minutes exist, show a
+    // "Collecting first minutes" state with an activity indicator instead.
+    const liveEmpty = classifyLiveEmptyState({
+      collectingNow: isLive,
+      rollupCount: rollups.filter(point => !point.missing).length,
+    })
+    if (liveEmpty.kind === 'collecting-first-minutes') {
+      return (
+        <div className="grid min-h-80 place-items-center rounded border border-white/10 bg-[#0d0d12]/50 backdrop-blur-md px-4 text-center">
+          <div>
+            <div className="flex items-center justify-center gap-2">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-500/30 border-t-violet-400" />
+              <div className="text-base font-black text-zinc-100">{COLLECTING_FIRST_MINUTES_MESSAGE}</div>
+            </div>
+            <div className="mt-1 text-sm font-semibold text-zinc-500 max-w-md">
+              Live collection is active. The chart appears as soon as the first minutes of viewer, chat, and emote data arrive.
+            </div>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="grid min-h-80 place-items-center rounded border border-white/10 bg-[#0d0d12]/50 backdrop-blur-md px-4 text-center">
         <div>
@@ -1943,7 +2056,7 @@ function AnalyticsChart({
                 disabled={syncing}
                 className="rounded-lg bg-violet-600 px-5 py-2.5 text-xs font-black uppercase tracking-wider text-white transition hover:bg-violet-500 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
               >
-                {syncing ? 'Sync in progress…' : chatOnlySyncAvailable ? 'Sync VOD chat' : 'Sync Historical Data'}
+                {syncing ? (syncCtaLabelText ?? 'Sync in progress…') : (syncCtaLabelText ?? (chatOnlySyncAvailable ? 'Sync VOD chat' : 'Sync Historical Data'))}
               </button>
               {chatOnlySyncAvailable && onChatOnlySync ? (
                 <button
@@ -1978,9 +2091,13 @@ function AnalyticsChart({
   const yAvg = viewerBand.bandBottom - ((avgViewers - viewerScaleMin) / viewerScaleSpan) * viewerBand.bandHeight
   const showAvgLabel = (yAvg - yMax) > 22 && (viewerBand.bandBottom - yAvg) > 22
 
-  const hoverIndex = hover === null ? rollups.length - 1 : hover
+  const hoverIndex = rollups.length === 0
+    ? 0
+    : Math.max(0, Math.min(rollups.length - 1, hover === null ? rollups.length - 1 : hover))
   const hoverPoint = rollups[hoverIndex]
-  const hoverX = rollups.length === 1 ? padLeft : padLeft + (hoverIndex / (rollups.length - 1)) * (width - padLeft - padRight)
+  const hoverX = rollups.length <= 1
+    ? padLeft
+    : padLeft + (hoverIndex / (rollups.length - 1)) * (width - padLeft - padRight)
 
   return (
     <div className="rounded border border-white/10 bg-[#0d0d12] p-3">
@@ -2503,7 +2620,10 @@ function AnalyticsChart({
         {selectedRollup && (() => {
           const selectedIdx = rollups.findIndex(r => r.minuteTs === selectedRollup.minuteTs)
           if (selectedIdx === -1) return null
-          const selX = padLeft + (selectedIdx / (rollups.length - 1)) * (width - padLeft - padRight)
+          const selX = rollups.length <= 1
+            ? padLeft
+            : padLeft + (selectedIdx / (rollups.length - 1)) * (width - padLeft - padRight)
+          if (!Number.isFinite(selX)) return null
           return (
             <line
               x1={selX}
@@ -2517,15 +2637,42 @@ function AnalyticsChart({
           )
         })()}
 
+        {/* Same-page playback cursor (Req 22.1): tracks VOD playhead at >= 1Hz
+            when a co-located player is active for this stream. */}
+        {cursorSync.synced && cursorSync.cursorOffsetSeconds !== null && rollups.length > 1 && (() => {
+          const firstMs = new Date(rollups[0].minuteTs).getTime()
+          const lastMs = new Date(rollups[rollups.length - 1].minuteTs).getTime()
+          const span = lastMs - firstMs
+          if (!Number.isFinite(span) || span <= 0) return null
+          const startedAt = detail?.stream?.startedAt
+          const startMs = startedAt ? new Date(startedAt).getTime() : firstMs
+          const targetMs = startMs + cursorSync.cursorOffsetSeconds * 1000
+          const pct = Math.min(1, Math.max(0, (targetMs - firstMs) / span))
+          const playX = padLeft + pct * (width - padLeft - padRight)
+          return (
+            <line
+              x1={playX}
+              x2={playX}
+              y1={padTop}
+              y2={height - padBottom}
+              stroke="#34d399"
+              strokeWidth="2"
+            />
+          )
+        })()}
+
         {/* Draw game dividers and labels */}
         {chartGames.map((segment, index) => {
           const n = rollups.length
           if (n === 0) return null
           const totalDurationSec = n * 60
+          if (!Number.isFinite(totalDurationSec) || totalDurationSec <= 0) return null
+          if (!Number.isFinite(segment.offsetSeconds) || !Number.isFinite(segment.durationSeconds) || segment.durationSeconds <= 0) return null
 
           const startX = padLeft + (segment.offsetSeconds / totalDurationSec) * (width - padLeft - padRight)
           const durationFraction = segment.durationSeconds / totalDurationSec
           const endX = startX + durationFraction * (width - padLeft - padRight)
+          if (!Number.isFinite(startX) || !Number.isFinite(endX)) return null
           const centerX = (startX + endX) / 2
           const textWidth = endX - startX
           const maxChars = Math.floor(textWidth / 8)
@@ -2584,14 +2731,18 @@ function AnalyticsChart({
           fill="transparent"
           style={{ cursor: 'crosshair' }}
           onMouseMove={event => {
+            if (rollups.length === 0) return
             const rect = event.currentTarget.getBoundingClientRect()
+            if (rect.width <= 0) return
             const clientXRelative = event.clientX - rect.left
             const pct = Math.min(1, Math.max(0, clientXRelative / rect.width))
             setHover(Math.round(pct * (rollups.length - 1)))
           }}
           onMouseLeave={() => setHover(null)}
           onClick={event => {
+            if (rollups.length === 0) return
             const rect = event.currentTarget.getBoundingClientRect()
+            if (rect.width <= 0) return
             const clientXRelative = event.clientX - rect.left
             const pct = Math.min(1, Math.max(0, clientXRelative / rect.width))
             const idx = Math.round(pct * (rollups.length - 1))
@@ -2676,6 +2827,14 @@ function StreamSidebar({
     return streams.filter(s => (s.viewerSamples ?? 0) > 0 || (s.chatMessages ?? 0) > 0)
   }, [streams, syncedOnly])
 
+  // Below the lg breakpoint (1024px) the archive starts collapsed to at most
+  // 2 stream rows with a toggle to reveal the full list (Requirements 5.2,
+  // 5.3). At lg+ the full list is always shown (the `lg:block` resets the
+  // mobile-only `hidden`), so this state only affects the mobile layout.
+  const [archiveExpanded, setArchiveExpanded] = useState(false)
+  const MOBILE_COLLAPSED_ROWS = 2
+  const hasCollapsibleRows = visibleStreams.length > MOBILE_COLLAPSED_ROWS
+
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded border border-white/10 bg-white/[0.035] xl:max-h-[calc(100vh-12rem)]">
       <div className="flex items-center justify-between border-b border-white/10 px-3 py-2.5">
@@ -2718,7 +2877,7 @@ function StreamSidebar({
           </div>
         ) : (
           <div className="divide-y divide-white/5">
-            {visibleStreams.map(stream => {
+            {visibleStreams.map((stream, rowIndex) => {
               const dateSlug = getLocalDateString(stream.startedAt)
               const isUnique = dateSlug && dateCounts[dateSlug] === 1
               const targetSlug = isUnique ? dateSlug : stream.streamId
@@ -2726,6 +2885,10 @@ function StreamSidebar({
               const hasMinuteData = (stream.viewerSamples ?? 0) > 0 || (stream.chatMessages ?? 0) > 0
               const isSyncingActive = Boolean(syncing && isActive)
               const rollupStats = isSyncingActive ? activeRollupStats : null
+              // Hide rows beyond the first 2 on mobile while collapsed; lg:block
+              // always reveals them on desktop (Requirement 5.2).
+              const mobileHiddenClass =
+                !archiveExpanded && rowIndex >= MOBILE_COLLAPSED_ROWS ? 'hidden lg:block' : ''
 
               return (
                 <Link
@@ -2733,7 +2896,7 @@ function StreamSidebar({
                   to={`/analytics/${encodeURIComponent(login)}/${encodeURIComponent(targetSlug)}`}
                   onMouseEnter={() => onPrefetchStream?.(stream.streamId)}
                   onFocus={() => onPrefetchStream?.(stream.streamId)}
-                  className={`block border-l-2 px-3 py-2.5 transition hover:bg-white/[0.05] ${
+                  className={`block border-l-2 px-3 py-2.5 transition hover:bg-white/[0.05] ${mobileHiddenClass} ${
                     isActive ? 'border-l-cyan-400 bg-cyan-400/10' : 'border-l-transparent'
                   }`}
                 >
@@ -2799,6 +2962,16 @@ function StreamSidebar({
             })}
           </div>
         )}
+        {hasCollapsibleRows ? (
+          <button
+            type="button"
+            onClick={() => setArchiveExpanded(prev => !prev)}
+            aria-expanded={archiveExpanded}
+            className="block w-full border-t border-white/10 px-3 py-2 text-center text-[10px] font-black uppercase tracking-wide text-zinc-400 transition hover:bg-white/[0.05] hover:text-white lg:hidden"
+          >
+            {archiveExpanded ? 'Show fewer streams' : `Show all ${visibleStreams.length} streams`}
+          </button>
+        ) : null}
       </div>
     </div>
   )
@@ -2852,17 +3025,6 @@ function TopEmoteTable({ emotes, selected, onSelect, embedded = false }: { emote
   )
 }
 
-function formatVodOffset(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  const parts = []
-  if (h > 0) parts.push(`${h}h`)
-  if (m > 0 || h > 0) parts.push(`${m}m`)
-  parts.push(`${s}s`)
-  return parts.join('')
-}
-
 type MomentSortMode = 'score' | 'chat' | 'emotes' | 'seventv' | 'twitch' | 'top_emote' | 'time'
 
 const MOMENT_SORT_OPTIONS: Array<{ id: MomentSortMode; label: string }> = [
@@ -2889,25 +3051,46 @@ function MomentReviewPanel({
   selectedRollup,
   onSelectRollup,
   topEmotesCatalog,
+  heatmapPoints,
   embedded = false,
 }: {
   rollups: AnalyticsMinuteRollup[]
   selectedRollup: AnalyticsMinuteRollup | null
   onSelectRollup: (rollup: AnalyticsMinuteRollup) => void
   topEmotesCatalog?: AnalyticsTopEmote[]
+  heatmapPoints?: ReplayHeatmapPoint[]
   embedded?: boolean
 }) {
   const [sortBy, setSortBy] = useState<MomentSortMode>('score')
   const baselines = useMemo(() => computeStreamBaselines(rollups), [rollups])
+  const heatmapPointMap = useMemo(() => {
+    if (!heatmapPoints || heatmapPoints.length === 0) return null
+    const map = new Map<string, ReplayHeatmapPoint>()
+    for (const p of heatmapPoints) {
+      map.set(p.minuteTs, p)
+    }
+    return map
+  }, [heatmapPoints])
   const candidates = useMemo(() => {
     const rows = rollups
       .filter(point => !point.missing && rollupHasMinuteData(point))
-      .map(point => ({
-        rollup: point,
-        score: computeMomentScore(point, baselines, rollups),
-        reason: detectPickReason(point, baselines, topEmotesCatalog),
-        topEmote: topEmotesFromRollup(point, 1, topEmotesCatalog)[0],
-      }))
+      .map(point => {
+        const fallbackReason = detectPickReason(point, baselines, topEmotesCatalog)
+        const scoreModel = buildMomentScoreModel({
+          heatmapPoint: heatmapPointMap?.get(point.minuteTs),
+          fallbackScore100: computeMomentScore100(point, baselines, rollups),
+          fallbackReason,
+          fallbackTopEmotes: heatmapEmotesFromRollup(point, 5, topEmotesCatalog),
+        })
+        return {
+          rollup: point,
+          score: scoreModel.score,
+          scoreLabel: scoreModel.label,
+          reasonLabel: scoreModel.reasonLabel,
+          topEmote: topEmotesFromRollup(point, 1, topEmotesCatalog)[0],
+          estimated: scoreModel.estimated,
+        }
+      })
     const sorted = [...rows]
     if (sortBy === 'chat') {
       sorted.sort((a, b) => (b.rollup.chatCount ?? 0) - (a.rollup.chatCount ?? 0))
@@ -2925,7 +3108,7 @@ function MomentReviewPanel({
       sorted.sort((a, b) => b.score - a.score)
     }
     return sorted.slice(0, 10)
-  }, [rollups, baselines, sortBy, topEmotesCatalog])
+  }, [rollups, baselines, sortBy, topEmotesCatalog, heatmapPointMap])
 
   if (candidates.length < 2) {
     return (
@@ -2957,7 +3140,7 @@ function MomentReviewPanel({
         </div>
       </div>
       <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto">
-        {candidates.map(({ rollup, score, reason, topEmote }) => {
+        {candidates.map(({ rollup, scoreLabel, reasonLabel, topEmote, estimated }) => {
           const timeStr = new Date(rollup.minuteTs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
           const active = selectedRollup?.minuteTs === rollup.minuteTs
           return (
@@ -2971,7 +3154,7 @@ function MomentReviewPanel({
             >
               <span className="font-bold text-zinc-200">{timeStr}</span>
               <span className="min-w-0">
-                <span className="block truncate font-semibold text-zinc-400">{momentReasonLabel(reason)}</span>
+                <span className="block truncate font-semibold text-zinc-400">{reasonLabel}</span>
                 {topEmote ? (
                   <span className="mt-1 flex min-w-0 items-center gap-1.5">
                     {topEmote.image_url ? (
@@ -2983,13 +3166,29 @@ function MomentReviewPanel({
                   </span>
                 ) : null}
               </span>
-              <span className="font-black text-amber-300/80">{score.toFixed(1)}</span>
+              <span
+                className="font-black text-amber-300/80"
+                title={estimated ? 'Estimated from local rollups until heatmap scoring is available.' : 'Backend replay heatmap score.'}
+              >
+                {scoreLabel}
+              </span>
             </button>
           )
         })}
       </div>
     </div>
   )
+}
+
+function formatVodOffset(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  const parts = []
+  if (h > 0) parts.push(`${h}h`)
+  if (m > 0 || h > 0) parts.push(`${m}m`)
+  parts.push(`${s}s`)
+  return parts.join('')
 }
 
 function SelectedMomentPanel({
@@ -3000,6 +3199,8 @@ function SelectedMomentPanel({
   channel,
   streamId,
   topEmotesCatalog,
+  heatmapPoint,
+  heatmapDetail,
   isLiveView,
   channelLive,
 }: {
@@ -3010,6 +3211,8 @@ function SelectedMomentPanel({
   channel: string
   streamId?: string
   topEmotesCatalog?: AnalyticsTopEmote[]
+  heatmapPoint?: ReplayHeatmapPoint | null
+  heatmapDetail?: ReplayHeatmapDetailPoint | null
   isLiveView?: boolean
   channelLive?: boolean
 }) {
@@ -3021,7 +3224,7 @@ function SelectedMomentPanel({
   if (!rollup) {
     return (
       <div className="rounded border border-white/10 bg-[#0d0d12] p-4 text-center text-xs text-zinc-500 italic">
-        Click on the graph above to select a moment and clip it or view the VOD.
+        Click the graph or a ranked row to select a moment.
       </div>
     )
   }
@@ -3032,16 +3235,20 @@ function SelectedMomentPanel({
   let offsetSeconds = 0
   let offsetStr = ''
   if (startedAt) {
-    const startMs = new Date(startedAt).getTime()
-    const currentMs = new Date(rollup.minuteTs).getTime()
-    offsetSeconds = Math.max(0, Math.floor((currentMs - startMs) / 1000))
+    offsetSeconds = rollupOffsetSeconds(rollup, startedAt)
     offsetStr = formatVodOffset(offsetSeconds)
   }
 
-  const vodUrl = vodId
-    ? `https://www.twitch.tv/videos/${vodId}?t=${offsetStr}`
-    : undefined
-
+  const fallbackReason = detectPickReason(rollup, baselines, topEmotesCatalog)
+  const scoreModel = buildMomentScoreModel({
+    heatmapPoint,
+    heatmapDetail,
+    fallbackScore100: computeMomentScore100(rollup, baselines, rollups),
+    fallbackReason,
+    fallbackTopEmotes: heatmapEmotesFromRollup(rollup, 5, topEmotesCatalog),
+  })
+  const vodUrl = vodId ? buildTwitchVodUrl(vodId, offsetSeconds) : undefined
+  const streamcloneVodUrl = vodId ? buildVodDeepLink(channel, vodId, offsetSeconds, streamId) : undefined
   const canClipLive = isLiveView && channelLive !== false
   const canExportVod = !isLiveView && Boolean(vodId)
 
@@ -3068,12 +3275,12 @@ function SelectedMomentPanel({
           setClipStatus('error')
           setClipError(
             authStatus.remediation
-              || describeClipperFailure({ failure_code: authStatus.failure_code })
+              || describeClipperFailure({ failure_code: authStatus.failure_code }),
           )
           return
         }
       }
-      const pickReason = detectPickReason(rollup, baselines, topEmotesCatalog)
+      const pickReason = scoreModel.reason
       const chatMultiplier = (rollup.chatCount ?? 0) / baselines.chat
       const data = await triggerClipperManual(channel, {
         title: canExportVod ? `Analytics Export (${timeStr})` : `Analytics Spike (${timeStr})`,
@@ -3092,7 +3299,7 @@ function SelectedMomentPanel({
           top_emotes: topEmotesFromRollup(rollup, 5, topEmotesCatalog),
           chat_multiplier: Math.round(chatMultiplier * 10) / 10,
           pick_reason: pickReason,
-          moment_score: Math.round(computeMomentScore(rollup, baselines, rollups) * 10) / 10,
+          moment_score: Math.round(scoreModel.score),
         },
       })
       setCreatedJobId(data.job_id)
@@ -3115,9 +3322,19 @@ function SelectedMomentPanel({
             <span className="text-sm font-black text-white">{timeStr} · {dateStr}</span>
           </div>
           <div className="mt-2 flex flex-wrap gap-4 text-xs font-bold text-zinc-400">
-            {offsetStr && (
+            {offsetStr ? (
               <span>Stream offset: <strong className="text-zinc-200">{offsetStr}</strong></span>
-            )}
+            ) : null}
+            <span>
+              Score:{' '}
+              <strong className={scoreModel.estimated ? 'text-amber-200' : 'text-emerald-300'}>
+                {scoreModel.label}
+              </strong>
+            </span>
+            <span>Reason: <strong className="text-zinc-200">{scoreModel.reasonLabel}</strong></span>
+            {scoreModel.confidence !== null ? (
+              <span>Confidence: <strong className="text-zinc-200">{Math.round(scoreModel.confidence * 100)}%</strong></span>
+            ) : null}
             <span>Viewers: <strong className="text-zinc-200">{count(viewerValue(rollup))}</strong></span>
             <span>Chat activity: <strong className="text-zinc-200">{rollup.chatCount}/min</strong></span>
             <span>Emotes: <strong className="text-zinc-200">{minuteEmoteTotal(rollup)}/min</strong></span>
@@ -3142,38 +3359,51 @@ function SelectedMomentPanel({
               ))}
             </div>
           ) : null}
+          {scoreModel.detailComponents.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {scoreModel.detailComponents.slice(0, 4).map(component => (
+                <span
+                  key={component.key}
+                  className="rounded border border-white/10 bg-white/[0.035] px-2 py-1 text-[10px] font-bold text-zinc-400"
+                >
+                  {component.key.replace(/_/g, ' ')}{' '}
+                  <strong className="text-zinc-200">{Math.round(component.weightedScore)}</strong>
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">
-          {vodId ? (
+          {streamcloneVodUrl ? (
             <Link
-              to={`/c/${encodeURIComponent(channel)}?vod=${encodeURIComponent(vodId)}&offset=${offsetSeconds}`}
-              className="flex items-center gap-2 rounded bg-cyan-600 px-4 py-2 text-xs font-black text-white hover:bg-cyan-700 transition shadow-lg shadow-cyan-600/20"
+              to={streamcloneVodUrl}
+              className="flex items-center gap-2 rounded bg-violet-600 px-4 py-2 text-xs font-black text-white transition hover:bg-violet-700 shadow-lg shadow-violet-600/20"
             >
               <span>Play in Streamclone</span>
-            </Link>
-          ) : null}
-          {vodUrl ? (
-            <a
-              href={vodUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 rounded bg-violet-600 px-4 py-2 text-xs font-black text-white hover:bg-violet-700 transition shadow-lg shadow-violet-600/20"
-            >
-              <span>Jump into VOD</span>
               <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
               </svg>
-            </a>
+            </Link>
           ) : (
             <button
               disabled
               title="VOD ID not resolved yet. Ensure Twitch Developer OAuth settings are fully configured."
               className="flex items-center gap-2 rounded bg-zinc-800 px-4 py-2 text-xs font-black text-zinc-500 cursor-not-allowed border border-white/5"
             >
-              <span>VOD Offline</span>
+              VOD not linked yet
             </button>
           )}
+          {vodUrl ? (
+            <a
+              href={vodUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded border border-violet-400/20 bg-violet-500/10 px-4 py-2 text-xs font-black text-violet-100 transition hover:border-violet-300/40 hover:bg-violet-500/20"
+            >
+              Open on Twitch
+            </a>
+          ) : null}
 
           <div>
             {canClipLive ? (
@@ -3227,8 +3457,11 @@ function SelectedMomentPanel({
       </div>
 
       {clipStatus === 'error' && (
-        <div className="mt-3 text-xs font-semibold text-red-400 rounded border border-red-500/10 bg-red-500/5 p-2.5">
-          Error: {clipError}
+        <div className="mt-3 text-xs font-semibold text-red-400 rounded border border-red-500/10 bg-red-500/5 p-2.5 space-y-2">
+          <div>Error: {clipError}</div>
+          {isClipperAuthFailureMessage(clipError) ? (
+            <ClipperAuthHelp compact onSynced={() => { setClipError(''); setClipStatus('idle') }} />
+          ) : null}
         </div>
       )}
       {clipStatus === 'success' && (
@@ -3238,11 +3471,11 @@ function SelectedMomentPanel({
               ? 'VOD export queued — open Clip Studio to edit while the segment downloads (may take 1–3 min for long VODs).'
               : 'Clip queued — open Clip Studio to edit while the source downloads (~30–90s).'}
           </span>
-          {createdJobId && (
+          {createdJobId ? (
             <Link to={`/studio/${createdJobId}`} className="ml-2 underline text-emerald-300 font-bold hover:text-emerald-200">
               Open in Clip Studio →
             </Link>
-          )}
+          ) : null}
         </div>
       )}
     </div>
@@ -3254,6 +3487,7 @@ export default function Analytics() {
   const { login = '', streamId = '' } = useParams<{ login: string; streamId?: string }>()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [selectedRollup, setSelectedRollup] = useState<AnalyticsMinuteRollup | null>(null)
+  const [selectedHeatmapPeak, setSelectedHeatmapPeak] = useState<ReplayHeatmapPoint | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -3261,7 +3495,7 @@ export default function Analytics() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
   const [activeClipsTab, setActiveClipsTab] = useState<'edits' | 'twitch'>('edits')
-  const [rightPanelTab, setRightPanelTab] = useState<'emotes' | 'clips' | 'sync'>('emotes')
+  const [rightPanelTab, setRightPanelTab] = useState<'moments' | 'emotes' | 'clips' | 'sync'>('moments')
   const [syncedOnlyFilter, setSyncedOnlyFilter] = useState(false)
 
   const isLiveRoute = !streamId
@@ -3269,18 +3503,33 @@ export default function Analytics() {
 
   useEffect(() => {
     setSelectedRollup(null)
+    setSelectedHeatmapPeak(null)
     setLastRefreshedAt(null)
   }, [login, streamId])
 
   useEffect(() => {
     if (!login) return
     watchAnalyticsChannel(login).catch(() => undefined)
-    getChannel(login)
-      .then(channel => {
-        if (!channel?.id) return
-        return ensureChannelEmotes(login, channel.id, ['seventv', 'twitch'])
-      })
-      .catch(() => undefined)
+    const warmEmotes = () => {
+      getChannel(login)
+        .then(channel => {
+          if (!channel?.id) return
+          return ensureChannelEmotes(login, channel.id, ['seventv', 'twitch'])
+        })
+        .catch(() => undefined)
+    }
+    const requestIdle = typeof window.requestIdleCallback === 'function'
+      ? window.requestIdleCallback.bind(window)
+      : null
+    const cancelIdle = typeof window.cancelIdleCallback === 'function'
+      ? window.cancelIdleCallback.bind(window)
+      : null
+    if (requestIdle && cancelIdle) {
+      const idleId = requestIdle(warmEmotes, { timeout: 3000 })
+      return () => cancelIdle(idleId)
+    }
+    const timer = setTimeout(warmEmotes, 1000)
+    return () => clearTimeout(timer)
   }, [login])
 
   const streamsQuery = useQuery({
@@ -3460,6 +3709,22 @@ export default function Analytics() {
     enabled: Boolean(targetQueryStreamId),
   })
 
+  const heatmapQuery = useQuery({
+    queryKey: ['replay-heatmap', targetQueryStreamId, login],
+    queryFn: () => targetQueryStreamId ? getReplayHeatmap(targetQueryStreamId, 60, login) : Promise.resolve(null),
+    enabled: Boolean(targetQueryStreamId),
+    staleTime: 120_000,
+    retry: 1,
+  })
+
+  const heatmapDetailQuery = useQuery({
+    queryKey: ['replay-heatmap-detail', targetQueryStreamId, login],
+    queryFn: () => targetQueryStreamId ? getReplayHeatmapDetail(targetQueryStreamId, 60, login) : Promise.resolve(null),
+    enabled: Boolean(targetQueryStreamId && selectedRollup),
+    staleTime: 120_000,
+    retry: 1,
+  })
+
   const handleRefresh = async () => {
     if (!login || refreshing) return
     setRefreshing(true)
@@ -3475,6 +3740,8 @@ export default function Analytics() {
       ]
       if (targetQueryStreamId) {
         refetches.push(gamesQuery.refetch())
+        refetches.push(heatmapQuery.refetch())
+        if (selectedRollup) refetches.push(heatmapDetailQuery.refetch())
       }
       await Promise.race([
         Promise.all(refetches),
@@ -3585,7 +3852,7 @@ export default function Analytics() {
         setSyncError(finalStatus.error || 'Sync failed.')
         return
       }
-      setSyncNotice(finalStatus.resultMessage || 'Sync completed.')
+      setSyncNotice(friendlySyncNotice(finalStatus.resultMessage))
       const loaded = await waitForSyncedDetail({ viewersOnly })
       await refreshSyncedQueries()
       if (!loaded) {
@@ -3654,7 +3921,7 @@ export default function Analytics() {
         return
       }
       if (finalStatus.phase === 'completed') {
-        setSyncNotice(finalStatus.resultMessage || 'Sync completed.')
+        setSyncNotice(friendlySyncNotice(finalStatus.resultMessage))
         await refreshSyncedQueries()
       }
     })()
@@ -3770,6 +4037,47 @@ export default function Analytics() {
   }, [dateSlugUnresolved, isHistoricalRoute, detailQueryMatchesRoute, detail?.state, syncing, detailQuery.isLoading])
 
   const stream = detail?.stream
+  const streamVodId = resolveAnalyticsVodId(detail)
+  const rollupCount = detail?.rollups?.length ?? 0
+  const isLongStreamChart = rollupCount >= 360
+  const selectedHeatmapDetail = useMemo(() => {
+    if (!selectedRollup) return null
+    return heatmapDetailQuery.data?.points?.find(point => point.minuteTs === selectedRollup.minuteTs) ?? null
+  }, [heatmapDetailQuery.data?.points, selectedRollup])
+  const selectedHeatmapBackendPoint = useMemo(() => {
+    if (!selectedRollup) return null
+    return selectedHeatmapDetail
+      ?? heatmapQuery.data?.points?.find(point => point.minuteTs === selectedRollup.minuteTs)
+      ?? null
+  }, [heatmapQuery.data?.points, selectedHeatmapDetail, selectedRollup])
+
+  const selectRollupWithHeatmap = useCallback((rollup: AnalyticsMinuteRollup | null) => {
+    setSelectedRollup(rollup)
+    if (!rollup) {
+      setSelectedHeatmapPeak(null)
+      return
+    }
+    const rollups = detail?.rollups ?? []
+    const heatmapPoints = heatmapQuery.data?.points ?? []
+    const matched = heatmapPoints.find(point => point.minuteTs === rollup.minuteTs)
+    if (matched) {
+      setSelectedHeatmapPeak(matched)
+      return
+    }
+    const baselines = computeStreamBaselines(rollups)
+    setSelectedHeatmapPeak({
+      offsetSeconds: rollupOffsetSeconds(rollup, stream?.startedAt),
+      durationSeconds: 60,
+      score: computeMomentScore100(rollup, baselines, rollups),
+      confidence: 0.55,
+      reason: detectPickReason(rollup, baselines, detail?.topEmotes),
+      topEmotes: heatmapEmotesFromRollup(rollup, 3, detail?.topEmotes),
+      vodId: streamVodId ?? null,
+      streamId: stream?.streamId || targetQueryStreamId || streamId || '',
+      minuteTs: rollup.minuteTs,
+    })
+  }, [detail?.rollups, detail?.topEmotes, heatmapQuery.data?.points, stream?.startedAt, stream?.streamId, streamId, streamVodId, targetQueryStreamId])
+
   const liveHasRichHistory = useMemo(() => {
     if (!isLiveRoute) return false
     const rollups = detail?.rollups ?? []
@@ -3796,12 +4104,18 @@ export default function Analytics() {
   }, [targetQueryStreamId, isLiveRoute, detail, matchedStream])
 
   const headerSyncLabel = useMemo(() => {
-    if (syncing) return 'Syncing…'
-    if (chatOnlySyncAvailable) return 'Sync VOD chat'
-    if (viewersOnlySync) return 'Re-sync viewers'
-    if (needsSync) return 'Sync for charts'
-    return 'Sync chat/emotes'
-  }, [syncing, chatOnlySyncAvailable, viewersOnlySync, needsSync])
+    // Req 4.1: a single canonical label shared across header, chart-empty,
+    // right-rail sync area, and sync panel for the current stream state.
+    const hasChatRollups =
+      (detail?.rollups ?? []).some(point => !point.missing && (point.chatCount ?? 0) > 0) ||
+      (detail?.stream?.chatMessages ?? 0) > 0
+    const state: SyncStreamState = {
+      hasViewerSamples: viewerDataFromExisting,
+      hasChatRollups,
+      syncing,
+    }
+    return syncCtaLabel(state)
+  }, [syncing, viewerDataFromExisting, detail?.rollups, detail?.stream?.chatMessages])
 
   const canHeaderSync = !coreMinuteChartsBlocked && Boolean(targetQueryStreamId || needsSync)
   const headerStats = useMemo(() => {
@@ -3821,6 +4135,26 @@ export default function Analytics() {
       emoteLabel: emoteSegmentLabel,
     }
   }, [detail?.rollups, stream, syncing, syncStatus?.chat])
+  // Req 6: classify each stat card as numeric or a source-appropriate placeholder
+  // ("Stats only" / "Needs sync" / "Collecting") with a muted style (Req 6.5).
+  const statCardClasses = useMemo(
+    () =>
+      classifyStatCards({
+        state: (detail?.state as StreamCollectionState) ?? 'not_collected',
+        avgViewers: stream?.avgViewers ?? 0,
+        peakViewers: stream?.peakViewers ?? 0,
+        rollups: detail?.rollups ?? [],
+      }),
+    [detail?.state, detail?.rollups, stream?.avgViewers, stream?.peakViewers],
+  )
+  // Req 3.2: the right rail resets to the Moments tab whenever the selected
+  // stream changes (a full reload remounts and also defaults to Moments).
+  const activeStreamKey = stream?.streamId || targetQueryStreamId || streamId
+  const [prevRailStreamKey, setPrevRailStreamKey] = useState(activeStreamKey)
+  if (activeStreamKey !== prevRailStreamKey) {
+    setPrevRailStreamKey(activeStreamKey)
+    setRightPanelTab('moments')
+  }
   const sidebarRollupStats = useMemo(
     () => (syncing ? computeRollupViewerStats(detail?.rollups ?? []) : null),
     [syncing, detail?.rollups],
@@ -3859,6 +4193,7 @@ export default function Analytics() {
                 {streamStateLabel(headerState as AnalyticsStreamDetail['state'] | 'not found' | 'loading', isHistoricalRoute)}
               </span>
               <ChatCoverageBadge detail={detailQueryMatchesRoute ? detail : undefined} />
+              <TierIndicator />
             </div>
             <h1 className="mt-3 truncate text-2xl font-black leading-tight text-white lg:text-3xl" title={displayStreamTitle(stream, login, [historicalStream?.title, matchedStream?.title])}>
               {displayStreamTitle(stream, login, [historicalStream?.title, matchedStream?.title])}
@@ -3906,17 +4241,41 @@ export default function Analytics() {
         ) : null}
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-          <StatCard label="Current" value={count(headerStats.current)} tone="text-cyan-300/90" />
-          <StatCard label="Average" value={count(headerStats.avg)} />
-          <StatCard label="Peak" value={count(headerStats.peak)} />
-          <StatCard label="Chat" value={count(headerStats.chat)} tone="text-violet-300/90" />
+          <StatCard
+            label="Current"
+            value={statCardClasses.current.placeholder ?? count(headerStats.current)}
+            tone={statCardClasses.current.muted ? STAT_PLACEHOLDER_MUTED_CLASS : 'text-cyan-300/90'}
+          />
+          <StatCard
+            label="Average"
+            value={statCardClasses.average.placeholder ?? count(headerStats.avg)}
+            tone={statCardClasses.average.muted ? STAT_PLACEHOLDER_MUTED_CLASS : undefined}
+          />
+          <StatCard
+            label="Peak"
+            value={statCardClasses.peak.placeholder ?? count(headerStats.peak)}
+            tone={statCardClasses.peak.muted ? STAT_PLACEHOLDER_MUTED_CLASS : undefined}
+          />
+          <StatCard
+            label="Chat"
+            value={statCardClasses.chat.placeholder ?? count(headerStats.chat)}
+            tone={statCardClasses.chat.muted ? STAT_PLACEHOLDER_MUTED_CLASS : 'text-violet-300/90'}
+          />
           <StatCard
             label="Emote Uses"
-            value={headerStats.emoteLabel ?? count(headerStats.emotes)}
-            tone="text-emerald-300/90"
+            value={statCardClasses.emoteUses.placeholder ?? (headerStats.emoteLabel ?? count(headerStats.emotes))}
+            tone={statCardClasses.emoteUses.muted ? STAT_PLACEHOLDER_MUTED_CLASS : 'text-emerald-300/90'}
           />
           <StatCard label="Duration" value={duration(stream)} />
         </section>
+
+        {isLiveRoute && detail?.state === 'live' ? (
+          <LiveStatsBand
+            login={login}
+            enabled
+            className="rounded border border-white/10 bg-[#0d0d12] p-3"
+          />
+        ) : null}
 
         {stream?.tags?.length ? (
           <div className="flex flex-wrap gap-2">
@@ -3931,7 +4290,7 @@ export default function Analytics() {
         ) : null}
 
         <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
-          <aside className="min-w-0 xl:sticky xl:top-4 xl:self-start">
+          <aside className="order-2 min-w-0 lg:order-none xl:sticky xl:top-4 xl:self-start">
             <StreamSidebar
               login={login}
               streams={combinedStreams}
@@ -3947,13 +4306,13 @@ export default function Analytics() {
               activeRollupStats={sidebarRollupStats}
             />
           </aside>
-          <section className="min-w-0 space-y-4">
+          <section className="order-1 min-w-0 space-y-4 lg:order-none">
             <AnalyticsChart
               detail={detail}
               selectedEmotes={chartEmoteKeys}
               onSelectEmote={toggleSelected}
               selectedRollup={selectedRollup}
-              onSelectRollup={setSelectedRollup}
+              onSelectRollup={selectRollupWithHeatmap}
               syncing={syncing}
               syncError={syncError}
               syncNotice={syncNotice}
@@ -3969,29 +4328,47 @@ export default function Analytics() {
               coreMinuteChartsBlocked={coreMinuteChartsBlocked}
               liveHasRichHistory={liveHasRichHistory}
               chatOnlySyncAvailable={chatOnlySyncAvailable}
+              syncCtaLabel={headerSyncLabel}
             />
+            {streamVodId ? (
+              <p className="text-[11px] font-semibold text-zinc-500">
+                Select a moment to play the VOD in Streamclone, or open Twitch as a fallback.
+                <a
+                  href={buildTwitchVodUrl(streamVodId)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-1 text-violet-300 hover:text-violet-200"
+                >
+                  Open full VOD
+                </a>
+                {isLongStreamChart ? ' Long streams (6h+) may feel slower while hovering the chart.' : ''}
+              </p>
+            ) : null}
+            {selectedHeatmapPeak ? (
+              <MomentDrawer
+                selectedPoint={selectedHeatmapPeak}
+                canPlay={Boolean(streamVodId)}
+                canClip={Boolean(streamVodId) || (isLiveRoute && detail?.state === 'live')}
+              />
+            ) : null}
             <SelectedMomentPanel
               rollup={selectedRollup}
               rollups={detail?.rollups ?? []}
               startedAt={stream?.startedAt}
-              vodId={detail?.vodId}
+              vodId={streamVodId}
               channel={login}
               streamId={stream?.streamId || targetQueryStreamId || streamId}
               topEmotesCatalog={detail?.topEmotes}
+              heatmapPoint={selectedHeatmapBackendPoint}
+              heatmapDetail={selectedHeatmapDetail}
               isLiveView={isLiveRoute}
               channelLive={detail?.state === 'live'}
             />
-            <MomentReviewPanel
-              rollups={detail?.rollups ?? []}
-              selectedRollup={selectedRollup}
-              onSelectRollup={setSelectedRollup}
-              topEmotesCatalog={detail?.topEmotes}
-            />
           </section>
-          <aside className="space-y-4">
+          <aside className="order-3 space-y-4 lg:order-none">
             <div className="rounded border border-white/10 bg-white/[0.035] overflow-hidden">
               <div className="flex border-b border-white/10 text-[10px] font-black uppercase bg-white/[0.015]">
-                {(['emotes', 'clips', 'sync'] as const).map(tab => (
+                {(['moments', 'emotes', 'clips', 'sync'] as const).map(tab => (
                   <button
                     key={tab}
                     type="button"
@@ -4002,11 +4379,31 @@ export default function Analytics() {
                         : 'text-zinc-500 hover:text-zinc-300'
                     }`}
                   >
-                    {tab === 'emotes' ? 'Emotes' : tab === 'clips' ? 'Clips' : 'Sync'}
+                    {tab === 'moments' ? 'Moments' : tab === 'emotes' ? 'Emotes' : tab === 'clips' ? 'Clips' : 'Sync'}
                   </button>
                 ))}
               </div>
               <div className="p-0">
+                {rightPanelTab === 'moments' ? (
+                  <>
+                    {isLiveRoute && detail?.state === 'live' ? (
+                      <MostReactedLive
+                        login={login}
+                        vodId={streamVodId}
+                        enabled
+                        className="flex flex-col gap-3 border-b border-white/10 p-3"
+                      />
+                    ) : null}
+                    <MomentReviewPanel
+                      rollups={detail?.rollups ?? []}
+                      selectedRollup={selectedRollup}
+                      onSelectRollup={selectRollupWithHeatmap}
+                      topEmotesCatalog={detail?.topEmotes}
+                      heatmapPoints={heatmapDetailQuery.data?.points ?? heatmapQuery.data?.points}
+                      embedded
+                    />
+                  </>
+                ) : null}
                 {rightPanelTab === 'emotes' ? (
                   <TopEmoteTable emotes={detail?.topEmotes ?? []} selected={chartEmoteKeys} onSelect={toggleSelected} embedded />
                 ) : null}
@@ -4033,7 +4430,13 @@ export default function Analytics() {
                       </button>
                     </div>
                     {activeClipsTab === 'edits' ? (
-                      <RecentClipsList login={login} isTab={true} />
+                      <RecentClipsList
+                        login={login}
+                        isTab={true}
+                        rollups={detail?.rollups ?? []}
+                        onSync={() => void handleSync(chatOnlySyncAvailable ? { chatOnly: true } : undefined)}
+                        onOpenMoments={() => setRightPanelTab('moments')}
+                      />
                     ) : (
                       <TwitchDayClipsList
                         login={login}
@@ -4098,9 +4501,23 @@ export default function Analytics() {
   )
 }
 
-function RecentClipsList({ login, isTab = false }: { login: string; isTab?: boolean }) {
+function RecentClipsList({
+  login,
+  isTab = false,
+  rollups,
+  onSync,
+  onOpenMoments,
+}: {
+  login: string
+  isTab?: boolean
+  rollups?: AnalyticsMinuteRollup[]
+  onSync?: () => void
+  onOpenMoments?: () => void
+}) {
   const [jobs, setJobs] = useState<ClipperJob[]>([])
   const [loading, setLoading] = useState(true)
+  const [retryingId, setRetryingId] = useState<string | null>(null)
+  const [retryError, setRetryError] = useState<string | null>(null)
 
   const fetchJobs = async () => {
     try {
@@ -4111,6 +4528,24 @@ function RecentClipsList({ login, isTab = false }: { login: string; isTab?: bool
       console.error('Failed to fetch clipper jobs', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleRetryJob = async (jobId: string) => {
+    setRetryingId(jobId)
+    setRetryError(null)
+    try {
+      const result = await retryClipperJob(jobId)
+      window.dispatchEvent(new CustomEvent('streamclone:clip-created'))
+      if (result.job.id !== jobId) {
+        window.location.href = `/studio/${result.job.id}`
+        return
+      }
+      await fetchJobs()
+    } catch (err: unknown) {
+      setRetryError(err instanceof Error ? err.message : 'Could not retry clip job.')
+    } finally {
+      setRetryingId(null)
     }
   }
 
@@ -4132,6 +4567,21 @@ function RecentClipsList({ login, isTab = false }: { login: string; isTab?: bool
   }
 
   if (!jobs.length) {
+    // Req 35: honest Clips empty state — instruct sync-first when no chat/emote
+    // rollups exist, or point at Moments/heatmap peaks when rollups exist but no
+    // clip jobs are queued. Never "click the graph".
+    if (rollups) {
+      return (
+        <div className={`p-3 ${!isTab ? 'rounded border border-white/10 bg-white/[0.035]' : ''}`}>
+          <ClipsTabEmptyState
+            rollups={rollups}
+            clipJobCount={0}
+            onSync={onSync}
+            onOpenMoments={onOpenMoments}
+          />
+        </div>
+      )
+    }
     return (
       <div className={`p-3 text-center text-xs text-zinc-500 ${!isTab ? 'rounded border border-white/10 bg-white/[0.035]' : ''}`}>
         No clips created for this streamer yet. Click on the graph to clip moments!
@@ -4157,11 +4607,26 @@ function RecentClipsList({ login, isTab = false }: { login: string; isTab?: bool
             <span className="text-zinc-500">{relativeTime(job.created_at)}</span>
           </div>
           {job.state === 'failed' && (
-            <div className="mt-1 text-[10px] font-semibold text-red-300/90 line-clamp-2">
-              {describeClipperFailure(job)}
-            </div>
+            <>
+              <div className="mt-1 text-[10px] font-semibold text-red-300/90 line-clamp-3">
+                {describeClipperFailure(job)}
+              </div>
+              {isClipperAuthFailure(job) || isClipperAuthFailureMessage(job.error_message) ? (
+                <ClipperAuthHelp compact onSynced={() => void fetchJobs()} />
+              ) : null}
+            </>
           )}
           <div className="mt-2 flex gap-2">
+            {isClipperJobRetryable(job) ? (
+              <button
+                type="button"
+                onClick={() => void handleRetryJob(job.id)}
+                disabled={retryingId === job.id}
+                className="flex-1 rounded bg-amber-600/20 border border-amber-500/30 px-2 py-1 text-center text-[10px] font-bold text-amber-100 transition hover:bg-amber-600/35 disabled:opacity-50"
+              >
+                {retryingId === job.id ? 'Retrying…' : 'Retry'}
+              </button>
+            ) : null}
             <Link
               to={`/studio/${job.id}`}
               className="flex-1 rounded bg-violet-600/20 border border-violet-500/30 px-2 py-1 text-center text-[10px] font-bold text-violet-200 transition hover:bg-violet-600/35"
@@ -4180,6 +4645,9 @@ function RecentClipsList({ login, isTab = false }: { login: string; isTab?: bool
           </div>
         </div>
       ))}
+      {retryError ? (
+        <div className="px-3 py-2 text-[10px] font-semibold text-red-300">{retryError}</div>
+      ) : null}
     </div>
   )
 

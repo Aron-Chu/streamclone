@@ -97,27 +97,10 @@ func TestVODCommentsFetchStateMergeDedupe(t *testing.T) {
 		commentsMap:   make(map[int][]string),
 		commentsCount: &count,
 	}
-	edge := GQLCommentEdge{
-		Node: struct {
-			ID                   string `json:"id"`
-			ContentOffsetSeconds int    `json:"contentOffsetSeconds"`
-			Message              struct {
-				Body      string `json:"body"`
-				Fragments []struct {
-					Text string `json:"text"`
-				} `json:"fragments"`
-			} `json:"message"`
-		}{
-			ID:                   "abc",
-			ContentOffsetSeconds: 90,
-			Message: struct {
-				Body      string `json:"body"`
-				Fragments []struct {
-					Text string `json:"text"`
-				} `json:"fragments"`
-			}{Body: "hello"},
-		},
-	}
+	edge := GQLCommentEdge{}
+	edge.Node.ID = "abc"
+	edge.Node.ContentOffsetSeconds = 90
+	edge.Node.Message.Body = "hello"
 	state.mergeEdge(edge, 0, 600)
 	state.mergeEdge(edge, 0, 600)
 	if count.Load() != 1 {
@@ -136,27 +119,10 @@ func TestVODCommentsFetchStateMergeAppliesChatAlign(t *testing.T) {
 		commentsCount: &count,
 		chatAlignSec:  16740,
 	}
-	edge := GQLCommentEdge{
-		Node: struct {
-			ID                   string `json:"id"`
-			ContentOffsetSeconds int    `json:"contentOffsetSeconds"`
-			Message              struct {
-				Body      string `json:"body"`
-				Fragments []struct {
-					Text string `json:"text"`
-				} `json:"fragments"`
-			} `json:"message"`
-		}{
-			ID:                   "abc",
-			ContentOffsetSeconds: 0,
-			Message: struct {
-				Body      string `json:"body"`
-				Fragments []struct {
-					Text string `json:"text"`
-				} `json:"fragments"`
-			}{Body: "hello"},
-		},
-	}
+	edge := GQLCommentEdge{}
+	edge.Node.ID = "abc"
+	edge.Node.ContentOffsetSeconds = 0
+	edge.Node.Message.Body = "hello"
 	state.mergeEdge(edge, 0, 600)
 	state.shardedComments.mergeInto(state.commentsMap)
 	if len(state.commentsMap[279]) != 1 {
@@ -172,27 +138,11 @@ func TestVODCommentsFetchStateMergeSkipsOutOfRange(t *testing.T) {
 		vodDurationSec: 3600,
 	}
 	makeEdge := func(id string, offset int, body string) GQLCommentEdge {
-		return GQLCommentEdge{
-			Node: struct {
-				ID                   string `json:"id"`
-				ContentOffsetSeconds int    `json:"contentOffsetSeconds"`
-				Message              struct {
-					Body      string `json:"body"`
-					Fragments []struct {
-						Text string `json:"text"`
-					} `json:"fragments"`
-				} `json:"message"`
-			}{
-				ID:                   id,
-				ContentOffsetSeconds: offset,
-				Message: struct {
-					Body      string `json:"body"`
-					Fragments []struct {
-						Text string `json:"text"`
-					} `json:"fragments"`
-				}{Body: body},
-			},
-		}
+		edge := GQLCommentEdge{}
+		edge.Node.ID = id
+		edge.Node.ContentOffsetSeconds = offset
+		edge.Node.Message.Body = body
+		return edge
 	}
 	before := makeEdge("before", 500, "early")
 	inRange := makeEdge("in", 650, "ok")
@@ -226,27 +176,11 @@ func TestVODCommentsFetchStateMergeExcludesSegmentEndBoundary(t *testing.T) {
 		vodDurationSec: 3600,
 	}
 	makeEdge := func(id string, offset int) GQLCommentEdge {
-		return GQLCommentEdge{
-			Node: struct {
-				ID                   string `json:"id"`
-				ContentOffsetSeconds int    `json:"contentOffsetSeconds"`
-				Message              struct {
-					Body      string `json:"body"`
-					Fragments []struct {
-						Text string `json:"text"`
-					} `json:"fragments"`
-				} `json:"message"`
-			}{
-				ID:                   id,
-				ContentOffsetSeconds: offset,
-				Message: struct {
-					Body      string `json:"body"`
-					Fragments []struct {
-						Text string `json:"text"`
-					} `json:"fragments"`
-				}{Body: "ok"},
-			},
-		}
+		edge := GQLCommentEdge{}
+		edge.Node.ID = id
+		edge.Node.ContentOffsetSeconds = offset
+		edge.Node.Message.Body = "ok"
+		return edge
 	}
 	// Non-final segment [600,720): offset 720 belongs to next segment.
 	if !state.mergeEdge(makeEdge("boundary", 720), 600, 720) {
@@ -362,6 +296,33 @@ func TestGQLSegmentWorkQueuePriorityOrder(t *testing.T) {
 	}
 	if _, ok := q.acquire(ctx); ok {
 		t.Fatal("expected empty queue")
+	}
+}
+
+func TestGQLSegmentPointerSnapshotsSurviveAppend(t *testing.T) {
+	segments := gqlSegmentPointers(buildGQLSegments(1200, 600))
+	state := &vodCommentsFetchState{segments: &segments}
+	first, ok := state.segmentAt(0)
+	if !ok {
+		t.Fatal("expected first segment")
+	}
+
+	for i := 0; i < 32; i++ {
+		state.appendSegment(gqlSegmentProgress{
+			StartSec:  1200 + i,
+			EndSec:    1201 + i,
+			OffsetSec: 1200 + i,
+		})
+	}
+	first.Done = true
+	first.OffsetSec = 599
+
+	snapshot := state.snapshotSegments()
+	if len(snapshot) != 34 {
+		t.Fatalf("expected 34 segments after appends, got %d", len(snapshot))
+	}
+	if !snapshot[0].Done || snapshot[0].OffsetSec != 599 {
+		t.Fatalf("expected first segment mutation to survive append, got %+v", snapshot[0])
 	}
 }
 

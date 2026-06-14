@@ -1,20 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { StreamDiagnostics } from '../api'
 import type { PlaybackMetrics } from '../playback'
-
-type TwitchPlayerInstance = {
-  getPlaybackStats?: () => Record<string, unknown>
-  setMuted?: (muted: boolean) => void
-  pause?: () => void
-}
-
-declare global {
-  interface Window {
-    Twitch?: {
-      Player: new (target: string, options: Record<string, unknown>) => TwitchPlayerInstance
-    }
-  }
-}
+import { loadTwitchEmbedScript, type TwitchPlayerInstance } from '../utils/twitchEmbed'
 
 interface TwitchStatsInput {
   downloadBitrateKbps: string
@@ -33,8 +20,6 @@ const blankStats: TwitchStatsInput = {
   bufferSizeSec: '',
   latencyToBroadcasterSec: '',
 }
-
-let twitchEmbedScriptPromise: Promise<void> | null = null
 
 function fmt(value: number | null | undefined, unit = '') {
   if (value === null || value === undefined || Number.isNaN(value)) return '-'
@@ -66,28 +51,6 @@ function delayDelta(local: number | null | undefined, twitch: number | null | un
   return `${sign}${diff.toFixed(Math.abs(diff) < 10 ? 2 : 0)}s`
 }
 
-function loadTwitchEmbedScript() {
-  if (typeof window === 'undefined') return Promise.reject(new Error('browser required'))
-  if (window.Twitch?.Player) return Promise.resolve()
-  if (twitchEmbedScriptPromise) return twitchEmbedScriptPromise
-  twitchEmbedScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>('script[data-streamclone-twitch-embed]')
-    if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true })
-      existing.addEventListener('error', () => reject(new Error('twitch embed script failed')), { once: true })
-      return
-    }
-    const script = document.createElement('script')
-    script.src = 'https://player.twitch.tv/js/embed/v1.js'
-    script.async = true
-    script.dataset.streamcloneTwitchEmbed = 'true'
-    script.onload = () => resolve()
-    script.onerror = () => reject(new Error('twitch embed script failed'))
-    document.head.appendChild(script)
-  })
-  return twitchEmbedScriptPromise
-}
-
 function MetricCell({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
     <div title={title} className="rounded border border-white/10 bg-white/[0.045] px-3 py-2">
@@ -103,12 +66,14 @@ export default function PlaybackDiagnostics({
   diagnostics,
   sessionId,
   onJumpLive,
+  isVod = false,
 }: {
   channel: string
   metrics: PlaybackMetrics
   diagnostics?: StreamDiagnostics
   sessionId?: string
   onJumpLive?: () => void
+  isVod?: boolean
 }) {
   const storageKey = `streamclone:twitch-stats:${channel}`
   const [open, setOpen] = useState(false)
@@ -236,14 +201,16 @@ export default function PlaybackDiagnostics({
           >
             Compare Twitch
           </button>
-          <button
-            type="button"
-            onClick={onJumpLive}
-            disabled={!onJumpLive || !metrics.canJumpLive}
-            className="rounded border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-xs font-black text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.04] disabled:text-zinc-500"
-          >
-            Jump Live
-          </button>
+          {!isVod ? (
+            <button
+              type="button"
+              onClick={onJumpLive}
+              disabled={!onJumpLive || !metrics.canJumpLive}
+              className="rounded border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-xs font-black text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.04] disabled:text-zinc-500"
+            >
+              Jump Live
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={copyBenchmark}

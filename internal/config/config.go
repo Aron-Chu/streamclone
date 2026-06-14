@@ -59,6 +59,7 @@ type Config struct {
 	MaxConcurrentTrackedChannels int           `env:"MAX_CONCURRENT_TRACKED_CHANNELS" envDefault:"50"`
 	AnalyticsPollInterval        time.Duration `env:"ANALYTICS_POLL_INTERVAL" envDefault:"15s"`
 	AnalyticsRetentionDays       int           `env:"ANALYTICS_RETENTION_DAYS" envDefault:"30"`
+	AnalyticsVODChatRetentionDays int          `env:"ANALYTICS_VOD_CHAT_RETENTION_DAYS" envDefault:"90"`
 	AnalyticsTopEmotesPerMinute  int           `env:"ANALYTICS_TOP_EMOTES_PER_MINUTE" envDefault:"200"`
 	AnalyticsVODGQLPageDelayMS        int `env:"ANALYTICS_VOD_GQL_PAGE_DELAY_MS" envDefault:"0"`
 	AnalyticsVODGQLConcurrency        int `env:"ANALYTICS_VOD_GQL_CONCURRENCY" envDefault:"3"`

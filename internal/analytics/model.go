@@ -74,6 +74,7 @@ type StreamDetailResponse struct {
 	Sources          []SourceStatus        `json:"sources"`
 	UpdatedAt        int64                 `json:"updatedAt"`
 	VodID            string                `json:"vodId,omitempty"`
+	VodSource        string                `json:"vodSource,omitempty"`
 	SyncPhase        string                `json:"syncPhase,omitempty"`
 	ChatCoveragePct  float64               `json:"chatCoveragePct,omitempty"`
 	VodDurationSec   int                   `json:"vodDurationSec,omitempty"`
@@ -123,4 +124,3 @@ type SyncResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
-

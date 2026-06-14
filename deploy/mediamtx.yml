@@ -6,8 +6,8 @@ rtmpAddress: :1935
 hls: yes
 hlsAddress: :8888
 hlsVariant: mpegts
-hlsSegmentCount: 3
-hlsSegmentDuration: 1s
+hlsSegmentCount: 15
+hlsSegmentDuration: 2s
 hlsAllowOrigins: ["*"]
 # Treat Caddy as a trusted CDN so browser HLS works over HTTP localhost without Secure cookies.
 hlsCDNSecret: streamclone-local-hls-cdn

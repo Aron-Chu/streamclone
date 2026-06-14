@@ -177,6 +177,19 @@ func (h *Handler) SessionIDFromRequest(r *http.Request) (string, bool) {
 	return h.verifyCookie(cookie.Value)
 }
 
+// ViewerAccessToken resolves the signed-in viewer OAuth token from the session cookie.
+func (h *Handler) ViewerAccessToken(ctx context.Context, r *http.Request) (string, bool) {
+	id, ok := h.SessionIDFromRequest(r)
+	if !ok {
+		return "", false
+	}
+	session, err := h.Session(ctx, id)
+	if err != nil || strings.TrimSpace(session.AccessToken) == "" {
+		return "", false
+	}
+	return session.AccessToken, true
+}
+
 func (h *Handler) Session(ctx context.Context, id string) (Session, error) {
 	session, err := h.store.GetSession(ctx, id)
 	if err != nil {

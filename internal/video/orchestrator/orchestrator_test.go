@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -38,7 +39,7 @@ func (fakeToken) Live(context.Context, string) (token.Token, error) {
 	return token.Token{Value: "v", Signature: "s"}, nil
 }
 
-func (fakeToken) Vod(context.Context, string) (token.Token, error) {
+func (fakeToken) Vod(context.Context, string, string) (token.Token, error) {
 	return token.Token{Value: "v", Signature: "s"}, nil
 }
 
@@ -48,7 +49,7 @@ func (f failingToken) Live(context.Context, string) (token.Token, error) {
 	return token.Token{}, f.err
 }
 
-func (f failingToken) Vod(context.Context, string) (token.Token, error) {
+func (f failingToken) Vod(context.Context, string, string) (token.Token, error) {
 	return token.Token{}, f.err
 }
 
@@ -410,7 +411,7 @@ func newVodOrch(maxStreams int, spawned *int32, hlsBase string) *Orchestrator {
 		MaxStreams:      maxStreams,
 		IdleTimeout:     time.Hour,
 		WorkerBackends:  []string{"streamlink"},
-		VodSpawn: func(string, string, int, string, io.Writer) (registry.Streamer, error) {
+		VodSpawn: func(string, string, int, string, io.Writer, string) (registry.Streamer, error) {
 			atomic.AddInt32(spawned, 1)
 			return newFakeStream(), nil
 		},
@@ -486,5 +487,200 @@ func TestVodStartInvalidID(t *testing.T) {
 	}
 	if spawned != 0 {
 		t.Fatal("invalid vod id must not spawn")
+	}
+}
+
+// notFoundHLS returns an HLS probe server that always 404s, simulating
+// MediaMTX never publishing the VOD path so waitForHLS times out.
+func notFoundHLS() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+}
+
+// readyHLS returns an HLS probe server that serves a ready playlist for the
+// given VOD media key, so the relay start succeeds and occupies a slot.
+func readyHLS() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "vod_") {
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-TARGETDURATION:2\nseg.ts\n"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+}
+
+// helixMissingClient reports the VOD as absent from Helix /videos.
+type helixMissingClient struct{}
+
+func (helixMissingClient) VideoExists(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+// vodUnavailableUsher reports the VOD as unavailable (deleted / sub-only /
+// unpublished) from DiscoverVod, mirroring usher.ErrVodUnavailable.
+type vodUnavailableUsher struct{}
+
+func (vodUnavailableUsher) Discover(context.Context, string, string, string) ([]usher.Rendition, error) {
+	return []usher.Rendition{{Name: "720p60"}}, nil
+}
+
+func (vodUnavailableUsher) DiscoverVod(context.Context, string, string, string) ([]usher.Rendition, error) {
+	return nil, usher.ErrVodUnavailable
+}
+
+func decodeAPIError(t *testing.T, rec *httptest.ResponseRecorder) apiError {
+	t.Helper()
+	var body apiError
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode api error body: %v (raw: %s)", err, rec.Body.String())
+	}
+	return body
+}
+
+// Requirement 26.1: waitForHLS times out after worker spawn (HLS probe returns
+// 404 for the VOD path) -> HTTP 504 hls_not_ready, retryable true.
+func TestVodStartHLSNotReady(t *testing.T) {
+	hls := notFoundHLS()
+	defer hls.Close()
+
+	var spawned int32
+	h := newVodOrch(5, &spawned, hls.URL)
+	rec := post(h, "/v1/stream/vod/start", `{"vod_id":"1234567890","quality":"720p60"}`)
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected 504, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := decodeAPIError(t, rec)
+	if body.Code != "hls_not_ready" || !body.Retryable {
+		t.Fatalf("unexpected body: %+v", body)
+	}
+	if spawned != 1 {
+		t.Fatalf("expected one attempted spawn, got %d", spawned)
+	}
+}
+
+// Requirement 26.2: invalid (non-numeric) VOD identifier -> HTTP 400
+// invalid_vod_id, non-retryable, no worker spawned.
+func TestVodStartInvalidIDStructuredJSON(t *testing.T) {
+	var spawned int32
+	h := newVodOrch(5, &spawned, "")
+	rec := post(h, "/v1/stream/vod/start", `{"vod_id":"abc"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := decodeAPIError(t, rec)
+	if body.Code != "invalid_vod_id" || body.Retryable {
+		t.Fatalf("unexpected body: %+v", body)
+	}
+	if spawned != 0 {
+		t.Fatal("invalid vod id must not spawn")
+	}
+}
+
+// Helix preflight reports the VOD missing -> HTTP 404 vod_unavailable,
+// non-retryable, no worker spawned, token/usher not consulted.
+func TestVodStartHelixMissing(t *testing.T) {
+	var spawned int32
+	h := newVodOrch(5, &spawned, "")
+	h.o.VodHelix = helixMissingClient{}
+	h.o.Token = failingToken{err: fmt.Errorf("%w: should not run", upstream.ErrPlaybackToken)}
+
+	rec := post(h, "/v1/stream/vod/start", `{"vod_id":"1234567890","quality":"720p60"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := decodeAPIError(t, rec)
+	if body.Code != "vod_unavailable" || body.Retryable {
+		t.Fatalf("unexpected body: %+v", body)
+	}
+	if spawned != 0 {
+		t.Fatal("helix_missing must not spawn a worker")
+	}
+}
+
+// Requirement 26.3 (updated): usher embed-token 404 does not abort when streamlink
+// can still relay the VOD (streamlink resolves usher v2 tokens internally).
+func TestVodStartUsherUnavailableStreamlinkFallback(t *testing.T) {
+	hls := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "vod_1234567890") {
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-TARGETDURATION:2\nseg.ts\n"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer hls.Close()
+
+	var spawned int32
+	h := newVodOrch(5, &spawned, hls.URL)
+	h.o.Usher = vodUnavailableUsher{}
+	rec := post(h, "/v1/stream/vod/start", `{"vod_id":"1234567890","quality":"720p60"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected streamlink fallback 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if spawned != 1 {
+		t.Fatalf("expected streamlink spawn after usher 404, got %d", spawned)
+	}
+}
+
+func TestVodStartUsherUnavailableRelayFails(t *testing.T) {
+	var spawned int32
+	h := newVodOrch(5, &spawned, "")
+	h.o.Usher = vodUnavailableUsher{}
+	h.o.VodSpawn = func(string, string, int, string, io.Writer, string) (registry.Streamer, error) {
+		atomic.AddInt32(&spawned, 1)
+		return nil, errors.New("streamlink unavailable")
+	}
+	rec := post(h, "/v1/stream/vod/start", `{"vod_id":"1234567890","quality":"720p60"}`)
+	if rec.Code != http.StatusGatewayTimeout && rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected relay failure status, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if spawned != 1 {
+		t.Fatalf("expected one streamlink attempt, got %d", spawned)
+	}
+}
+
+// Requirement 26.4: relay at max concurrent capacity -> HTTP 503
+// capacity_reached, retryable true.
+func TestVodStartCapacityReached(t *testing.T) {
+	hls := readyHLS()
+	defer hls.Close()
+
+	var spawned int32
+	h := newVodOrch(1, &spawned, hls.URL)
+	if rec := post(h, "/v1/stream/vod/start", `{"vod_id":"1234567890","quality":"720p60"}`); rec.Code != http.StatusOK {
+		t.Fatalf("expected first vod start 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	rec := post(h, "/v1/stream/vod/start", `{"vod_id":"9876543210","quality":"720p60"}`)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 at capacity, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := decodeAPIError(t, rec)
+	if body.Code != "capacity_reached" || !body.Retryable {
+		t.Fatalf("unexpected body: %+v", body)
+	}
+	if spawned != 1 {
+		t.Fatalf("expected only the first vod to spawn, got %d", spawned)
+	}
+}
+
+// Requirement 26.5: token provider fails with ErrPlaybackToken -> HTTP 502
+// upstream_token_failed, retryable true, no worker spawned.
+func TestVodStartUpstreamTokenFailed(t *testing.T) {
+	var spawned int32
+	h := newVodOrch(5, &spawned, "")
+	h.o.Token = failingToken{err: fmt.Errorf("%w: schema changed", upstream.ErrPlaybackToken)}
+
+	rec := post(h, "/v1/stream/vod/start", `{"vod_id":"1234567890","quality":"720p60"}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := decodeAPIError(t, rec)
+	if body.Code != "upstream_token_failed" || !body.Retryable {
+		t.Fatalf("unexpected body: %+v", body)
+	}
+	if spawned != 0 {
+		t.Fatal("token failures must not spawn workers")
 	}
 }

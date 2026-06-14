@@ -1,4 +1,6 @@
 import type { ClipperJob } from '../../api'
+import { isClipperAuthFailure, isClipperAuthFailureMessage } from '../../api'
+import ClipperAuthHelp from '../ClipperAuthHelp'
 import type { RenderStatus } from './types'
 
 const PIPELINE_STEPS = [
@@ -65,6 +67,9 @@ export function JobProgressOverlay({
         <div className="clip-studio-progress-card">
           <span className="progress-status progress-status-failed">Clip job failed</span>
           <p className="progress-error">{failureMessage || renderErrorMsg || 'Processing failed'}</p>
+          {isClipperAuthFailure(job) || isClipperAuthFailureMessage(failureMessage) ? (
+            <ClipperAuthHelp onSynced={onRetry} />
+          ) : null}
           {onRetry ? (
             <button type="button" className="btn-export" onClick={onRetry}>
               Retry clip job

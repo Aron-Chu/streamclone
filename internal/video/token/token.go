@@ -170,12 +170,15 @@ func (c *Client) fetchLive(ctx context.Context, login string) (Token, error) {
 
 func vodCacheKey(vodID string) string { return "vod:" + vodID }
 
-func (c *Client) Vod(ctx context.Context, vodID string) (Token, error) {
+func (c *Client) Vod(ctx context.Context, vodID, viewerOAuth string) (Token, error) {
 	vodID = strings.TrimSpace(vodID)
 	if vodID == "" {
 		return Token{}, fmt.Errorf("%w: empty vod id", upstream.ErrPlaybackToken)
 	}
 	key := vodCacheKey(vodID)
+	if viewerOAuth != "" {
+		key = key + ":oauth"
+	}
 	if tok, ok := c.cached(key); ok {
 		return tok, nil
 	}
@@ -183,7 +186,7 @@ func (c *Client) Vod(ctx context.Context, vodID string) (Token, error) {
 		if tok, ok := c.cached(key); ok {
 			return tok, nil
 		}
-		tok, err := c.fetchVod(ctx, vodID)
+		tok, err := c.fetchVod(ctx, vodID, viewerOAuth)
 		if err != nil {
 			return Token{}, err
 		}
@@ -196,10 +199,13 @@ func (c *Client) Vod(ctx context.Context, vodID string) (Token, error) {
 	return v.(Token), nil
 }
 
-func (c *Client) fetchVod(ctx context.Context, vodID string) (Token, error) {
-	playerType := os.Getenv("TWITCH_PLAYER_TYPE")
+func (c *Client) fetchVod(ctx context.Context, vodID, viewerOAuth string) (Token, error) {
+	playerType := os.Getenv("TWITCH_VOD_PLAYER_TYPE")
 	if playerType == "" {
-		playerType = "embed"
+		playerType = os.Getenv("TWITCH_PLAYER_TYPE")
+	}
+	if playerType == "" {
+		playerType = "site"
 	}
 
 	payload, _ := json.Marshal(map[string]any{
@@ -218,6 +224,9 @@ func (c *Client) fetchVod(ctx context.Context, vodID string) (Token, error) {
 	req.Header.Set("Client-ID", c.clientID)
 	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(viewerOAuth) != "" {
+		req.Header.Set("Authorization", "OAuth "+strings.TrimSpace(viewerOAuth))
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

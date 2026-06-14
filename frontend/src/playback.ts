@@ -68,6 +68,14 @@ const maxFatalMediaRecoveries = 2
 const stallDowngradeThreshold = 3
 const rebufferDowngradeMs = 4000
 
+/** VOD relays publish a short live HLS window; never seek past buffered duration. */
+function clampVodRelaySeek(video: HTMLVideoElement, seekTarget: number): number {
+  if (!Number.isFinite(seekTarget) || seekTarget <= 0) return 0
+  const duration = video.duration
+  if (!Number.isFinite(duration) || duration <= 0) return 0
+  return Math.min(seekTarget, Math.max(0, duration - 0.5))
+}
+
 function nextLatencyMode(mode: PlaybackLatencyMode): PlaybackLatencyMode | null {
   if (mode === 'instant') return 'fast'
   if (mode === 'fast') return 'stable'
@@ -105,6 +113,20 @@ interface UseHlsPlaybackOptions {
   onLatencyDowngrade?: (mode: PlaybackLatencyMode) => void
   /** Fired after repeated 401s on HLS playlists — usually stale session or dead relay. */
   onUnauthorizedHls?: () => void
+  onVodRelayStale?: () => void
+}
+
+function hlsVodRelayConfig() {
+  return {
+    lowLatencyMode: false,
+    liveSyncDurationCount: 2,
+    liveMaxLatencyDurationCount: 5,
+    maxBufferLength: 30,
+    backBufferLength: 0,
+    liveBackBufferLength: 0,
+    maxLiveSyncPlaybackRate: 1,
+    startFragPrefetch: true,
+  }
 }
 
 function hlsLatencyConfig(latencyMode: PlaybackLatencyMode) {
@@ -241,8 +263,9 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
 
     const markPlaying = () => {
       if (!alive) return
-      if (!seekApplied && seekTarget > 0 && Number.isFinite(video.duration)) {
-        video.currentTime = Math.min(seekTarget, Math.max(0, video.duration - 0.25))
+      if (!seekApplied && seekTarget > 0) {
+        const clamped = clampVodRelaySeek(video, seekTarget)
+        if (clamped > 0) video.currentTime = clamped
         seekApplied = true
       }
       if (rebufferStartedRef.current !== null) {
@@ -308,7 +331,8 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
       const { default: HlsPlayer } = await import('hls.js')
       if (!alive) return
       if (HlsPlayer.isSupported()) {
-        const latency = hlsLatencyConfig(latencyMode)
+        const latency = playbackMode === 'vod' ? hlsVodRelayConfig() : hlsLatencyConfig(latencyMode)
+        const maxNetworkRecoveries = playbackMode === 'vod' ? 6 : maxFatalNetworkRecoveries
         const hls = new HlsPlayer({
           ...latency,
           capLevelToPlayerSize: true,
@@ -327,7 +351,8 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
           stageRef.current = 'manifest-parsed'
           updateMetrics()
           if (!seekApplied && seekTarget > 0) {
-            video.currentTime = seekTarget
+            const clamped = clampVodRelaySeek(video, seekTarget)
+            if (clamped > 0) video.currentTime = clamped
             seekApplied = true
           }
           if (options.autoPlay !== false) video.play().catch(() => undefined)
@@ -374,12 +399,28 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
             return
           }
 
-          if (!data?.fatal) return
+          if (!data?.fatal) {
+            if (
+              playbackMode === 'vod'
+              && responseCode === 404
+              && details.includes('frag')
+            ) {
+              stageRef.current = 'frag-404-live-edge'
+              hls.startLoad(-1)
+              updateMetrics()
+            }
+            return
+          }
           recoveryRef.current += 1
           stageRef.current = data.details || 'hls-error'
           updateMetrics()
           if (data.type === HlsPlayer.ErrorTypes.NETWORK_ERROR) {
-            if (recoveryRef.current > maxFatalNetworkRecoveries) {
+            if (recoveryRef.current > maxNetworkRecoveries) {
+              if (playbackMode === 'vod' && options.onVodRelayStale) {
+                setState('retrying')
+                options.onVodRelayStale()
+                return
+              }
               setState('error')
               setError(normalizePlaybackError(`HLS ${data.details || 'network error'}`))
               return
@@ -447,7 +488,7 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
       video.removeAttribute('src')
       video.load()
     }
-  }, [effectiveLatencyMode, options.autoPlay, options.enabled, options.mode, options.muted, options.onLatencyDowngrade, options.seekOnStart, options.src, videoRef])
+  }, [effectiveLatencyMode, options.autoPlay, options.enabled, options.mode, options.muted, options.onLatencyDowngrade, options.onUnauthorizedHls, options.onVodRelayStale, options.seekOnStart, options.src, videoRef])
 
   return useMemo(() => ({ state, error, metrics, jumpLive, effectiveLatencyMode }), [state, error, metrics, jumpLive, effectiveLatencyMode])
 }

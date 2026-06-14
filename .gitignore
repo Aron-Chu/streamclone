@@ -60,9 +60,13 @@ runtime/clipper-twitch.env
 # local output / scratch
 *.bin
 tmp-*.bin
+/analytics
+/tmp-vod-*.json
+/tmp-probe-hls.sh
 out.json
 *.log.json
 test.md
+**/testdata/rapid/*.fail
 # runtime data
 *.sqlite
 *.sqlite3

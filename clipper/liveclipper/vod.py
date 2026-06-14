@@ -121,13 +121,15 @@ def _redact_argv(argv: list[str], token: str) -> CommandPreview:
 def resolve_ffmpeg_bin(ffmpeg_bin: str) -> str:
     if ffmpeg_bin != "ffmpeg":
         return ffmpeg_bin
+    found = which("ffmpeg")
+    if found:
+        return found
     try:
         import imageio_ffmpeg
 
         return imageio_ffmpeg.get_ffmpeg_exe()
     except Exception:
-        found = which("ffmpeg")
-        return found or ffmpeg_bin
+        return ffmpeg_bin
 
 
 class VodDownloader:
@@ -220,4 +222,8 @@ class VodDownloader:
                 if "403" in lower or "forbidden" in lower or "unauthorized" in lower
                 else "vod_download_failed"
             )
+            if proc.returncode < 0:
+                signal = -proc.returncode
+                detail = stderr or f"ffmpeg crashed with signal {signal}"
+                raise VodDownloadError(code, detail)
             raise VodDownloadError(code, stderr or "ffmpeg VOD segment download failed")

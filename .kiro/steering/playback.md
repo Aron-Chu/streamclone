@@ -49,6 +49,7 @@ Files: `deploy/Caddyfile.local-tunnel` (`@hls_local`, `@hls`) and `deploy/Caddyf
 | Transient 401s during `docker compose up --build` | Old HLS session URLs in an open tab; hard-refresh after stack stabilizes |
 | 404 on segments | Stream not started or worker not publishing to MediaMTX yet |
 | Playback works on LAN IP but not localhost | Stale `wslrelay` — see `.kiro/steering/windows-dev.md` |
+| `:8090` unreachable / `local-proxy` exit 127 / Caddy mount error | `deploy/Caddyfile.local-tunnel` is a **directory** instead of a file (bad Docker bind). **Start Streamclone** runs `Repair-StreamcloneCaddyfileLocalTunnel` in `scripts/start-streamclone.ps1`; install overlay ships the file from GitHub commit SHA |
 
 ## Architecture boundaries
 
@@ -79,6 +80,9 @@ Go does not download HLS segments in-process. Segment fetch and transmux are del
 - Worker crashes: `supervise()` rotates `streamlink` ↔ `direct_hls` with backoff and re-runs `waitForHLS`.
 - Playback tokens: short-lived per-channel cache + single-flight in `internal/video/token`.
 - Frontend rewrites `/live/` URLs to same origin via `normalizeBrowserOriginUrl` in `frontend/src/config.ts`.
+- **Archived VOD relay:** `POST /v1/stream/vod/start` with `vod_id` / offset starts a Streamlink→ffmpeg worker publishing to `live/vod_{id}/index.m3u8` (same Caddy `@hls` path as live). Channel deep-link: `/c/{login}?vod={id}&offset=`; analytics adds `from=analytics&sid={stream_id}` for activity/chat replay. Keep Twitch as an explicit fallback action, not an automatic redirect.
+- VOD mode must stay inside the channel workspace, show `VodModeControls`, publish playhead sync for matching analytics charts, and load `VodChatReplayPanel` when `sid` is present.
+- Theater layout: opening player settings must not shrink the theater player. `Shrink`/theater toggle exits theater; settings only expand controls.
 
 ## Latency / resilience knobs
 

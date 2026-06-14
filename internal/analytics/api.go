@@ -12,19 +12,27 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
+
+	"streamclone/internal/analytics/heatmap"
 )
 
 var loginRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{2,24}$`)
 
 type Handler struct {
-	store       *Store
-	collector   *Collector
-	helix       *HelixClient
-	syncService *SyncService
+	store        *Store
+	collector    *Collector
+	helix        *HelixClient
+	syncService  *SyncService
+	heatmapCache *heatmap.Cache
 }
 
 func NewHandler(store *Store, collector *Collector, helix *HelixClient, syncService *SyncService) *Handler {
 	return &Handler{store: store, collector: collector, helix: helix, syncService: syncService}
+}
+
+func (h *Handler) WithHeatmapCache(cache *heatmap.Cache) *Handler {
+	h.heatmapCache = cache
+	return h
 }
 
 func (h *Handler) Routes(r chi.Router) {
@@ -39,6 +47,8 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Post("/streams/{streamID}/sync", h.syncStream)
 		r.Get("/streams/{streamID}/sync/status", h.syncStreamStatus)
 		r.Get("/streams/{streamID}/games", h.getStreamGames)
+		r.Get("/streams/{streamID}/replay-heatmap", h.replayHeatmap)
+		r.Delete("/streams/{streamID}/replay-heatmap/cache", h.invalidateHeatmapCache)
 	})
 }
 
@@ -147,7 +157,7 @@ func (h *Handler) streamDetail(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) writeMissingStreamDetail(w http.ResponseWriter, r *http.Request, streamID string) {
 	if h.syncService != nil {
-		if status, statusErr := h.syncService.GetSyncStatus(r.Context(), streamID); statusErr == nil && status != nil && !status.Phase.IsTerminal() {
+		if status, statusErr := h.syncService.GetSyncStatus(r.Context(), streamID); statusErr == nil && status != nil && !status.Phase.IsTerminal() && !status.Stale {
 			writeJSON(w, http.StatusOK, StreamDetailResponse{
 				Channel:   "",
 				State:     "syncing",
@@ -201,6 +211,7 @@ func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stre
 		state = "live"
 	}
 	vodID := strings.TrimSpace(stream.VodID)
+	vodSource := strings.TrimSpace(stream.VodSource)
 	broadcasterID := NormalizeBroadcasterID(stream.BroadcasterID)
 	if broadcasterID == "" && h.helix != nil && h.helix.Enabled() && stream.Login != "" {
 		broadcasterID = h.helix.ResolveBroadcasterID(r.Context(), stream.Login, "")
@@ -208,6 +219,7 @@ func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stre
 	if vodID == "" && h.helix != nil && h.helix.Enabled() && broadcasterID != "" {
 		if resolved, _ := h.helix.VideoIDByStreamID(r.Context(), broadcasterID, stream.StreamID); resolved != "" {
 			vodID = resolved
+			vodSource = "helix_stream_match"
 			_ = h.store.SetStreamVodID(r.Context(), stream.StreamID, vodID, "helix_stream_match")
 		}
 	}
@@ -229,7 +241,7 @@ func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stre
 	responseState := state
 	var syncPhase string
 	if h.syncService != nil {
-		if syncStatus, syncErr := h.syncService.GetSyncStatus(r.Context(), stream.StreamID); syncErr == nil && syncStatus != nil && !syncStatus.Phase.IsTerminal() {
+		if syncStatus, syncErr := h.syncService.GetSyncStatus(r.Context(), stream.StreamID); syncErr == nil && syncStatus != nil && !syncStatus.Phase.IsTerminal() && !syncStatus.Stale {
 			responseState = "syncing"
 			syncPhase = string(syncStatus.Phase)
 		}
@@ -245,6 +257,7 @@ func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stre
 		Sources:         []SourceStatus{{Source: "analytics_db", State: "ready"}},
 		UpdatedAt:       time.Now().UnixMilli(),
 		VodID:           vodID,
+		VodSource:       vodSource,
 		ChatCoveragePct: chatCoverage.CoveragePct,
 		VodDurationSec:  vodDurationSec,
 		ChatCoverage:    &chatCoverage,

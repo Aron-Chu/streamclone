@@ -9,10 +9,20 @@ echo   removes shortcuts, and deletes this install folder.
 echo.
 echo   To pause without deleting anything, use Stop Streamclone.cmd instead.
 echo.
+echo   If Docker Desktop is not running, you can defer container/volume cleanup
+echo   and finish later with Finish Streamclone Docker cleanup.cmd on your Desktop.
+echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-streamclone-launcher.ps1" -Action uninstall -LauncherRoot "%~dp0"
 if errorlevel 2 if not errorlevel 3 (
   echo.
   echo Uninstall cancelled.
+  pause
+  exit /b 0
+)
+if errorlevel 3 if not errorlevel 4 (
+  echo.
+  echo Partial uninstall complete.
+  echo Start Docker Desktop, then run Finish Streamclone Docker cleanup on your Desktop.
   pause
   exit /b 0
 )

@@ -55,8 +55,7 @@ func Start(channel, quality, rtmpURL, liveEdge string, logw io.Writer) (*Worker,
 		"twitch.tv/"+channel,
 		quality,
 	)
-	ffArgs := append([]string{"-hide_banner", "-loglevel", "error"}, ffmpegReconnectFlags()...)
-	ffArgs = append(ffArgs, "-i", "pipe:0", "-c", "copy", "-f", "flv", rtmpURL)
+	ffArgs := append(ffmpegPipeInputFlags(), "-i", "pipe:0", "-c", "copy", "-f", "flv", rtmpURL)
 	ff := exec.Command("ffmpeg", ffArgs...)
 
 	pr, pw, err := os.Pipe()
@@ -122,6 +121,10 @@ func StartDirectHLS(channel, sourceURL, rtmpURL string, logw io.Writer) (*Worker
 		return nil, fmt.Errorf("start ffmpeg direct hls: %w", err)
 	}
 	return &Worker{Channel: channel, PGID: ff.Process.Pid, ff: ff}, nil
+}
+
+func ffmpegPipeInputFlags() []string {
+	return []string{"-hide_banner", "-loglevel", "error"}
 }
 
 func ffmpegReconnectFlags() []string {

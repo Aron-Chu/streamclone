@@ -18,4 +18,10 @@ fi
 echo "==> validate-env"
 bash scripts/validate-env.sh
 
+echo "==> local debug instrumentation"
+if rg -n "127\\.0\\.0\\.1:7829|X-Debug-Session-Id|#region agent log" frontend internal cmd clipper deploy .github --glob '!frontend/node_modules/**' --glob '!frontend/dist/**' --glob '!**/testdata/rapid/**'; then
+  echo "Local debug ingest instrumentation found; remove it before committing." >&2
+  exit 1
+fi
+
 echo "security-scan ok"

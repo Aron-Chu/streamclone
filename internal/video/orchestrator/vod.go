@@ -23,7 +23,9 @@ import (
 	"streamclone/internal/video/worker"
 )
 
-type VodSpawnFunc func(vodID, quality string, offsetSeconds int, rtmp string, logw io.Writer) (registry.Streamer, error)
+var errVodHelixMissing = errors.New("helix_missing")
+
+type VodSpawnFunc func(vodID, quality string, offsetSeconds int, rtmp string, logw io.Writer, twitchOAuth string) (registry.Streamer, error)
 type VodDirectSpawnFunc func(vodID, sourceURL string, offsetSeconds int, rtmp string, logw io.Writer) (registry.Streamer, error)
 
 type vodStartReq struct {
@@ -110,13 +112,19 @@ func (h *Orchestrator) startVod(w http.ResponseWriter, r *http.Request) {
 	}
 	sfKey := regKey + ":" + req.Quality + ":" + strconv.Itoa(req.OffsetSeconds)
 	v, err, _ := h.sf.Do(sfKey, func() (any, error) {
-		return h.createVod(r.Context(), req.VodID, req.Quality, req.OffsetSeconds, qualityRestarted)
+		viewerOAuth := ""
+		if h.o.ViewerAuth != nil {
+			if tok, ok := h.o.ViewerAuth.ViewerAccessToken(r.Context(), r); ok {
+				viewerOAuth = tok
+			}
+		}
+		return h.createVod(r.Context(), req.VodID, req.Quality, req.OffsetSeconds, qualityRestarted, viewerOAuth)
 	})
 	if err != nil {
 		code := h.vodStartErrorCode(err)
 		metrics.StreamStartFailures.WithLabelValues(code).Inc()
 		metrics.StreamStartDuration.WithLabelValues(code, "none").Observe(time.Since(started).Seconds())
-		h.writeVodStartError(w, req.VodID, err)
+		h.writeVodStartError(w, req.VodID, err, h.vodFailReason(err))
 		return
 	}
 	s := v.(*registry.Session)
@@ -129,6 +137,8 @@ func (h *Orchestrator) startVod(w http.ResponseWriter, r *http.Request) {
 
 func (h *Orchestrator) vodStartErrorCode(err error) string {
 	switch {
+	case errors.Is(err, resilience.ErrOpen):
+		return "upstream_token_failed"
 	case errors.Is(err, usher.ErrVodUnavailable):
 		return "vod_unavailable"
 	case errors.Is(err, errBusy):
@@ -144,10 +154,20 @@ func (h *Orchestrator) vodStartErrorCode(err error) string {
 	}
 }
 
-func (h *Orchestrator) writeVodStartError(w http.ResponseWriter, vodID string, err error) {
+func (h *Orchestrator) vodFailReason(err error) string {
+	if errors.Is(err, errVodHelixMissing) {
+		return "helix_missing"
+	}
+	if errors.Is(err, usher.ErrVodUnavailable) {
+		return "usher_404"
+	}
+	return ""
+}
+
+func (h *Orchestrator) writeVodStartError(w http.ResponseWriter, vodID string, err error, reason string) {
 	switch {
 	case errors.Is(err, usher.ErrVodUnavailable):
-		writeAPIError(w, http.StatusNotFound, "vod_unavailable", "vod unavailable", false)
+		writeAPIErrorWithReason(w, http.StatusNotFound, "vod_unavailable", "vod unavailable", false, reason)
 	case errors.Is(err, errBusy):
 		writeAPIError(w, http.StatusServiceUnavailable, "capacity_reached", "stream capacity reached", true)
 	case errors.Is(err, worker.ErrInvalidVodID):
@@ -155,6 +175,9 @@ func (h *Orchestrator) writeVodStartError(w http.ResponseWriter, vodID string, e
 	case errors.Is(err, upstream.ErrPlaybackToken):
 		h.o.Log.Error("vod playback token failed", "vod_id", vodID, "err", err)
 		writeAPIError(w, http.StatusBadGateway, "upstream_token_failed", err.Error(), true)
+	case errors.Is(err, resilience.ErrOpen):
+		h.o.Log.Warn("vod token circuit breaker open", "vod_id", vodID)
+		writeAPIError(w, http.StatusBadGateway, "upstream_token_failed", "relay token service cooling down; try again shortly", true)
 	case errors.Is(err, errHLSNotReady):
 		h.o.Log.Error("vod hls readiness failed", "vod_id", vodID, "err", err)
 		writeAPIError(w, http.StatusGatewayTimeout, "hls_not_ready", "local HLS relay did not become ready", true)
@@ -164,7 +187,32 @@ func (h *Orchestrator) writeVodStartError(w http.ResponseWriter, vodID string, e
 	}
 }
 
-func (h *Orchestrator) createVod(ctx context.Context, vodID, quality string, offsetSeconds int, qualityRestarted bool) (*registry.Session, error) {
+// fetchVodPlaybackToken tries a viewer OAuth token first (chat sign-in). Chat scopes
+// do not include VOD playback, so GQL often returns 401 — fall back to anonymous embed
+// token without counting that failure against the shared upstream circuit breaker.
+// streamlinkOAuth is non-empty only when the viewer token worked for VOD playback;
+// do not pass chat-only OAuth to streamlink (it can hang or never publish HLS).
+func (h *Orchestrator) fetchVodPlaybackToken(ctx context.Context, vodID, viewerOAuth string) (token.Token, string, error) {
+	if strings.TrimSpace(viewerOAuth) != "" {
+		tok, err := h.o.Token.Vod(ctx, vodID, viewerOAuth)
+		if err == nil {
+			return tok, viewerOAuth, nil
+		}
+		h.o.Log.Warn("viewer oauth vod token failed; falling back to anonymous", "vod_id", vodID, "err", err)
+	}
+
+	var tok token.Token
+	err := h.breaker.Do(func() error {
+		return resilience.Retry(ctx, 2, 200*time.Millisecond, func() error {
+			var e error
+			tok, e = h.o.Token.Vod(ctx, vodID, "")
+			return e
+		})
+	})
+	return tok, "", err
+}
+
+func (h *Orchestrator) createVod(ctx context.Context, vodID, quality string, offsetSeconds int, qualityRestarted bool, viewerOAuth string) (*registry.Session, error) {
 	startupStartedAt := time.Now()
 	select {
 	case h.sem <- struct{}{}:
@@ -182,16 +230,20 @@ func (h *Orchestrator) createVod(ctx context.Context, vodID, quality string, off
 	regKey := worker.VodRegistryKey(vodID)
 	seekSeconds := worker.VodSeekSeconds(offsetSeconds)
 
+	if h.o.VodHelix != nil {
+		exists, herr := h.o.VodHelix.VideoExists(ctx, vodID)
+		if herr != nil {
+			h.o.Log.Warn("vod helix preflight failed; continuing", "vod_id", vodID, "err", herr)
+		} else if !exists {
+			h.o.Log.Warn("vod unavailable", "vod_id", vodID, "reason", "helix_missing")
+			return nil, fmt.Errorf("%w", errors.Join(usher.ErrVodUnavailable, errVodHelixMissing))
+		}
+	}
+
 	upstreamStartedAt := time.Now()
 	var tok token.Token
 	tokenStartedAt := time.Now()
-	terr := h.breaker.Do(func() error {
-		return resilience.Retry(ctx, 2, 200*time.Millisecond, func() error {
-			var e error
-			tok, e = h.o.Token.Vod(ctx, vodID)
-			return e
-		})
-	})
+	tok, streamlinkOAuth, terr := h.fetchVodPlaybackToken(ctx, vodID, viewerOAuth)
 	if terr != nil {
 		metrics.UpstreamRequests.WithLabelValues("vod_token", "error").Inc()
 		metrics.UpstreamRequestDuration.WithLabelValues("vod_token", "error").Observe(time.Since(tokenStartedAt).Seconds())
@@ -201,19 +253,25 @@ func (h *Orchestrator) createVod(ctx context.Context, vodID, quality string, off
 	metrics.UpstreamRequestDuration.WithLabelValues("vod_token", "ok").Observe(time.Since(tokenStartedAt).Seconds())
 
 	usherStartedAt := time.Now()
-	rends, err := h.o.Usher.DiscoverVod(ctx, vodID, tok.Value, tok.Signature)
-	if err != nil {
+	rends, usherErr := h.o.Usher.DiscoverVod(ctx, vodID, tok.Value, tok.Signature)
+	var selected *usher.Rendition
+	if usherErr != nil {
 		metrics.UpstreamRequests.WithLabelValues("vod_usher", "error").Inc()
 		metrics.UpstreamRequestDuration.WithLabelValues("vod_usher", "error").Observe(time.Since(usherStartedAt).Seconds())
-		return nil, err
+		if errors.Is(usherErr, usher.ErrVodUnavailable) {
+			h.o.Log.Warn("vod usher unavailable; continuing with streamlink relay", "vod_id", vodID, "has_viewer_oauth", viewerOAuth != "")
+		} else {
+			return nil, usherErr
+		}
+	} else {
+		metrics.UpstreamRequests.WithLabelValues("vod_usher", "ok").Inc()
+		metrics.UpstreamRequestDuration.WithLabelValues("vod_usher", "ok").Observe(time.Since(usherStartedAt).Seconds())
+		selected = selectRendition(rends, quality)
 	}
-	metrics.UpstreamRequests.WithLabelValues("vod_usher", "ok").Inc()
-	metrics.UpstreamRequestDuration.WithLabelValues("vod_usher", "ok").Observe(time.Since(usherStartedAt).Seconds())
 
-	selected := selectRendition(rends, quality)
 	upstreamFetchMs := time.Since(upstreamStartedAt).Milliseconds()
 	rtmp := "rtmp://" + h.o.RTMPBase + "/live/" + mediaKey
-	st, backend, fallbackAttempted, fallbackAttempts, lastStartErr, startupBreakdown, err := h.startVodWorker(ctx, vodID, quality, offsetSeconds, rtmp, selected)
+	st, backend, fallbackAttempted, fallbackAttempts, lastStartErr, startupBreakdown, err := h.startVodWorker(ctx, vodID, quality, offsetSeconds, rtmp, selected, streamlinkOAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -248,16 +306,19 @@ func (h *Orchestrator) createVod(ctx context.Context, vodID, quality string, off
 	return s, nil
 }
 
-func (h *Orchestrator) startVodWorker(ctx context.Context, vodID, quality string, offsetSeconds int, rtmp string, selected *usher.Rendition) (registry.Streamer, string, bool, int, string, registry.StartupBreakdown, error) {
+// VOD streamlink→ffmpeg→RTMP→MediaMTX can exceed live probe budgets on cold start.
+const vodHLSProbeMinTimeout = 45 * time.Second
+
+func (h *Orchestrator) startVodWorker(ctx context.Context, vodID, quality string, offsetSeconds int, rtmp string, selected *usher.Rendition, viewerOAuth string) (registry.Streamer, string, bool, int, string, registry.StartupBreakdown, error) {
 	var lastErr error
 	fallbackAttempts := 0
-	backends := normalizeBackends(h.o.WorkerBackends)
+	backends := vodWorkerBackends(h.o.WorkerBackends)
 	for i, backend := range backends {
 		if i > 0 {
 			fallbackAttempts++
 		}
 		spawnStartedAt := time.Now()
-		st, err := h.spawnVodBackend(vodID, quality, offsetSeconds, rtmp, backend, selected)
+		st, err := h.spawnVodBackend(vodID, quality, offsetSeconds, rtmp, backend, selected, viewerOAuth)
 		spawnMs := time.Since(spawnStartedAt).Milliseconds()
 		if err != nil {
 			if !errors.Is(err, errDirectHLSSourceUnavailable) || lastErr == nil {
@@ -265,11 +326,15 @@ func (h *Orchestrator) startVodWorker(ctx context.Context, vodID, quality string
 			}
 			continue
 		}
-		probeTimeout := backendProbeTimeout(h.o.HLSProbeTimeout, i, len(backends))
+		probeTimeout := h.o.HLSProbeTimeout
+		if probeTimeout < vodHLSProbeMinTimeout {
+			probeTimeout = vodHLSProbeMinTimeout
+		}
 		hlsReadyStartedAt := time.Now()
 		mediaKey := worker.VodMediaKey(vodID)
 		if err := waitForHLS(ctx, h.o.HLSProbeBase, mediaKey, probeTimeout, hlsStabilityWindow, true); err != nil {
 			st.Kill()
+			_ = st.Wait()
 			lastErr = err
 			continue
 		}
@@ -289,7 +354,26 @@ func (h *Orchestrator) startVodWorker(ctx context.Context, vodID, quality string
 	return nil, "", fallbackAttempts > 0, fallbackAttempts, lastErr.Error(), registry.StartupBreakdown{}, lastErr
 }
 
-func (h *Orchestrator) spawnVodBackend(vodID, quality string, offsetSeconds int, rtmp, backend string, selected *usher.Rendition) (registry.Streamer, error) {
+func vodWorkerBackends(backends []string) []string {
+	normalized := normalizeBackends(backends)
+	if len(normalized) == 0 {
+		return normalized
+	}
+	out := make([]string, 0, len(normalized))
+	for _, backend := range normalized {
+		if backend == "streamlink" {
+			out = append(out, backend)
+		}
+	}
+	for _, backend := range normalized {
+		if backend != "streamlink" {
+			out = append(out, backend)
+		}
+	}
+	return out
+}
+
+func (h *Orchestrator) spawnVodBackend(vodID, quality string, offsetSeconds int, rtmp, backend string, selected *usher.Rendition, viewerOAuth string) (registry.Streamer, error) {
 	switch backend {
 	case "direct_hls":
 		if selected == nil || selected.URL == "" {
@@ -308,7 +392,7 @@ func (h *Orchestrator) spawnVodBackend(vodID, quality string, offsetSeconds int,
 		h.o.Log.Info("spawning vod direct HLS worker with local manifest proxy", "vod_id", vodID, "proxy_url", proxyURL)
 		return h.o.VodDirectSpawn(vodID, proxyURL, offsetSeconds, rtmp, vodLogWriter{log: h.o.Log, vodID: vodID})
 	default:
-		return h.o.VodSpawn(vodID, quality, offsetSeconds, rtmp, vodLogWriter{log: h.o.Log, vodID: vodID})
+		return h.o.VodSpawn(vodID, quality, offsetSeconds, rtmp, vodLogWriter{log: h.o.Log, vodID: vodID}, viewerOAuth)
 	}
 }
 

@@ -432,6 +432,7 @@ func (c *Client) ArchivedStreamHistory(ctx context.Context, login string, limit 
 				StreamID  string `json:"stream_id"`
 				Title     string `json:"title"`
 				GameName  string `json:"game_name"`
+				Thumbnail string `json:"thumbnail_url"`
 				CreatedAt string `json:"created_at"`
 				Duration  string `json:"duration"`
 			} `json:"data"`
@@ -456,6 +457,7 @@ func (c *Client) ArchivedStreamHistory(ctx context.Context, login string, limit 
 				VideoID:         item.ID,
 				Title:           title,
 				Category:        strings.TrimSpace(item.GameName),
+				ThumbnailURL:    strings.TrimSpace(item.Thumbnail),
 				StartedAt:       startedAt,
 				EndedAt:         endedAt,
 				DurationMinutes: durationMinutes,
@@ -470,6 +472,25 @@ func (c *Client) ArchivedStreamHistory(ctx context.Context, login string, limit 
 		}
 	}
 	return out, nil
+}
+
+// VideoExists reports whether Helix returns a /videos record for the VOD id.
+// When the client is disabled, it returns (true, nil) so callers can skip preflight.
+func (c *Client) VideoExists(ctx context.Context, videoID string) (bool, error) {
+	if !c.Enabled() || videoID == "" {
+		return true, nil
+	}
+	q := url.Values{}
+	q.Set("id", videoID)
+	var resp struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := c.get(ctx, "/videos", q, &resp); err != nil {
+		return false, err
+	}
+	return len(resp.Data) > 0, nil
 }
 
 func helixVideoTimes(createdAt, duration string) (startedAt, endedAt string, durationMinutes int) {

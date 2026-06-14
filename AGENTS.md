@@ -10,6 +10,8 @@ Read this file first. Load **one** domain steering doc, then use the code graph 
 |------|------------|---------------|
 | Any change | `.kiro/steering/tech.md` | `get_ast_chunk` / `get_blast_radius` |
 | Product / UX guardrails | `.kiro/steering/product.md` | — |
+| Product backlog / refine vs add | `docs/product-refinement-and-growth.md`, `docs/product-roadmap.md` | — |
+| Channel player / theater / controls | `.kiro/steering/product.md`, `.kiro/steering/playback.md` | `get_ast_chunk("LivePlayerControls")`, `get_ast_chunk("Channel")` |
 | Live clipper / Clip Studio | `.kiro/steering/clipper.md` | `get_ast_chunk("ClipStudio")`, `get_ast_chunk("VideoStage")`, `get_ast_chunk("CaptionOverlayEditor")`, `get_ast_chunk("_process")`, `get_ast_chunk("prepare_emote_assets")` |
 | Analytics / rollups / VODs | `.kiro/steering/analytics.md`, `.kiro/specs/vod-chat-pipeline-notes.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("gqlCommentText")`, `get_ast_chunk("hasGoodChatCoverageFromRollups")`, `get_ast_chunk("SyncProgressPanel")` |
 | System health / optional services / setup-control | `.kiro/steering/product.md`, `.kiro/steering/windows-dev.md` | `get_ast_chunk("SystemHealthPanel")`, `get_ast_chunk("useOptionalServices")`, `get_ast_chunk("OptionalServicesPanel")` |
@@ -62,7 +64,7 @@ If the graph is missing or stale, run `make codegraph` before debugging cross-pa
 7. Before PRs that touch auth, compose, clipper, or env: read `docs/security.md`; run `make security-scan` when changing secrets-related paths.
 8. Git commits use [Conventional Commits](https://www.conventionalcommits.org/) — see `CONTRIBUTING.md` (`type(scope): summary`).
 9. Release installs under `%USERPROFILE%\streamclone` are usually **not git checkouts**. To get code changes into that install, update/publish Docker images and sync `IMAGE_TAG`/`VERSION`; copying source files only updates scripts/docs.
-10. After scraper, analytics, install, or OAuth changes, update `.kiro/steering/*` and rebuild the AST graph (`make codegraph`) before calling the work fully synchronized.
+10. After scraper, analytics, install, OAuth, or large frontend workspace changes (e.g. `Channel.tsx` / `LivePlayerControls`), update `.kiro/steering/*` and rebuild the AST graph (`make codegraph`) before calling the work fully synchronized. The graph is gitignored (local only); run `graph_status()` after rebuild to confirm freshness.
 
 ## Layout
 

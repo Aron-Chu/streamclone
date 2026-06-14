@@ -413,11 +413,6 @@ class Renderer:
         return plan
 
     def _resolve_ffmpeg(self, ffmpeg_bin: str) -> str:
-        if ffmpeg_bin != "ffmpeg":
-            return ffmpeg_bin
-        try:
-            import imageio_ffmpeg
+        from .vod import resolve_ffmpeg_bin
 
-            return imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception:
-            return ffmpeg_bin
+        return resolve_ffmpeg_bin(ffmpeg_bin)

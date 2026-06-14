@@ -51,7 +51,7 @@ if ($UseImages) { $setupArgs['UseImages'] = $true }
 
 if ($Release) {
     Write-Host 'Step 2/4: Creating config and secrets...' -ForegroundColor Cyan
-    Write-Host 'Step 3/4: Pulling Docker images and starting stack (~3-5 min)...' -ForegroundColor Cyan
+    Write-Host 'Step 3/4: Pulling Docker images and starting stack (~3-8 min)...' -ForegroundColor Cyan
 }
 & (Join-Path $Dir 'scripts\setup.ps1') @setupArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

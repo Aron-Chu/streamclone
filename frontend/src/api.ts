@@ -1,17 +1,21 @@
-import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN, SETUP_CONTROL_TOKEN } from './config'
+import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN, SETUP_CONTROL_AVAILABLE, SETUP_CONTROL_TOKEN } from './config'
 import type { ClipPeriod, PlaybackLatencyMode, StatsPeriod } from './settings'
+import { buildVodStartRequestBody } from './utils/vodDeepLink'
+import type { HeatmapDetailResponse, HeatmapResponse } from './types/heatmap'
 
 export class ApiError extends Error {
   status: number
   code?: string
   retryable?: boolean
+  reason?: string
 
-  constructor(message: string, status: number, code?: string, retryable?: boolean) {
+  constructor(message: string, status: number, code?: string, retryable?: boolean, reason?: string) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.retryable = retryable
+    this.reason = reason
   }
 }
 
@@ -78,6 +82,8 @@ export interface AnalyticsStream {
   chatMessages: number
   totalEmoteUses: number
   seventvEmoteUses: number
+  vodId?: string
+  vodSource?: string
 }
 
 export interface AnalyticsMinuteRollup {
@@ -119,6 +125,7 @@ export interface AnalyticsStreamDetail {
   sources: SourceStatus[]
   updatedAt: number
   vodId?: string
+  vodSource?: string
   syncPhase?: string
   chatCoveragePct?: number
   vodDurationSec?: number
@@ -210,6 +217,7 @@ export interface StreamStat {
   videoId?: string
   title: string
   category?: string
+  thumbnailUrl?: string
   startedAt?: string
   endedAt?: string
   durationMinutes?: number
@@ -516,6 +524,7 @@ async function json<T>(res: Response): Promise<T> {
         res.status,
         typeof body.code === 'string' ? body.code : undefined,
         typeof body.retryable === 'boolean' ? body.retryable : undefined,
+        typeof body.reason === 'string' ? body.reason : undefined,
       )
     } catch (err) {
       if (err instanceof ApiError) throw err
@@ -759,6 +768,22 @@ export const syncHistoricalStream = (
 export const getStreamGameSegments = (streamId: string): Promise<GameSegment[]> =>
   fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}/games`).then(r => json<GameSegment[]>(r))
 
+export const getReplayHeatmap = async (streamId: string, window = 60, channel?: string): Promise<HeatmapResponse | null> => {
+  const params = new URLSearchParams({ window: String(window) })
+  if (channel) params.set('channel', channel)
+  const res = await fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}/replay-heatmap?${params}`)
+  if (res.status === 404) return null
+  return json<HeatmapResponse>(res)
+}
+
+export const getReplayHeatmapDetail = async (streamId: string, window = 60, channel?: string): Promise<HeatmapDetailResponse | null> => {
+  const params = new URLSearchParams({ window: String(window), detail: 'true' })
+  if (channel) params.set('channel', channel)
+  const res = await fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}/replay-heatmap?${params}`)
+  if (res.status === 404) return null
+  return json<HeatmapDetailResponse>(res)
+}
+
 export const getTwitchDayClips = (login: string, startedAt: string, endedAt: string, cursor = ''): Promise<ClipsResponse> => {
   const params = new URLSearchParams({ startedAt, endedAt, cursor })
   return fetch(`${METADATA}/v1/channels/${encodeURIComponent(login)}/clips?${params}`).then(r => json<ClipsResponse>(r))
@@ -780,13 +805,9 @@ export const startVodPlayback = (
 ): Promise<VodStartResponse> =>
   fetch(`${VIDEO}/v1/stream/vod/start`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      vod_id: vodId,
-      offset_seconds: offsetSeconds,
-      quality,
-      latency_mode: latencyMode,
-    }),
+    body: JSON.stringify(buildVodStartRequestBody(vodId, offsetSeconds, quality, latencyMode)),
   }).then(r => json<VodStartResponse>(r))
 
 export function vodSessionKey(vodId: string): string {
@@ -902,6 +923,9 @@ export const startSetupService = (service: 'scraper' | 'clipper'): Promise<Setup
 }
 
 export const syncClipperAuthFromSignIn = (): Promise<{ ok: boolean; merged?: boolean; recreated?: boolean; message?: string }> => {
+  if (!SETUP_CONTROL_AVAILABLE) {
+    return Promise.resolve({ ok: false, message: 'Install helper unavailable in this browser context.' })
+  }
   const headers: Record<string, string> = {}
   if (SETUP_CONTROL_TOKEN) {
     headers['X-Streamclone-Setup-Token'] = SETUP_CONTROL_TOKEN
@@ -1349,6 +1373,34 @@ const CLIPPER_STATE_LABELS: Record<string, string> = {
 
 export function isClipperJobInProgress(job: Pick<ClipperJob, 'state'>): boolean {
   return !CLIPPER_TERMINAL_STATES.has(job.state)
+}
+
+const CLIPPER_AUTH_FAILURE_CODES = new Set([
+  'invalid_token',
+  'twitch_not_configured',
+  'missing_scope',
+  'client_id_mismatch',
+  'vod_auth_failed',
+])
+
+export function isClipperAuthFailure(job: Pick<ClipperJob, 'failure_code'>): boolean {
+  return CLIPPER_AUTH_FAILURE_CODES.has(job.failure_code || '')
+}
+
+export function isClipperAuthFailureMessage(message?: string): boolean {
+  const lower = (message || '').toLowerCase()
+  return (
+    lower.includes('oauth') ||
+    lower.includes('expired') ||
+    lower.includes('invalid_token') ||
+    lower.includes('twitch-local-auth') ||
+    lower.includes('clips:edit') ||
+    lower.includes('authenticate with twitch')
+  )
+}
+
+export function isClipperJobRetryable(job: Pick<ClipperJob, 'state'>): boolean {
+  return job.state === 'failed'
 }
 
 export function describeClipperJobState(

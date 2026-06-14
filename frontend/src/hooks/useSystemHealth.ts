@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getHostDiagnostics, getMetadataDiagnostics } from '../api'
+import { SETUP_CONTROL_AVAILABLE } from '../config'
 import { useOptionalServices } from './useOptionalServices'
 
 export function useSystemHealth() {
@@ -10,6 +11,7 @@ export function useSystemHealth() {
   const host = useQuery({
     queryKey: ['host-diagnostics'],
     queryFn: getHostDiagnostics,
+    enabled: SETUP_CONTROL_AVAILABLE,
     staleTime: 10_000,
     refetchInterval: 20_000,
     retry: false,
@@ -26,7 +28,9 @@ export function useSystemHealth() {
   const refreshAll = async () => {
     await Promise.all([
       optional.refreshStatus(),
-      queryClient.invalidateQueries({ queryKey: ['host-diagnostics'] }),
+      SETUP_CONTROL_AVAILABLE
+        ? queryClient.invalidateQueries({ queryKey: ['host-diagnostics'] })
+        : Promise.resolve(),
       queryClient.invalidateQueries({ queryKey: ['metadata-diagnostics'] }),
     ])
   }

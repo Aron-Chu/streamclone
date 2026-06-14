@@ -61,6 +61,8 @@ interface ChatState {
 let ws: WebSocket | null = null
 let retryDelay = 1000
 let retryTimer: ReturnType<typeof setTimeout> | null = null
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+let queuedPersist: { channel: string; messages: Message[] } | null = null
 const CHAT_CACHE_PREFIX = 'streamclone:chat-cache:v1:'
 const CHAT_CACHE_TTL_MS = 30 * 60 * 1000
 const latencyWindows: Record<'total' | 'source' | 'relay' | 'browser' | 'echo', number[]> = {
@@ -125,6 +127,29 @@ function persistMessages(channel: string, messages: Message[]) {
   } catch {
     return
   }
+}
+
+function flushPersistedMessages() {
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  const next = queuedPersist
+  queuedPersist = null
+  if (next) {
+    persistMessages(next.channel, next.messages)
+  }
+}
+
+function schedulePersistMessages(channel: string, messages: Message[]) {
+  if (!channel) return
+  queuedPersist = { channel, messages }
+  if (persistTimer) return
+  persistTimer = setTimeout(flushPersistedMessages, 750)
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushPersistedMessages)
 }
 
 function textOf(msg: Message) {
@@ -300,7 +325,7 @@ function mergeIncoming(state: ChatState, incoming: Message[], frameServerSentTs?
 
   const nextMessages = trimMessages(messages)
   if (state.activeChannel) {
-    persistMessages(state.activeChannel, nextMessages)
+    schedulePersistMessages(state.activeChannel, nextMessages)
   }
 
   return {
@@ -362,7 +387,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         set(state => {
           const messages = applyAck(state.messages, data.client_msg_id!, ack)
           if (state.activeChannel) {
-            persistMessages(state.activeChannel, messages)
+            schedulePersistMessages(state.activeChannel, messages)
           }
           return { messages }
         })
@@ -371,7 +396,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         set(state => {
           const messages = applyError(state.messages, data.client_msg_id!, data.message ?? 'send failed')
           if (state.activeChannel) {
-            persistMessages(state.activeChannel, messages)
+            schedulePersistMessages(state.activeChannel, messages)
           }
           return {
             messages,
@@ -464,7 +489,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       set(state => {
         const messages = trimMessages([...state.messages, pending])
-        persistMessages(state.activeChannel ?? channel, messages)
+        schedulePersistMessages(state.activeChannel ?? channel, messages)
         return { messages, restoredFromCache: false }
       })
       connect()

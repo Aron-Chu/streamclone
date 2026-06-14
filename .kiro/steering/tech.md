@@ -23,7 +23,7 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 
 ## Local Commands
 
-- Human setup guide: `docs/install-desktop.md` (options: `docs/options.md`)
+- Human setup guide: `docs/install-desktop.md` (options: `docs/options.md`); product backlog: `docs/product-refinement-and-growth.md`
 - Backend build: `make build`
 - Backend tests: `make test`
 - Backend vet: `make vet`
@@ -33,7 +33,8 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - Host **setup-control** daemon: loopback `:9191`, started by `scripts/ensure-setup-control.ps1` on setup/start/install. Caddy proxies `/v1/setup-control/*` → `host.docker.internal:9191`. PID file: `.streamclone-setup-control.pid`.
 - Stop stack (keep data): `make down` or `scripts/stop-streamclone.ps1` / **Stop Streamclone** launcher
 - Remove volumes only: `make down-clean`
-- Complete uninstall: `scripts/uninstall-streamclone.ps1` / **Uninstall Streamclone** launcher
+- Complete uninstall: `scripts/uninstall-streamclone.ps1` / **Uninstall Streamclone** launcher (defers Docker cleanup when Desktop is offline)
+- Windows install overlay: `scripts/bootstrap-windows-install.ps1` resolves latest GitHub commit SHA for script/Caddyfile overlay; `scripts/start-streamclone.ps1` repairs `deploy/Caddyfile.local-tunnel` if Docker created a directory mount
 - Migrations: `make migrate`
 - Instant local Twitch login: `make twitch-local-auth`
 - Frontend dev from WSL: `cd /mnt/c/Users/Aron/twitch-7tv-clone/frontend && npm run dev -- --host 127.0.0.1 --port 5174`
@@ -72,4 +73,4 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - For local proxy, auth, or chat transport changes, validate `docker compose ... config`, `http://localhost:8090/v1/auth/debug`, and a websocket subscribe through `ws://localhost:8090/v1/ws`.
 - For channel playback/UI changes, verify against the proxied local bundle at `http://localhost:8090`, not just the standalone Vite dev server.
 - For docs-only changes, no build is required unless the docs describe a command or generated artifact that should be verified.
-- After adding/moving symbols or completing a cross-package change, rebuild the AST graph with `make codegraph` so codegraph MCP stays fresh.
+- After adding/moving symbols or completing a cross-package change, rebuild the AST graph with `make codegraph` (WSL) so codegraph MCP stays fresh. Graph lives at `.codegraph/streamclone.kuzu` (gitignored). Large TSX files may log tree-sitter warnings but still index; use `graph_status()` to confirm counts.

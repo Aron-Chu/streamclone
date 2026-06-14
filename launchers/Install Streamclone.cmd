@@ -10,7 +10,7 @@ echo.
 echo   This will:
 echo     1. Download the latest release
 echo     2. Create config and secrets
-echo     3. Pull Docker images and start the stack (~3-5 min)
+echo     3. Pull Docker images and start the stack (~3-8 min)
 echo     4. Add a Streamclone shortcut and open the directory
 echo.
 echo   Windows may show "Unknown Publisher" - click Run. We are not code-signed yet.

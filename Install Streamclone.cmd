@@ -8,9 +8,9 @@ echo   Requires Docker Desktop (running).
 echo.
 echo   This will:
 echo     1. Create config and secrets
-echo     2. Pull Docker images and start the stack (~3-5 min)
+echo     2. Pull Docker images and start the stack (~3-8 min)
 echo     3. Add a Streamclone shortcut to your Desktop
-echo     4. Open http://127.0.0.1:8090/ in your browser
+echo     4. Open Streamclone in your browser
 echo.
 echo   If setup fails, run Check Streamclone.cmd in this folder first.
 echo.

@@ -468,7 +468,7 @@ class Store:
                     now_ms(),
                     row["peak_chat_ts"],
                     row["message_count"],
-                    row.get("moment_context"),
+                    row["moment_context"],
                     ts,
                     ts,
                 ),

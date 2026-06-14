@@ -114,6 +114,7 @@ type StreamStat struct {
 	VideoID         string `json:"videoId,omitempty"`
 	Title           string `json:"title"`
 	Category        string `json:"category,omitempty"`
+	ThumbnailURL    string `json:"thumbnailUrl,omitempty"`
 	StartedAt       string `json:"startedAt,omitempty"`
 	EndedAt         string `json:"endedAt,omitempty"`
 	DurationMinutes int    `json:"durationMinutes,omitempty"`

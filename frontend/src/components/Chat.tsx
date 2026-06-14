@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import type { AuthUser, ChannelEmote, ChatBadge, EmoteBenchmark, EmoteProviderStatus } from '../api'
 import { Fragment, LatencySummary, Message, useChatStore } from '../chatStore'
@@ -24,6 +24,7 @@ function EmoteStack({ base, overlays }: { base: Fragment; overlays: Fragment[] }
         src={normalizeBrowserOriginUrl(base.u, ['/emotes/'])}
         alt={base.c}
         className="inline-block h-full w-auto max-w-none align-middle drop-shadow"
+        decoding="async"
       />
       {overlays.map((overlay, index) => (
         <img
@@ -32,6 +33,7 @@ function EmoteStack({ base, overlays }: { base: Fragment; overlays: Fragment[] }
           alt={overlay.c}
           title={overlay.c}
           className="pointer-events-none absolute inset-0 z-10 h-full w-full object-contain drop-shadow"
+          decoding="async"
         />
       ))}
     </span>
@@ -47,6 +49,7 @@ function Frag({ f, selfMention, mentionColor }: { f: Fragment; selfMention?: boo
         title={f.c}
         className="inline-block align-middle drop-shadow"
         style={{ height: '1.65em', width: f.zw ? '1.65em' : undefined }}
+        decoding="async"
       />
     )
   }
@@ -122,7 +125,7 @@ function renderMessageFragments(fragments: Fragment[], mentionNames: Set<string>
   return nodes
 }
 
-function Row({ msg, badges, mentionNames }: { msg: Message; badges: Record<string, ChatBadge>; mentionNames: Set<string> }) {
+const Row = memo(function Row({ msg, badges, mentionNames }: { msg: Message; badges: Record<string, ChatBadge>; mentionNames: Set<string> }) {
   const time = Number.isFinite(msg.ts) ? new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
   const tone = msg.ackState === 'error'
     ? 'text-red-300'
@@ -144,7 +147,7 @@ function Row({ msg, badges, mentionNames }: { msg: Message; badges: Record<strin
       ) : null}
     </div>
   )
-}
+})
 
 function StatusPill({ label, tone }: { label: string; tone: 'ok' | 'warn' | 'err' | 'idle' }) {
   const classes = {

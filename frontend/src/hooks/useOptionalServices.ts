@@ -9,6 +9,7 @@ import {
   type MetadataDiagnostics,
   type SetupWelcome,
 } from '../api'
+import { SETUP_CONTROL_AVAILABLE } from '../config'
 
 export type ServiceStartProgress = {
   service: 'scraper' | 'clipper'
@@ -72,6 +73,7 @@ export function useOptionalServices() {
   const control = useQuery({
     queryKey: ['setup-control-health'],
     queryFn: getSetupControlHealth,
+    enabled: SETUP_CONTROL_AVAILABLE,
     staleTime: 10_000,
     retry: false,
   })
@@ -99,7 +101,9 @@ export function useOptionalServices() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['setup-welcome'] }),
       queryClient.invalidateQueries({ queryKey: ['setup-diagnostics'] }),
-      queryClient.invalidateQueries({ queryKey: ['setup-control-health'] }),
+      SETUP_CONTROL_AVAILABLE
+        ? queryClient.invalidateQueries({ queryKey: ['setup-control-health'] })
+        : Promise.resolve(),
     ])
   }
 

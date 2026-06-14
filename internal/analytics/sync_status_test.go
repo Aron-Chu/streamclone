@@ -38,6 +38,31 @@ func TestSyncStatusIsStale(t *testing.T) {
 	}
 }
 
+func TestSyncStatusShouldReportStaleDependsOnCurrentOwner(t *testing.T) {
+	status := &SyncStatus{
+		Phase:     SyncPhaseFetchingComments,
+		UpdatedAt: time.Now().UTC().Add(-2 * time.Minute),
+	}
+	if !syncStatusShouldReportStale(status, false) {
+		t.Fatal("stale status without a current owner should be reported stale")
+	}
+	if syncStatusShouldReportStale(status, true) {
+		t.Fatal("stale status owned by this process should stay active")
+	}
+}
+
+func TestSyncLockOwnedBy(t *testing.T) {
+	if !syncLockOwnedBy("owner-a", "owner-a") {
+		t.Fatal("matching owner should own lock")
+	}
+	if syncLockOwnedBy("owner-a", "owner-b") {
+		t.Fatal("different owner should not own lock")
+	}
+	if syncLockOwnedBy("", "owner-a") {
+		t.Fatal("empty lock value should not be owned")
+	}
+}
+
 func TestSyncStatusCacheThrottlesFlush(t *testing.T) {
 	cache := &syncStatusCache{}
 	cache.put(SyncStatus{StreamID: "1"})

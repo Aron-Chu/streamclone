@@ -21,6 +21,16 @@ func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
 }
 
+// Pool exposes the underlying connection pool so sibling stores (such as the
+// chat-replay store) can be constructed against the same database without
+// re-plumbing a pool through every constructor.
+func (s *Store) Pool() *pgxpool.Pool {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
+
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.Ping(ctx)
 }
@@ -208,6 +218,15 @@ func (s *Store) StreamByID(ctx context.Context, streamID string) (*StreamRecord,
 	return scanStream(rows)
 }
 
+func (s *Store) GetStreamUpdatedAt(ctx context.Context, streamID string) (time.Time, error) {
+	var updatedAt time.Time
+	err := s.db.QueryRow(ctx,
+		`SELECT updated_at FROM analytics_streams WHERE stream_id = $1`,
+		streamID,
+	).Scan(&updatedAt)
+	return updatedAt, err
+}
+
 func (s *Store) StreamsByLogin(ctx context.Context, login string, limit int) ([]StreamRecord, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
@@ -281,6 +300,29 @@ func (s *Store) SetStreamVodID(ctx context.Context, streamID, vodID, source stri
 		UPDATE analytics_streams
 		SET vod_id=$2, vod_source=$3, updated_at=now()
 		WHERE stream_id=$1`, streamID, vodID, source)
+	return err
+}
+
+// VodSourceUnlinked marks a closed stream whose VOD id did not resolve within the
+// post-close resolution window. Live-collected minute rollups remain stored under
+// the live stream id; a later sync or manual trigger can resolve the VOD and link
+// them via SetStreamVodID, which overwrites this marker. See Requirements 19.3/19.4.
+const VodSourceUnlinked = "unlinked"
+
+// MarkStreamVodUnlinked records that a closed stream's VOD id could not be
+// resolved within the resolution window. It only stamps the marker when the
+// stream is still unlinked (no vod_id and not already marked) so it never
+// clobbers a real VOD association produced by SetStreamVodID.
+func (s *Store) MarkStreamVodUnlinked(ctx context.Context, streamID string) error {
+	if streamID == "" {
+		return nil
+	}
+	_, err := s.db.Exec(ctx, `
+		UPDATE analytics_streams
+		SET vod_source=$2, updated_at=now()
+		WHERE stream_id=$1
+		  AND COALESCE(vod_id,'')=''
+		  AND COALESCE(vod_source,'') <> $2`, streamID, VodSourceUnlinked)
 	return err
 }
 
@@ -744,4 +786,3 @@ func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rol
 
 	return tx.Commit(ctx)
 }
-

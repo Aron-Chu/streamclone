@@ -139,6 +139,15 @@ obs-config:
 test:
 	$(GO) test ./...
 
+integration-up:
+	docker compose -f internal/integration/docker-compose.test.yml up -d
+
+integration-down:
+	docker compose -f internal/integration/docker-compose.test.yml down -v
+
+integration-test: integration-up
+	INTEGRATION=1 $(GO) test ./internal/integration/ -count=1 -timeout 120s
+
 vet:
 	$(GO) vet ./...
 

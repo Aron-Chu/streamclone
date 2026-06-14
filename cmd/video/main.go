@@ -7,9 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
+	"streamclone/internal/chat/auth"
 	"streamclone/internal/config"
 	"streamclone/internal/httpx"
 	"streamclone/internal/log"
+	"streamclone/internal/metadata/helix"
 	"streamclone/internal/metrics"
 	"streamclone/internal/video/orchestrator"
 	"streamclone/internal/video/registry"
@@ -30,9 +34,38 @@ func main() {
 		logger.Warn("reconciled orphan stream processes", "killed", n)
 	}
 
+	vodHelix := helix.New(
+		cfg.TwitchAPIURL,
+		cfg.TwitchTokenURL,
+		cfg.TwitchOAuthClientID,
+		cfg.TwitchOAuthClientSecret,
+		cfg.Upstream.UserAgent,
+	)
+
+	var viewerAuth orchestrator.ViewerAuth
+	if strings.TrimSpace(cfg.RedisURL) != "" {
+		opt, err := redis.ParseURL(cfg.RedisURL)
+		if err != nil {
+			logger.Error("redis parse failed", "err", err)
+			os.Exit(1)
+		}
+		authHandler := auth.New(auth.NewRedisStore(redis.NewClient(opt)), auth.Config{
+			ClientID:     cfg.TwitchOAuthClientID,
+			ClientSecret: cfg.TwitchOAuthClientSecret,
+			TokenURL:     cfg.TwitchTokenURL,
+			ValidateURL:  "https://id.twitch.tv/oauth2/validate",
+			APIURL:       cfg.TwitchAPIURL,
+			CookieSecret: cfg.AuthCookieSecret,
+			CookieSameSite: cfg.AuthCookieSameSite,
+		}, logger)
+		viewerAuth = authHandler
+	}
+
 	orch := orchestrator.New(orchestrator.Options{
 		Token:          token.New(cfg.Upstream),
+		ViewerAuth:     viewerAuth,
 		Usher:          usher.New(cfg.Upstream),
+		VodHelix:       vodHelix,
 		Registry:       registry.New(),
 		Log:            logger,
 		RTMPBase:       cfg.MediaMTXRTMP,

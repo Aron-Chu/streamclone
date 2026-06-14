@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"net/http"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -21,25 +22,26 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 
+	"streamclone/internal/analytics/chatreplay"
 	"streamclone/internal/chat/enrich"
 )
 
 type SyncService struct {
-	store          *Store
-	enricher       *enrich.Enricher
-	helix          *HelixClient
-	emoteURL       string
-	scraperURL   string
-	scraperKey   string
-	twitchGQLURL   string
-	twitchClientID string
-	userAgent           string
-	client              *http.Client
-	gqlClient           *http.Client
-	vodGQLPageDelay        time.Duration
-	vodGQLConcurrency      int
-	vodGQLConcurrencyMin   int
-	vodGQLConcurrencyMax   int
+	store                         *Store
+	enricher                      *enrich.Enricher
+	helix                         *HelixClient
+	emoteURL                      string
+	scraperURL                    string
+	scraperKey                    string
+	twitchGQLURL                  string
+	twitchClientID                string
+	userAgent                     string
+	client                        *http.Client
+	gqlClient                     *http.Client
+	vodGQLPageDelay               time.Duration
+	vodGQLConcurrency             int
+	vodGQLConcurrencyMin          int
+	vodGQLConcurrencyMax          int
 	vodGQLSegmentSeconds          int
 	vodGQLDenseSegmentSeconds     int
 	vodGQLHotSegmentPageThreshold int
@@ -48,19 +50,24 @@ type SyncService struct {
 	vodGQLHotCommentsPerPage      int
 	vodGQLPriorityEdgeSeconds     int
 	vodGQLIncrementalDB           bool
-	trackerScrapeTimeoutMS int
-	passTTMaxAge              bool
-	ttMaxAgeMSDefault         int
-	ttStaleMaxAgeMS           int
-	ttPrefetchEnabled         bool
-	ttDirectHTTPEnabled       bool
-	ttDirectHTTPStaleOnly     bool
-	ttDirectHTTPTimeoutMS     int
-	directHTTP                directHTTPTelemetry
-	trackerPrefetch           trackerPrefetchState
-	syncStatusCache        syncStatusCache
-	log                 *slog.Logger
-	rdb                 *redis.Client
+	trackerScrapeTimeoutMS        int
+	passTTMaxAge                  bool
+	ttMaxAgeMSDefault             int
+	ttStaleMaxAgeMS               int
+	ttPrefetchEnabled             bool
+	ttDirectHTTPEnabled           bool
+	ttDirectHTTPStaleOnly         bool
+	ttDirectHTTPTimeoutMS         int
+	directHTTP                    directHTTPTelemetry
+	trackerPrefetch               trackerPrefetchState
+	syncStatusCache               syncStatusCache
+	syncOwnerID                   string
+	log                           *slog.Logger
+	rdb                           *redis.Client
+
+	chatReplaySink    chatreplay.Sink
+	chatReplayCfg     chatreplay.SanitizeConfig
+	chatReplayEnabled bool
 }
 
 var errTrackerAccessProtected = errors.New("tracker access protected")
@@ -151,13 +158,26 @@ func NewSyncService(
 		MaxIdleConnsPerHost: 16,
 		IdleConnTimeout:     90 * time.Second,
 	}
+
+	// Chat replay persistence (P2) is optional and default-safe: a nil
+	// *StoreSink is a no-op, so the sync paths can always call Add/FlushSegment/
+	// Flush without nil checks. It is only backed by the database when the
+	// feature is gated on (see chatReplayPersistenceEnabled) and a pool exists.
+	var chatReplaySink chatreplay.Sink = (*chatreplay.StoreSink)(nil)
+	chatReplayCfg := chatreplay.LoadConfig()
+	chatReplayEnabled := false
+	if chatReplayPersistenceEnabled() && store != nil && store.Pool() != nil {
+		chatReplaySink = chatreplay.NewStoreSink(chatreplay.NewStore(store.Pool()))
+		chatReplayEnabled = true
+	}
+
 	return &SyncService{
 		store:          store,
 		enricher:       enricher,
 		helix:          helix,
 		emoteURL:       strings.TrimRight(emoteURL, "/"),
-		scraperURL:   scraperURL,
-		scraperKey:   scraperKey,
+		scraperURL:     scraperURL,
+		scraperKey:     scraperKey,
 		twitchGQLURL:   twitchGQLURL,
 		twitchClientID: twitchClientID,
 		userAgent:      userAgent,
@@ -168,10 +188,10 @@ func NewSyncService(
 			Timeout:   30 * time.Second,
 			Transport: gqlTransport,
 		},
-		vodGQLPageDelay:        vodGQLPageDelay,
-		vodGQLConcurrency:      vodGQLConcurrency,
-		vodGQLConcurrencyMin:   vodGQLConcurrencyMin,
-		vodGQLConcurrencyMax:   vodGQLConcurrencyMax,
+		vodGQLPageDelay:               vodGQLPageDelay,
+		vodGQLConcurrency:             vodGQLConcurrency,
+		vodGQLConcurrencyMin:          vodGQLConcurrencyMin,
+		vodGQLConcurrencyMax:          vodGQLConcurrencyMax,
 		vodGQLSegmentSeconds:          vodGQLSegmentSeconds,
 		vodGQLDenseSegmentSeconds:     vodGQLDenseSegmentSeconds,
 		vodGQLHotSegmentPageThreshold: vodGQLHotSegmentPageThreshold,
@@ -180,18 +200,35 @@ func NewSyncService(
 		vodGQLHotCommentsPerPage:      vodGQLHotCommentsPerPage,
 		vodGQLPriorityEdgeSeconds:     vodGQLPriorityEdgeSeconds,
 		vodGQLIncrementalDB:           vodGQLIncrementalDB,
-		trackerScrapeTimeoutMS: trackerScrapeTimeoutMS,
-		passTTMaxAge:              passTTMaxAge,
-		ttMaxAgeMSDefault:         ttMaxAgeMSDefault,
-		ttStaleMaxAgeMS:           ttStaleMaxAgeMS,
-		ttPrefetchEnabled:         ttPrefetchEnabled,
-		ttDirectHTTPEnabled:       ttDirectHTTPEnabled,
-		ttDirectHTTPStaleOnly:     ttDirectHTTPStaleOnly,
-		ttDirectHTTPTimeoutMS:     ttDirectHTTPTimeoutMS,
-		trackerPrefetch:           *newTrackerPrefetchState(),
-		log:                       logger.With("service", "sync"),
-		rdb:                    rdb,
+		trackerScrapeTimeoutMS:        trackerScrapeTimeoutMS,
+		passTTMaxAge:                  passTTMaxAge,
+		ttMaxAgeMSDefault:             ttMaxAgeMSDefault,
+		ttStaleMaxAgeMS:               ttStaleMaxAgeMS,
+		ttPrefetchEnabled:             ttPrefetchEnabled,
+		ttDirectHTTPEnabled:           ttDirectHTTPEnabled,
+		ttDirectHTTPStaleOnly:         ttDirectHTTPStaleOnly,
+		ttDirectHTTPTimeoutMS:         ttDirectHTTPTimeoutMS,
+		trackerPrefetch:               *newTrackerPrefetchState(),
+		syncOwnerID:                   newSyncOwnerID(),
+		log:                           logger.With("service", "sync"),
+		rdb:                           rdb,
+		chatReplaySink:                chatReplaySink,
+		chatReplayCfg:                 chatReplayCfg,
+		chatReplayEnabled:             chatReplayEnabled,
 	}
+}
+
+// chatReplayPersistenceEnabled reports whether individual VOD chat messages
+// should be persisted to analytics_vod_chat_messages during GQL sync. It is
+// default-safe (off): enabled only when explicitly turned on via
+// ANALYTICS_VOD_CHAT_REPLAY_ENABLED, or implicitly when a server-side sender
+// salt (ANALYTICS_VOD_CHAT_SENDER_SALT) is configured so privacy hashing is
+// meaningful.
+func chatReplayPersistenceEnabled() bool {
+	if v := strings.TrimSpace(os.Getenv("ANALYTICS_VOD_CHAT_REPLAY_ENABLED")); v != "" {
+		return v == "1" || strings.EqualFold(v, "true")
+	}
+	return strings.TrimSpace(os.Getenv("ANALYTICS_VOD_CHAT_SENDER_SALT")) != ""
 }
 
 type GQLRequest struct {
@@ -214,7 +251,12 @@ type GQLCommentEdge struct {
 	Node   struct {
 		ID                   string `json:"id"`
 		ContentOffsetSeconds int    `json:"contentOffsetSeconds"`
-		Message              struct {
+		Commenter            *struct {
+			ID          string `json:"id"`
+			Login       string `json:"login"`
+			DisplayName string `json:"displayName"`
+		} `json:"commenter"`
+		Message struct {
 			Body      string `json:"body"`
 			Fragments []struct {
 				Text string `json:"text"`
@@ -774,41 +816,41 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 	if skipTracker && !viewersOnly {
 		rollups = nil
 	} else {
-	if !viewersOnly {
-		s.setSyncPhase(ctx, streamID, SyncPhaseWritingRollups, "Tokenizing chat and emotes", func(st *SyncStatus) {
-			if st.Chat != nil {
-				st.Chat.IndexPhase = "tokenizing"
-				st.Chat.StreamDurationSec = durationSeconds
-			}
-		})
-	}
-	tokenizeStart := time.Now()
-	var cacheFn func(int) (CachedMinuteRollup, bool)
-	if chatCache != nil {
-		cacheFn = func(minute int) (CachedMinuteRollup, bool) {
-			r, ok := chatCache.get(minute)
-			if !ok {
-				return CachedMinuteRollup{}, false
-			}
-			return CachedMinuteRollup{
-				ChatCount:         r.ChatCount,
-				TotalEmoteCount:   r.TotalEmoteCount,
-				SevenTVEmoteCount: r.SevenTVEmoteCount,
-				Emotes:            r.Emotes,
-			}, true
+		if !viewersOnly {
+			s.setSyncPhase(ctx, streamID, SyncPhaseWritingRollups, "Tokenizing chat and emotes", func(st *SyncStatus) {
+				if st.Chat != nil {
+					st.Chat.IndexPhase = "tokenizing"
+					st.Chat.StreamDurationSec = durationSeconds
+				}
+			})
 		}
-	}
-	rollups = BuildMinuteRollupsFromCommentsCached(
-		login,
-		s.enricher,
-		commentsMap,
-		toRollupViewerPoints(viewerPoints),
-		rollupStart,
-		durationSeconds,
-		cacheFn,
-	)
-	tokenizeMS = time.Since(tokenizeStart).Milliseconds()
-	s.log.Info("sync phase complete", "stream_id", streamID, "phase", "tokenize", "duration_ms", tokenizeMS)
+		tokenizeStart := time.Now()
+		var cacheFn func(int) (CachedMinuteRollup, bool)
+		if chatCache != nil {
+			cacheFn = func(minute int) (CachedMinuteRollup, bool) {
+				r, ok := chatCache.get(minute)
+				if !ok {
+					return CachedMinuteRollup{}, false
+				}
+				return CachedMinuteRollup{
+					ChatCount:         r.ChatCount,
+					TotalEmoteCount:   r.TotalEmoteCount,
+					SevenTVEmoteCount: r.SevenTVEmoteCount,
+					Emotes:            r.Emotes,
+				}, true
+			}
+		}
+		rollups = BuildMinuteRollupsFromCommentsCached(
+			login,
+			s.enricher,
+			commentsMap,
+			toRollupViewerPoints(viewerPoints),
+			rollupStart,
+			durationSeconds,
+			cacheFn,
+		)
+		tokenizeMS = time.Since(tokenizeStart).Milliseconds()
+		s.log.Info("sync phase complete", "stream_id", streamID, "phase", "tokenize", "duration_ms", tokenizeMS)
 	}
 
 	chatRollupsWritten := 0
@@ -930,12 +972,12 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		}
 	} else if vodID == "" {
 		if NormalizeBroadcasterID(broadcasterID) == "" {
-			msg = "Stream synced (viewers only — VOD chat skipped: broadcaster ID missing; re-sync after Helix credentials are set)"
+			msg = "Viewer timeline synced; VOD chat skipped because broadcaster ID is missing. Re-sync after Helix credentials are set."
 		} else {
-			msg = "Stream synced (viewers only — VOD not found in Helix/TwitchTracker; chat/7TV skipped)"
+			msg = "Viewer timeline synced; VOD was not found in Helix/TwitchTracker, so chat/7TV were skipped."
 		}
 	} else if chatComments == 0 {
-		msg = "Stream synced (viewers only — VOD comments unavailable)"
+		msg = "Viewer timeline synced; Twitch VOD comments are unavailable right now."
 	}
 	if skipTracker && !viewersOnly && chatComments > 0 {
 		msg = fmt.Sprintf("Chat/emotes synced (%s comments); viewer timeline unchanged", strconv.Itoa(chatComments))
@@ -1230,8 +1272,8 @@ func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string, strea
 	var fcResp struct {
 		Success bool `json:"success"`
 		Data    struct {
-			HTML    string `json:"html"`
-			RawHTML string `json:"rawHtml"`
+			HTML       string `json:"html"`
+			RawHTML    string `json:"rawHtml"`
 			Validation struct {
 				CloudflareState string `json:"cloudflareState"`
 			} `json:"validation"`

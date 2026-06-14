@@ -43,7 +43,12 @@ type DirectSpawnFunc func(channel, sourceURL, rtmp string, logw io.Writer) (regi
 
 type TokenClient interface {
 	Live(ctx context.Context, login string) (token.Token, error)
-	Vod(ctx context.Context, vodID string) (token.Token, error)
+	Vod(ctx context.Context, vodID, viewerOAuth string) (token.Token, error)
+}
+
+// ViewerAuth resolves optional viewer OAuth from the browser session cookie.
+type ViewerAuth interface {
+	ViewerAccessToken(ctx context.Context, r *http.Request) (string, bool)
 }
 
 type UsherClient interface {
@@ -51,9 +56,15 @@ type UsherClient interface {
 	DiscoverVod(ctx context.Context, vodID, tokenValue, signature string) ([]usher.Rendition, error)
 }
 
+type VodHelixClient interface {
+	VideoExists(ctx context.Context, vodID string) (bool, error)
+}
+
 type Options struct {
 	Token           TokenClient
+	ViewerAuth      ViewerAuth
 	Usher           UsherClient
+	VodHelix        VodHelixClient
 	Registry        *registry.Registry
 	Log             *slog.Logger
 	RTMPBase        string
@@ -92,8 +103,8 @@ func New(o Options) *Orchestrator {
 		}
 	}
 	if o.VodSpawn == nil {
-		o.VodSpawn = func(vodID, quality string, offsetSeconds int, rtmp string, logw io.Writer) (registry.Streamer, error) {
-			return worker.StartVod(vodID, quality, offsetSeconds, rtmp, logw)
+		o.VodSpawn = func(vodID, quality string, offsetSeconds int, rtmp string, logw io.Writer, twitchOAuth string) (registry.Streamer, error) {
+			return worker.StartVod(vodID, quality, offsetSeconds, rtmp, logw, twitchOAuth)
 		}
 	}
 	if o.VodDirectSpawn == nil {
@@ -824,10 +835,15 @@ type apiError struct {
 	Code      string `json:"code"`
 	Error     string `json:"error"`
 	Retryable bool   `json:"retryable"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 func writeAPIError(w http.ResponseWriter, status int, code, message string, retryable bool) {
-	writeJSON(w, status, apiError{Code: code, Error: message, Retryable: retryable})
+	writeAPIErrorWithReason(w, status, code, message, retryable, "")
+}
+
+func writeAPIErrorWithReason(w http.ResponseWriter, status int, code, message string, retryable bool, reason string) {
+	writeJSON(w, status, apiError{Code: code, Error: message, Retryable: retryable, Reason: reason})
 }
 
 func waitForHLS(ctx context.Context, base, channel string, timeout time.Duration, stabilityWindow time.Duration, skipVariant bool) error {

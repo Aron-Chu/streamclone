@@ -9,6 +9,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"streamclone/internal/analytics"
+	"streamclone/internal/analytics/chatreplay"
+	"streamclone/internal/analytics/heatmap"
 	"streamclone/internal/chat/enrich"
 	"streamclone/internal/chat/ircconn"
 	"streamclone/internal/config"
@@ -113,11 +115,19 @@ func main() {
 		cfg.AnalyticsTTDirectHTTPTimeoutMS,
 	)
 	handler := analytics.NewHandler(store, collector, helix, syncService)
+	heatmapCache := heatmap.NewCache(rdb, logger)
+	handler.WithHeatmapCache(heatmapCache)
+	chatReplayStore := chatreplay.NewStore(pool)
+	chatReplayHandler := chatreplay.NewHandler(chatReplayStore).WithLogger(logger)
+
+	retentionWorker := chatreplay.NewRetentionWorker(chatReplayStore, cfg.AnalyticsVODChatRetentionDays, logger)
+	retentionWorker.Start(ctx)
 	srv := httpx.New("analytics", cfg.HTTPAddr, logger, metrics.HTTPMiddleware("analytics"), httpx.CORS, httpx.NewRateLimiter(20, 40).Middleware)
 	srv.AddReady(func(ctx context.Context) error {
 		return store.Ping(ctx)
 	})
 	handler.Routes(srv.Router)
+	chatReplayHandler.Routes(srv.Router)
 
 	if err := srv.Run(ctx); err != nil {
 		logger.Error("server stopped", "err", err)

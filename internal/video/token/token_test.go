@@ -101,7 +101,7 @@ func TestVodSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok, err := newTestClient(srv).Vod(context.Background(), "1234567890")
+	tok, err := newTestClient(srv).Vod(context.Background(), "1234567890", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestVodSchemaMismatch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := newTestClient(srv).Vod(context.Background(), "1234567890")
+	_, err := newTestClient(srv).Vod(context.Background(), "1234567890", "")
 	if !errors.Is(err, upstream.ErrUpstreamSchema) {
 		t.Fatalf("expected ErrUpstreamSchema, got %v", err)
 	}
@@ -132,10 +132,10 @@ func TestVodTokenCache(t *testing.T) {
 
 	client := newTestClient(srv)
 	ctx := context.Background()
-	if _, err := client.Vod(ctx, "1234567890"); err != nil {
+	if _, err := client.Vod(ctx, "1234567890", ""); err != nil {
 		t.Fatalf("first vod: %v", err)
 	}
-	if _, err := client.Vod(ctx, "1234567890"); err != nil {
+	if _, err := client.Vod(ctx, "1234567890", ""); err != nil {
 		t.Fatalf("second vod: %v", err)
 	}
 	if calls != 1 {

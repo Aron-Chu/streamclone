@@ -69,6 +69,7 @@ Analytics is a separate Compose service (`cmd/analytics`) but reuses chat packag
 - Keep `ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS` above the scraper's TwitchTracker wait budget (`wait_for_function` + navigation overhead); avoid setting below ~95s or viewer charts may truncate at the tail.
 - **Early stream row**: first-time sync upserts a placeholder `analytics_streams` row immediately (Helix `VideoByStreamID` for `started_at` / `vod_id`) so `GET .../streams/{id}?sparse=true` returns 200 during sync instead of 404.
 - **Syncing API fallback**: if the row is still missing but Redis sync status is active, `streamDetail` returns `state: "syncing"` with empty rollups.
+- **Sync lock owner**: Redis sync locks store a per-analytics-process owner id. After container recreation, old non-terminal statuses should become `stale` once progress stops instead of staying "syncing" until the two-hour lock TTL expires; retry clears the orphaned lock.
 - **7TV preload fast path**: `ensure` returns local `processing` status immediately when a provider seed is already running or assets are pending, and only performs remote provider refresh checks after those fast paths. This keeps VOD chat sync polling from waiting on repeated 7TV API calls while assets are rendering.
 
 ### VOD resolution
@@ -123,10 +124,14 @@ Optional fields on Redis `SyncStatus.timing` surface in the **`SyncProgressPanel
 - **`targetQueryStreamId`** in `Analytics.tsx`: numeric `streamId` passes through; date slugs (`YYYY-MM-DD`) resolve via `matchedStream` only — **never** call the API with the date string as `streamId` (caused 404s).
 - While streams/insights load for a date slug, `targetQueryStreamId` is `undefined` (query disabled).
 - Unresolved date slug shows a stream-not-found state (`dateSlugUnresolved`), not a bad API request.
+- Moment scoring UI uses `frontend/src/utils/momentScore.ts`: backend replay heatmap `score/reason/confidence/topEmotes` is canonical (`N/100`); frontend rollup scoring is fallback only and must be shown as `~N/100`. Selected moment panels and ranked moment rows should use the same model.
+- Replay heatmap detail fetch is `GET /v1/analytics/streams/{streamId}/replay-heatmap?window=60&detail=true&channel={login}`. Use it for selected-moment breakdown; do not invent a second score in the component.
+- Guard chart coordinate math against empty/one-point rollups and non-finite game segment offsets/durations before rendering SVG `<line>` attributes.
 
 ## Clipper panel
 
 - Analytics embeds **Clipper Edits** and **Twitch Clips** tabs; links to **Clip Studio** at `/studio/{jobId}`.
+- **Play in Streamclone** on synced historical streams deep-links to `/c/{login}?vod={vod_id}&offset=&from=analytics&sid={stream_id}` — channel workspace starts VOD relay via `POST /v1/stream/vod/start` and loads activity/chat replay when `sid` is present (see `.kiro/steering/playback.md`).
 - Clipper worker/API is a separate app (`clipper/`); Caddy strips `/v1/clipper` → clipper `:8095`. See `.kiro/steering/clipper.md`.
 
 ## Load benchmarks

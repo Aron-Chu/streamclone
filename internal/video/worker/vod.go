@@ -44,7 +44,7 @@ func VodSeekSeconds(offsetSeconds int) int {
 	return seek
 }
 
-func StartVod(vodID, quality string, offsetSeconds int, rtmpURL string, logw io.Writer) (*Worker, error) {
+func StartVod(vodID, quality string, offsetSeconds int, rtmpURL string, logw io.Writer, twitchOAuth string) (*Worker, error) {
 	if !ValidVodID(vodID) {
 		return nil, ErrInvalidVodID
 	}
@@ -54,7 +54,7 @@ func StartVod(vodID, quality string, offsetSeconds int, rtmpURL string, logw io.
 	seekSec := VodSeekSeconds(offsetSeconds)
 	mediaKey := VodMediaKey(vodID)
 
-	sl := exec.Command(
+	slArgs := []string{
 		"streamlink",
 		"--twitch-disable-ads",
 		"--twitch-supported-codecs=h264,h265,av1",
@@ -63,14 +63,16 @@ func StartVod(vodID, quality string, offsetSeconds int, rtmpURL string, logw io.
 		"--retry-open", "3",
 		"--stream-segment-attempts", "3",
 		"--stdout",
-		VodPageURL(vodID),
-		quality,
-	)
-	ffArgs := append([]string{"-hide_banner", "-loglevel", "error"}, ffmpegReconnectFlags()...)
-	if seekSec > 0 {
-		ffArgs = append(ffArgs, "-ss", strconv.Itoa(seekSec))
 	}
-	ffArgs = append(ffArgs, "-i", "pipe:0", "-c", "copy", "-f", "flv", rtmpURL)
+	if strings.TrimSpace(twitchOAuth) != "" {
+		slArgs = append(slArgs, "--twitch-oauth-token", strings.TrimSpace(twitchOAuth))
+	}
+	slArgs = append(slArgs, VodPageURL(vodID), quality)
+	sl := exec.Command(slArgs[0], slArgs[1:]...)
+	ffArgs := append(ffmpegPipeInputFlags(), "-i", "pipe:0", "-c", "copy", "-f", "flv", rtmpURL)
+	if seekSec > 0 {
+		ffArgs = append([]string{"-ss", strconv.Itoa(seekSec)}, ffArgs...)
+	}
 	ff := exec.Command("ffmpeg", ffArgs...)
 
 	pr, pw, err := os.Pipe()
