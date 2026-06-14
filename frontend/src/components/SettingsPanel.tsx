@@ -167,10 +167,11 @@ export default function SettingsButton() {
 
             <div>
               <div className="mb-2 text-[11px] font-black uppercase text-zinc-500">Rail</div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <Toggle label="Live" checked={settings.railSections.live} onChange={value => updateSettings({ railSections: { live: value } })} />
                 <Toggle label="Offline" checked={settings.railSections.offline} onChange={value => updateSettings({ railSections: { offline: value } })} />
                 <Toggle label="Top" checked={settings.railSections.top} onChange={value => updateSettings({ railSections: { top: value } })} />
+                <Toggle label="Categories" checked={settings.railSections.categories} onChange={value => updateSettings({ railSections: { categories: value } })} />
               </div>
             </div>
 
