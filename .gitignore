@@ -57,6 +57,15 @@ deploy/tmp-*
 deploy/env/oauth-bundle.env
 deploy/env/release-bundle.env
 deploy/env/helm-local.yaml
+# Emote Pulse sandbox (local-only chart + docs)
+charts/pulse/
+docs/helm-pulse.md
+deploy/env/helm-local.example.yaml
+scripts/helm-preflight.sh
+scripts/helm-portforward.sh
+scripts/helm-pulse-wire.sh
+scripts/helm-pulse-check.sh
+.local/helm-pulse/
 runtime/clipper-twitch.env
 # local output / scratch
 *.bin

@@ -58,7 +58,7 @@ Go services are I/O-bound glue around upstream Twitch loops and external media t
 - Playback quality UI should use backend-discovered requestable renditions once available and show loaded backend quality separately from the user's requested target.
 - Keep channel names, IDs, and client input validated at service boundaries.
 - Prefer bounded queues, context cancellation, retry caps, and backoff for anything involving upstream networks or worker loops.
-- Reddit LSF is multi-provider and uses an automatic prioritized fallback chain. Even if a specific primary provider (like `firecrawl` or `third_party`) is selected via `REDDIT_PROVIDER` in `.env`, the metadata service will automatically fall back to other available providers (such as public JSON or HTML scraping) if the primary is blocked or fails. Setting `REDDIT_PROVIDER=auto` tries all providers in order of availability. Blocked or erroring providers back off for about 45 seconds before retry.
+- Reddit LSF is multi-provider and uses an automatic prioritized fallback chain. Even if a specific primary provider (like `firecrawl` or `third_party`) is selected via `REDDIT_PROVIDER` in `.env`, the metadata service will automatically fall back to other available providers (such as public JSON or HTML scraping) if the primary is blocked or fails. Setting `REDDIT_PROVIDER=auto` tries all providers in order of availability. Blocked or erroring providers back off for about 45 seconds before retry. When `REDDIT_PROVIDER=off` (compose default), Pulse uses **public Reddit JSON first** (`/r/LivestreamFail/search.json`, then a hot-feed fallback), then optional scraper when Reddit blocks JSON, then HTML fallback — **no Analytics scraper required** for the common case.
 
 ## Data Conventions
 
