@@ -57,13 +57,15 @@ export default function SettingsButton() {
     <div className="relative z-50">
       <button
         type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
         onClick={() => setOpen(value => !value)}
         className="rounded border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-white/10"
       >
         Settings
       </button>
       {open ? (
-        <div className="absolute right-0 top-11 z-50 w-80 rounded border border-white/10 bg-[#111117] p-4 text-zinc-100 shadow-2xl shadow-black/50">
+        <div className="absolute right-0 top-11 z-50 max-h-[calc(100vh-5rem)] w-[min(22rem,calc(100vw-1rem))] overflow-y-auto rounded border border-white/10 bg-[#111117] p-4 text-zinc-100 shadow-2xl shadow-black/50">
           <div className="mb-3 flex items-center justify-between">
             <div className="text-sm font-black">Settings</div>
             <button

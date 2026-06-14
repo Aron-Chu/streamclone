@@ -22,7 +22,8 @@ type SystemHealthPanelProps = {
 }
 
 export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrowse }: SystemHealthPanelProps) {
-  const health = useSystemHealth()
+  const full = variant === 'full'
+  const health = useSystemHealth({ probeHost: full, probeControl: full })
   const [copied, setCopied] = useState(false)
 
   const copyDiagnostics = async () => {
@@ -40,11 +41,9 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
     return (
       <div className="space-y-3">
         <div className="flex flex-wrap gap-1.5">
-          <StatusChip label="Core" good={health.coreReady} loading={health.setup.isLoading} />
-          <StatusChip label="Analytics" good={health.analyticsReady} loading={health.setup.isLoading} />
-          <StatusChip label="Clip Studio" good={health.clipperReady} loading={health.setup.isLoading} />
-          <StatusChip label="Install helper" good={health.installHelperReady} loading={health.control.isLoading} />
-          <StatusChip label="Docker" good={health.dockerReady} loading={health.host.isLoading} />
+          <StatusChip label="Core" good={health.coreReady} loading={health.statusLoading} />
+          <StatusChip label="Analytics" good={health.analyticsReady} loading={health.statusLoading} />
+          <StatusChip label="Clip Studio" good={health.clipperReady} loading={health.statusLoading} />
         </div>
       </div>
     )
@@ -66,9 +65,9 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
           </button>
         </div>
         <div className="mb-4 flex flex-wrap gap-1.5">
-          <StatusChip label="Core" good={health.coreReady} loading={health.metadata.isLoading} />
-          <StatusChip label="Analytics" good={health.analyticsReady} loading={health.setup.isLoading} />
-          <StatusChip label="Clip Studio" good={health.clipperReady} loading={health.setup.isLoading} />
+          <StatusChip label="Core" good={health.coreReady} loading={health.metadata.isLoading && !health.metadata.data} />
+          <StatusChip label="Analytics" good={health.analyticsReady} loading={health.statusLoading} />
+          <StatusChip label="Clip Studio" good={health.clipperReady} loading={health.statusLoading} />
           <StatusChip label="Install helper" good={health.installHelperReady} loading={health.control.isLoading} />
           <StatusChip label="Docker" good={health.dockerReady} loading={health.host.isLoading} />
         </div>

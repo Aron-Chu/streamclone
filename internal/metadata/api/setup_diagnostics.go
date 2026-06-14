@@ -32,17 +32,25 @@ func (h *Handler) setupDiagnostics(w http.ResponseWriter, r *http.Request) {
 		profile = "core"
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), setupProbeBudget)
 	defer cancel()
 
+	statuses := h.probeSetupServices(ctx, map[string]string{
+		"chat":      "http://chat:8080/healthz",
+		"video":     "http://video:8080/healthz",
+		"emote":     "http://emote:8080/healthz",
+		"analytics": "http://analytics:8080/healthz",
+		"scraper":   scraperHealthURL(h.scraperAPIURL),
+		"clipper":   h.clipperServiceURL + "/v1/twitch/status",
+	})
 	services := setupDiagnosticsServices{
 		Metadata:  "ready",
-		Chat:      serviceStatus(h.probeServiceHealth(ctx, "http://chat:8080/healthz")),
-		Video:     serviceStatus(h.probeServiceHealth(ctx, "http://video:8080/healthz")),
-		Emote:     serviceStatus(h.probeServiceHealth(ctx, "http://emote:8080/healthz")),
-		Analytics: serviceStatus(h.probeServiceHealth(ctx, "http://analytics:8080/healthz")),
-		Scraper:   serviceStatus(h.probeServiceHealth(ctx, scraperHealthURL(h.scraperAPIURL))),
-		Clipper:   serviceStatus(h.probeServiceHealth(ctx, h.clipperServiceURL+"/v1/twitch/status")),
+		Chat:      statuses["chat"],
+		Video:     statuses["video"],
+		Emote:     statuses["emote"],
+		Analytics: statuses["analytics"],
+		Scraper:   statuses["scraper"],
+		Clipper:   statuses["clipper"],
 	}
 
 	healthy := services.Chat == "ready" &&

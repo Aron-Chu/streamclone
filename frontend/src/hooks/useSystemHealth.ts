@@ -4,16 +4,16 @@ import { getHostDiagnostics, getMetadataDiagnostics } from '../api'
 import { SETUP_CONTROL_AVAILABLE } from '../config'
 import { useOptionalServices } from './useOptionalServices'
 
-export function useSystemHealth() {
+export function useSystemHealth(options: { probeHost?: boolean; probeControl?: boolean } = {}) {
   const queryClient = useQueryClient()
-  const optional = useOptionalServices()
+  const optional = useOptionalServices({ probeControl: options.probeControl })
 
   const host = useQuery({
     queryKey: ['host-diagnostics'],
     queryFn: getHostDiagnostics,
-    enabled: SETUP_CONTROL_AVAILABLE,
+    enabled: SETUP_CONTROL_AVAILABLE && Boolean(options.probeHost),
     staleTime: 10_000,
-    refetchInterval: 20_000,
+    refetchInterval: false,
     retry: false,
   })
 
@@ -28,7 +28,7 @@ export function useSystemHealth() {
   const refreshAll = async () => {
     await Promise.all([
       optional.refreshStatus(),
-      SETUP_CONTROL_AVAILABLE
+      SETUP_CONTROL_AVAILABLE && Boolean(options.probeHost)
         ? queryClient.invalidateQueries({ queryKey: ['host-diagnostics'] })
         : Promise.resolve(),
       queryClient.invalidateQueries({ queryKey: ['metadata-diagnostics'] }),
@@ -43,7 +43,7 @@ export function useSystemHealth() {
     metadata: metadata.data,
   }), [host.data, metadata.data, optional.profile, optional.setup.data])
 
-  const coreReady = metadata.data?.healthy ?? Boolean(optional.setup.data && !optional.setup.isLoading)
+  const coreReady = metadata.data?.healthy ?? Boolean(optional.hasServiceSnapshot && !optional.statusLoading)
   const analyticsReady = optional.services?.scraper === 'ready'
   const clipperReady = optional.services?.clipper === 'ready'
   const installHelperReady = optional.controlReady

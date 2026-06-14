@@ -4,7 +4,14 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
+)
+
+const (
+	setupProbeRequestTimeout = 500 * time.Millisecond
+	setupProbeRetryDelay     = 100 * time.Millisecond
+	setupProbeBudget         = 1300 * time.Millisecond
 )
 
 type SetupWelcomeOptions struct {
@@ -51,12 +58,16 @@ func (h *Handler) setupWelcome(w http.ResponseWriter, r *http.Request) {
 		profile = "core"
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), setupProbeBudget)
 	defer cancel()
 
+	statuses := h.probeSetupServices(ctx, map[string]string{
+		"scraper": scraperHealthURL(h.scraperAPIURL),
+		"clipper": h.clipperServiceURL + "/v1/twitch/status",
+	})
 	services := setupWelcomeServices{
-		Scraper: serviceStatus(h.probeServiceHealth(ctx, scraperHealthURL(h.scraperAPIURL))),
-		Clipper: serviceStatus(h.probeServiceHealth(ctx, h.clipperServiceURL+"/v1/twitch/status")),
+		Scraper: statuses["scraper"],
+		Clipper: statuses["clipper"],
 	}
 
 	incomplete := false
@@ -102,25 +113,47 @@ func scraperHealthURL(scrapeURL string) string {
 	return "http://scraper:8000/health"
 }
 
+func (h *Handler) probeSetupServices(ctx context.Context, targets map[string]string) map[string]string {
+	statuses := make(map[string]string, len(targets))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for name, rawURL := range targets {
+		wg.Add(1)
+		go func(name, rawURL string) {
+			defer wg.Done()
+			status := serviceStatus(h.probeServiceHealth(ctx, rawURL))
+			mu.Lock()
+			statuses[name] = status
+			mu.Unlock()
+		}(name, rawURL)
+	}
+	wg.Wait()
+	return statuses
+}
+
 func (h *Handler) probeServiceHealth(ctx context.Context, rawURL string) bool {
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
 				return false
-			case <-time.After(250 * time.Millisecond):
+			case <-time.After(setupProbeRetryDelay):
 			}
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		attemptCtx, cancel := context.WithTimeout(ctx, setupProbeRequestTimeout)
+		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, rawURL, nil)
 		if err != nil {
+			cancel()
 			continue
 		}
 		resp, err := h.http.Do(req)
 		if err != nil {
+			cancel()
 			continue
 		}
 		ok := resp.StatusCode >= 200 && resp.StatusCode < 300
 		resp.Body.Close()
+		cancel()
 		if ok {
 			return true
 		}

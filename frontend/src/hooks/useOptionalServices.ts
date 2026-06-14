@@ -47,7 +47,7 @@ function isServiceReady(
   return serviceReadyFromDiagnostics(diagnostics, service) || serviceReadyFromWelcome(welcome, service)
 }
 
-export function useOptionalServices() {
+export function useOptionalServices(options: { probeControl?: boolean } = {}) {
   const queryClient = useQueryClient()
   const [starting, setStarting] = useState<Set<'scraper' | 'clipper'>>(() => new Set())
   const [startProgressByService, setStartProgressByService] = useState<
@@ -63,21 +63,25 @@ export function useOptionalServices() {
     queryFn: getSetupWelcome,
     staleTime: 10_000,
     refetchInterval: anyStarting ? 2_000 : 15_000,
+    retry: false,
   })
   const diagnostics = useQuery({
     queryKey: ['setup-diagnostics'],
     queryFn: getMetadataDiagnostics,
     staleTime: 5_000,
     refetchInterval: anyStarting ? 2_000 : 15_000,
+    retry: false,
   })
   const control = useQuery({
     queryKey: ['setup-control-health'],
     queryFn: getSetupControlHealth,
-    enabled: SETUP_CONTROL_AVAILABLE,
+    enabled: SETUP_CONTROL_AVAILABLE && (Boolean(options.probeControl) || anyStarting),
     staleTime: 10_000,
     retry: false,
   })
 
+  const hasServiceSnapshot = Boolean(setup.data || diagnostics.data)
+  const statusLoading = !hasServiceSnapshot && (setup.isLoading || diagnostics.isLoading)
   const profile = setup.data?.profile ?? diagnostics.data?.profile ?? 'core'
   const services = useMemo(() => {
     const welcome = setup.data?.services
@@ -101,7 +105,7 @@ export function useOptionalServices() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['setup-welcome'] }),
       queryClient.invalidateQueries({ queryKey: ['setup-diagnostics'] }),
-      SETUP_CONTROL_AVAILABLE
+      SETUP_CONTROL_AVAILABLE && (Boolean(options.probeControl) || anyStarting)
         ? queryClient.invalidateQueries({ queryKey: ['setup-control-health'] })
         : Promise.resolve(),
     ])
@@ -111,7 +115,7 @@ export function useOptionalServices() {
     setActionError(null)
     if (!controlReady) {
       setActionError(
-        'The install helper is not running (needed to start Analytics). Close the app tab, run Start Streamclone from Desktop, then try again.',
+        `The install helper is not running (needed to start ${START_LABELS[service]}). Close the app tab, run Start Streamclone from Desktop, then try again.`,
       )
       return false
     }
@@ -253,6 +257,8 @@ export function useOptionalServices() {
     setup,
     diagnostics,
     control,
+    hasServiceSnapshot,
+    statusLoading,
     profile,
     services,
     controlReady,

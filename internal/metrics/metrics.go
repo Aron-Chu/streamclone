@@ -98,6 +98,39 @@ var (
 	ReadinessFailures = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "readiness_failures_total", Help: "Readiness probe failures by service.",
 	}, []string{"service"})
+	TimeseriesWriteAttempts = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "timeseries_write_attempts_total", Help: "Best-effort time-series write attempts by backend and result.",
+	}, []string{"backend", "result"})
+	TimeseriesWriteBatchSize = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "timeseries_write_batch_size",
+		Help:    "Number of rollups included in each time-series write attempt.",
+		Buckets: []float64{1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
+	}, []string{"backend"})
+	TimeseriesWriteDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "timeseries_write_duration_seconds",
+		Help:    "Time spent writing best-effort time-series batches by backend and result.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"backend", "result"})
+	TimeseriesQueueDrops = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "timeseries_queue_drops_total", Help: "Rollup items dropped because the time-series writer queue was full.",
+	}, []string{"backend"})
+	AnalyticsRollupWriteDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "analytics_rollup_write_duration_seconds",
+		Help:    "Time spent writing analytics minute rollups by write kind and result.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"kind", "result"})
+	AnalyticsVODGQLPagesFetched = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_vod_gql_pages_fetched_total", Help: "Twitch GQL VOD comment pages fetched by result.",
+	}, []string{"result"})
+	AnalyticsVODGQLSegments = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_vod_gql_segments_total", Help: "Twitch GQL VOD comment segment transitions by state.",
+	}, []string{"state"})
+	AnalyticsHeatmapCacheRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_heatmap_cache_requests_total", Help: "Replay heatmap cache lookups by result.",
+	}, []string{"result"})
+	AnalyticsScraperRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_scraper_requests_total", Help: "Analytics scraper requests by source and result.",
+	}, []string{"source", "result"})
 )
 
 type statusRecorder struct {

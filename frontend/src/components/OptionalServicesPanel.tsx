@@ -5,7 +5,7 @@ import { useOptionalServices, type ServiceStartProgress } from '../hooks/useOpti
 type ServiceStatus = 'ready' | 'offline' | 'checking'
 
 export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean }) {
-  const { controlReady, isStarting, startService } = useOptionalServices()
+  const { controlReady, isStarting, startService } = useOptionalServices({ probeControl: true })
 
   return (
     <div className={compact ? 'mt-2 text-left' : 'max-w-md'}>
@@ -140,7 +140,8 @@ export default function OptionalServicesPanel({
   channelLogin,
 }: OptionalServicesPanelProps) {
   const {
-    setup,
+    hasServiceSnapshot,
+    statusLoading,
     profile,
     services,
     controlReady,
@@ -151,11 +152,11 @@ export default function OptionalServicesPanel({
     actionError,
     startService,
     refreshStatus,
-  } = useOptionalServices()
+  } = useOptionalServices({ probeControl: true })
 
-  const coreStatus: ServiceStatus = setup.isLoading ? 'checking' : setup.data ? 'ready' : 'offline'
-  const scraperStatus: ServiceStatus = setup.isLoading ? 'checking' : services?.scraper ?? 'offline'
-  const clipperStatus: ServiceStatus = setup.isLoading ? 'checking' : services?.clipper ?? 'offline'
+  const coreStatus: ServiceStatus = statusLoading ? 'checking' : hasServiceSnapshot ? 'ready' : 'offline'
+  const scraperStatus: ServiceStatus = statusLoading ? 'checking' : services?.scraper ?? 'offline'
+  const clipperStatus: ServiceStatus = statusLoading ? 'checking' : services?.clipper ?? 'offline'
 
   const showScraper = focus === 'all' || focus === 'scraper'
   const showClipper = focus === 'all' || focus === 'clipper'
