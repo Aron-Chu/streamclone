@@ -43,7 +43,7 @@ metadata:
     {{- include "pulse.labels" . | nindent 4 }}
 data:
   emote-pulse.json: |
-{{ .Files.Get "dashboards/emote-pulse.json" | nindent 4 }}
+{{ (.Files.Get "dashboards/emote-pulse.json") | replace "__EMOTE_PROXY__" (.Values.grafana.emoteProxyURL | default "http://localhost:8090") | replace "__STREAM_LIST_DAYS__" (toString (.Values.grafana.streamListDays | default 90)) | nindent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -60,6 +60,8 @@ spec:
       app.kubernetes.io/component: grafana
   template:
     metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
       labels:
         {{- include "pulse.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: grafana

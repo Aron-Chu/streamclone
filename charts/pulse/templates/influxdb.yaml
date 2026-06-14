@@ -8,12 +8,13 @@ metadata:
     {{- include "pulse.labels" . | nindent 4 }}
     app.kubernetes.io/component: influxdb
 spec:
+  type: {{ .Values.influxdb.serviceType | default "LoadBalancer" }}
   selector:
     {{- include "pulse.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: influxdb
   ports:
     - name: http
-      port: 8086
+      port: {{ .Values.influxdb.servicePort | default 18086 }}
       targetPort: http
 ---
 apiVersion: apps/v1

@@ -32,5 +32,5 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "pulse.influxURL" -}}
-http://{{ include "pulse.fullname" . }}-influxdb:8086
+http://{{ include "pulse.fullname" . }}-influxdb:{{ .Values.influxdb.servicePort }}
 {{- end -}}

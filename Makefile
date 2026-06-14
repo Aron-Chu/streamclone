@@ -27,6 +27,9 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote
 	refresh-auth reload-env reload-env-if-stale ensure-oauth ensure-clipper-auth ensure-frontend-config \
 	scraper-reload scraper-check scraper-preflight scraper-warm ps ports migrate logs \
 	helm-kubeconfig helm-up helm-down helm-status helm-lint \
+	helm-grafana helm-grafana-stop helm-influx helm-influx-stop helm-open \
+	helm-pulse-wire helm-pulse-check helm-pulse helm-pulse-sync-token helm-pulse-watch \
+	pulse pulse-on pulse-off pulse-check pulse-down pulse-watch \
 	test vet build tidy integration-up integration-down integration-test \
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
 	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp \
@@ -50,9 +53,12 @@ help:
 	@printf '  make refresh-auth        OAuth sync + reload stale services\n'
 	@printf '  make twitch-local-auth   Device-code login for localhost:8090\n'
 	@printf '  make twitch-sync         Sync Twitch CLI creds into .env\n\n'
-	@printf 'Helm (Emote Pulse sandbox): docs/helm-pulse.md\n'
-	@printf '  make helm-kubeconfig  Link Docker Desktop kubeconfig (WSL)\n'
-	@printf '  make helm-up / down / status / lint\n\n'
+	@printf 'Helm (Emote Pulse): .local/helm-pulse/README.md\n'
+	@printf '  make pulse           First-time: deploy k8s + wire compose + port-forwards\n'
+	@printf '  make pulse-on        Probe localhost (LoadBalancer) or restart port-forwards\n'
+	@printf '  make pulse-check     Verify pods, forwards, env, and Influx data\n'
+	@printf '  make pulse-off       Stop port-forwards only\n'
+	@printf '  make pulse-down      Stop forwards + uninstall k8s release\n\n'
 	@printf 'Quality: make test | vet | build | clipper-test | smoke | security-scan\n'
 
 env:
@@ -131,11 +137,15 @@ helm-kubeconfig:
 	@bash scripts/helm-preflight.sh
 
 helm-up: helm-kubeconfig
-	@values=""; \
-	if [ -f "$(HELM_LOCAL_VALUES)" ]; then values="-f $(HELM_LOCAL_VALUES)"; \
-	elif [ -f "$(HELM_EXAMPLE_VALUES)" ]; then values="-f $(HELM_EXAMPLE_VALUES)"; fi; \
+	@values="-f $(HELM_CHART)/values.yaml"; \
+	if [ -f "$(HELM_LOCAL_VALUES)" ]; then values="$$values -f $(HELM_LOCAL_VALUES)"; \
+	elif [ -f "$(HELM_EXAMPLE_VALUES)" ]; then values="$$values -f $(HELM_EXAMPLE_VALUES)"; fi; \
 	$(HELM) upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
 		-n $(HELM_NAMESPACE) --create-namespace $$values --wait
+	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-pulse-sync-token.sh
+	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh start all
+	@printf '\nGrafana: http://localhost:3000/d/streamclone-emote-pulse/emote-pulse (admin / devpulse)\n'
+	@printf 'Persistent on Docker Desktop: LoadBalancer → localhost (no port-forward tunnel).\n'
 
 helm-down:
 	-$(HELM) uninstall $(HELM_RELEASE) -n $(HELM_NAMESPACE)
@@ -145,6 +155,58 @@ helm-status:
 
 helm-lint:
 	$(HELM) lint $(HELM_CHART)
+
+helm-grafana: helm-kubeconfig
+	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh start grafana
+	@printf 'Grafana: http://localhost:3000 (admin / devpulse)\n'
+
+helm-grafana-stop:
+	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh stop grafana
+
+helm-influx: helm-kubeconfig
+	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh start influx
+	@printf 'InfluxDB: http://localhost:18086 (override: PULSE_INFLUX_LOCAL_PORT)\n'
+
+helm-influx-stop:
+	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh stop influx
+
+helm-pulse-wire: helm-kubeconfig
+	@ENV_FILE=$(ENV_FILE) HELM_NAMESPACE=$(HELM_NAMESPACE) HELM_RELEASE=$(HELM_RELEASE) \
+		bash scripts/helm-pulse-wire.sh
+
+helm-pulse-sync-token: helm-kubeconfig
+	@HELM_NAMESPACE=$(HELM_NAMESPACE) HELM_RELEASE=$(HELM_RELEASE) \
+		bash scripts/helm-pulse-sync-token.sh
+
+helm-pulse-check: helm-kubeconfig
+	@ENV_FILE=$(ENV_FILE) HELM_NAMESPACE=$(HELM_NAMESPACE) HELM_RELEASE=$(HELM_RELEASE) \
+		bash scripts/helm-pulse-check.sh
+
+helm-pulse: helm-up helm-pulse-wire
+
+helm-pulse-on: helm-kubeconfig
+	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh start all
+	@printf '\nGrafana: http://localhost:3000/d/streamclone-emote-pulse/emote-pulse (admin / devpulse)\n'
+	@printf 'Docker Desktop: LoadBalancer on localhost — no tunnel needed when probe succeeds.\n'
+
+helm-pulse-watch: helm-kubeconfig
+	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward-watch.sh
+
+helm-pulse-off:
+	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh stop all
+
+helm-pulse-down: helm-pulse-off helm-down
+
+# Short aliases (preferred)
+pulse: helm-pulse
+pulse-on: helm-pulse-on
+pulse-watch: helm-pulse-watch
+pulse-off: helm-pulse-off
+pulse-check: helm-pulse-check
+pulse-down: helm-pulse-down
+
+helm-open: helm-grafana
+	@printf 'Open http://localhost:3000/d/streamclone-emote-pulse/emote-pulse\n'
 
 test:
 	$(GO) test ./...

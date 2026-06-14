@@ -51,6 +51,25 @@ kubectl -n streamclone port-forward svc/streamclone-pulse-influxdb 8086:8086
 
 Open Grafana → folder **Emote Pulse** → dashboard **Emote Pulse**.
 
+### Access and login
+
+On Docker Desktop, **NodePort often does not reach the host**. Prefer port-forward (keep the terminal open):
+
+```bash
+kubectl -n streamclone port-forward svc/streamclone-pulse-grafana 3000:3000
+```
+
+Then open **http://localhost:3000**.
+
+Default Grafana login (from `deploy/env/helm-local.example.yaml` / chart values):
+
+| Field | Value |
+|-------|-------|
+| Username | `admin` |
+| Password | `devpulse` |
+
+If you deployed before the example file was updated, the password may still be `change-me` until you run `make helm-up` again.
+
 ## Live data from compose analytics
 
 The analytics service writes minute rollups to Influx when timeseries export is enabled (`internal/timeseries/writer.go`). No Helm changes are required — point compose at the k8s Influx instance.

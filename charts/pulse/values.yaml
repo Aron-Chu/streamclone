@@ -8,6 +8,9 @@ influxdb:
   image: influxdb:2.7-alpine
   username: admin
   password: devpulse
+  # LoadBalancer on 18086 avoids compose analytics conflict on host :8086.
+  serviceType: LoadBalancer
+  servicePort: 18086
   persistence:
     enabled: true
     size: 20Gi
@@ -16,7 +19,12 @@ grafana:
   enabled: true
   adminUser: admin
   adminPassword: devpulse
-  serviceType: NodePort
+  # Emote image URLs are loaded by the browser (Grafana at localhost:3000), not the Grafana pod.
+  emoteProxyURL: http://localhost:8090
+  # Days of stream history for the stream picker Flux queries.
+  streamListDays: 90
+  # LoadBalancer: Docker Desktop maps to localhost:3000 (no kubectl port-forward).
+  serviceType: LoadBalancer
   servicePort: 3000
   image: grafana/grafana:11.5.0
 

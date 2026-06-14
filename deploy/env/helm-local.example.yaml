@@ -1,8 +1,10 @@
 # Copy to deploy/env/helm-local.yaml (gitignored) and override dev defaults.
-# Used by: make helm-up
+# Used by: make helm-up (this file is applied automatically when helm-local.yaml is missing)
+#
+# Default Grafana login with these values: admin / devpulse
 
 influxdb:
-  adminToken: "change-me-influx-token"
+  adminToken: "dev-pulse-token"
 
 grafana:
-  adminPassword: "change-me"
+  adminPassword: "devpulse"
