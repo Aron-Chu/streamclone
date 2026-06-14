@@ -4,9 +4,9 @@
 
 **How to use this brief:** Treat this as your primary context. Follow file paths into the repo for implementation detail. Run the benchmark and smoke scripts where feasible. Structure your response using the **Deliverables** section at the end.
 
-**Repository:** [github.com/Aron-Chu/streamclone](https://github.com/Aron-Chu/streamclone)  
-**Sibling repo (optional profile):** [streamclone-scraper](https://github.com/Aron-Chu/streamclone-scraper)  
-**Canonical local URL:** `http://localhost:8090/`  
+**Repository:** [github.com/Aron-Chu/streamclone](https://github.com/Aron-Chu/streamclone)
+**Sibling repo (optional profile):** [streamclone-scraper](https://github.com/Aron-Chu/streamclone-scraper)
+**Canonical local URL:** `http://localhost:8090/`
 **License:** Apache 2.0
 
 **Related brief (install/infra only):** [`docs/infrastructure-review-brief.md`](infrastructure-review-brief.md) — use that for deep install, Compose layering, and desktop distribution critique; this document covers the full product.
@@ -392,11 +392,11 @@ For each domain below: **read the cited paths**, assess correctness and maintain
 
 ### 3.15 Observability & Operations
 
-**Key files:** `deploy/docker-compose.observability.yml`, `internal/metrics/`, `scripts/diagnose-*.ps1`
+**Key files:** `charts/streamclone`, `internal/metrics/`, `scripts/diagnose-*.ps1`
 
 **Questions:**
 
-1. Is **observability compose** (Prometheus, Grafana, Loki) production-viable or dev-only?
+1. Is **hosted Helm observability** (Prometheus, Grafana, Loki, InfluxDB) production-viable or pilot-only?
 2. **Healthchecks** — do all services have meaningful health endpoints?
 3. **Diagnostics scripts** — sufficient for self-hosters without SSH skills?
 4. **Log aggregation** — structured logs across Go/Python containers?

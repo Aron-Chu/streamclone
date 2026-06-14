@@ -13,6 +13,7 @@ import (
 
 	"streamclone/internal/analytics/chatreplay"
 	"streamclone/internal/chat/enrich"
+	"streamclone/internal/metrics"
 )
 
 const (
@@ -577,8 +578,12 @@ func segmentAlignedMinuteBounds(seg gqlSegmentProgress, chatAlignSec int) (start
 }
 
 func (st *vodCommentsFetchState) finishSegment(seg *gqlSegmentProgress, offset int) {
+	wasDone := seg.Done
 	seg.Done = true
 	seg.OffsetSec = offset
+	if !wasDone {
+		metrics.AnalyticsVODGQLSegments.WithLabelValues("completed").Inc()
+	}
 	if st.commentsMap != nil || st.onSegmentDone != nil {
 		st.commentsMapMu.Lock()
 		defer st.commentsMapMu.Unlock()
@@ -1251,6 +1256,7 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 
 	parallelRetries := state.enqueueIncompleteSegments()
 	if parallelRetries > 0 && int(commentsCount.Load()) < vodCommentsMaxCount {
+		metrics.AnalyticsVODGQLSegments.WithLabelValues("retry").Add(float64(parallelRetries))
 		s.log.Info("retrying unfinished VOD chat segments in parallel",
 			"stream_id", streamID,
 			"video_id", videoID,
@@ -1269,6 +1275,7 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 			continue
 		}
 		serialRetries++
+		metrics.AnalyticsVODGQLSegments.WithLabelValues("retry").Inc()
 		s.log.Warn("retrying VOD chat segment serially",
 			"stream_id", streamID,
 			"video_id", videoID,

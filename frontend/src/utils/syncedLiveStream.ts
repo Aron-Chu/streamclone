@@ -1,0 +1,72 @@
+import type { AnalyticsStream } from '../api.ts'
+
+/** Stream list row has minute-level rollups synced into analytics DB. */
+export function streamHasSyncedMinutes(stream: AnalyticsStream): boolean {
+  return (stream.viewerSamples ?? 0) > 0 || (stream.chatMessages ?? 0) > 0
+}
+
+export function getAnalyticsStreamDateSlug(startedAt?: string): string {
+  if (!startedAt) return ''
+  const date = new Date(startedAt)
+  if (Number.isNaN(date.getTime())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/** Route slug for /analytics/{login}/{slug} — date when unique that day, else stream id. */
+export function analyticsStreamPathSlug(
+  stream: AnalyticsStream,
+  allStreams: AnalyticsStream[],
+): string {
+  const dateSlug = getAnalyticsStreamDateSlug(stream.startedAt)
+  if (!dateSlug) return stream.streamId
+  const sameDay = allStreams.filter(s => getAnalyticsStreamDateSlug(s.startedAt) === dateSlug).length
+  return sameDay === 1 ? dateSlug : stream.streamId
+}
+
+/**
+ * When the live collector route has no chart minutes but a synced session exists,
+ * pick the sidebar stream to open instead of the empty live placeholder row.
+ */
+export function pickSyncedLiveStreamTarget(
+  combinedStreams: AnalyticsStream[],
+  opts?: { liveStreamId?: string; channelLive?: boolean },
+): AnalyticsStream | undefined {
+  const synced = combinedStreams.filter(streamHasSyncedMinutes)
+  if (synced.length === 0) return undefined
+
+  const liveStreamId = opts?.liveStreamId?.trim()
+  const channelLive = opts?.channelLive ?? false
+
+  if (liveStreamId) {
+    const same = synced.find(stream => stream.streamId === liveStreamId)
+    if (same) return same
+  }
+
+  const openSynced = synced.filter(stream => !stream.endedAt)
+  if (openSynced.length > 0) return openSynced[0]
+
+  if (channelLive) {
+    const liveRow = liveStreamId
+      ? combinedStreams.find(stream => stream.streamId === liveStreamId)
+      : combinedStreams[0]
+    const collectorIsStale = !liveRow || !streamHasSyncedMinutes(liveRow)
+    const newestSynced = synced[0]
+    if (collectorIsStale && newestSynced && isRecentSyncedSession(newestSynced)) {
+      return newestSynced
+    }
+    return undefined
+  }
+
+  return synced[0]
+}
+
+/** Long streams stay "live" for many hours; allow redirect for recent synced sessions. */
+function isRecentSyncedSession(stream: AnalyticsStream, nowMs = Date.now()): boolean {
+  if (!stream.startedAt) return false
+  const started = Date.parse(stream.startedAt)
+  if (Number.isNaN(started)) return false
+  return nowMs-started < 48 * 60 * 60 * 1000
+}

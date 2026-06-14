@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
@@ -41,11 +41,14 @@ import {
 } from '../api'
 import TierIndicator from './analytics/TierIndicator'
 import ClipsTabEmptyState from './analytics/ClipsTabEmptyState'
-import MomentDrawer from './analytics/MomentDrawer'
 import LiveStatsBand from './analytics/LiveStatsBand'
 import MostReactedLive from './analytics/MostReactedLive'
 import type { HeatmapEmote, ReplayHeatmapDetailPoint, ReplayHeatmapPoint } from '../types/heatmap'
 import { syncCtaLabel, type SyncStreamState } from '../utils/syncLabel'
+import {
+  analyticsStreamPathSlug,
+  pickSyncedLiveStreamTarget,
+} from '../utils/syncedLiveStream.ts'
 import {
   classifyStatCards,
   STAT_PLACEHOLDER_MUTED_CLASS,
@@ -84,6 +87,15 @@ type Series = {
   max: number
   dashed?: boolean
 }
+
+type AnalyticsViewMode = 'overview' | 'emotes' | 'spikes'
+type RightPanelTab = 'moments' | 'emotes' | 'clips' | 'sync'
+
+const analyticsViewModes: Array<{ id: AnalyticsViewMode; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'emotes', label: 'Emotes' },
+  { id: 'spikes', label: 'Spikes' },
+]
 
 function count(value: number | null | undefined) {
   if (value === null || value === undefined) return '-'
@@ -1641,6 +1653,8 @@ function AnalyticsChart({
   chatOnlySyncAvailable = false,
   onChatOnlySync,
   syncCtaLabel: syncCtaLabelText,
+  viewMode,
+  onViewModeChange,
 }: {
   detail?: AnalyticsStreamDetail;
   selectedEmotes: Set<string>;
@@ -1664,6 +1678,8 @@ function AnalyticsChart({
   onChatOnlySync?: () => void;
   /** Canonical sync CTA label (Req 4.1) shared with header/right-rail placements. */
   syncCtaLabel?: string;
+  viewMode: AnalyticsViewMode;
+  onViewModeChange: (mode: AnalyticsViewMode) => void;
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const [expandedScale, setExpandedScale] = useState(true)
@@ -1682,6 +1698,10 @@ function AnalyticsChart({
   })
   const [showSpikes, setShowSpikes] = useState(false)
   const [focusedSeriesKey, setFocusedSeriesKey] = useState<string | null>(null)
+  useEffect(() => {
+    setShowSpikes(viewMode === 'spikes')
+    if (viewMode === 'overview') setFocusedSeriesKey(null)
+  }, [viewMode])
   const seriesFocusOpacity = useCallback((seriesKey: string, base: number) => {
     if (!focusedSeriesKey) return base
     return seriesKey === focusedSeriesKey ? base : base * 0.14
@@ -2119,8 +2139,25 @@ function AnalyticsChart({
       {syncError ? (
         <div className="mb-3 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300">{syncError}</div>
       ) : null}
-      <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap gap-2">
+      <div className="mb-3 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0 space-y-2">
+          <div className="inline-flex rounded border border-white/10 bg-white/[0.035] p-1 text-[10px] font-black uppercase">
+            {analyticsViewModes.map(mode => (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => onViewModeChange(mode.id)}
+                className={`rounded px-3 py-1.5 transition ${
+                  viewMode === mode.id
+                    ? 'bg-white text-zinc-950'
+                    : 'text-zinc-500 hover:bg-white/10 hover:text-zinc-200'
+                }`}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto pr-1 sm:max-h-none">
           {series.map(item => {
             const parts = item.key.split(':')
             const isEmote = parts.length >= 2
@@ -2159,8 +2196,9 @@ function AnalyticsChart({
               </button>
             )
           })}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
           <div className="text-xs font-bold text-zinc-500">{clock(hoverPoint?.minuteTs)} · viewers {count(hoverPoint ? viewerValue(hoverPoint) : null)} · chat {count(hoverPoint?.chatCount)} · emotes {count(hoverPoint ? minuteEmoteTotal(hoverPoint) : null)}</div>
           {canSync && !coreMinuteChartsBlocked && (!hasChatData || needsViewerResync) ? (
             <button
@@ -2172,7 +2210,7 @@ function AnalyticsChart({
               {syncing ? 'Syncing…' : needsViewerResync ? 'Re-sync viewers' : 'Sync chat/emotes'}
             </button>
           ) : null}
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
               onClick={onRefresh}
@@ -2184,7 +2222,7 @@ function AnalyticsChart({
             </button>
             <button
               type="button"
-              onClick={() => setShowSpikes(v => !v)}
+              onClick={() => onViewModeChange(showSpikes ? 'overview' : 'spikes')}
               title={showSpikes ? 'Hide spike markers' : 'Show spike markers'}
               className={`rounded border px-2 py-1 text-[10px] font-black uppercase transition ${showSpikes ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200' : 'border-white/10 bg-white/[0.04] text-zinc-500 hover:text-zinc-300'}`}
             >
@@ -2202,11 +2240,12 @@ function AnalyticsChart({
               type="button"
               onClick={() => setExpandedScale(v => !v)}
               title={expandedScale
-                ? `Fit: viewers ${count(viewerAxis.min)}–${count(viewerAxis.max)}, total emotes ${count(activityScaleMin)}–${count(activityScaleMax)}, selected emotes ${count(selectedEmoteScaleMin)}–${count(selectedEmoteScaleMax)}. Click for peak scale.`
-                : `Peak: viewers 0–${count(viewerPeakAxis.max)}, emotes 0–${count(activityScaleMax)}. Click to zoom selected emotes into visible min–max.`}
+                ? `Zoomed scale: viewers ${count(viewerAxis.min)}–${count(viewerAxis.max)}, total emotes ${count(activityScaleMin)}–${count(activityScaleMax)}, selected emotes ${count(selectedEmoteScaleMin)}–${count(selectedEmoteScaleMax)}. Click for full zero-based scale.`
+                : `Full scale: viewers 0–${count(viewerPeakAxis.max)}, emotes 0–${count(activityScaleMax)}. Click to zoom into the visible min–max range.`}
+              aria-pressed={expandedScale}
               className={`rounded border px-2 py-1 text-[10px] font-black uppercase transition ${expandedScale ? 'border-violet-400/30 bg-violet-400/10 text-violet-200' : 'border-white/10 bg-white/[0.04] text-zinc-500 hover:text-zinc-300'}`}
             >
-              {expandedScale ? 'Fit' : 'Peak'}
+              {expandedScale ? 'Zoom' : 'Full'}
             </button>
           </div>
         </div>
@@ -2214,7 +2253,9 @@ function AnalyticsChart({
       <div className="overflow-hidden rounded">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-[min(420px,52vh)] min-h-[320px] w-full cursor-crosshair select-none"
+        role="img"
+        aria-label="Analytics timeline chart"
+        className="h-[360px] min-h-[320px] w-full cursor-crosshair select-none sm:h-[min(420px,52vh)]"
       >
         <defs>
           <linearGradient id="viewerAreaGradient" x1="0" y1="0" x2="0" y2="1">
@@ -2753,7 +2794,8 @@ function AnalyticsChart({
         />
       </svg>
       </div>
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      {viewMode === 'emotes' ? (
+      <div className="mt-3 flex max-h-32 flex-wrap gap-1.5 overflow-y-auto pr-1 sm:max-h-none">
         {(detail?.topEmotes ?? []).slice(0, 16).map(emote => {
           const imageUrl = getEmoteImageUrl(emote)
           return (
@@ -2772,6 +2814,7 @@ function AnalyticsChart({
           )
         })}
       </div>
+      ) : null}
     </div>
   )
 }
@@ -2792,8 +2835,8 @@ function StreamSidebar({
   activeID,
   isLiveView,
   liveState,
+  liveLinkSlug,
   onPrefetchStream,
-  onSync,
   syncing,
   syncedOnly,
   onSyncedOnlyChange,
@@ -2805,8 +2848,8 @@ function StreamSidebar({
   activeID?: string
   isLiveView: boolean
   liveState?: string
+  liveLinkSlug?: string
   onPrefetchStream?: (streamId: string) => void
-  onSync?: () => void
   syncing?: boolean
   syncedOnly?: boolean
   onSyncedOnlyChange?: (value: boolean) => void
@@ -2854,7 +2897,9 @@ function StreamSidebar({
       ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Link
-          to={`/analytics/${encodeURIComponent(login)}`}
+          to={liveLinkSlug
+            ? `/analytics/${encodeURIComponent(login)}/${encodeURIComponent(liveLinkSlug)}`
+            : `/analytics/${encodeURIComponent(login)}`}
           className={`block border-b border-white/5 px-3 py-2.5 transition hover:bg-white/[0.05] ${
             isLiveView ? 'border-l-2 border-l-red-400 bg-red-500/10' : 'border-l-2 border-l-transparent'
           }`}
@@ -2927,7 +2972,7 @@ function StreamSidebar({
                             ? 'Minute-level viewer, chat, and emote rollups are synced for charts.'
                             : coreMinuteChartsBlocked
                               ? 'Session stats only. Minute charts require the Analytics (scraper) tier.'
-                              : 'Session stats only (duration, title). Use Sync chat/emotes on the stream detail page for minute charts.'
+                              : 'Session stats only (duration, title). Open the stream detail page to sync minute charts.'
                       }
                     >
                       {isSyncingActive ? 'Syncing' : hasMinuteData ? 'Synced' : 'Stats only'}
@@ -2937,20 +2982,6 @@ function StreamSidebar({
                     <div className="mt-1.5">
                       <CoreMinuteChartsNotice compact />
                     </div>
-                  ) : null}
-                  {!hasMinuteData && isActive && onSync && !coreMinuteChartsBlocked ? (
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        onSync()
-                      }}
-                      disabled={syncing}
-                      className="mt-1.5 rounded border border-violet-400/30 bg-violet-500/10 px-2 py-0.5 text-[9px] font-black uppercase text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
-                    >
-                      {syncing ? 'Syncing…' : 'Sync for charts'}
-                    </button>
                   ) : null}
                   <div className="mt-1.5 grid grid-cols-3 gap-1 text-[10px] font-bold text-zinc-500">
                     <span>{duration(stream)}</span>
@@ -3484,10 +3515,10 @@ function SelectedMomentPanel({
 
 export default function Analytics() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { login = '', streamId = '' } = useParams<{ login: string; streamId?: string }>()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [selectedRollup, setSelectedRollup] = useState<AnalyticsMinuteRollup | null>(null)
-  const [selectedHeatmapPeak, setSelectedHeatmapPeak] = useState<ReplayHeatmapPoint | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -3495,7 +3526,8 @@ export default function Analytics() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
   const [activeClipsTab, setActiveClipsTab] = useState<'edits' | 'twitch'>('edits')
-  const [rightPanelTab, setRightPanelTab] = useState<'moments' | 'emotes' | 'clips' | 'sync'>('moments')
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('moments')
+  const [analyticsViewMode, setAnalyticsViewMode] = useState<AnalyticsViewMode>('overview')
   const [syncedOnlyFilter, setSyncedOnlyFilter] = useState(false)
 
   const isLiveRoute = !streamId
@@ -3503,7 +3535,6 @@ export default function Analytics() {
 
   useEffect(() => {
     setSelectedRollup(null)
-    setSelectedHeatmapPeak(null)
     setLastRefreshedAt(null)
   }, [login, streamId])
 
@@ -3689,7 +3720,12 @@ export default function Analytics() {
     queryKey: ['analytics-detail', login, targetQueryStreamId],
     queryFn: () => targetQueryStreamId ? getAnalyticsStream(targetQueryStreamId, { channel: login }) : getAnalyticsLive(login),
     enabled: Boolean(login && (streamId === '' || targetQueryStreamId)),
-    refetchInterval: streamId ? false : 15000,
+    refetchInterval: query => {
+      const data = query.state.data as AnalyticsStreamDetail | undefined
+      if (!streamId) return 15_000
+      if (data?.state === 'live' || data?.state === 'syncing') return 15_000
+      return false
+    },
     retry: false,
     placeholderData: (previousData, previousQuery) => {
       const prevKey = previousQuery?.queryKey?.[2]
@@ -4053,30 +4089,7 @@ export default function Analytics() {
 
   const selectRollupWithHeatmap = useCallback((rollup: AnalyticsMinuteRollup | null) => {
     setSelectedRollup(rollup)
-    if (!rollup) {
-      setSelectedHeatmapPeak(null)
-      return
-    }
-    const rollups = detail?.rollups ?? []
-    const heatmapPoints = heatmapQuery.data?.points ?? []
-    const matched = heatmapPoints.find(point => point.minuteTs === rollup.minuteTs)
-    if (matched) {
-      setSelectedHeatmapPeak(matched)
-      return
-    }
-    const baselines = computeStreamBaselines(rollups)
-    setSelectedHeatmapPeak({
-      offsetSeconds: rollupOffsetSeconds(rollup, stream?.startedAt),
-      durationSeconds: 60,
-      score: computeMomentScore100(rollup, baselines, rollups),
-      confidence: 0.55,
-      reason: detectPickReason(rollup, baselines, detail?.topEmotes),
-      topEmotes: heatmapEmotesFromRollup(rollup, 3, detail?.topEmotes),
-      vodId: streamVodId ?? null,
-      streamId: stream?.streamId || targetQueryStreamId || streamId || '',
-      minuteTs: rollup.minuteTs,
-    })
-  }, [detail?.rollups, detail?.topEmotes, heatmapQuery.data?.points, stream?.startedAt, stream?.streamId, streamId, streamVodId, targetQueryStreamId])
+  }, [])
 
   const liveHasRichHistory = useMemo(() => {
     if (!isLiveRoute) return false
@@ -4085,6 +4098,37 @@ export default function Analytics() {
     if (hasLiveRollups) return false
     return combinedStreams.some(s => (s.viewerSamples ?? 0) > 0 || (s.chatMessages ?? 0) > 0)
   }, [isLiveRoute, detail?.rollups, combinedStreams])
+
+  const syncedLiveStreamTarget = useMemo(() => {
+    const rollups = detail?.rollups ?? []
+    const hasChartRollups = rollups.some(rollupHasMinuteData) || rollupsHaveViewerData(rollups)
+    if (hasChartRollups) return undefined
+    return pickSyncedLiveStreamTarget(combinedStreams, {
+      liveStreamId: detail?.stream?.streamId,
+      channelLive: detail?.state === 'live' || detail?.state === 'not_collected',
+    })
+  }, [combinedStreams, detail?.rollups, detail?.state, detail?.stream?.streamId])
+
+  const syncedLiveStreamSlug = useMemo(() => {
+    if (!syncedLiveStreamTarget) return undefined
+    return analyticsStreamPathSlug(syncedLiveStreamTarget, combinedStreams)
+  }, [syncedLiveStreamTarget, combinedStreams])
+
+  useEffect(() => {
+    if (!isLiveRoute || !login || !syncedLiveStreamSlug) return
+    if (detailQuery.isLoading || streamsQuery.isLoading) return
+    navigate(
+      `/analytics/${encodeURIComponent(login)}/${encodeURIComponent(syncedLiveStreamSlug)}`,
+      { replace: true },
+    )
+  }, [
+    detailQuery.isLoading,
+    isLiveRoute,
+    login,
+    navigate,
+    streamsQuery.isLoading,
+    syncedLiveStreamSlug,
+  ])
 
   const chatOnlySyncAvailable = useMemo(() => {
     if (!targetQueryStreamId || isLiveRoute || coreMinuteChartsBlocked) return false
@@ -4117,7 +4161,6 @@ export default function Analytics() {
     return syncCtaLabel(state)
   }, [syncing, viewerDataFromExisting, detail?.rollups, detail?.stream?.chatMessages])
 
-  const canHeaderSync = !coreMinuteChartsBlocked && Boolean(targetQueryStreamId || needsSync)
   const headerStats = useMemo(() => {
     const rollups = detail?.rollups ?? []
     const viewerStats = computeRollupViewerStats(rollups)
@@ -4160,9 +4203,10 @@ export default function Analytics() {
     [syncing, detail?.rollups],
   )
   const chartEmoteKeys = useMemo(() => {
+    if (analyticsViewMode === 'overview') return selected
     if (selected.size > 0) return selected
     return new Set((detail?.topEmotes ?? []).slice(0, 4).map(emote => emote.key))
-  }, [selected, detail?.topEmotes])
+  }, [analyticsViewMode, selected, detail?.topEmotes])
 
   const toggleSelected = (key: string) => {
     setSelected(current => {
@@ -4171,6 +4215,15 @@ export default function Analytics() {
       else if (next.size < 5) next.add(key)
       return next
     })
+  }
+
+  const handleAnalyticsViewMode = (mode: AnalyticsViewMode) => {
+    setAnalyticsViewMode(mode)
+    if (mode === 'emotes') {
+      setRightPanelTab('emotes')
+    } else if (mode === 'spikes') {
+      setRightPanelTab('moments')
+    }
   }
 
   return (
@@ -4213,16 +4266,6 @@ export default function Analytics() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            {canHeaderSync ? (
-              <button
-                type="button"
-                onClick={() => void handleSync(chatOnlySyncAvailable ? { chatOnly: true } : undefined)}
-                disabled={syncing || (isHistoricalRoute && !targetQueryStreamId)}
-                className="rounded-lg bg-violet-600 px-4 py-2 text-[11px] font-black uppercase tracking-wide text-white transition hover:bg-violet-500 disabled:opacity-50"
-              >
-                {headerSyncLabel}
-              </button>
-            ) : null}
             <StackStatusButton />
             <button
               type="button"
@@ -4269,7 +4312,7 @@ export default function Analytics() {
           <StatCard label="Duration" value={duration(stream)} />
         </section>
 
-        {isLiveRoute && detail?.state === 'live' ? (
+        {detail?.state === 'live' ? (
           <LiveStatsBand
             login={login}
             enabled
@@ -4290,15 +4333,15 @@ export default function Analytics() {
         ) : null}
 
         <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
-          <aside className="order-2 min-w-0 lg:order-none xl:sticky xl:top-4 xl:self-start">
+          <aside className="order-3 min-w-0 xl:order-none xl:sticky xl:top-4 xl:self-start">
             <StreamSidebar
               login={login}
               streams={combinedStreams}
               activeID={isHistoricalRoute ? (targetQueryStreamId || streamId) : undefined}
               isLiveView={isLiveRoute}
-              liveState={isLiveRoute ? detail?.state : undefined}
+              liveState={detail?.state === 'live' ? 'live' : (isLiveRoute ? detail?.state : undefined)}
+              liveLinkSlug={syncedLiveStreamSlug}
               onPrefetchStream={prefetchStreamDetail}
-              onSync={coreMinuteChartsBlocked ? undefined : () => void handleSync()}
               syncing={syncing}
               syncedOnly={syncedOnlyFilter}
               onSyncedOnlyChange={setSyncedOnlyFilter}
@@ -4306,66 +4349,65 @@ export default function Analytics() {
               activeRollupStats={sidebarRollupStats}
             />
           </aside>
-          <section className="order-1 min-w-0 space-y-4 lg:order-none">
-            <AnalyticsChart
-              detail={detail}
-              selectedEmotes={chartEmoteKeys}
-              onSelectEmote={toggleSelected}
-              selectedRollup={selectedRollup}
-              onSelectRollup={selectRollupWithHeatmap}
-              syncing={syncing}
-              syncError={syncError}
-              syncNotice={syncNotice}
-              onSync={() => void handleSync(chatOnlySyncAvailable ? { chatOnly: true } : undefined)}
-              onChatOnlySync={chatOnlySyncAvailable ? () => void handleSync({ chatOnly: true, forceChat: true }) : undefined}
-              notInAnalyticsDb={needsSync}
-              onRefresh={handleRefresh}
-              refreshing={refreshing}
-              loading={detailQuery.isLoading && !matchedStream && !historicalStream}
-              games={gamesQuery.data ?? []}
-              canSync={!coreMinuteChartsBlocked && (Boolean(streamId) || needsSync)}
-              isLive={isLiveRoute && detail?.state === 'live'}
-              coreMinuteChartsBlocked={coreMinuteChartsBlocked}
-              liveHasRichHistory={liveHasRichHistory}
-              chatOnlySyncAvailable={chatOnlySyncAvailable}
-              syncCtaLabel={headerSyncLabel}
-            />
-            {streamVodId ? (
-              <p className="text-[11px] font-semibold text-zinc-500">
-                Select a moment to play the VOD in Streamclone, or open Twitch as a fallback.
-                <a
-                  href={buildTwitchVodUrl(streamVodId)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="ml-1 text-violet-300 hover:text-violet-200"
-                >
-                  Open full VOD
-                </a>
-                {isLongStreamChart ? ' Long streams (6h+) may feel slower while hovering the chart.' : ''}
-              </p>
-            ) : null}
-            {selectedHeatmapPeak ? (
-              <MomentDrawer
-                selectedPoint={selectedHeatmapPeak}
-                canPlay={Boolean(streamVodId)}
-                canClip={Boolean(streamVodId) || (isLiveRoute && detail?.state === 'live')}
+          <section className="order-1 min-w-0 xl:order-none">
+            <div className="min-w-0 space-y-4">
+              <AnalyticsChart
+                detail={detail}
+                selectedEmotes={chartEmoteKeys}
+                onSelectEmote={toggleSelected}
+                selectedRollup={selectedRollup}
+                onSelectRollup={selectRollupWithHeatmap}
+                syncing={syncing}
+                syncError={syncError}
+                syncNotice={syncNotice}
+                onSync={() => void handleSync(chatOnlySyncAvailable ? { chatOnly: true } : undefined)}
+                onChatOnlySync={chatOnlySyncAvailable ? () => void handleSync({ chatOnly: true, forceChat: true }) : undefined}
+                notInAnalyticsDb={needsSync}
+                onRefresh={handleRefresh}
+                refreshing={refreshing}
+                loading={detailQuery.isLoading && !matchedStream && !historicalStream}
+                games={gamesQuery.data ?? []}
+                canSync={!coreMinuteChartsBlocked && (Boolean(streamId) || needsSync)}
+                isLive={detail?.state === 'live'}
+                coreMinuteChartsBlocked={coreMinuteChartsBlocked}
+                liveHasRichHistory={liveHasRichHistory}
+                chatOnlySyncAvailable={chatOnlySyncAvailable}
+                syncCtaLabel={headerSyncLabel}
+                viewMode={analyticsViewMode}
+                onViewModeChange={handleAnalyticsViewMode}
               />
-            ) : null}
-            <SelectedMomentPanel
-              rollup={selectedRollup}
-              rollups={detail?.rollups ?? []}
-              startedAt={stream?.startedAt}
-              vodId={streamVodId}
-              channel={login}
-              streamId={stream?.streamId || targetQueryStreamId || streamId}
-              topEmotesCatalog={detail?.topEmotes}
-              heatmapPoint={selectedHeatmapBackendPoint}
-              heatmapDetail={selectedHeatmapDetail}
-              isLiveView={isLiveRoute}
-              channelLive={detail?.state === 'live'}
-            />
+              <div className="space-y-4">
+                <SelectedMomentPanel
+                  rollup={selectedRollup}
+                  rollups={detail?.rollups ?? []}
+                  startedAt={stream?.startedAt}
+                  vodId={streamVodId}
+                  channel={login}
+                  streamId={stream?.streamId || targetQueryStreamId || streamId}
+                  topEmotesCatalog={detail?.topEmotes}
+                  heatmapPoint={selectedHeatmapBackendPoint}
+                  heatmapDetail={selectedHeatmapDetail}
+                  isLiveView={detail?.state === 'live'}
+                  channelLive={detail?.state === 'live'}
+                />
+              </div>
+              {streamVodId ? (
+                <p className="text-[11px] font-semibold text-zinc-500">
+                  Select a moment to play the VOD in Streamclone, or open Twitch as a fallback.
+                  <a
+                    href={buildTwitchVodUrl(streamVodId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-1 text-violet-300 hover:text-violet-200"
+                  >
+                    Open full VOD
+                  </a>
+                  {isLongStreamChart ? ' Long streams (6h+) may feel slower while hovering the chart.' : ''}
+                </p>
+              ) : null}
+            </div>
           </section>
-          <aside className="order-3 space-y-4 lg:order-none">
+          <aside className="order-2 space-y-4 xl:order-none">
             <div className="rounded border border-white/10 bg-white/[0.035] overflow-hidden">
               <div className="flex border-b border-white/10 text-[10px] font-black uppercase bg-white/[0.015]">
                 {(['moments', 'emotes', 'clips', 'sync'] as const).map(tab => (
@@ -4379,14 +4421,14 @@ export default function Analytics() {
                         : 'text-zinc-500 hover:text-zinc-300'
                     }`}
                   >
-                    {tab === 'moments' ? 'Moments' : tab === 'emotes' ? 'Emotes' : tab === 'clips' ? 'Clips' : 'Sync'}
+                    {tab === 'moments' ? 'Moments' : tab === 'emotes' ? 'Emotes' : tab === 'clips' ? 'Clips' : 'Status'}
                   </button>
                 ))}
               </div>
               <div className="p-0">
                 {rightPanelTab === 'moments' ? (
                   <>
-                    {isLiveRoute && detail?.state === 'live' ? (
+                    {detail?.state === 'live' ? (
                       <MostReactedLive
                         login={login}
                         vodId={streamVodId}
@@ -4453,28 +4495,6 @@ export default function Analytics() {
                         Viewer minutes are already synced. VOD chat uses Twitch GQL only — no scraper profile required.
                       </div>
                     ) : null}
-                    {canHeaderSync ? (
-                      <div className="flex flex-col gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void handleSync(chatOnlySyncAvailable ? { chatOnly: true } : undefined)}
-                          disabled={syncing || (isHistoricalRoute && !targetQueryStreamId)}
-                          className="rounded-lg bg-violet-600 px-4 py-2 text-[11px] font-black uppercase text-white transition hover:bg-violet-500 disabled:opacity-50"
-                        >
-                          {headerSyncLabel}
-                        </button>
-                        {chatOnlySyncAvailable ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleSync({ chatOnly: true, forceChat: true })}
-                            disabled={syncing}
-                            className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-4 py-2 text-[10px] font-black uppercase text-cyan-100 transition hover:bg-cyan-500/20 disabled:opacity-50"
-                          >
-                            Re-sync chat only
-                          </button>
-                        ) : null}
-                      </div>
-                    ) : null}
                     {syncing ? (
                       <SyncProgressPanel
                         status={syncStatus}
@@ -4487,7 +4507,7 @@ export default function Analytics() {
                     {syncError ? <div className="text-xs font-bold text-red-300">{syncError}</div> : null}
                     {!syncing && !syncNotice && !syncError ? (
                       <div className="text-[11px] font-semibold text-zinc-500">
-                        Start a sync from here or use the header button. Progress appears while VOD chat and emotes index.
+                        Sync progress appears here while VOD chat and emotes index. Start sync from the chart when a stream needs minute data.
                       </div>
                     ) : null}
                   </div>

@@ -83,6 +83,7 @@ Go does not download HLS segments in-process. Segment fetch and transmux are del
 - **Archived VOD relay:** `POST /v1/stream/vod/start` with `vod_id` / offset starts a Streamlink→ffmpeg worker publishing to `live/vod_{id}/index.m3u8` (same Caddy `@hls` path as live). Channel deep-link: `/c/{login}?vod={id}&offset=`; analytics adds `from=analytics&sid={stream_id}` for activity/chat replay. Keep Twitch as an explicit fallback action, not an automatic redirect.
 - VOD mode must stay inside the channel workspace, show `VodModeControls`, publish playhead sync for matching analytics charts, and load `VodChatReplayPanel` when `sid` is present.
 - Theater layout: opening player settings must not shrink the theater player. `Shrink`/theater toggle exits theater; settings only expand controls.
+- Player fit/fill should only change the media object fit, not the player frame geometry. `Fit` shows the whole video with letterboxing; `Fill` covers the frame and may crop edges. Default layout keeps a 16:9 player frame (`aspect-video`) like Twitch; theater mode expands height with a viewport clamp.
 
 ## Latency / resilience knobs
 

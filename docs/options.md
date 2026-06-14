@@ -56,6 +56,7 @@ Setup can clone the scraper for you. Never commit `PROXY_*` credentials — use 
 | Pause (keep data) | **Stop Streamclone** launcher | `make down` or `scripts/stop-streamclone.ps1` |
 | Resume | **Start Streamclone** launcher | `make start` |
 | Remove volumes only | — | `make down-clean` |
+| Full teardown (compose + helm + integration) | — | `make nuke` |
 | Complete removal | **Uninstall Streamclone** launcher | `scripts/uninstall-streamclone.ps1` |
 | Re-test install (keep folder) | — | `scripts/reset-local-install.ps1 -RemoveVolumes` |
 

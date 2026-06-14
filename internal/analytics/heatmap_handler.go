@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"streamclone/internal/analytics/heatmap"
+	"streamclone/internal/metrics"
 )
 
 func (h *Handler) invalidateHeatmapCache(w http.ResponseWriter, r *http.Request) {
@@ -69,12 +70,14 @@ func (h *Handler) replayHeatmap(w http.ResponseWriter, r *http.Request) {
 
 	if h.heatmapCache != nil {
 		if cached, ok := h.heatmapCache.Get(ctx, cacheKey); ok {
+			metrics.AnalyticsHeatmapCacheRequests.WithLabelValues("hit").Inc()
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-Cache", "HIT")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write(cached)
 			return
 		}
+		metrics.AnalyticsHeatmapCacheRequests.WithLabelValues("miss").Inc()
 	}
 
 	rollups, _, err := h.consolidateForHeatmap(ctx, streamID)

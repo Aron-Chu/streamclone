@@ -34,7 +34,7 @@ export function StudioTemplateRail({
   }, [templates, search, formatFilter])
 
   return (
-    <aside className="flex w-[240px] shrink-0 flex-col border-r border-white/[0.08] bg-[#0d0d12]/95">
+    <aside className="flex min-h-0 w-full flex-1 flex-col border-b border-white/[0.08] bg-[#0d0d12]/95 lg:w-[240px] lg:flex-none lg:border-b-0 lg:border-r">
       <div className="border-b border-white/[0.08] px-3 py-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-400/90">Templates</p>
         <input

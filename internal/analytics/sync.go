@@ -24,6 +24,7 @@ import (
 
 	"streamclone/internal/analytics/chatreplay"
 	"streamclone/internal/chat/enrich"
+	"streamclone/internal/metrics"
 )
 
 type SyncService struct {
@@ -489,6 +490,11 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 			s.log.Warn("retrying TwitchTracker scrape after Camoufox browser crash", "stream_id", streamID)
 			time.Sleep(2 * time.Second)
 			html, err = s.scrapeTwitchTracker(ctx, trackerURL, stream, viewersOnly)
+		}
+		if err != nil {
+			metrics.AnalyticsScraperRequests.WithLabelValues("twitchtracker", "error").Inc()
+		} else {
+			metrics.AnalyticsScraperRequests.WithLabelValues("twitchtracker", "success").Inc()
 		}
 		trackerScrapeMS = time.Since(trackerStart).Milliseconds()
 		s.updateTrackerProgress(ctx, streamID, func(tp *SyncTrackerProgress) {
@@ -2402,6 +2408,7 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 
 		resp, err := s.gqlHTTPClient().Do(req)
 		if err != nil {
+			metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
 			return GQLResponse{}, err
 		}
 
@@ -2418,6 +2425,7 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 				if count429 > 0 || count503 > 0 {
 					s.log.Warn("gql video comments exhausted retries", "429_count", count429, "503_count", count503)
 				}
+				metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
 				return GQLResponse{}, fmt.Errorf("gql video comments status %d after %d retries", resp.StatusCode, attempt)
 			}
 			delay := gqlBackoffDelay(attempt, retryAfter)
@@ -2441,16 +2449,19 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
+			metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
 			return GQLResponse{}, fmt.Errorf("gql video comments status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 
 		var respBody []GQLResponse
 		if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
 			resp.Body.Close()
+			metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
 			return GQLResponse{}, err
 		}
 		resp.Body.Close()
 		if len(respBody) == 0 {
+			metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
 			return GQLResponse{}, fmt.Errorf("gql video comments response empty")
 		}
 		if count429 > 0 || count503 > 0 {
@@ -2459,8 +2470,10 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 		if coord != nil {
 			coord.RecordSuccess()
 		}
+		metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("success").Inc()
 		return respBody[0], nil
 	}
+	metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
 	return GQLResponse{}, fmt.Errorf("gql video comments retry loop exhausted")
 }
 

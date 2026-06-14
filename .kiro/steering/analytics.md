@@ -124,6 +124,10 @@ Optional fields on Redis `SyncStatus.timing` surface in the **`SyncProgressPanel
 - **`targetQueryStreamId`** in `Analytics.tsx`: numeric `streamId` passes through; date slugs (`YYYY-MM-DD`) resolve via `matchedStream` only — **never** call the API with the date string as `streamId` (caused 404s).
 - While streams/insights load for a date slug, `targetQueryStreamId` is `undefined` (query disabled).
 - Unresolved date slug shows a stream-not-found state (`dateSlugUnresolved`), not a bad API request.
+- `Analytics.tsx` keeps chart exploration in three UI modes: `overview`, `emotes`, and `spikes`. Overview should keep the chart readable with only aggregate lanes unless the user explicitly selected emotes; Emotes may surface top-emote chips and right-rail emote focus; Spikes turns on spike markers and keeps moment review close.
+- Desktop Analytics keeps the selected moment details directly below the chart; do not move them into a narrow side dock and do not re-add the old separate `MomentDrawer` summary above it. The right rail is for Moments/Emotes/Clips/Sync exploration.
+- Sync should have one primary CTA on the active stream surface. For streams without minute data, the chart empty state owns the sync action; the header, streams sidebar, and Sync rail should not repeat the same button.
+- Mobile Analytics order is chart first, selected moment details second, right rail third, and stream picker last. Do not put the streams sidebar before the selected-moment tools on narrow viewports.
 - Moment scoring UI uses `frontend/src/utils/momentScore.ts`: backend replay heatmap `score/reason/confidence/topEmotes` is canonical (`N/100`); frontend rollup scoring is fallback only and must be shown as `~N/100`. Selected moment panels and ranked moment rows should use the same model.
 - Replay heatmap detail fetch is `GET /v1/analytics/streams/{streamId}/replay-heatmap?window=60&detail=true&channel={login}`. Use it for selected-moment breakdown; do not invent a second score in the component.
 - Guard chart coordinate math against empty/one-point rollups and non-finite game segment offsets/durations before rendering SVG `<line>` attributes.

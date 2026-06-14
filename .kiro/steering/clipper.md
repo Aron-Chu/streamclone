@@ -88,6 +88,7 @@ When extending clipper, prefer consuming Go stack surfaces (webhook/SSE from cha
 - API base: `CLIPPER` in `frontend/src/config.ts` (auto → same origin `/v1/clipper`).
 - Job states: `queued` → `creating_clip` | `downloading` (VOD export skips Helix) → `transcribing` → `rendering` → `ready` | `failed`.
 - After queueing from Analytics, follow **Open in Studio** or `/studio/{jobId}` directly.
+- Desktop Clip Studio keeps template rail, stage/timeline, and inspector rails. Mobile Clip Studio uses panes (`Stage`, `Templates`, `Details`, `Captions`, `Export`) so narrow viewports do not render the fixed desktop rails side by side.
 
 ## Historical VOD export (shipped)
 

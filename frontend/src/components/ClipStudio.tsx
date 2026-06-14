@@ -41,6 +41,16 @@ import OptionalServicesPanel from './OptionalServicesPanel'
 import StackStatusButton from './StackStatusButton'
 import './ClipStudio.css'
 
+type StudioPane = 'stage' | 'templates' | 'details' | 'captions' | 'export'
+
+const studioPanes: Array<{ id: StudioPane; label: string }> = [
+  { id: 'stage', label: 'Stage' },
+  { id: 'templates', label: 'Templates' },
+  { id: 'details', label: 'Details' },
+  { id: 'captions', label: 'Captions' },
+  { id: 'export', label: 'Export' },
+]
+
 export default function ClipStudio() {
   const { jobId } = useParams<{ jobId: string }>()
   const [job, setJob] = useState<ClipperJob | null>(null)
@@ -55,6 +65,7 @@ export default function ClipStudio() {
   const [selectedCaptionIndex, setSelectedCaptionIndex] = useState<number | null>(null)
   const [addTextMode, setAddTextMode] = useState(false)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('layout')
+  const [studioPane, setStudioPane] = useState<StudioPane>('stage')
 
   const [formatPreset, setFormatPreset] = useState<FormatPreset>('tiktok')
   const [captionPreset, setCaptionPreset] = useState<CaptionPreset>('default')
@@ -570,8 +581,19 @@ export default function ClipStudio() {
       ? getClipperSourceVideoUrl(job.id)
       : ''
 
+  const handleStudioPaneChange = (pane: StudioPane) => {
+    setStudioPane(pane)
+    if (pane === 'captions') {
+      setInspectorTab('captions')
+    } else if (pane === 'export') {
+      setInspectorTab('export')
+    } else if (pane === 'details') {
+      setInspectorTab('layout')
+    }
+  }
+
   return (
-    <div className="flex h-[calc(100vh-56px)] flex-col overflow-hidden bg-[#0d0d12] text-zinc-100">
+    <div className="flex min-h-[calc(100vh-56px)] flex-col overflow-y-auto bg-[#0d0d12] text-zinc-100 lg:h-[calc(100vh-56px)] lg:overflow-hidden">
       {toast && (
         <div
           className={`fixed right-4 top-16 z-[10000] cursor-pointer rounded-lg px-4 py-2.5 text-sm font-medium shadow-xl ${
@@ -605,16 +627,37 @@ export default function ClipStudio() {
         exportDisabled={sourceUnavailable || renderStatus === 'rendering'}
       />
 
-      <div className="flex min-h-0 flex-1">
-        <StudioTemplateRail
-          templates={templates}
-          selectedTemplateId={selectedTemplateId}
-          formatPreset={formatPreset}
-          onApplyTemplate={applyTemplate}
-          onFormatPresetChange={handleFormatPresetChange}
-        />
+      <div className="border-b border-white/[0.08] bg-[#09090d] px-3 py-2 lg:hidden">
+        <div className="grid grid-cols-5 gap-1 rounded border border-white/10 bg-white/[0.04] p-1 text-[10px] font-black uppercase">
+          {studioPanes.map(pane => (
+            <button
+              key={pane.id}
+              type="button"
+              onClick={() => handleStudioPaneChange(pane.id)}
+              className={`rounded px-2 py-2 transition ${
+                studioPane === pane.id
+                  ? 'bg-white text-zinc-950'
+                  : 'text-zinc-500 hover:bg-white/10 hover:text-zinc-200'
+              }`}
+            >
+              {pane.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-        <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div className={`${studioPane === 'templates' ? 'flex' : 'hidden'} min-h-0 flex-1 lg:flex lg:flex-none`}>
+          <StudioTemplateRail
+            templates={templates}
+            selectedTemplateId={selectedTemplateId}
+            formatPreset={formatPreset}
+            onApplyTemplate={applyTemplate}
+            onFormatPresetChange={handleFormatPresetChange}
+          />
+        </div>
+
+        <div className={`${studioPane === 'stage' ? 'flex' : 'hidden'} min-w-0 flex-1 flex-col lg:flex`}>
           <VideoStage
             videoRef={videoRef}
             videoSrc={videoSrc}
@@ -665,25 +708,35 @@ export default function ClipStudio() {
           />
         </div>
 
-        <div className="flex w-[300px] shrink-0 flex-col border-l border-white/[0.08] bg-[#0d0d12]/95">
-          <ClipDetailsPanel
-            job={job}
-            trimStart={trimStart}
-            trimEnd={trimEnd}
-            trimDuration={trimDuration}
-            captionPreset={captionPreset}
-            layout={layout}
-            captionsCount={captions.length}
-            isTranscribing={isTranscribing}
-            onToggleCaptions={handleCaptionsToggle}
-            onToggleFacecamFocus={handleFacecamToggle}
-            onCenterOnSpike={() => applyTrimWindow('spike')}
-            onApplyDurationPreset={applyDurationPreset}
-            onOpenCaptionsTab={() => setInspectorTab('captions')}
-          />
+        <div className={`${studioPane === 'details' || studioPane === 'captions' || studioPane === 'export' ? 'flex' : 'hidden'} min-h-0 flex-1 flex-col border-t border-white/[0.08] bg-[#0d0d12]/95 lg:flex lg:w-[300px] lg:flex-none lg:border-l lg:border-t-0`}>
+          <div className={`${studioPane === 'details' ? 'block' : 'hidden'} lg:block`}>
+            <ClipDetailsPanel
+              job={job}
+              trimStart={trimStart}
+              trimEnd={trimEnd}
+              trimDuration={trimDuration}
+              captionPreset={captionPreset}
+              layout={layout}
+              captionsCount={captions.length}
+              isTranscribing={isTranscribing}
+              onToggleCaptions={handleCaptionsToggle}
+              onToggleFacecamFocus={handleFacecamToggle}
+              onCenterOnSpike={() => applyTrimWindow('spike')}
+              onApplyDurationPreset={applyDurationPreset}
+              onOpenCaptionsTab={() => {
+                setInspectorTab('captions')
+                setStudioPane('captions')
+              }}
+            />
+          </div>
           <ClipInspector
             activeTab={inspectorTab}
-            onTabChange={setInspectorTab}
+            onTabChange={tab => {
+              setInspectorTab(tab)
+              if (tab === 'captions') setStudioPane('captions')
+              if (tab === 'export') setStudioPane('export')
+              if (tab === 'layout') setStudioPane('details')
+            }}
             templates={templates}
             selectedTemplateId={selectedTemplateId}
             formatPreset={formatPreset}

@@ -31,7 +31,7 @@ Also verify:
 
 ## Playback / channel UI changes
 
-Validate against **`http://localhost:8090`**, not standalone Vite `:5174`.
+Validate against **`http://localhost:8090`**.
 
 ## Before finishing
 

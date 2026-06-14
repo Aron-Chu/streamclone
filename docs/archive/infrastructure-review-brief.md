@@ -2,8 +2,8 @@
 
 **Purpose of this document:** Provide a self-contained briefing for an external reviewer (human or large model) to **evaluate, benchmark, and critique** Streamclone’s install experience, deployment architecture, and infrastructure decisions. The reviewer should treat this as the primary context; follow file paths into the repo for implementation detail.
 
-**Repository:** [github.com/Aron-Chu/streamclone](https://github.com/Aron-Chu/streamclone)  
-**Canonical local URL:** `http://localhost:8090/` (never raw service ports for end users)  
+**Repository:** [github.com/Aron-Chu/streamclone](https://github.com/Aron-Chu/streamclone)
+**Canonical local URL:** `http://localhost:8090/` (never raw service ports for end users)
 **License:** Apache 2.0 (open source, not code-signed on Windows yet)
 
 ---
@@ -108,7 +108,7 @@ docker compose --env-file .env \
 | `deploy/docker-compose.local-tunnel.yml` | Local desktop + dev | **Caddy `local-proxy` on `8090:80`**; `PUBLIC_ORIGIN` overrides |
 | `deploy/docker-compose.release.yml` | Release ZIP / `-UseImages` | Pin `ghcr.io/aron-chu/streamclone/*:${IMAGE_TAG}`; frontend nginx baked in image |
 | `deploy/docker-compose.prod.yml` | Public VM deploy | Caddy on `80/443` with Let's Encrypt |
-| `deploy/docker-compose.observability.yml` | Optional | Prometheus, Grafana, Loki, hides raw ports |
+| `charts/streamclone` | Hosted Kubernetes deploy | App profiles plus optional Prometheus, Grafana, Loki, InfluxDB |
 
 **Project name:** `streamclone` (Docker Compose `name: streamclone`)
 
@@ -129,7 +129,7 @@ Both `deploy/Caddyfile` and `deploy/Caddyfile.local-tunnel` implement the same p
 | `/v1/*` (remaining) | `metadata:8080` | Directory, search, channels |
 | default | `frontend:80` | React SPA |
 
-**Why port 8090:** Documented as the **only** browser entry for local use. Single origin keeps cookies, WebSocket URLs, HLS paths, and `GET /v1/me` auth checks aligned. Raw ports (`8081`–`8086`, `5174`) exist for developer bypass only.
+**Why port 8090:** Documented as the **only** browser entry for local use. Single origin keeps cookies, WebSocket URLs, HLS paths, and `GET /v1/me` auth checks aligned. Raw ports (`8081`–`8086`) exist for developer bypass only.
 
 **Why `caddy:2` not alpine:** `.kiro/steering/tech.md` documents intermittent Docker DNS WebSocket failures with `caddy:2-alpine`.
 
@@ -169,7 +169,7 @@ Both `deploy/Caddyfile` and `deploy/Caddyfile.local-tunnel` implement the same p
 
 ### 3.3 Release packaging pipeline
 
-**Script:** `scripts/package-release.sh`  
+**Script:** `scripts/package-release.sh`
 **CI:** `.github/workflows/release-images.yml` on tag `v*`
 
 Release ZIP/tar.gz contains (no app source):
@@ -191,10 +191,10 @@ Release ZIP/tar.gz contains (no app source):
 | `Install Streamclone.cmd` | One-file bootstrap (fetches ZIP) |
 | `Streamclone-Setup-<version>.exe` | Wizard installer |
 
-**GHCR images published:** `metadata`, `chat`, `video`, `emote`, `analytics`, `frontend`, `clipper`  
+**GHCR images published:** `metadata`, `chat`, `video`, `emote`, `analytics`, `frontend`, `clipper`
 **Not published:** `scraper` (builds from sibling repo when `--profile scraper`)
 
-Registry: `ghcr.io/aron-chu/streamclone/<service>:${IMAGE_TAG}`  
+Registry: `ghcr.io/aron-chu/streamclone/<service>:${IMAGE_TAG}`
 **Requirement:** GHCR packages must be **public** or installs fail without `docker login ghcr.io`.
 
 ### 3.4 Product tiers (setup profiles)
@@ -265,7 +265,6 @@ From `.kiro/steering/tech.md`:
 | Port | Service | Expose publicly? |
 |------|---------|------------------|
 | **8090** | Caddy local-proxy (**browser entry**) | Localhost only |
-| 5174 | frontend direct | Dev bypass only |
 | 8081–8086 | Go services direct | Dev bypass only |
 | 8095 | clipper | Trusted network only |
 | 8000 | scraper | Trusted network only |
@@ -571,7 +570,7 @@ Please structure your review as:
 | CPU | 4 cores | 6+ cores |
 | Network | Stable broadband; ~1.5–2 GB first download | Wired / fast Wi‑Fi |
 
-**VM deploy (testing):** 2 OCPU / 8 GB RAM  
+**VM deploy (testing):** 2 OCPU / 8 GB RAM
 **VM deploy (smoother workers):** 4 OCPU / 16–24 GB RAM, 80–150 GB disk
 
 ---
