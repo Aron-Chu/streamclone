@@ -28,7 +28,7 @@ import {
   vodSessionKey,
   watchAnalyticsChannel,
 } from '../api'
-import type { AnalyticsMinuteRollup, AnalyticsStream, AnalyticsTopEmote, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat, VodStartResponse } from '../api'
+import type { AnalyticsStream, AnalyticsTopEmote, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat, VodStartResponse } from '../api'
 import { useAuth } from '../auth'
 import { useChatStore } from '../chatStore'
 import { normalizeBrowserOriginUrl } from '../config'
@@ -59,6 +59,13 @@ import { HLS_NOT_READY_MAX_AUTO_RETRIES } from './channel/vodError'
 import PlayerHeatmap from './channel/PlayerHeatmap'
 
 type ChannelTab = 'about' | 'stats' | 'clips' | 'vods' | 'diagnostics' | 'emotes'
+type MobileChannelPane = 'watch' | 'chat' | 'workspace'
+
+const mobileChannelPanes: Array<{ id: MobileChannelPane; label: string }> = [
+  { id: 'watch', label: 'Watch' },
+  { id: 'chat', label: 'Chat' },
+  { id: 'workspace', label: 'Workspace' },
+]
 
 const emoteProviderOptions: Array<{ id: EmoteProvider; label: string }> = [
   { id: 'seventv', label: '7TV' },
@@ -890,14 +897,19 @@ function LivePlayerControls({
               ))}
             </div>
             <div className="flex h-9 rounded border border-white/10 bg-white/[0.045] p-1">
-              {(['fit', 'fill'] as const).map(mode => (
+              {([
+                { id: 'fit', label: 'Fit', title: 'Show the whole video with letterboxing when needed' },
+                { id: 'fill', label: 'Fill', title: 'Fill the player frame and crop edges when needed' },
+              ] as const).map(mode => (
                 <button
-                  key={mode}
+                  key={mode.id}
                   type="button"
-                  onClick={() => onVideoFit(mode)}
-                  className={`rounded px-3 py-1.5 text-xs font-black uppercase transition ${videoFit === mode ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
+                  onClick={() => onVideoFit(mode.id)}
+                  title={mode.title}
+                  aria-pressed={videoFit === mode.id}
+                  className={`rounded px-3 py-1.5 text-xs font-black uppercase transition ${videoFit === mode.id ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
                 >
-                  {mode}
+                  {mode.label}
                 </button>
               ))}
             </div>
@@ -931,27 +943,6 @@ function LivePlayerControls({
       ) : null}
     </section>
   )
-}
-
-function MiniViewerSparkline({ values }: { values: number[] }) {
-  if (values.length < 2) return null
-  const max = Math.max(...values, 1)
-  const coords = values.map((value, index) => {
-    const x = values.length === 1 ? 0 : (index / (values.length - 1)) * 100
-    const y = 24 - (value / max) * 20
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
-  return (
-    <svg viewBox="0 0 100 26" className="mt-1 h-6 w-full max-w-[120px]" aria-hidden>
-      <polyline fill="none" stroke="rgba(34,211,238,.35)" strokeWidth="6" strokeLinecap="round" points={coords} />
-      <polyline fill="none" stroke="rgb(34,211,238)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={coords} />
-    </svg>
-  )
-}
-
-function viewerSparklineValues(rollups: AnalyticsMinuteRollup[] | undefined) {
-  if (!rollups?.length) return []
-  return rollups.slice(-20).map(rollup => rollup.viewerMax || rollup.viewerLatest || rollup.viewerAvg || 0)
 }
 
 function FollowButton({ login }: { login: string }) {
@@ -1057,7 +1048,6 @@ function ChannelMeta({
   quality,
   listeners,
   dense,
-  viewerTrend,
   trackLiveAnalytics,
   trackAnalyticsPending,
   onTrackAnalytics,
@@ -1068,7 +1058,6 @@ function ChannelMeta({
   quality: string
   listeners: number | null
   dense: boolean
-  viewerTrend?: number[]
   trackLiveAnalytics?: boolean
   trackAnalyticsPending?: boolean
   onTrackAnalytics?: (track: boolean) => void
@@ -1080,61 +1069,44 @@ function ChannelMeta({
   const title = details?.streamTitle || (detailsLoading ? 'Loading stream details' : `${display}'s channel`)
   const avatar = details?.profileImage
   return (
-    <section className={`border-t border-white/10 bg-[#0d0d12] ${dense ? 'px-3 py-3 lg:px-4' : 'px-4 py-4 lg:px-6'}`}>
-      <div className={`flex flex-col ${dense ? 'gap-3' : 'gap-4'} 2xl:flex-row 2xl:items-start 2xl:justify-between`}>
-        <div className="min-w-0 flex-1">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className={`rounded px-2 py-0.5 text-[11px] font-black uppercase tracking-wide text-white ${details?.isLive ? 'bg-red-600' : 'bg-zinc-600'}`}>
-              {details?.isLive ? 'Live' : 'Offline'}
-            </span>
-            <FollowButton login={login} />
-            {details?.category ? <span className="rounded border border-white/10 bg-white/[0.06] px-2 py-0.5 text-xs font-bold text-zinc-200">{details.category}</span> : null}
-            {details?.startedAt ? <span className="text-xs font-semibold text-zinc-500">Started {relativeTime(details.startedAt)}</span> : null}
-            {details?.isLive && onTrackAnalytics ? (
-              <TrackAnalyticsToggle
-                tracked={Boolean(trackLiveAnalytics)}
-                pending={Boolean(trackAnalyticsPending)}
-                onToggle={onTrackAnalytics}
-              />
-            ) : null}
-          </div>
-          <h1 title={title} className="line-clamp-2 text-xl font-black leading-tight tracking-tight text-white sm:text-2xl">{title}</h1>
-          <div className={`mt-3 flex items-start ${dense ? 'gap-2' : 'gap-3'}`}>
-            <div className={`grid shrink-0 place-items-center overflow-hidden rounded bg-white/10 text-sm font-black text-violet-100 ${dense ? 'h-10 w-10' : 'h-12 w-12'}`}>
-              {avatar ? <img src={avatar} alt={display} className="h-full w-full object-cover" /> : display.slice(0, 1).toUpperCase()}
-            </div>
-            <div className="min-w-0">
-              <div className="font-black text-zinc-100">{display}</div>
-              {details?.description ? <p className={`mt-1 max-w-3xl font-medium text-zinc-300 ${dense ? 'line-clamp-1 text-[13px] leading-5' : 'line-clamp-2 text-sm leading-6'}`}>{details.description}</p> : null}
-              <div className="mt-2">
-                <SourcePills sources={details?.sources} />
-              </div>
-            </div>
-          </div>
+    <section className={`shrink-0 border-b border-white/10 bg-[#0e0e10] ${dense ? 'px-3 py-3 lg:px-4' : 'px-4 py-4 lg:px-5'}`}>
+      <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+        {details?.isLive ? (
+          <span className="rounded bg-red-600 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">Live</span>
+        ) : (
+          <span className="rounded bg-zinc-700 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-zinc-200">Offline</span>
+        )}
+        {details?.category ? <span className="text-sm font-semibold text-[#bf94ff]">{details.category}</span> : null}
+        {details?.isLive && details.viewers != null ? (
+          <span className="text-sm font-semibold text-zinc-300">{fullCount(details.viewers)} viewers</span>
+        ) : null}
+        {details?.startedAt ? <span className="text-sm text-zinc-500">· {relativeTime(details.startedAt)}</span> : null}
+      </div>
+      <h1 title={title} className={`font-semibold leading-snug text-white ${dense ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{title}</h1>
+      <div className={`mt-3 flex flex-wrap items-center gap-3 ${dense ? 'gap-2' : ''}`}>
+        <div className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-zinc-800 text-sm font-black text-violet-100 ${dense ? 'h-10 w-10' : 'h-12 w-12'}`}>
+          {avatar ? <img src={avatar} alt={display} className="h-full w-full object-cover" /> : display.slice(0, 1).toUpperCase()}
         </div>
-        <div className={`grid grid-cols-2 text-xs font-bold text-zinc-300 sm:grid-cols-4 ${dense ? 'gap-1.5 2xl:w-[460px]' : 'gap-2 2xl:w-[520px]'}`}>
-          <div className={`rounded border border-white/10 bg-white/[0.055] ${dense ? 'px-2.5 py-2' : 'px-3 py-2'}`} title="Live viewer count from Twitch metadata (sidebar uses the same value when this channel is open)">
-            <div className="text-[11px] uppercase text-zinc-500">Viewers</div>
-            <div className="mt-0.5 text-sm text-white">{fullCount(details?.viewers)}</div>
-            {details?.isLive ? <MiniViewerSparkline values={viewerTrend ?? []} /> : null}
-          </div>
-          <div className={`rounded border border-white/10 bg-white/[0.055] ${dense ? 'px-2.5 py-2' : 'px-3 py-2'}`}>
-            <div className="text-[11px] uppercase text-zinc-500">Relay</div>
-            <div className="mt-0.5 text-sm text-white">{quality}</div>
-          </div>
-          <div className={`rounded border border-white/10 bg-white/[0.055] ${dense ? 'px-2.5 py-2' : 'px-3 py-2'}`}>
-            <div className="text-[11px] uppercase text-zinc-500">Local</div>
-            <div className="mt-0.5 text-sm text-white">{fullCount(listeners)} listeners</div>
-          </div>
-          <div className={`rounded border border-white/10 bg-white/[0.055] ${dense ? 'px-2.5 py-2' : 'px-3 py-2'}`}>
-            <div className="text-[11px] uppercase text-zinc-500">Updated</div>
-            <div className="mt-0.5 text-sm text-white">{details?.updatedAt ? relativeTime(details.updatedAt / 1000) : '-'}</div>
-          </div>
-          <Link to={`/analytics/${encodeURIComponent(login)}`} className="col-span-2 rounded border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-center text-xs font-black uppercase text-cyan-100 transition hover:border-cyan-200/60 hover:bg-cyan-400/20 sm:col-span-4">
-            Analytics
-          </Link>
+        <div className="min-w-0 flex-1">
+          <div className="text-base font-semibold text-white">{display}</div>
+          {!dense && details?.description ? (
+            <p className="mt-1 line-clamp-2 text-sm leading-5 text-zinc-400">{details.description}</p>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <FollowButton login={login} />
+          {details?.isLive && onTrackAnalytics ? (
+            <TrackAnalyticsToggle
+              tracked={Boolean(trackLiveAnalytics)}
+              pending={Boolean(trackAnalyticsPending)}
+              onToggle={onTrackAnalytics}
+            />
+          ) : null}
         </div>
       </div>
+      {listeners != null && listeners > 0 ? (
+        <div className="mt-2 text-xs font-medium text-zinc-500">{fullCount(listeners)} watching on this relay · {quality}</div>
+      ) : null}
     </section>
   )
 }
@@ -1351,7 +1323,6 @@ function ChannelTabs({
   activeTab,
   onTab,
   insights,
-  loading,
   channel,
   details,
   diagnostics,
@@ -1371,7 +1342,6 @@ function ChannelTabs({
   activeTab: ChannelTab
   onTab: (tab: ChannelTab) => void
   insights?: ChannelInsights
-  loading: boolean
   channel: string
   details?: ChannelDetails
   diagnostics?: StreamDiagnostics
@@ -1394,32 +1364,38 @@ function ChannelTabs({
     { id: 'about', label: 'About' },
     { id: 'stats', label: 'Stats' },
     { id: 'clips', label: 'Clips' },
-    { id: 'vods', label: 'VODs' },
-    { id: 'diagnostics', label: 'Diagnostics' },
+    { id: 'vods', label: 'Videos' },
     { id: 'emotes', label: 'Emotes' },
   ]
   return (
-    <section className={`border-t border-white/10 bg-[#09090d] ${dense ? 'px-3 py-3 lg:px-4' : 'px-4 py-4 lg:px-6'}`}>
-      <div className={`sticky top-0 z-10 -mx-3 bg-[#09090d]/95 px-3 py-2 backdrop-blur-sm lg:-mx-4 lg:px-4 ${dense ? 'mb-2' : 'mb-3'}`}>
-        <div className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`}>
-          <div>
-            <h2 className="text-base font-black text-white">Channel workspace</h2>
-            <div className="mt-1 text-xs font-semibold text-zinc-500">{loading ? 'Loading sources' : insights?.updatedAt ? `${statsPeriod} · updated ${relativeTime(insights.updatedAt / 1000)}` : 'Sources pending'}</div>
-          </div>
-          <div className="flex flex-wrap rounded border border-white/10 bg-white/[0.045] p-1">
-            {tabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => onTab(tab.id)}
-                className={`rounded px-3 py-1.5 text-xs font-black transition ${activeTab === tab.id ? 'bg-white text-zinc-950' : 'text-zinc-400 hover:bg-white/10 hover:text-white'}`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+    <section className="shrink-0 bg-[#0e0e10]">
+      <div className={`sticky top-0 z-10 border-b border-white/10 bg-[#0e0e10]/95 backdrop-blur-sm ${dense ? 'px-2' : 'px-3 lg:px-4'}`}>
+        <div className="flex items-center gap-1 overflow-x-auto">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onTab(tab.id)}
+              className={`shrink-0 border-b-2 px-3 py-3 text-sm font-semibold transition ${activeTab === tab.id ? 'border-[#bf94ff] text-white' : 'border-transparent text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => onTab('diagnostics')}
+            className={`shrink-0 border-b-2 px-3 py-3 text-sm font-semibold transition ${
+              activeTab === 'diagnostics'
+                ? 'border-amber-300 text-amber-100'
+                : 'border-transparent text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
+            }`}
+          >
+            Advanced
+          </button>
         </div>
       </div>
 
+      <div className={dense ? 'px-3 py-3 lg:px-4' : 'px-4 py-4 lg:px-5'}>
       {activeTab === 'diagnostics' ? (
         <p className={`text-xs font-semibold leading-relaxed text-zinc-500 ${dense ? 'mb-3' : 'mb-4'}`}>
           Advanced playback tools for comparing local HLS relay latency against Twitch&apos;s embed player. Most viewers can stay on About or Stats — open this tab when tuning buffer, quality, or relay startup.
@@ -1475,6 +1451,7 @@ function ChannelTabs({
         <PlaybackDiagnostics channel={channel} metrics={playbackMetrics} diagnostics={diagnostics} sessionId={streamSession?.session_id} onJumpLive={onJumpLive} isVod={isVod} />
       ) : null}
       {activeTab === 'emotes' ? emotePanel : null}
+      </div>
     </section>
   )
 }
@@ -1485,115 +1462,63 @@ function ChannelDetailSections({ details, dense }: { details?: ChannelDetails; d
   const socialLinks = details?.socialLinks ?? []
   const aboutSources = (details?.sources ?? []).filter(source => source.source === 'twitch_gql_about_panels')
   const aboutIssue = aboutSources.find(source => source.state !== 'ready')
-  const factCards = [
-    {
-      label: 'Status',
-      value: details?.isLive ? 'Live now' : 'Offline',
-      detail: details?.startedAt ? `Started ${relativeTime(details.startedAt)}` : 'Waiting for the next broadcast.',
-    },
-    {
-      label: 'Category',
-      value: details?.category || 'Unlisted',
-      detail: details?.streamId ? `Stream ${details.streamId}` : 'No active stream ID right now.',
-    },
-    {
-      label: 'Viewers',
-      value: fullCount(details?.viewers),
-      detail: details?.isLive ? 'Current live viewer count.' : 'Viewer count appears when the stream is live.',
-    },
-    {
-      label: 'Created',
-      value: calendarDate(details?.createdAt),
-      detail: details?.updatedAt ? `Metadata refreshed ${relativeTime(details.updatedAt / 1000)}` : 'Metadata refresh time unavailable.',
-    },
-  ]
 
   return (
-    <div className={dense ? 'space-y-4' : 'space-y-5'}>
-      <div className={`grid ${dense ? 'gap-3' : 'gap-4'} xl:grid-cols-[minmax(0,1.75fr)_minmax(300px,.95fr)]`}>
-        <section className={`overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] shadow-2xl shadow-black/20 ${dense ? 'p-4' : 'p-5'}`}>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded px-2 py-0.5 text-[11px] font-black uppercase tracking-wide text-white ${details?.isLive ? 'bg-red-600' : 'bg-zinc-600'}`}>
-              {details?.isLive ? 'Live' : 'Offline'}
-            </span>
-            {details?.category ? <span className="rounded border border-white/10 bg-white/[0.06] px-2 py-0.5 text-xs font-bold text-zinc-200">{details.category}</span> : null}
-            {details?.startedAt ? <span className="text-xs font-semibold text-zinc-400">Started {relativeTime(details.startedAt)}</span> : null}
+    <div className={dense ? 'space-y-5' : 'space-y-6'}>
+      <section>
+        <h3 className="text-base font-semibold text-white">About {displayName}</h3>
+        <p className="mt-3 max-w-3xl whitespace-pre-wrap text-sm leading-7 text-zinc-300">
+          {details?.description || 'This channel has not set a profile description yet.'}
+        </p>
+        {details?.createdAt ? (
+          <p className="mt-3 text-sm text-zinc-500">
+            Channel created {calendarDate(details.createdAt)}
+            {details.isLive && details.viewers != null ? ` · ${fullCount(details.viewers)} watching now` : ''}
+          </p>
+        ) : null}
+      </section>
+
+      {socialLinks.length ? (
+        <section>
+          <h4 className="text-sm font-semibold text-white">Links</h4>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+            {socialLinks.map((link, index) => (
+              <a
+                key={link.id || link.url || index}
+                href={link.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm font-semibold text-[#bf94ff] transition hover:text-[#d8b7ff] hover:underline"
+              >
+                {link.title || compactUrl(link.url)}
+              </a>
+            ))}
           </div>
-          <div className="mt-4 max-w-4xl">
-            <div className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">About {displayName}</div>
-            <p className="mt-3 text-base font-medium leading-7 text-zinc-200">
-              {details?.description || 'No channel description is available from the current metadata source yet.'}
-            </p>
-          </div>
-          <div className="mt-5">
-            <div className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">Metadata sources</div>
-            <div className="mt-2">
-              <SourcePills sources={details?.sources} />
-            </div>
-          </div>
-          {socialLinks.length ? (
-            <div className="mt-5">
-              <div className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">Links</div>
-              <div className={`mt-3 grid ${dense ? 'gap-2 sm:grid-cols-2 xl:grid-cols-3' : 'gap-3 sm:grid-cols-2 xl:grid-cols-3'}`}>
-                {socialLinks.map((link, index) => (
-                  <a
-                    key={link.id || link.url || index}
-                    href={link.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="group flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.045] px-4 py-3 transition duration-300 hover:-translate-y-0.5 hover:border-violet-300/45 hover:bg-white/[0.07]"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-black text-white">{link.title || 'Social link'}</div>
-                      <div className="mt-1 truncate text-xs font-semibold text-zinc-400">{compactUrl(link.url)}</div>
-                    </div>
-                    <span className="shrink-0 text-[11px] font-black uppercase tracking-wide text-cyan-100">Open</span>
-                  </a>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </section>
-        <aside className={`grid ${dense ? 'gap-2.5' : 'gap-3'} sm:grid-cols-2 xl:grid-cols-1`}>
-          {factCards.map(card => (
-            <div key={card.label} className={`rounded-2xl border border-white/10 bg-white/[0.04] shadow-xl shadow-black/10 ${dense ? 'p-3.5' : 'p-4'}`}>
-              <div className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">{card.label}</div>
-              <div className="mt-2 text-lg font-black text-white">{card.value}</div>
-              <div className="mt-1 text-sm font-medium leading-6 text-zinc-400">{card.detail}</div>
-            </div>
-          ))}
-        </aside>
-      </div>
-      <div>
-        <div className="mb-3">
-          <div className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">Twitch panels</div>
-          <div className="mt-1 text-sm font-semibold text-zinc-400">Images, links, and custom cards pulled from the channel&apos;s About section.</div>
-        </div>
-        {panels.length ? (
-          <div className={`grid ${dense ? 'gap-3 md:grid-cols-2 xl:grid-cols-3' : 'gap-4 md:grid-cols-2'}`}>
+      ) : null}
+
+      {panels.length ? (
+        <section>
+          <h4 className="mb-3 text-sm font-semibold text-white">Panels</h4>
+          <div className="flex w-full max-w-[340px] flex-col gap-4">
             {panels.map((panel, index) => {
-              const panelBadge = normalizePanelText(titleCase(panel.type || ''), panel.linkUrl ? 'Link panel' : 'Custom panel')
-              const panelTitle = normalizePanelText(panel.title, panel.linkUrl ? compactUrl(panel.linkUrl) : panelBadge)
-              const panelBody = panel.description || (panel.linkUrl ? `Opens ${compactUrl(panel.linkUrl)}.` : 'No panel description was provided for this card.')
+              const panelTitle = normalizePanelText(panel.title, panel.linkUrl ? compactUrl(panel.linkUrl) : 'Panel')
+              const panelBody = panel.description?.trim()
               const body = (
-                <div className="group h-full overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/20 transition duration-300 hover:-translate-y-1 hover:border-violet-300/45 hover:bg-white/[0.07]">
-                  <div className="relative aspect-[16/9] overflow-hidden bg-[linear-gradient(135deg,#181826,#07070b)]">
-                    {panel.imageUrl ? (
-                      <img src={panel.imageUrl} alt={panelTitle} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
-                    ) : (
-                      <div className="grid h-full w-full place-items-center text-xs font-black uppercase tracking-[0.2em] text-zinc-500">Twitch panel</div>
-                    )}
-                  </div>
-                  <div className={`space-y-2 ${dense ? 'p-3.5' : 'p-4'}`}>
-                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-500">{panelBadge}</div>
-                    <div className="text-base font-black text-white">{panelTitle}</div>
-                    <div className="whitespace-pre-line text-sm font-medium leading-6 text-zinc-300">{panelBody}</div>
-                  </div>
+                <div className="overflow-hidden rounded-md bg-[#18181b]">
+                  {panel.imageUrl ? (
+                    <img src={panel.imageUrl} alt={panelTitle} className="block w-full" loading="lazy" />
+                  ) : null}
+                  {panelBody ? (
+                    <div className={`text-sm leading-6 text-zinc-300 ${panel.imageUrl ? 'px-3 py-3' : 'px-3 py-4'}`}>
+                      <div className="whitespace-pre-wrap">{panelBody}</div>
+                    </div>
+                  ) : null}
                 </div>
               )
               if (panel.linkUrl) {
                 return (
-                  <a key={panel.id || panel.linkUrl || index} href={panel.linkUrl} target="_blank" rel="noreferrer">
+                  <a key={panel.id || panel.linkUrl || index} href={panel.linkUrl} target="_blank" rel="noreferrer" className="block transition hover:opacity-90">
                     {body}
                   </a>
                 )
@@ -1601,13 +1526,13 @@ function ChannelDetailSections({ details, dense }: { details?: ChannelDetails; d
               return <div key={panel.id || index}>{body}</div>
             })}
           </div>
-        ) : (
-          <div className="space-y-3">
-            <EmptyPanel title="No custom panels" detail={aboutIssue ? sourceMessageText(aboutIssue) : 'This channel did not expose Twitch About panels from the current metadata sources.'} />
-            <SourceDiagnostics sources={aboutSources} />
-          </div>
-        )}
-      </div>
+        </section>
+      ) : (
+        <section className="space-y-3">
+          <EmptyPanel title="No panels yet" detail={aboutIssue ? sourceMessageText(aboutIssue) : 'Custom About panels from Twitch will appear here when metadata is available.'} />
+          {aboutIssue ? <SourceDiagnostics sources={aboutSources} /> : null}
+        </section>
+      )}
     </div>
   )
 }
@@ -1644,6 +1569,7 @@ export default function Channel() {
   const [streamSession, setStreamSession] = useState<StartResponse | null>(null)
   const [listeners, setListeners] = useState<number | null>(null)
   const [mobileRailOpen, setMobileRailOpen] = useState(false)
+  const [mobilePane, setMobilePane] = useState<MobileChannelPane>('watch')
   const [activeTab, setActiveTab] = useState<ChannelTab>('about')
   const [detailsExpanded, setDetailsExpanded] = useState(false)
   const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>('7d')
@@ -2233,10 +2159,6 @@ export default function Channel() {
     [emotePreview.data, liveAnalytics.data?.topEmotes],
   )
   const headerTitle = useMemo(() => details.data?.displayName || channelLogin || 'Channel', [channelLogin, details.data?.displayName])
-  const viewerTrend = useMemo(
-    () => (details.data?.isLive ? viewerSparklineValues(liveAnalytics.data?.rollups) : []),
-    [details.data?.isLive, liveAnalytics.data?.rollups],
-  )
   const railViewerOverrides = useMemo(() => {
     if (!channelLogin || details.data?.viewers == null) return undefined
     return { [channelLogin]: details.data.viewers }
@@ -2248,22 +2170,17 @@ export default function Channel() {
   const requestedQuality = resolveRequestedQuality(activeRenditions, settings.preferredQuality, activeSelectedRendition)
   const loadedQuality = selectedRenditionText(streamSession, diagnostics.data)
   const isDenseBottom = settings.bottomDensity === 'dense'
-  const compactPlayerHeightClass = isDenseBottom
-    ? 'h-[clamp(220px,42vh,48vh)]'
-    : 'h-[clamp(240px,48vh,54vh)]'
   const theaterPlayerHeightClass = 'h-[clamp(320px,64vh,74vh)]'
   const playerViewportClass = isTheater
-    ? `grid min-h-[180px] shrink-0 place-items-center bg-black transition-[height] duration-200 ${theaterPlayerHeightClass}`
-    : `grid min-h-[170px] shrink-0 place-items-center bg-black transition-[height] duration-200 ${compactPlayerHeightClass}`
-  const playerFrameClass = settings.videoFit === 'fill'
-    ? 'group relative h-full w-full min-h-0 overflow-hidden bg-black'
-    : 'group relative aspect-video h-full max-h-full w-full max-w-full overflow-hidden bg-black'
+    ? `relative overflow-hidden w-full shrink-0 bg-black transition-[height] duration-200 ${theaterPlayerHeightClass}`
+    : 'relative overflow-hidden w-full shrink-0 bg-black aspect-video'
+  const videoObjectFitClass = settings.videoFit === 'fill' ? 'object-cover object-center' : 'object-contain object-center'
+  const playerControlsVisible = playbackState === 'playing' || playbackState === 'buffering' || detailsExpanded
   const lastLiveAgo = details.data?.startedAt
     ? relativeTime(details.data.startedAt)
     : details.data?.updatedAt
       ? relativeTime(details.data.updatedAt / 1000)
       : ''
-  const showBottomPanel = true
   const overlayState = startupOverlayState({
     playbackError,
     relayState,
@@ -2290,8 +2207,8 @@ export default function Channel() {
   )
 
   return (
-    <main className="h-screen overflow-hidden bg-[#050507] text-zinc-100">
-      <div className="relative flex h-screen min-h-0 overflow-hidden bg-[linear-gradient(135deg,rgba(139,92,246,.14),rgba(5,5,7,0)_32%),linear-gradient(180deg,#07070a,#050507)]">
+    <main className="flex h-dvh overflow-hidden bg-[#050507] text-zinc-100">
+      <div className="relative flex h-dvh min-h-0 flex-1 overflow-hidden bg-[linear-gradient(135deg,rgba(139,92,246,.14),rgba(5,5,7,0)_32%),linear-gradient(180deg,#07070a,#050507)]">
         <ChannelRail
           collapsed={railCollapsed}
           mobileOpen={mobileRailOpen}
@@ -2329,12 +2246,33 @@ export default function Channel() {
             </div>
           </header>
 
+          <div className="border-b border-white/10 bg-[#08080c]/95 px-3 py-2 lg:hidden">
+            <div className="grid grid-cols-3 gap-1 rounded border border-white/10 bg-white/[0.04] p-1 text-xs font-black uppercase">
+              {mobileChannelPanes.map(pane => (
+                <button
+                  key={pane.id}
+                  type="button"
+                  onClick={() => setMobilePane(pane.id)}
+                  className={`rounded px-3 py-2 transition ${
+                    mobilePane === pane.id
+                      ? 'bg-white text-zinc-950'
+                      : 'text-zinc-500 hover:bg-white/10 hover:text-zinc-200'
+                  }`}
+                >
+                  {pane.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-            <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-black">
-              <div className={`flex min-h-0 flex-col ${isTheater ? 'shrink-0' : 'shrink-0'}`}>
-                <div className={playerViewportClass}>
-                  <div ref={playerFrameRef} className={playerFrameClass}>
-                    <video ref={videoRef} className={`h-full w-full bg-black ${showTwitchEmbed ? 'hidden' : ''} ${settings.videoFit === 'fill' ? 'object-cover' : 'object-contain'}`} autoPlay muted={muted} playsInline poster={streamPoster || undefined} />
+            <div
+              className={`${mobilePane === 'chat' ? 'hidden' : 'flex'} min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-y-contain bg-[#0e0e10] lg:flex`}
+            >
+                <div className={`${mobilePane === 'watch' ? 'block' : 'hidden'} shrink-0 lg:block`}>
+                  <div className={playerViewportClass}>
+                    <div ref={playerFrameRef} className="group absolute inset-0 overflow-hidden bg-black">
+                    <video ref={videoRef} className={`absolute inset-0 h-full w-full bg-black ${showTwitchEmbed ? 'hidden' : ''} ${videoObjectFitClass}`} autoPlay muted={muted} playsInline poster={streamPoster || undefined} />
 
                     {showTwitchEmbed && !embedMountReady ? (
                       <div className="absolute inset-0 z-20 grid place-items-center bg-black">
@@ -2377,7 +2315,7 @@ export default function Channel() {
                       <img
                         src={streamPoster}
                         alt=""
-                        className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-contain"
+                        className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-contain object-center"
                         aria-hidden
                       />
                     ) : null}
@@ -2488,7 +2426,10 @@ export default function Channel() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setActiveTab('diagnostics')}
+                                  onClick={() => {
+                                    setActiveTab('diagnostics')
+                                    setMobilePane('workspace')
+                                  }}
                                   className="rounded border border-white/15 bg-white/[0.06] px-3 py-1.5 text-xs font-black text-zinc-200 transition hover:bg-white/10"
                                 >
                                   Diagnostics
@@ -2525,14 +2466,14 @@ export default function Channel() {
                       </div>
                     ) : null}
                     {playbackState === 'playing' && hlsUrl ? (
-                      <div className="absolute bottom-3 left-3 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-black/70 px-3 py-1.5 text-[11px] font-black uppercase text-zinc-300 shadow-lg shadow-black/40 backdrop-blur-sm transition-opacity hover:opacity-100 opacity-60">
+                      <div className={`absolute left-3 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-black/70 px-3 py-1.5 text-[11px] font-black uppercase text-zinc-300 shadow-lg shadow-black/40 backdrop-blur-sm transition-opacity hover:opacity-100 ${playerControlsVisible ? 'bottom-16 opacity-80' : 'bottom-3 opacity-60'}`}>
                         <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" />
                         <span>HLS relay</span>
                         {playback.metrics.behindLiveSec !== null ? <span className="text-zinc-500">+{fmtMetricSec(playback.metrics.behindLiveSec)}</span> : null}
                       </div>
                     ) : null}
                     {!showStructuredVodError ? (
-                    <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-50 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 ${showTwitchEmbed ? 'pb-2' : ''}`}>
+                    <div className={`absolute inset-x-0 bottom-0 z-50 transition-opacity duration-200 ${playerControlsVisible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'} ${showTwitchEmbed ? 'pb-2' : ''}`}>
                       {showAnalyticsActivityWaveform && hasActivityRollups ? (
                         <div className="pointer-events-none px-3 pb-1 lg:px-5 group-hover:pointer-events-auto focus-within:pointer-events-auto">
                           <PlayerHeatmap
@@ -2591,28 +2532,10 @@ export default function Channel() {
                       />
                     </div>
                     ) : null}
+                    </div>
                   </div>
                 </div>
-              </div>
-              {showLiveActivityWaveform ? (
-                <div className="shrink-0 border-t border-white/10 bg-[#0a0a0e] px-3 py-2 lg:px-5">
-                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">Live chat activity</span>
-                    <span className="text-[10px] font-semibold text-zinc-600">{liveActivityRollups.length} min collected</span>
-                  </div>
-                  <ActivityWaveform
-                    rollups={liveActivityRollups}
-                    totalDurationSec={Math.max(liveActivityRollups.length * 60, 60)}
-                    variant="player"
-                    showLayerToggles
-                  />
-                </div>
-              ) : details.data?.isLive && trackLiveAnalytics && !liveAnalytics.isLoading && liveActivityRollups.length === 0 ? (
-                <div className="shrink-0 border-t border-white/10 bg-[#0a0a0e] px-3 py-2 text-[11px] font-semibold text-zinc-500 lg:px-5">
-                  Analytics tracking is on — the activity chart will appear after the first minute of rollups.
-                </div>
-              ) : null}
-              <div className={`min-h-0 overflow-y-auto transition-[flex,max-height,opacity] duration-200 ${showBottomPanel ? 'flex-1' : 'max-h-0 flex-none overflow-hidden opacity-0'}`}>
+                <div className={`${mobilePane === 'workspace' ? 'block' : 'hidden'} lg:block`}>
                 <ChannelMeta
                   login={channelLogin}
                   details={details.data}
@@ -2620,7 +2543,6 @@ export default function Channel() {
                   quality={loadedQuality}
                   listeners={listeners}
                   dense={isDenseBottom}
-                  viewerTrend={viewerTrend}
                   trackLiveAnalytics={trackLiveAnalytics}
                   trackAnalyticsPending={trackAnalyticsMutation.isPending}
                   onTrackAnalytics={track => trackAnalyticsMutation.mutate(track)}
@@ -2629,7 +2551,6 @@ export default function Channel() {
                   activeTab={activeTab}
                   onTab={setActiveTab}
                   insights={insights.data}
-                  loading={insights.isLoading}
                   channel={channelLogin}
                   details={details.data}
                   diagnostics={diagnostics.data}
@@ -2646,10 +2567,28 @@ export default function Channel() {
                   analyticsStreams={analyticsStreamsQuery.data?.items}
                   liveStreamId={liveAnalytics.data?.stream?.streamId ?? null}
                 />
-              </div>
-            </section>
-            <aside className="flex h-[44vh] shrink-0 flex-col border-t border-white/10 bg-[#111117] lg:h-auto lg:w-[400px] lg:border-l lg:border-t-0">
-              <div className="min-h-0 flex-1">
+                {showLiveActivityWaveform ? (
+                  <div className="border-t border-white/10 bg-[#0a0a0e] px-3 py-2 lg:px-5">
+                    <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">Live chat activity</span>
+                      <span className="text-[10px] font-semibold text-zinc-600">{liveActivityRollups.length} min collected</span>
+                    </div>
+                    <ActivityWaveform
+                      rollups={liveActivityRollups}
+                      totalDurationSec={Math.max(liveActivityRollups.length * 60, 60)}
+                      variant="player"
+                      showLayerToggles
+                    />
+                  </div>
+                ) : details.data?.isLive && trackLiveAnalytics && !liveAnalytics.isLoading && liveActivityRollups.length === 0 ? (
+                  <div className="border-t border-white/10 bg-[#0a0a0e] px-3 py-2 text-[11px] font-semibold text-zinc-500 lg:px-5">
+                    Analytics tracking is on — the activity chart will appear after the first minute of rollups.
+                  </div>
+                ) : null}
+                </div>
+            </div>
+            <aside className={`${mobilePane === 'chat' ? 'flex' : 'hidden'} min-h-0 shrink-0 flex-col overflow-hidden border-t border-white/10 bg-[#111117] lg:flex lg:w-[400px] lg:border-l lg:border-t-0`}>
+              <div className="min-h-0 flex-1 overflow-y-auto">
                 {isVodPlayback && vodAnalyticsStreamId ? (
                   <VodChatReplayPanel
                     streamId={vodAnalyticsStreamId}
