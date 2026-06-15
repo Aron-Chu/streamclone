@@ -180,6 +180,13 @@ export interface TimeseriesStatus {
   lastWriteAt?: string
   lastErrorAt?: string
   lastError?: string
+  backfillState?: 'idle' | 'running' | 'completed' | 'failed'
+  backfillStreams?: number
+  backfillRollups?: number
+  backfillExported?: number
+  backfillStartedAt?: string
+  backfillCompletedAt?: string
+  backfillLastError?: string
 }
 
 export interface ChatBadge {

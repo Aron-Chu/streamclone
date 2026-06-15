@@ -34,6 +34,7 @@ make security-scan
 - Release install lives at `%USERPROFILE%\streamclone`.
 - Source checkout changes do not update built Docker images.
 - Start/repair paths should fix localhost relays and Caddyfile mount state.
+- Optional service buttons should own their dependencies; Start Pulse should bring up InfluxDB, Grafana, and analytics, then wait for timeseries readiness and backfill completion.
 - Keep `.env.local` for local overrides and secrets.
 
 ## Before Finishing

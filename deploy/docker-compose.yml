@@ -156,6 +156,7 @@ services:
       INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-streamclone}
       TIMESERIES_WRITE_TIMEOUT_MS: ${TIMESERIES_WRITE_TIMEOUT_MS:-1000}
       TIMESERIES_QUEUE_SIZE: ${TIMESERIES_QUEUE_SIZE:-1024}
+      TIMESERIES_BACKFILL_ON_START: ${TIMESERIES_BACKFILL_ON_START:-false}
       # Direct HTTP fast path skips the browser scrape when TT serves plain HTTP;
       # auto-disables for 1h if success rate drops below 10% (internal/analytics/direct_http.go).
       ANALYTICS_TT_DIRECT_HTTP_ENABLED: ${ANALYTICS_TT_DIRECT_HTTP_ENABLED:-true}

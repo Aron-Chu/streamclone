@@ -2,17 +2,37 @@ package timeseries
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
+type captureSink struct {
+	mu      sync.Mutex
+	batches int
+	rollups int
+	err     error
+}
+
+func (s *captureSink) WriteRollups(ctx context.Context, rollups []Rollup) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.batches++
+	s.rollups += len(rollups)
+	return s.err
+}
+
 func TestNoopWriter(t *testing.T) {
 	var w Writer = NoopWriter{}
 	w.EnqueueRollups([]Rollup{{StreamID: "s1"}})
+	if err := w.WriteRollups(context.Background(), []Rollup{{StreamID: "s1"}}); err != nil {
+		t.Fatalf("WriteRollups: %v", err)
+	}
 	if err := w.Close(context.Background()); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -110,5 +130,79 @@ func TestInfluxSinkReturnsErrorOnNon2xx(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "status=400") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAsyncWriterWriteRollupsUpdatesStatus(t *testing.T) {
+	sink := &captureSink{}
+	w := &AsyncWriter{
+		backend:      DefaultBackend,
+		writeTimeout: time.Second,
+		sink:         sink,
+		status: Status{
+			Enabled:    true,
+			Configured: true,
+			Backend:    DefaultBackend,
+			State:      "idle",
+		},
+	}
+
+	err := w.WriteRollups(context.Background(), []Rollup{{
+		ChannelLogin: "xqc",
+		StreamID:     "stream-1",
+		MinuteTS:     time.Unix(1710000000, 0).UTC(),
+		ChatCount:    12,
+	}})
+	if err != nil {
+		t.Fatalf("WriteRollups: %v", err)
+	}
+	if sink.batches != 1 || sink.rollups != 1 {
+		t.Fatalf("sink got batches=%d rollups=%d, want 1/1", sink.batches, sink.rollups)
+	}
+	status := w.Status()
+	if status.State != "ready" || status.Attempts != 1 || status.Failures != 0 || status.LastWriteAt == nil {
+		t.Fatalf("status = %+v, want ready successful write", status)
+	}
+}
+
+func TestAsyncWriterBackfillStatusTransitions(t *testing.T) {
+	w := &AsyncWriter{
+		status: Status{
+			Enabled:    true,
+			Configured: true,
+			Backend:    DefaultBackend,
+			State:      "idle",
+		},
+	}
+
+	w.StartBackfill(2, 5)
+	w.AddBackfillProgress(3)
+	status := w.Status()
+	if status.BackfillState != "running" || status.BackfillStreams != 2 || status.BackfillRollups != 5 || status.BackfillExported != 3 || status.BackfillStartedAt == nil {
+		t.Fatalf("running status = %+v", status)
+	}
+
+	w.FinishBackfill(nil)
+	status = w.Status()
+	if status.State != "ready" || status.BackfillState != "completed" || status.BackfillCompletedAt == nil || status.BackfillLastError != "" {
+		t.Fatalf("completed status = %+v", status)
+	}
+}
+
+func TestAsyncWriterBackfillFailureMarksStatus(t *testing.T) {
+	w := &AsyncWriter{
+		status: Status{
+			Enabled:    true,
+			Configured: true,
+			Backend:    DefaultBackend,
+			State:      "idle",
+		},
+	}
+
+	w.StartBackfill(1, 2)
+	w.FinishBackfill(errors.New("influx offline"))
+	status := w.Status()
+	if status.State != "degraded" || status.BackfillState != "failed" || status.BackfillLastError != "influx offline" || status.LastError != "influx offline" {
+		t.Fatalf("failed status = %+v", status)
 	}
 }

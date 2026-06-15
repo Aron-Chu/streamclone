@@ -237,6 +237,37 @@ function Test-StreamcloneHostPulseReady {
     )
 }
 
+function Get-StreamclonePulseTimeseriesStatus {
+    $urls = @(
+        ((Get-StreamcloneAppUrl) + '/v1/analytics/timeseries/status'),
+        'http://127.0.0.1:8090/v1/analytics/timeseries/status'
+    )
+    foreach ($url in $urls) {
+        try {
+            $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3
+            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300 -and -not [string]::IsNullOrWhiteSpace($resp.Content)) {
+                return ($resp.Content | ConvertFrom-Json)
+            }
+        } catch {
+            continue
+        }
+    }
+    return $null
+}
+
+function Test-StreamclonePulseReady {
+    if (-not (Test-StreamcloneHostPulseReady)) { return $false }
+    $status = Get-StreamclonePulseTimeseriesStatus
+    if ($null -eq $status) { return $false }
+    $backfillState = [string]$status.backfillState
+    return (
+        ($status.enabled -eq $true) -and
+        ($status.configured -eq $true) -and
+        ([string]$status.state -eq 'ready') -and
+        ([string]::IsNullOrWhiteSpace($backfillState) -or $backfillState -eq 'completed')
+    )
+}
+
 function Enable-StreamclonePulseEnv {
     param([string]$Root)
     $envPath = Join-Path $Root '.env'
@@ -247,7 +278,7 @@ function Enable-StreamclonePulseEnv {
         Set-EnvFileValue -Path $envPath -Key 'TIMESERIES_ENABLED' -Value 'true'
         Set-EnvFileValue -Path $envPath -Key 'TIMESERIES_BACKEND' -Value 'influxdb'
         Set-EnvFileValue -Path $envPath -Key 'INFLUXDB_URL' -Value 'http://host.docker.internal:18086'
-        foreach ($key in @('INFLUXDB_ORG', 'INFLUXDB_BUCKET', 'TIMESERIES_WRITE_TIMEOUT_MS', 'TIMESERIES_QUEUE_SIZE')) {
+        foreach ($key in @('INFLUXDB_ORG', 'INFLUXDB_BUCKET', 'TIMESERIES_WRITE_TIMEOUT_MS', 'TIMESERIES_QUEUE_SIZE', 'TIMESERIES_BACKFILL_ON_START')) {
             $value = [string]$current[$key]
             if ([string]::IsNullOrWhiteSpace($value)) { $value = [string]$defaults[$key] }
             if (-not [string]::IsNullOrWhiteSpace($value)) {
@@ -269,6 +300,7 @@ function Enable-StreamclonePulseEnv {
         'INFLUXDB_BUCKET',
         'TIMESERIES_WRITE_TIMEOUT_MS',
         'TIMESERIES_QUEUE_SIZE',
+        'TIMESERIES_BACKFILL_ON_START',
         'INFLUXDB_INIT_USERNAME',
         'INFLUXDB_INIT_PASSWORD',
         'GRAFANA_ADMIN_USER',

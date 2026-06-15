@@ -42,7 +42,7 @@ Regenerate preview media with `make docs-media` while the stack is running.
 
 ## Stack
 
-Browser `:8090` -> Caddy -> Go services, MediaMTX, MinIO, PostgreSQL, and Redis. Optional profiles add the scraper, Clip Studio, and Pulse dashboards.
+Browser `:8090` -> Caddy -> Go services, MediaMTX, MinIO, PostgreSQL, and Redis. Optional services add the scraper, Clip Studio, and Pulse dashboards; Pulse is started from Stack status.
 
 ## License
 

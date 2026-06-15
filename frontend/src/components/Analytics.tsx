@@ -4271,7 +4271,11 @@ export default function Analytics() {
     if (selected.size > 0) return selected
     return new Set((detail?.topEmotes ?? []).slice(0, 4).map(emote => emote.key))
   }, [analyticsViewMode, selected, detail?.topEmotes])
-  const pulseReady = setupQuery.data?.services.pulse === 'ready' || timeseriesStatusQuery.data?.state === 'ready'
+  const timeseriesStatus = timeseriesStatusQuery.data
+  const pulseTimeseriesReady =
+    timeseriesStatus?.state === 'ready' &&
+    (!timeseriesStatus.backfillState || timeseriesStatus.backfillState === 'completed')
+  const pulseReady = setupQuery.data?.services.pulse === 'ready' || pulseTimeseriesReady
   const clipperReady = setupQuery.data?.services.clipper === 'ready'
   const pulseUrl = useMemo(
     () => pulseDashboardUrl(login, stream, targetQueryStreamId || undefined),

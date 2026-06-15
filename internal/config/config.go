@@ -84,14 +84,15 @@ type Config struct {
 	AnalyticsTTDirectHTTPTimeoutMS         int           `env:"ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS" envDefault:"1200"`
 	AlwaysTrackedChannels                  []string      `env:"ALWAYS_TRACKED_CHANNELS" envSeparator:","`
 
-	TimeseriesEnabled        bool   `env:"TIMESERIES_ENABLED" envDefault:"false"`
-	TimeseriesBackend        string `env:"TIMESERIES_BACKEND" envDefault:"influxdb"`
-	InfluxDBURL              string `env:"INFLUXDB_URL"`
-	InfluxDBToken            string `env:"INFLUXDB_TOKEN"`
-	InfluxDBOrg              string `env:"INFLUXDB_ORG"`
-	InfluxDBBucket           string `env:"INFLUXDB_BUCKET" envDefault:"streamclone"`
-	TimeseriesWriteTimeoutMS int    `env:"TIMESERIES_WRITE_TIMEOUT_MS" envDefault:"1000"`
-	TimeseriesQueueSize      int    `env:"TIMESERIES_QUEUE_SIZE" envDefault:"1024"`
+	TimeseriesEnabled         bool   `env:"TIMESERIES_ENABLED" envDefault:"false"`
+	TimeseriesBackend         string `env:"TIMESERIES_BACKEND" envDefault:"influxdb"`
+	InfluxDBURL               string `env:"INFLUXDB_URL"`
+	InfluxDBToken             string `env:"INFLUXDB_TOKEN"`
+	InfluxDBOrg               string `env:"INFLUXDB_ORG"`
+	InfluxDBBucket            string `env:"INFLUXDB_BUCKET" envDefault:"streamclone"`
+	TimeseriesWriteTimeoutMS  int    `env:"TIMESERIES_WRITE_TIMEOUT_MS" envDefault:"1000"`
+	TimeseriesQueueSize       int    `env:"TIMESERIES_QUEUE_SIZE" envDefault:"1024"`
+	TimeseriesBackfillOnStart bool   `env:"TIMESERIES_BACKFILL_ON_START" envDefault:"false"`
 
 	TwitchOAuthClientID     string `env:"TWITCH_OAUTH_CLIENT_ID"`
 	TwitchOAuthClientSecret string `env:"TWITCH_OAUTH_CLIENT_SECRET"`

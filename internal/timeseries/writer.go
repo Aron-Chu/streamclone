@@ -51,8 +51,15 @@ type Rollup struct {
 
 type Writer interface {
 	EnqueueRollups([]Rollup)
+	WriteRollups(context.Context, []Rollup) error
 	Status() Status
 	Close(context.Context) error
+}
+
+type BackfillReporter interface {
+	StartBackfill(streams, rollups uint64)
+	AddBackfillProgress(exported uint64)
+	FinishBackfill(error)
 }
 
 type sink interface {
@@ -72,13 +79,22 @@ type Status struct {
 	LastWriteAt *time.Time `json:"lastWriteAt,omitempty"`
 	LastErrorAt *time.Time `json:"lastErrorAt,omitempty"`
 	LastError   string     `json:"lastError,omitempty"`
+
+	BackfillState       string     `json:"backfillState,omitempty"`
+	BackfillStreams     uint64     `json:"backfillStreams,omitempty"`
+	BackfillRollups     uint64     `json:"backfillRollups,omitempty"`
+	BackfillExported    uint64     `json:"backfillExported,omitempty"`
+	BackfillStartedAt   *time.Time `json:"backfillStartedAt,omitempty"`
+	BackfillCompletedAt *time.Time `json:"backfillCompletedAt,omitempty"`
+	BackfillLastError   string     `json:"backfillLastError,omitempty"`
 }
 
 type NoopWriter struct {
 	status Status
 }
 
-func (NoopWriter) EnqueueRollups([]Rollup) {}
+func (NoopWriter) EnqueueRollups([]Rollup)                      {}
+func (NoopWriter) WriteRollups(context.Context, []Rollup) error { return nil }
 func (w NoopWriter) Status() Status {
 	status := w.status
 	if status.Backend == "" {
@@ -96,6 +112,9 @@ func (w NoopWriter) Status() Status {
 func (NoopWriter) Close(context.Context) error {
 	return nil
 }
+func (NoopWriter) StartBackfill(uint64, uint64) {}
+func (NoopWriter) AddBackfillProgress(uint64)   {}
+func (NoopWriter) FinishBackfill(error)         {}
 
 func NewAsyncWriter(cfg Config, logger *slog.Logger) Writer {
 	backend := normalizeBackend(cfg.Backend)
@@ -178,6 +197,17 @@ func (w *AsyncWriter) EnqueueRollups(rollups []Rollup) {
 	}
 }
 
+func (w *AsyncWriter) WriteRollups(ctx context.Context, rollups []Rollup) error {
+	if w == nil || len(rollups) == 0 {
+		return nil
+	}
+	batch := cloneRollups(rollups)
+	if len(batch) == 0 {
+		return nil
+	}
+	return w.writeBatch(ctx, batch)
+}
+
 func (w *AsyncWriter) Status() Status {
 	if w == nil {
 		return Status{Enabled: false, Configured: false, Backend: DefaultBackend, State: "disabled"}
@@ -209,17 +239,23 @@ func (w *AsyncWriter) Close(ctx context.Context) error {
 func (w *AsyncWriter) run() {
 	defer w.wg.Done()
 	for batch := range w.queue {
-		w.write(batch)
+		_ = w.writeBatch(context.Background(), batch)
 	}
 }
 
-func (w *AsyncWriter) write(batch []Rollup) {
+func (w *AsyncWriter) writeBatch(ctx context.Context, batch []Rollup) error {
+	if len(batch) == 0 {
+		return nil
+	}
 	started := time.Now()
 	result := "success"
-	ctx, cancel := context.WithTimeout(context.Background(), w.writeTimeout)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, w.writeTimeout)
 	defer cancel()
 	metrics.TimeseriesWriteBatchSize.WithLabelValues(w.backend).Observe(float64(len(batch)))
-	err := w.sink.WriteRollups(ctx, batch)
+	err := w.sink.WriteRollups(writeCtx, batch)
 	if err != nil {
 		result = "error"
 		w.recordWriteError(err)
@@ -231,6 +267,7 @@ func (w *AsyncWriter) write(batch []Rollup) {
 	}
 	metrics.TimeseriesWriteAttempts.WithLabelValues(w.backend, result).Inc()
 	metrics.TimeseriesWriteDuration.WithLabelValues(w.backend, result).Observe(time.Since(started).Seconds())
+	return err
 }
 
 func (w *AsyncWriter) recordDrops(count uint64) {
@@ -261,6 +298,54 @@ func (w *AsyncWriter) recordWriteError(err error) {
 	w.status.State = "degraded"
 	w.status.LastErrorAt = &now
 	w.status.LastError = err.Error()
+}
+
+func (w *AsyncWriter) StartBackfill(streams, rollups uint64) {
+	if w == nil {
+		return
+	}
+	now := time.Now().UTC()
+	w.statusMu.Lock()
+	defer w.statusMu.Unlock()
+	w.status.BackfillState = "running"
+	w.status.BackfillStreams = streams
+	w.status.BackfillRollups = rollups
+	w.status.BackfillExported = 0
+	w.status.BackfillStartedAt = &now
+	w.status.BackfillCompletedAt = nil
+	w.status.BackfillLastError = ""
+}
+
+func (w *AsyncWriter) AddBackfillProgress(exported uint64) {
+	if w == nil || exported == 0 {
+		return
+	}
+	w.statusMu.Lock()
+	defer w.statusMu.Unlock()
+	w.status.BackfillExported += exported
+}
+
+func (w *AsyncWriter) FinishBackfill(err error) {
+	if w == nil {
+		return
+	}
+	now := time.Now().UTC()
+	w.statusMu.Lock()
+	defer w.statusMu.Unlock()
+	w.status.BackfillCompletedAt = &now
+	if err != nil {
+		w.status.BackfillState = "failed"
+		w.status.BackfillLastError = err.Error()
+		w.status.State = "degraded"
+		w.status.LastErrorAt = &now
+		w.status.LastError = err.Error()
+		return
+	}
+	w.status.BackfillState = "completed"
+	if w.status.State == "idle" {
+		w.status.State = "ready"
+	}
+	w.status.BackfillLastError = ""
 }
 
 type InfluxConfig struct {
