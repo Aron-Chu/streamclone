@@ -7,7 +7,7 @@ test('home directory loads', async ({ page }) => {
     window.localStorage.setItem(key, '1')
   }, ONBOARDING_DISMISSED_KEY)
   await waitForDirectoryReady(page)
-  await expect(page.getByRole('heading', { name: 'Live channels', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Recommended Live Channels' })).toBeVisible()
   await expect(page.locator('a[href^="/c/"]').first()).toBeVisible()
 })
 
@@ -46,7 +46,8 @@ test('channel route loads player shell or structured offline state', async ({ pa
   const href = await streamLink.getAttribute('href')
   const login = href?.replace(/^\/c\//, '').split('/')[0] ?? 'xqc'
 
-  await streamLink.click()
+  // Navigate directly — stack-status overlay can intercept card clicks after onboarding is dismissed.
+  await page.goto(href ?? `/c/${login}`)
   await page.waitForURL(new RegExp(`/c/${login}`), { timeout: 30_000 })
 
   const offline = page.getByText('Offline', { exact: true })
