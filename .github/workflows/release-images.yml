@@ -72,7 +72,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -89,7 +89,7 @@ jobs:
             echo "value=latest" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}/${{ matrix.image }}
@@ -98,7 +98,7 @@ jobs:
             type=sha,prefix=,enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_sha == 'true' }}
             type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && steps.tag.outputs.value == 'latest' }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -123,7 +123,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -140,7 +140,7 @@ jobs:
             echo "value=latest" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}/scraper
@@ -149,7 +149,7 @@ jobs:
             type=sha,prefix=,enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_sha == 'true' }}
             type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && steps.tag.outputs.value == 'latest' }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: scraper
           file: scraper/Dockerfile
@@ -201,7 +201,7 @@ jobs:
           test "IMAGE_TAG=$VERSION" = "IMAGE_TAG=$TAG"
           echo "IMAGE_TAG=$TAG matches release bundle convention"
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
