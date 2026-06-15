@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security advisory
+    url: https://github.com/Aron-Chu/streamclone/security/advisories/new
+    about: Report a vulnerability privately through GitHub Security Advisories.
+  - name: Install guide
+    url: https://github.com/Aron-Chu/streamclone/blob/master/docs/install-desktop.md
+    about: Setup.exe, profiles, optional services, and lifecycle commands.

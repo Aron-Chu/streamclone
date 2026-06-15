@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an improvement or new Streamclone capability
+title: "[feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For product direction, see `docs/product-roadmap.md`. Keep requests scoped to one user-facing outcome.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      placeholder: What pain point does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Affected tier
+      options:
+        - Core Watch
+        - Analytics
+        - Clip Studio
+        - Pulse Dashboards
+        - Install / desktop
+        - Developer tooling
+    validations:
+      required: true

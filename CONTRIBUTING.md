@@ -1,44 +1,53 @@
 # Contributing
 
-Thanks for helping with Streamclone. **End users:** you do not need this file — see [docs/install-desktop.md](docs/install-desktop.md).
+End users usually want [docs/install-desktop.md](docs/install-desktop.md), not this file.
 
 ## Setup
 
 ```sh
 git clone https://github.com/Aron-Chu/streamclone.git
 cd streamclone
-make install-hooks    # once — pre-commit (gitleaks, fmt, tsc)
-make setup            # or: scripts/setup.ps1
+make install-hooks
+make setup
 ```
 
-Optional sibling repo for Analytics scraper: [streamclone-scraper](https://github.com/Aron-Chu/streamclone-scraper).
+Optional Analytics scraper repo: [streamclone-scraper](https://github.com/Aron-Chu/streamclone-scraper).
 
-## Before you push
+## Before You Push
+
+Use the bundled check target:
+
+```sh
+make check
+```
+
+Useful narrower checks:
 
 ```sh
 make security-scan
-go test ./... && go vet ./...
-cd frontend && npm ci && npm run build
+make test
+make vet
+make frontend-build
+make frontend-test
+make frontend-audit
 make clipper-test
-make smoke            # stack up
+make compose-config-check
 ```
 
-CI runs the same on `master` — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+`make test`, `make vet`, and `make build` fall back to Docker when local Go is missing.
 
 ## Commits
 
-[Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary`
+Use Conventional Commits: `type(scope): summary`.
 
-Author: **Aron-Chu** `<aroncloudchu@gmail.com>` — no `Co-authored-by` agent trailers. Details: [`.cursor/rules/commits.mdc`](.cursor/rules/commits.mdc).
+Author commits as **Aron-Chu** `<aroncloudchu@gmail.com>`. Do not add agent co-author trailers.
 
 ## Secrets
 
-Never commit `.env`, tokens, `oauth-bundle.env`, `clipper-data/`, or build artifacts. Templates only: `.env.example`, `.env.dev`.
+Never commit `.env`, tokens, OAuth bundles, `clipper-data/`, rendered compose config, or token-bearing logs. Templates only: `.env.example`, `.env.dev`.
 
 ## More
 
-| Topic | Doc |
-|-------|-----|
-| Security / hardening | [SECURITY.md](SECURITY.md) → [docs/security.md](docs/security.md) |
-| Agent steering | `.kiro/steering/` (maintainers) |
-| Repo cleanup index | [docs/repo-maintenance.md](docs/repo-maintenance.md) |
+- Security: [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md)
+- Maintainer index: [docs/repo-maintenance.md](docs/repo-maintenance.md)
+- Agent steering: `AGENTS.md` and `.kiro/steering/`

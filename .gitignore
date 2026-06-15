@@ -29,6 +29,7 @@ cookies.txt
 .cursor/debug-*.log
 .cursor/mcp.json
 .cursor/hooks/__pycache__/
+.cursor/plans/
 scratch/
 weppy-project-sync/
 .tmp/
@@ -65,7 +66,14 @@ scripts/helm-preflight.sh
 scripts/helm-portforward.sh
 scripts/helm-pulse-wire.sh
 scripts/helm-pulse-check.sh
-.local/helm-pulse/
+.local/
+.debug-agent/
+.streamclone-start-queue.json
+.streamclone-start-*.log
+.streamclone-start-*.log.err
+.streamclone-scraper-warmup.log
+.streamclone-scraper-warmup.log.err
+.streamclone-scraper-warmup.requested
 runtime/clipper-twitch.env
 # local output / scratch
 *.bin

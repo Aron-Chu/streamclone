@@ -1,76 +1,67 @@
-# Agent guide (Streamclone)
+# Agent Guide
 
-Read this file first. Load **one** domain steering doc, then use the code graph MCP before broad file reads.
+Product name: **Streamclone**. The local folder may still be `twitch-7tv-clone`; the release install is `%USERPROFILE%\streamclone` and is usually not a git checkout.
 
-**Naming:** The product is **Streamclone** ([`Aron-Chu/streamclone`](https://github.com/Aron-Chu/streamclone)). This folder may be named `twitch-7tv-clone` locally; `%USERPROFILE%\streamclone` is the release install, not git. Ship fixes from this repo — see [`docs/repo-maintenance.md`](docs/repo-maintenance.md) (*Install bug fix log*).
+Start with one steering doc, then use the code graph before broad reads.
 
-## Task router
+## Task Router
 
-| Task | Read first | Symbol lookup |
-|------|------------|---------------|
-| Any change | `.kiro/steering/tech.md` | `get_ast_chunk` / `get_blast_radius` |
-| Product / UX guardrails | `.kiro/steering/product.md` | — |
-| Product backlog / refine vs add | `docs/product-refinement-and-growth.md`, `docs/product-roadmap.md` | — |
-| Channel player / theater / controls | `.kiro/steering/product.md`, `.kiro/steering/playback.md` | `get_ast_chunk("LivePlayerControls")`, `get_ast_chunk("Channel")` |
-| Live clipper / Clip Studio | `.kiro/steering/clipper.md` | `get_ast_chunk("ClipStudio")`, `get_ast_chunk("VideoStage")`, `get_ast_chunk("CaptionOverlayEditor")`, `get_ast_chunk("_process")`, `get_ast_chunk("prepare_emote_assets")` |
-| Analytics / rollups / VODs | `.kiro/steering/analytics.md`, `.kiro/specs/vod-chat-pipeline-notes.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("gqlCommentText")`, `get_ast_chunk("hasGoodChatCoverageFromRollups")`, `get_ast_chunk("SyncProgressPanel")` |
-| System health / optional services / setup-control | `.kiro/steering/product.md`, `.kiro/steering/windows-dev.md` | `get_ast_chunk("SystemHealthPanel")`, `get_ast_chunk("useOptionalServices")`, `get_ast_chunk("OptionalServicesPanel")` |
-| Scraper optimization / TT perf | `.kiro/specs/scraper-optimization-notes.md`, `.kiro/steering/analytics.md`, `docs/scraper-cloudflare-and-proxy.md` | — |
-| HLS playback / MediaMTX 401 | `.kiro/steering/playback.md` | `get_call_chain("waitForHLS")`, `get_blast_radius("filterTwitchAdSegments")` |
-| Local Twitch auth | `.kiro/steering/local-auth.md` | — |
-| Emotes / 7TV / FFZ | `.kiro/steering/emote-pipeline.md` | — |
-| Windows / Docker localhost | `.kiro/steering/windows-dev.md` | — |
-| Desktop install / uninstall | `docs/install-desktop.md`, `docs/repo-maintenance.md` (install bug fix log) | `Install` / `Start` / `Stop` / `Uninstall` launchers; `scripts/uninstall-streamclone.ps1` |
-| Security / secrets / deploy hardening | `SECURITY.md`, `docs/security.md` | — |
-| Scraper / CDP Bypass / Cloudflare | `.kiro/steering/windows-dev.md`, `.kiro/specs/scraper-optimization-notes.md`, `streamclone-scraper/main.py` | — |
-| Full feature specs | `.kiro/specs/<feature>/` | Use for planning, not every bugfix |
+| Task | Read first | Code graph |
+|------|------------|------------|
+| Any code change | `.kiro/steering/tech.md` | `get_ast_chunk` / `get_blast_radius` |
+| Product or UI guardrails | `.kiro/steering/product.md` | As needed |
+| Roadmap / backlog | `docs/product-roadmap.md` | As needed |
+| Channel player / HLS | `.kiro/steering/playback.md` | `get_ast_chunk("Channel")`, `get_ast_chunk("LivePlayerControls")` |
+| Clip Studio / clipper | `.kiro/steering/clipper.md` | `get_ast_chunk("ClipStudio")`, `get_ast_chunk("_process")` |
+| Analytics / VOD / rollups | `.kiro/steering/analytics.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("SyncProgressPanel")` |
+| System health / optional services | `.kiro/steering/windows-dev.md` | `get_ast_chunk("SystemHealthPanel")`, `get_ast_chunk("useOptionalServices")` |
+| Scraper / Cloudflare | `.kiro/steering/analytics.md`, `docs/scraper-cloudflare-and-proxy.md` | As needed |
+| Local Twitch auth | `.kiro/steering/local-auth.md` | As needed |
+| Emotes / 7TV / FFZ | `.kiro/steering/emote-pipeline.md` | As needed |
+| Install / uninstall | `docs/install-desktop.md`, `docs/repo-maintenance.md` | Launcher scripts |
+| Security / secrets | `SECURITY.md`, `docs/security.md` | As needed |
 
-## Code graph MCP (`streamclone-codegraph`)
+## Code Graph
 
-Deterministic AST graph in `.codegraph/streamclone.kuzu`. Prefer graph tools over `grep` + full-file `read`:
+Use `streamclone-codegraph` first:
 
-1. **`get_ast_chunk(symbol)`** — exact function/method source (smallest useful context).
-2. **`get_blast_radius(symbol)`** — files and callers affected by a change.
-3. **`get_call_chain(symbol, depth=2)`** — upstream/downstream flow.
-4. **`search_symbols(query)`** — find symbols when the exact name is unknown.
-5. **`graph_status()`** / **`rebuild_graph()`** — index freshness and rebuild.
+- `get_ast_chunk(symbol)` for exact source.
+- `get_blast_radius(symbol)` for affected files and callers.
+- `get_call_chain(symbol, depth=2)` for flow.
+- `search_symbols(query)` when names are fuzzy.
+- `graph_status()` after rebuilds.
 
-Setup: `make codegraph-install` then `make codegraph`. Rebuild after large refactors or commits that add/move symbols. See `tools/codegraph/README.md`.
+Setup:
 
-The Kuzu database is a **single file** at `.codegraph/streamclone.kuzu` (not a directory). If MCP fails to start, run `powershell -File scripts/mcp-preflight.ps1`.
+```sh
+make codegraph-install
+make codegraph
+```
 
-## Stack MCP (`streamclone-stack`)
+The database is `.codegraph/streamclone.kuzu` and is gitignored.
 
-Runtime probes for **`http://localhost:8090`**: `stack_health`, `stack_ports`, `playback_probe`, `twitch_auth_status`, `scraper_probe`, `compose_logs`. See `tools/stack/README.md`.
+## Runtime Probes
 
-## Data MCP (`streamclone-data`)
+Browser/API boundary is `http://localhost:8090` through Caddy. Do not point the UI at raw service ports unless intentionally bypassing the proxy.
 
-Read-only Postgres/Redis on local compose: `emote_jobs`, `redis_channel_emotes`, `postgres_query`. See `tools/data/README.md`.
+Stack MCP tools: `stack_health`, `stack_ports`, `playback_probe`, `twitch_auth_status`, `scraper_probe`, `compose_logs`.
 
-## Project skills
+Data MCP tools: `emote_jobs`, `redis_channel_emotes`, `postgres_query`.
 
-Cursor skills under `.cursor/skills/streamclone/` pair steering docs with MCP tools: `stack-debug`, `playback-hls`, `test-by-domain`, `clipper-local`, `analytics-sync`, `emote-pipeline`.
+## Discipline
 
-If the graph is missing or stale, run `make codegraph` before debugging cross-package behavior.
-
-## Context discipline
-
-1. Read the **one** steering file for the domain (table above).
-2. Resolve symbols via codegraph MCP; read whole files only for config, compose, or new code.
-3. Local browser stack: **`http://localhost:8090`** (Caddy proxy). Do not point the UI at raw service ports unless intentionally bypassing the proxy.
-4. Summarize API/job payloads in prose — do not paste full JSON into chat.
-5. Narrow tests first (`go test ./internal/analytics/...`, `clipper-test`), then broader suites when crossing packages.
-6. Debug mode / instrumentation only when the failure is unknown — not for routine fixes.
-7. Before PRs that touch auth, compose, clipper, or env: read `docs/security.md`; run `make security-scan` when changing secrets-related paths.
-8. Git commits use [Conventional Commits](https://www.conventionalcommits.org/) — see `CONTRIBUTING.md` (`type(scope): summary`).
-9. Release installs under `%USERPROFILE%\streamclone` are usually **not git checkouts**. To get code changes into that install, update/publish Docker images and sync `IMAGE_TAG`/`VERSION`; copying source files only updates scripts/docs.
-10. After scraper, analytics, install, OAuth, or large frontend workspace changes (e.g. `Channel.tsx` / `LivePlayerControls`), update `.kiro/steering/*` and rebuild the AST graph (`make codegraph`) before calling the work fully synchronized. The graph is gitignored (local only); run `graph_status()` after rebuild to confirm freshness.
+1. Preserve unrelated dirty work.
+2. Read only one steering doc unless the task crosses domains.
+3. Summarize payloads; do not paste full JSON.
+4. Use narrow tests first, then `make check` for broad validation.
+5. For auth, compose, clipper, env, or public deployment changes, read `docs/security.md` and run `make security-scan`.
+6. After scraper, analytics, install, OAuth, or large frontend changes, update steering docs and run `make codegraph`.
 
 ## Layout
 
-- Human docs: `README.md` (user-facing) and `CONTRIBUTING.md`
-- Go services: `cmd/*` entrypoints, `internal/*` packages
+- User docs: `README.md`, `docs/`
+- Go services: `cmd/*`, `internal/*`
 - Frontend: `frontend/src/`
-- Clipper (standalone): `clipper/liveclipper/`
-- Compose: `deploy/docker-compose.yml` + `deploy/docker-compose.local-tunnel.yml`
-- Agent steering: `.kiro/steering/`, specs: `.kiro/specs/`
+- Clipper: `clipper/liveclipper/`
+- Compose: `deploy/docker-compose*.yml`
+- Agent steering: `.kiro/steering/`

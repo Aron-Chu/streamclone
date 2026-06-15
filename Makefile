@@ -1,4 +1,6 @@
 GO ?= go
+GO_DOCKER_IMAGE ?= golang:1.25-alpine
+VERSION ?= $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo latest)
 ENV_FILE ?= .env
 COMPOSE_CORE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml
 COMPOSE_SCRAPER ?= $(COMPOSE_CORE) --profile scraper
@@ -32,9 +34,11 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote
 	helm-pulse-wire helm-pulse-check helm-pulse helm-pulse-sync-token helm-pulse-watch \
 	pulse pulse-on pulse-off pulse-check pulse-down pulse-watch \
 	test vet build tidy integration-up integration-down integration-test \
+	go-test-docker go-vet-docker go-build-docker \
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
 	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp \
-	docs-screenshots docs-media frontend-build frontend-restart frontend-logs \
+	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
+	frontend-restart frontend-logs compose-config-check check \
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
 	preflight-deps start stop-user ensure-localhost
 
@@ -60,7 +64,8 @@ help:
 	@printf '  make pulse-check     Verify pods, forwards, env, and Influx data\n'
 	@printf '  make pulse-off       Stop port-forwards only\n'
 	@printf '  make pulse-down      Stop forwards + uninstall k8s release\n\n'
-	@printf 'Quality: make test | vet | build | clipper-test | smoke | security-scan\n'
+	@printf 'Quality: make check | test | vet | build | clipper-test | smoke | security-scan\n'
+	@printf '          make frontend-test | frontend-audit | compose-config-check\n'
 
 env:
 	@test -f .env || cp .env.dev .env
@@ -218,8 +223,17 @@ pulse-down: helm-pulse-down
 helm-open: helm-grafana
 	@printf 'Open http://localhost:3000/d/streamclone-emote-pulse/emote-pulse\n'
 
+go-test-docker:
+	docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./...
+
+go-vet-docker:
+	docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go vet ./...
+
+go-build-docker:
+	docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go build ./...
+
 test:
-	$(GO) test ./...
+	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./... || $(MAKE) go-test-docker
 
 integration-up:
 	docker compose -f internal/integration/docker-compose.test.yml up -d
@@ -231,10 +245,10 @@ integration-test: integration-up
 	INTEGRATION=1 $(GO) test ./internal/integration/ -count=1 -timeout 120s
 
 vet:
-	$(GO) vet ./...
+	@command -v $(GO) >/dev/null 2>&1 && $(GO) vet ./... || $(MAKE) go-vet-docker
 
 build:
-	$(GO) build ./...
+	@command -v $(GO) >/dev/null 2>&1 && $(GO) build ./... || $(MAKE) go-build-docker
 
 tidy:
 	$(GO) mod tidy
@@ -292,6 +306,24 @@ docs-media:
 
 frontend-build:
 	cd frontend && npm run build
+
+frontend-test:
+	cd frontend && npm test
+
+frontend-audit:
+	cd frontend && npm audit --audit-level=high
+
+compose-config-check: env
+	$(COMPOSE_CORE) config --quiet
+	IMAGE_TAG=$(VERSION) docker compose --env-file $(ENV_FILE) \
+		-f deploy/docker-compose.yml \
+		-f deploy/docker-compose.local-tunnel.yml \
+		-f deploy/docker-compose.release.yml config --quiet
+	APP_DOMAIN=streamclone.example.invalid ACME_EMAIL=security@example.invalid docker compose --env-file $(ENV_FILE) \
+		-f deploy/docker-compose.yml \
+		-f deploy/docker-compose.prod.yml config --quiet
+
+check: security-scan frontend-build frontend-audit frontend-test clipper-test test vet build compose-config-check
 
 frontend-restart: env
 	$(COMPOSE_CORE) build frontend

@@ -1,45 +1,28 @@
 ---
-name: streamclone-clipper-local
-description: Set up and debug Streamclone live clipper and Clip Studio locally. Use for missing_scope, Helix clip failures, clipper jobs, or Clip Studio at /studio.
+description: Work on Streamclone Clip Studio, live clipper worker/API, VOD exports, captions, templates, and clipper auth.
 ---
 
-# Streamclone clipper local
+# Clipper Local
 
-Read `.kiro/steering/clipper.md` first.
+Read `AGENTS.md`, `.kiro/steering/clipper.md`, and `docs/security.md`.
 
 ## Guardrails
 
-- Clipper logic stays in `clipper/liveclipper/` — not in Go viewer services
-- UI surfaces: `ClipStudio.tsx`, `Analytics.tsx`, proxied at `/v1/clipper/*`
-- Never put tokens in URLs, logs, or SQLite display fields
+- Keep rendering and job state in `clipper/`.
+- Keep Go viewer services as API consumers only.
+- Do not log or expose Twitch tokens or webhook tokens.
 
-## Auth + scopes
+## Codegraph
 
-**Recommended (no Twitch CLI):** open http://localhost:8090 → **Sign in (optional)**. That runs the device-code flow in the browser and syncs clipper credentials automatically.
+- `get_ast_chunk("ClipStudio")`
+- `get_ast_chunk("VideoStage")`
+- `get_ast_chunk("CaptionOverlayEditor")`
+- `get_ast_chunk("_process")`
 
-Developers with Twitch CLI:
+## Tests
 
-```powershell
-make twitch-local-auth
-# or
-powershell -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action local-auth -Scopes "chat:read chat:edit user:read:follows clips:edit" -ChatHttp "http://localhost:8090"
+```sh
+make clipper-test
+cd frontend && npm run build
+make security-scan
 ```
-
-Both paths run `ensure-clipper-auth` + `ensure-frontend-config` so clipper and `/config.js` stay aligned with `.env` (plain `docker compose restart` is not enough).
-
-Manual recovery:
-
-```powershell
-make ensure-clipper-auth
-make ensure-frontend-config
-```
-
-## Diagnostics
-
-1. MCP **`streamclone-stack`** → `twitch_auth_status`
-2. MCP **`streamclone-stack`** → `compose_logs(service="clipper")`
-3. `make clipper-test`
-
-## Code lookup
-
-**`streamclone-codegraph`**: `get_ast_chunk("ClipStudio")`, `get_call_chain("_process")`

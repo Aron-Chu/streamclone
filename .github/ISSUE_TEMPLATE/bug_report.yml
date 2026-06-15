@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible Streamclone issue
+title: "[bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Do not paste `.env`, tokens, setup-control diagnostics, or full compose config dumps.
+  - type: dropdown
+    id: install-type
+    attributes:
+      label: Install type
+      options:
+        - Setup.exe / release install
+        - Git checkout (developer)
+        - Docker-only / custom compose
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Streamclone version or IMAGE_TAG
+      placeholder: v0.3.0-rc4
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: 1. Start Streamclone...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Redact secrets before posting.
