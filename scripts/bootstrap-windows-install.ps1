@@ -81,7 +81,7 @@ function Test-StreamcloneInstalledAt {
     return (Test-Path (Join-Path $Dir 'scripts\start-streamclone.ps1'))
 }
 
-Write-Host 'Step 1/4: Downloading latest release...' -ForegroundColor Cyan
+Write-Host $(if ($Version) { 'Step 1/4: Downloading release bundle...' } else { 'Step 1/4: Downloading latest release...' }) -ForegroundColor Cyan
 $meta = Get-StreamcloneReleaseZipMeta -Version $Version -Repo $Repo
 Write-Host "  $($meta.Name) ($($meta.Tag))"
 

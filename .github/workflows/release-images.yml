@@ -333,7 +333,7 @@ jobs:
           files: |
             dist/streamclone-${{ steps.ver.outputs.value }}-windows.zip
             dist/streamclone-${{ steps.ver.outputs.value }}.tar.gz
-            launchers/Install Streamclone.cmd
+            dist/Install Streamclone.cmd
           fail_on_unmatched_files: true
           generate_release_notes: true
           prerelease: ${{ contains(steps.ver.outputs.value, '-rc') }}
