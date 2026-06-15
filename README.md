@@ -4,33 +4,46 @@
 
 # Streamclone
 
-Self-hosted Twitch-style directory — HLS playback, chat, 7TV emotes, analytics, optional Clip Studio. **Apache-2.0** · not affiliated with Twitch or 7TV.
+Self-hosted Twitch-style directory with live HLS playback, chat, 7TV emotes, Analytics, and optional Clip Studio. Apache-2.0. Not affiliated with Twitch or 7TV.
 
-## Quick start
+## Start Here
 
-**Need:** [Docker Desktop](https://docs.docker.com/desktop/) running.
+Need: Docker Desktop running.
 
-1. Get **`Streamclone-Setup-*.exe`** from **[Releases](https://github.com/Aron-Chu/streamclone/releases/latest)**
-2. Run installer → open **`http://localhost:8090/`**
-3. Daily: **Start Streamclone** · Stop / uninstall via Desktop shortcuts or launchers
+1. Download `Streamclone-Setup-*.exe` from [Releases](https://github.com/Aron-Chu/streamclone/releases/latest).
+2. Run it.
+3. Open `http://localhost:8090/`.
 
-| | Windows | macOS / Linux dev |
-|--|---------|-------------------|
-| Install | Setup.exe or `Install Streamclone.cmd` | [install-desktop.md](docs/install-desktop.md) |
-| Develop | `git clone` + `make setup` | same |
+Daily use: launch **Streamclone** from the Desktop shortcut. Stop, repair, update, and uninstall are in the manager menu.
 
-**Docs:** [Install](docs/install-desktop.md) · [Options](docs/options.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+Developers:
+
+```sh
+git clone https://github.com/Aron-Chu/streamclone.git
+cd streamclone
+make setup
+```
+
+## Docs
+
+- [Install and lifecycle](docs/install-desktop.md)
+- [Optional features](docs/options.md)
+- [Security](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
+- [Roadmap](docs/product-roadmap.md)
 
 ## Preview
 
-<img src="docs/images/directory.gif" alt="Directory" width="720" /> · <img src="docs/images/channel.gif" alt="Channel" width="720" />
+<img src="docs/images/directory.gif" alt="Directory" width="720" />
 
-Regenerate: `make docs-media` (stack must be up)
+<img src="docs/images/channel.gif" alt="Channel" width="720" />
+
+Regenerate preview media with `make docs-media` while the stack is running.
 
 ## Stack
 
-Browser `:8090` → Caddy → Go services (metadata, video, chat, emote, analytics) + MediaMTX + MinIO · Postgres + Redis
+Browser `:8090` -> Caddy -> Go services, MediaMTX, MinIO, PostgreSQL, and Redis. Optional profiles add the scraper, Clip Studio, and Pulse dashboards.
 
 ## License
 
-[Apache License 2.0](LICENSE) — open source. You are responsible for compliance with Twitch/7TV terms when operating this software.
+[Apache License 2.0](LICENSE). You are responsible for complying with Twitch, 7TV, and local laws when operating this software.

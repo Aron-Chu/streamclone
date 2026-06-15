@@ -1,33 +1,27 @@
 ---
-name: streamclone-playback-hls
-description: Debug Streamclone HLS playback and MediaMTX 401 errors through localhost:8090. Use for channel player failures, main_stream.m3u8 401, cookieCheck loops, or MediaMTX session issues.
+description: Debug or change Streamclone channel playback, HLS, MediaMTX, Caddy proxying, or VOD relay behavior.
 ---
 
-# Streamclone playback / HLS
+# Playback / HLS
 
-Read `.kiro/steering/playback.md` first.
+Read `AGENTS.md`, `.kiro/steering/playback.md`, and `.kiro/steering/tech.md`.
 
-## Config check (before runtime probes)
+## First Checks
 
-Verify pairing in repo:
+- Validate through `http://localhost:8090`.
+- Check Caddy `Authorization: Bearer` for `/live/*`.
+- Check MediaMTX `hlsCDNSecret`.
 
-- [`deploy/mediamtx.yml`](deploy/mediamtx.yml) → `hlsCDNSecret: streamclone-local-hls-cdn`
-- [`deploy/Caddyfile.local-tunnel`](deploy/Caddyfile.local-tunnel) → `@hls_local` / `@hls` blocks include `header_up Authorization "Bearer streamclone-local-hls-cdn"`
+## Codegraph
 
-Do not remove this pairing without an alternative that works on plain HTTP localhost.
+- `get_call_chain("waitForHLS")`
+- `get_blast_radius("filterTwitchAdSegments")`
+- `get_ast_chunk("Channel")`
 
-## Runtime probes
+## Tests
 
-1. MCP **`streamclone-stack`** → `playback_probe(channel="<login>")`
-2. Interpret results:
-   - **401 on `main_stream.m3u8`** → CDN secret / Bearer mismatch
-   - **404 on segments** → stream not started; call `POST /v1/stream/start` first
-   - **302 loop on `index.m3u8?cookieCheck=1`** → same CDN secret issue on HTTP localhost
-
-## Code lookup
-
-Use **`streamclone-codegraph`**: `get_call_chain("waitForHLS")`, `get_ast_chunk` on orchestrator handlers.
-
-## User guidance
-
-After stack restarts, tell the user to hard-refresh — old HLS session URLs in open tabs cause transient 401s.
+```sh
+go test ./internal/video/...
+cd frontend && npm run build
+make compose-config-check
+```

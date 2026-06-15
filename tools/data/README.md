@@ -1,19 +1,17 @@
-# Streamclone data MCP
+# Data MCP
 
-Read-only Postgres and Redis inspection for local compose (`5432`, `6379`).
+Read-only local PostgreSQL/Redis inspection.
 
-## Setup
+Setup:
 
 ```sh
 make codegraph-install
 ```
 
-Adds `psycopg` and `redis` to `.codegraph/.venv`.
+Tools:
 
-## Tools
-
-- `data_status` — port reachability
-- `postgres_query` — SELECT-only SQL
-- `emote_jobs` — processing_jobs snapshot
-- `redis_get` — fetch a key
-- `redis_channel_emotes` — `channel:emotes:{login}` preview
+- `data_status`
+- `postgres_query` for SELECT-only SQL
+- `emote_jobs`
+- `redis_get`
+- `redis_channel_emotes`

@@ -1,57 +1,54 @@
 # Security
 
-Short reference for operators and contributors. **Report vulnerabilities:** [SECURITY.md](../SECURITY.md).
+Short operator checklist. Report vulnerabilities through [SECURITY.md](../SECURITY.md).
 
-## Legal
+## Localhost Default
 
-Streamclone uses unofficial Twitch/7TV endpoints for **personal self-hosting**. Not affiliated with Twitch or 7TV. **You** are responsible for ToS and local law compliance.
+- Use `http://localhost:8090/`.
+- Raw service ports bind to `127.0.0.1` in local compose.
+- Do not expose Redis, Postgres, MinIO, MediaMTX, setup-control, or raw Go service ports.
+- Do not paste `.env`, rendered compose config, setup-control diagnostics, cookies, or token-bearing logs into issues or PRs.
 
-## Localhost (default install)
+## Secrets
 
-- Watch, directory, and chat read work without login.
-- OAuth tokens live in Redis when you sign in.
-- `make setup` generates random secrets (`CURATOR_API_TOKEN`, `CLIPPER_WEBHOOK_TOKEN`, etc.).
-- Raw compose ports bind to `127.0.0.1` by default. Treat `http://localhost:8090` as the browser entrypoint.
-- **Do not** expose raw compose ports (`5432`, `6379`, `8095`, …) to the internet.
-- Do not paste raw `docker compose config`, `.env`, setup-control diagnostics, or container env dumps into issues/PRs. They can contain OAuth tokens, setup-control tokens, clipper tokens, and generated install secrets.
+`make setup` generates local secrets. Production or public installs must rotate placeholders.
 
-### Empty secrets = no auth
+Important variables:
 
-| Variable | Risk if empty |
-|----------|----------------|
+| Variable | Risk if weak or empty |
+|----------|-----------------------|
+| `AUTH_COOKIE_SECRET` | Signed auth cookies can be forged |
 | `CURATOR_API_TOKEN` | Emote admin API open |
-| `CLIPPER_WEBHOOK_TOKEN` | Clipper webhooks unauthenticated |
-| `SETUP_CONTROL_TOKEN` | Cannot start optional profiles from UI (mutations blocked) |
+| `CLIPPER_WEBHOOK_TOKEN` | Clipper mutations unauthenticated |
+| `SETUP_CONTROL_TOKEN` | Optional service mutations exposed |
+| `S3_SECRET_KEY` | Object storage access |
 
-Run `make validate-env` before treating an install as production-ready.
+Run:
+
+```sh
+make validate-env
+make security-scan
+```
 
 ## Tunnels
 
-Local tunnels should forward the loopback proxy (`127.0.0.1:8090`) only. When `PUBLIC_ORIGIN` or `FRONTEND_ORIGIN` is not loopback:
+Forward only the Caddy proxy (`127.0.0.1:8090`).
+
+When `PUBLIC_ORIGIN` or `FRONTEND_ORIGIN` is not loopback:
 
 - Set `TWITCH_DEV_TOKEN_IMPORT_ENABLED=false`.
-- Treat `SETUP_CONTROL_TOKEN` and `VITE_CLIPPER_TOKEN` as browser-visible. Any visitor who can load `/config.js` can read them.
-- Leave `SETUP_CONTROL_TOKEN` unset unless every tunnel visitor is trusted to start optional profiles or sync clipper auth.
-- Leave `VITE_CLIPPER_TOKEN` unset unless every tunnel visitor is trusted to call clipper mutation APIs.
+- Treat `SETUP_CONTROL_TOKEN` and `VITE_CLIPPER_TOKEN` as browser-visible.
+- Leave setup-control and clipper mutation tokens unset unless every visitor is trusted.
+- Prefer Cloudflare Tunnel or Tailscale over opening inbound ports.
 
-## Public VM deploy
+Free ngrok warning pages can break fetch, HLS, and WebSocket traffic.
 
-Use TLS (Caddy), firewall (443 only), rate limits, `TWITCH_DEV_TOKEN_IMPORT_ENABLED=false`, strong rotated secrets. The production compose overlay removes raw service ports; Caddy on `80/443` should be the only public entrypoint. Checklist: [deploy/FREE_DEPLOYMENT.md](../deploy/FREE_DEPLOYMENT.md).
+## Public VM
 
-## Developers
+Use `deploy/docker-compose.prod.yml`, TLS through Caddy, a firewall with only `80/443` public, strong rotated secrets, and `TWITCH_DEV_TOKEN_IMPORT_ENABLED=false`.
 
-```sh
-make install-hooks && make security-scan
-```
+Guide: [deploy/FREE_DEPLOYMENT.md](../deploy/FREE_DEPLOYMENT.md).
 
-CI: gitleaks, govulncheck, npm audit, tests, and compose validation. Never commit `.env` or tokens.
+## GitHub
 
-Before sharing support bundles, redact `.env`, rendered compose config, setup-control output, clipper diagnostics, cookies, and screenshots that show tokens or local account data.
-
-## Uninstall
-
-`Uninstall Streamclone` removes local `.env` and volumes on disk only — not GitHub or Twitch data.
-
-## GitHub repo
-
-Enable **secret scanning** and **push protection** under repo Settings → Code security.
+Enable secret scanning, push protection, Dependabot security updates, and branch protection requiring CI.

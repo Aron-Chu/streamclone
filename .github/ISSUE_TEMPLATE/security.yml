@@ -1,0 +1,20 @@
+name: Security report
+description: Report vulnerabilities privately
+title: "[security]: "
+labels:
+  - security
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not open a public issue for vulnerabilities or exploit details.
+
+        Use GitHub's private security advisory flow instead:
+        https://github.com/Aron-Chu/streamclone/security/advisories/new
+  - type: checkboxes
+    id: advisory
+    attributes:
+      label: Private disclosure
+      options:
+        - label: I will report this through GitHub private security advisories instead of this public issue form.
+          required: true

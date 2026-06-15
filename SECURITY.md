@@ -1,23 +1,19 @@
 # Security Policy
 
-## Supported versions
+Security fixes apply to the latest `v*` release.
 
-Security fixes apply to the **latest [release](https://github.com/Aron-Chu/streamclone/releases/latest)** (`v*` tag). Older tags are not maintained.
+## Report A Vulnerability
 
-## Reporting a vulnerability
+Use [GitHub private security advisories](https://github.com/Aron-Chu/streamclone/security/advisories/new). If that is unavailable, open a minimal public issue without exploit details and ask for a private channel.
 
-1. **Preferred:** [GitHub private security advisory](https://github.com/Aron-Chu/streamclone/security/advisories/new) on this repo.
-2. **Alternative:** open a minimal public issue (no exploit details) and ask for a private channel.
+Include affected version, impact, and reproduction steps.
 
-Please include steps to reproduce, impact, and affected version/tag.
+## Operator Notice
 
-## Operator notice
+Streamclone is self-hosted open source software, not a hosted service. Operators must harden their Docker host and comply with Twitch, 7TV, and local laws.
 
-Streamclone is **Apache-2.0 open source** for self-hosting. It is not a hosted SaaS. Operators must harden their own Docker host and comply with third-party terms (Twitch, 7TV).
-
-**Hardening guide:** [docs/security.md](docs/security.md)  
-**Public deploy:** [deploy/FREE_DEPLOYMENT.md](deploy/FREE_DEPLOYMENT.md)
+Read [docs/security.md](docs/security.md) before exposing anything beyond localhost. Public deployment notes live in [deploy/FREE_DEPLOYMENT.md](deploy/FREE_DEPLOYMENT.md).
 
 ## License
 
-Source code is licensed under [Apache License 2.0](LICENSE). Third-party trademarks (Twitch, 7TV) belong to their owners.
+Source code is Apache-2.0. Twitch and 7TV trademarks belong to their owners.
