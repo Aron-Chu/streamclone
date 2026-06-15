@@ -28,7 +28,7 @@ import {
   vodSessionKey,
   watchAnalyticsChannel,
 } from '../api'
-import type { AnalyticsStream, AnalyticsTopEmote, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat, VodStartResponse } from '../api'
+import type { AnalyticsStream, AnalyticsTopEmote, AboutPanel, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat, VodStartResponse } from '../api'
 import { useAuth } from '../auth'
 import { useChatStore } from '../chatStore'
 import { normalizeBrowserOriginUrl } from '../config'
@@ -41,6 +41,7 @@ import { buildVodDeepLink, buildVodSeekTarget, parseVodAnalyticsContext } from '
 import { buildTwitchVodUrl } from '../utils/twitchVodUrl'
 import ActivityWaveform from './analytics/ActivityWaveform'
 import VodChatReplayPanel from './analytics/VodChatReplayPanel'
+import ChannelTabShell from './channel/ChannelTabShell'
 import ChannelVodsPanel from './channel/ChannelVodsPanel'
 import TwitchVodEmbed, { type TwitchVodPlayerHandle } from './channel/TwitchVodEmbed'
 import { usePlayheadStore } from '../stores/playheadStore'
@@ -448,7 +449,7 @@ function EmoteProviderPanel({
     <div className="rounded border border-white/10 bg-white/[0.035] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <div className="text-sm font-black text-white">Chat emotes</div>
+          <div className="text-sm font-semibold text-white">Chat emotes</div>
           {status.benchmark ? (
             <span className="rounded border border-white/10 bg-black/25 px-2 py-1 text-[10px] font-black uppercase text-zinc-300">
               {status.benchmark.cacheHit ? 'Warm cache' : 'Cold load'}
@@ -989,29 +990,25 @@ function FollowButton({ login }: { login: string }) {
 
 function ChannelMetaSkeleton({ dense }: { dense: boolean }) {
   return (
-    <section className={`border-t border-white/10 bg-[#0d0d12] ${dense ? 'px-3 py-3 lg:px-4' : 'px-4 py-4 lg:px-6'}`}>
-      <div className={`flex flex-col ${dense ? 'gap-3' : 'gap-4'} 2xl:flex-row 2xl:items-start 2xl:justify-between`}>
-        <div className="min-w-0 flex-1 space-y-3">
-          <div className="flex gap-2">
+    <section className={`border-b border-white/10 bg-[#0e0e10] ${dense ? 'px-4 py-3 lg:px-6' : 'px-4 py-4 lg:px-6'}`}>
+      <div className={dense ? 'space-y-3' : 'space-y-4'}>
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
             <div className={`animate-pulse rounded bg-white/10 ${dense ? 'h-5 w-14' : 'h-5 w-16'}`} />
             <div className="h-5 w-24 animate-pulse rounded bg-white/10" />
           </div>
           <div className={`animate-pulse rounded bg-white/10 ${dense ? 'h-7 w-4/5' : 'h-8 w-3/4'}`} />
-          <div className={`flex items-start ${dense ? 'gap-2' : 'gap-3'}`}>
-            <div className={`shrink-0 animate-pulse rounded bg-white/10 ${dense ? 'h-10 w-10' : 'h-12 w-12'}`} />
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="h-4 w-32 animate-pulse rounded bg-white/10" />
-              <div className="h-3 w-full max-w-md animate-pulse rounded bg-white/10" />
-            </div>
-          </div>
         </div>
-        <div className={`grid grid-cols-2 sm:grid-cols-4 ${dense ? 'gap-1.5 2xl:w-[460px]' : 'gap-2 2xl:w-[520px]'}`}>
-          {Array.from({ length: 4 }).map((_, index) => (
-            <div key={index} className={`rounded border border-white/10 bg-white/[0.04] ${dense ? 'px-2.5 py-2' : 'px-3 py-2'}`}>
-              <div className="h-3 w-12 animate-pulse rounded bg-white/10" />
-              <div className={`mt-1.5 animate-pulse rounded bg-white/10 ${dense ? 'h-4 w-16' : 'h-5 w-20'}`} />
-            </div>
-          ))}
+        <div className={`flex flex-wrap items-center ${dense ? 'gap-2' : 'gap-3'}`}>
+          <div className={`shrink-0 animate-pulse rounded-full bg-white/10 ${dense ? 'h-10 w-10' : 'h-12 w-12'}`} />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-4 w-32 animate-pulse rounded bg-white/10" />
+            <div className="h-3 w-full max-w-md animate-pulse rounded bg-white/10" />
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <div className="h-8 w-20 animate-pulse rounded bg-white/10" />
+            <div className="h-8 w-28 animate-pulse rounded bg-white/10" />
+          </div>
         </div>
       </div>
     </section>
@@ -1083,8 +1080,10 @@ function ChannelMeta({
   const title = details?.streamTitle || (detailsLoading ? 'Loading stream details' : `${display}'s channel`)
   const avatar = details?.profileImage
   return (
-    <section className={`shrink-0 border-b border-white/10 bg-[#0e0e10] ${dense ? 'px-3 py-3 lg:px-4' : 'px-4 py-4 lg:px-5'}`}>
-      <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+    <section className={`shrink-0 border-b border-white/10 bg-[#0e0e10] ${dense ? 'px-4 py-3 lg:px-6' : 'px-4 py-4 lg:px-6'}`}>
+      <div className={dense ? 'space-y-3' : 'space-y-4'}>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {details?.isLive ? (
           <span className="rounded bg-red-600 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">Live</span>
         ) : (
@@ -1095,26 +1094,32 @@ function ChannelMeta({
           <span className="text-sm font-semibold text-zinc-300">{fullCount(details.viewers)} viewers</span>
         ) : null}
         {details?.startedAt ? <span className="text-sm text-zinc-500">· {relativeTime(details.startedAt)}</span> : null}
-      </div>
-      <h1 title={title} className={`font-semibold leading-snug text-white ${dense ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{title}</h1>
-      <div className={`mt-3 flex flex-wrap items-center gap-3 ${dense ? 'gap-2' : ''}`}>
-        <div className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-zinc-800 text-sm font-black text-violet-100 ${dense ? 'h-10 w-10' : 'h-12 w-12'}`}>
-          {avatar ? <img src={avatar} alt={display} className="h-full w-full object-cover" /> : display.slice(0, 1).toUpperCase()}
+          </div>
+          <h1 title={title} className={`font-semibold leading-snug text-white ${dense ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{title}</h1>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-base font-semibold text-white">{display}</div>
-          {!dense && details?.description ? (
-            <p className="mt-1 line-clamp-2 text-sm leading-5 text-zinc-400">{details.description}</p>
-          ) : null}
+        <div className={`flex flex-wrap items-center gap-3 ${dense ? 'gap-2' : ''}`}>
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-zinc-800 text-sm font-black text-violet-100 ${dense ? 'h-10 w-10' : 'h-12 w-12'}`}>
+            {avatar ? <img src={avatar} alt={display} className="h-full w-full object-cover" /> : display.slice(0, 1).toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <div className="text-base font-semibold text-white">{display}</div>
+            {!dense && details?.description ? (
+              <p className="mt-1 line-clamp-2 text-sm leading-5 text-zinc-400">{details.description}</p>
+            ) : null}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <FollowButton login={login} />
           <OpenFullAnalyticsLink channel={login} />
         </div>
       </div>
       {listeners != null && listeners > 0 ? (
-        <div className="mt-2 text-xs font-medium text-zinc-500">{fullCount(listeners)} watching on this relay · {quality}</div>
+        <div className="border-t border-white/[0.06] pt-2 text-[11px] font-medium text-zinc-600">
+          {fullCount(listeners)} watching on this relay · {quality}
+        </div>
       ) : null}
+      </div>
     </section>
   )
 }
@@ -1374,44 +1379,10 @@ function ChannelTabs({
 }) {
   const statsSources = (insights?.sources ?? []).filter(source => sourceMatchesGroup(source, 'stats'))
   const clipSources = (insights?.sources ?? []).filter(source => sourceMatchesGroup(source, 'clips'))
-  const tabs: Array<{ id: ChannelTab; label: string }> = [
-    { id: 'about', label: 'About' },
-    { id: 'stats', label: 'Stats' },
-    { id: 'clips', label: 'Clips' },
-    { id: 'vods', label: 'Videos' },
-    { id: 'emotes', label: 'Emotes' },
-  ]
   return (
-    <section className="shrink-0 bg-[#0e0e10]">
-      <div className={`sticky top-0 z-10 border-b border-white/10 bg-[#0e0e10]/95 backdrop-blur-sm ${dense ? 'px-2' : 'px-3 lg:px-4'}`}>
-        <div className="flex items-center gap-1 overflow-x-auto">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => onTab(tab.id)}
-              className={`shrink-0 border-b-2 px-3 py-3 text-sm font-semibold transition ${activeTab === tab.id ? 'border-[#bf94ff] text-white' : 'border-transparent text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'}`}
-            >
-              {tab.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => onTab('diagnostics')}
-            className={`shrink-0 border-b-2 px-3 py-3 text-sm font-semibold transition ${
-              activeTab === 'diagnostics'
-                ? 'border-amber-300 text-amber-100'
-                : 'border-transparent text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
-            }`}
-          >
-            Advanced
-          </button>
-        </div>
-      </div>
-
-      <div className={dense ? 'px-3 py-3 lg:px-4' : 'px-4 py-4 lg:px-5'}>
+    <ChannelTabShell activeTab={activeTab} onTab={onTab} dense={dense}>
       {activeTab === 'diagnostics' ? (
-        <p className={`text-xs font-semibold leading-relaxed text-zinc-500 ${dense ? 'mb-3' : 'mb-4'}`}>
+        <p className="text-xs font-semibold leading-relaxed text-zinc-500">
           Advanced playback tools for comparing local HLS relay latency against Twitch&apos;s embed player. Most viewers can stay on About or Stats — open this tab when tuning buffer, quality, or relay startup.
         </p>
       ) : null}
@@ -1444,7 +1415,7 @@ function ChannelTabs({
       {activeTab === 'vods' ? (
         <div className={dense ? 'space-y-3' : 'space-y-4'}>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs font-black uppercase text-zinc-500">Stream History & VODs</div>
+            <h3 className="text-sm font-semibold text-white">Stream History & VODs</h3>
             {details?.isLive && onTrackAnalytics ? (
               <TrackAnalyticsToggle
                 tracked={Boolean(trackLiveAnalytics)}
@@ -1467,9 +1438,52 @@ function ChannelTabs({
         <PlaybackDiagnostics channel={channel} metrics={playbackMetrics} diagnostics={diagnostics} sessionId={streamSession?.session_id} onJumpLive={onJumpLive} isVod={isVod} />
       ) : null}
       {activeTab === 'emotes' ? emotePanel : null}
-      </div>
-    </section>
+    </ChannelTabShell>
   )
+}
+
+type AboutPanelCardProps = { panel: AboutPanel; index: number }
+
+function AboutPanelCard({ panel, index }: AboutPanelCardProps) {
+  const [tall, setTall] = useState(false)
+  const panelTitle = normalizePanelText(panel.title, panel.linkUrl ? compactUrl(panel.linkUrl) : 'Panel')
+  const panelBody = panel.description?.trim()
+  const body = (
+    <div className="h-full overflow-hidden rounded-md border border-white/10 bg-[#18181b]">
+      {panel.imageUrl ? (
+        <img
+          src={panel.imageUrl}
+          alt={panelTitle}
+          className="block w-full"
+          loading="lazy"
+          onLoad={event => {
+            const img = event.currentTarget
+            if (img.naturalHeight > img.naturalWidth * 1.5) setTall(true)
+          }}
+        />
+      ) : null}
+      {panelBody ? (
+        <div className={`text-sm leading-6 text-zinc-300 ${panel.imageUrl ? 'px-3 py-3' : 'px-3 py-4'}`}>
+          <div className="whitespace-pre-wrap">{panelBody}</div>
+        </div>
+      ) : null}
+    </div>
+  )
+  const className = tall ? 'row-span-2' : ''
+  if (panel.linkUrl) {
+    return (
+      <a
+        key={panel.id || panel.linkUrl || index}
+        href={panel.linkUrl}
+        target="_blank"
+        rel="noreferrer"
+        className={`block transition hover:opacity-90 ${className}`}
+      >
+        {body}
+      </a>
+    )
+  }
+  return <div key={panel.id || index} className={className}>{body}</div>
 }
 
 function ChannelDetailSections({ details, dense }: { details?: ChannelDetails; dense: boolean }) {
@@ -1495,16 +1509,16 @@ function ChannelDetailSections({ details, dense }: { details?: ChannelDetails; d
       </section>
 
       {socialLinks.length ? (
-        <section>
+        <section className="border-t border-white/10 pt-4">
           <h4 className="text-sm font-semibold text-white">Links</h4>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             {socialLinks.map((link, index) => (
               <a
                 key={link.id || link.url || index}
                 href={link.url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-sm font-semibold text-[#bf94ff] transition hover:text-[#d8b7ff] hover:underline"
+                className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-[#bf94ff] transition hover:border-[#bf94ff]/40 hover:bg-[#bf94ff]/10 hover:text-[#d8b7ff]"
               >
                 {link.title || compactUrl(link.url)}
               </a>
@@ -1516,37 +1530,21 @@ function ChannelDetailSections({ details, dense }: { details?: ChannelDetails; d
       {panels.length ? (
         <section>
           <h4 className="mb-3 text-sm font-semibold text-white">Panels</h4>
-          <div className="flex w-full max-w-[340px] flex-col gap-4">
-            {panels.map((panel, index) => {
-              const panelTitle = normalizePanelText(panel.title, panel.linkUrl ? compactUrl(panel.linkUrl) : 'Panel')
-              const panelBody = panel.description?.trim()
-              const body = (
-                <div className="overflow-hidden rounded-md bg-[#18181b]">
-                  {panel.imageUrl ? (
-                    <img src={panel.imageUrl} alt={panelTitle} className="block w-full" loading="lazy" />
-                  ) : null}
-                  {panelBody ? (
-                    <div className={`text-sm leading-6 text-zinc-300 ${panel.imageUrl ? 'px-3 py-3' : 'px-3 py-4'}`}>
-                      <div className="whitespace-pre-wrap">{panelBody}</div>
-                    </div>
-                  ) : null}
-                </div>
-              )
-              if (panel.linkUrl) {
-                return (
-                  <a key={panel.id || panel.linkUrl || index} href={panel.linkUrl} target="_blank" rel="noreferrer" className="block transition hover:opacity-90">
-                    {body}
-                  </a>
-                )
-              }
-              return <div key={panel.id || index}>{body}</div>
-            })}
+          <div className="grid w-full auto-rows-min grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {panels.map((panel, index) => (
+              <AboutPanelCard key={panel.id || panel.linkUrl || index} panel={panel} index={index} />
+            ))}
           </div>
         </section>
       ) : (
-        <section className="space-y-3">
-          <EmptyPanel title="No panels yet" detail={aboutIssue ? sourceMessageText(aboutIssue) : 'Custom About panels from Twitch will appear here when metadata is available.'} />
-          {aboutIssue ? <SourceDiagnostics sources={aboutSources} /> : null}
+        <section>
+          <h4 className="mb-3 text-sm font-semibold text-white">Panels</h4>
+          <div className="grid w-full auto-rows-min grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="col-span-full space-y-3">
+              <EmptyPanel title="No panels yet" detail={aboutIssue ? sourceMessageText(aboutIssue) : 'Custom About panels from Twitch will appear here when metadata is available.'} />
+              {aboutIssue ? <SourceDiagnostics sources={aboutSources} /> : null}
+            </div>
+          </div>
         </section>
       )}
     </div>

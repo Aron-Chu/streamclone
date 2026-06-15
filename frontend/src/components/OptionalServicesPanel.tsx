@@ -152,7 +152,7 @@ export default function OptionalServicesPanel({
     actionError,
     startService,
     refreshStatus,
-  } = useOptionalServices({ probeControl: true })
+  } = useOptionalServices({ probeControl: true, pollActive: variant === 'overlay' })
 
   const coreStatus: ServiceStatus = statusLoading ? 'checking' : hasServiceSnapshot ? 'ready' : 'offline'
   const scraperStatus: ServiceStatus = statusLoading ? 'checking' : services?.scraper ?? 'offline'

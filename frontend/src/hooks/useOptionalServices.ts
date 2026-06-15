@@ -47,7 +47,7 @@ function isServiceReady(
   return serviceReadyFromDiagnostics(diagnostics, service) || serviceReadyFromWelcome(welcome, service)
 }
 
-export function useOptionalServices(options: { probeControl?: boolean } = {}) {
+export function useOptionalServices(options: { probeControl?: boolean; pollActive?: boolean } = {}) {
   const queryClient = useQueryClient()
   const [starting, setStarting] = useState<Set<'scraper' | 'clipper'>>(() => new Set())
   const [startProgressByService, setStartProgressByService] = useState<
@@ -56,20 +56,22 @@ export function useOptionalServices(options: { probeControl?: boolean } = {}) {
   const [actionError, setActionError] = useState<string | null>(null)
 
   const anyStarting = starting.size > 0
+  const pollActive = options.pollActive ?? false
+  const statusPollMs = anyStarting ? 2_000 : pollActive ? 15_000 : 60_000
   const startProgress = startProgressByService.scraper ?? startProgressByService.clipper ?? null
 
   const setup = useQuery({
     queryKey: ['setup-welcome'],
     queryFn: getSetupWelcome,
     staleTime: 10_000,
-    refetchInterval: anyStarting ? 2_000 : 15_000,
+    refetchInterval: statusPollMs,
     retry: false,
   })
   const diagnostics = useQuery({
     queryKey: ['setup-diagnostics'],
     queryFn: getMetadataDiagnostics,
     staleTime: 5_000,
-    refetchInterval: anyStarting ? 2_000 : 15_000,
+    refetchInterval: statusPollMs,
     retry: false,
   })
   const control = useQuery({

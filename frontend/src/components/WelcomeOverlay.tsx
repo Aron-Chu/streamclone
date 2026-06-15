@@ -12,16 +12,17 @@ export default function WelcomeOverlay() {
   const [forcedOpen, setForcedOpen] = useState(false)
   const [sessionDismissed, setSessionDismissed] = useState(false)
   const offlinePromptedRef = useRef(false)
-  const { setup, scraperOffline, clipperOffline } = useOptionalServices()
-
-  useEffect(() => {
-    const open = () => setForcedOpen(true)
-    window.addEventListener(OPEN_STACK_STATUS_EVENT, open)
-    return () => window.removeEventListener(OPEN_STACK_STATUS_EVENT, open)
-  }, [])
-
   const showOnboarding = Boolean((location.state as { showOnboarding?: boolean } | null)?.showOnboarding)
   const installId = STREAMCLONE_INSTALL_ID
+  const autoShow = location.pathname === '/' && !sessionDismissed && (showOnboarding || !isOnboardingDismissed(installId))
+  const open = forcedOpen || autoShow
+  const { setup, scraperOffline, clipperOffline } = useOptionalServices({ pollActive: open })
+
+  useEffect(() => {
+    const onOpen = () => setForcedOpen(true)
+    window.addEventListener(OPEN_STACK_STATUS_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_STACK_STATUS_EVENT, onOpen)
+  }, [])
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -51,9 +52,6 @@ export default function WelcomeOverlay() {
       dispatchOpenStackStatus()
     }
   }, [setup.data?.incomplete, scraperOffline, clipperOffline, location.pathname, installId])
-
-  const autoShow = location.pathname === '/' && !sessionDismissed && (showOnboarding || !isOnboardingDismissed(installId))
-  const open = forcedOpen || autoShow
 
   if (!open) return null
 

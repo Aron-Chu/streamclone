@@ -8,10 +8,12 @@ export function useSystemHealth(options: { probeHost?: boolean; probeControl?: b
   const queryClient = useQueryClient()
   const optional = useOptionalServices({ probeControl: options.probeControl })
 
+  const probeHost = Boolean(options.probeHost)
+
   const host = useQuery({
     queryKey: ['host-diagnostics'],
     queryFn: getHostDiagnostics,
-    enabled: SETUP_CONTROL_AVAILABLE && Boolean(options.probeHost),
+    enabled: SETUP_CONTROL_AVAILABLE && probeHost,
     staleTime: 10_000,
     refetchInterval: false,
     retry: false,
@@ -20,18 +22,21 @@ export function useSystemHealth(options: { probeHost?: boolean; probeControl?: b
   const metadata = useQuery({
     queryKey: ['metadata-diagnostics'],
     queryFn: getMetadataDiagnostics,
+    enabled: probeHost,
     staleTime: 10_000,
-    refetchInterval: 20_000,
+    refetchInterval: probeHost ? 20_000 : false,
     retry: false,
   })
 
   const refreshAll = async () => {
     await Promise.all([
       optional.refreshStatus(),
-      SETUP_CONTROL_AVAILABLE && Boolean(options.probeHost)
+      SETUP_CONTROL_AVAILABLE && probeHost
         ? queryClient.invalidateQueries({ queryKey: ['host-diagnostics'] })
         : Promise.resolve(),
-      queryClient.invalidateQueries({ queryKey: ['metadata-diagnostics'] }),
+      probeHost
+        ? queryClient.invalidateQueries({ queryKey: ['metadata-diagnostics'] })
+        : Promise.resolve(),
     ])
   }
 
