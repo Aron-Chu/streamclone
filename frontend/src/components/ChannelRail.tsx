@@ -154,8 +154,7 @@ function CategoryItem({
 }) {
   return (
     <Link
-      to="/"
-      state={{ directoryCategoryId: category.id, directoryCategoryName: category.name }}
+      to={`/browse/category/${category.id}?name=${encodeURIComponent(category.name)}`}
       onClick={onClick}
       className="group flex items-center gap-3 rounded px-2 py-1.5 text-zinc-300 transition hover:bg-white/[0.07] hover:text-white"
       title={collapsed ? category.name : undefined}
