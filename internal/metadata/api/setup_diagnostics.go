@@ -16,6 +16,7 @@ type setupDiagnosticsServices struct {
 	Analytics string `json:"analytics"`
 	Scraper   string `json:"scraper"`
 	Clipper   string `json:"clipper"`
+	Pulse     string `json:"pulse"`
 }
 
 type setupDiagnosticsResponse struct {
@@ -51,6 +52,7 @@ func (h *Handler) setupDiagnostics(w http.ResponseWriter, r *http.Request) {
 		Analytics: statuses["analytics"],
 		Scraper:   statuses["scraper"],
 		Clipper:   statuses["clipper"],
+		Pulse:     h.pulseServiceReady(ctx),
 	}
 
 	healthy := services.Chat == "ready" &&

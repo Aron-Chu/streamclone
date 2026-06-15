@@ -10,6 +10,7 @@ type RuntimeConfig = {
   maxRetainedMessages?: string | number
   streamcloneProfile?: string
   setupControlToken?: string
+  setupControlUrl?: string
   devTokenImportEnabled?: string | boolean
   installId?: string
 }
@@ -72,4 +73,18 @@ export const SETUP_CONTROL_AVAILABLE = Boolean(SETUP_CONTROL_TOKEN)
     || browserOrigin.endsWith(':8090')
     || String(import.meta.env.VITE_SETUP_CONTROL_ENABLE ?? 'false') === 'true'
   )
+
+function resolveSetupControlBase() {
+  const configured = String(runtime.setupControlUrl ?? import.meta.env.VITE_SETUP_CONTROL_URL ?? '').trim()
+  if (configured) return configured.replace(/\/$/, '')
+  if (typeof window !== 'undefined') {
+    const { hostname, port } = window.location
+    if ((hostname === 'localhost' || hostname === '127.0.0.1') && port === '8090') {
+      return 'http://127.0.0.1:9191'
+    }
+  }
+  return browserOrigin ? `${browserOrigin}/v1/setup-control` : 'http://127.0.0.1:9191'
+}
+
+export const SETUP_CONTROL_BASE = resolveSetupControlBase()
 export const STREAMCLONE_INSTALL_ID = String(runtime.installId ?? import.meta.env.VITE_STREAMCLONE_INSTALL_ID ?? '').trim()

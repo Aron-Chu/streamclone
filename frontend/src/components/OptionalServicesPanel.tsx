@@ -3,6 +3,7 @@ import { profileNeedsScraper, SCRAPER_SETUP_DOC_URL } from '../setupProfile'
 import { useOptionalServices, type ServiceStartProgress } from '../hooks/useOptionalServices'
 
 type ServiceStatus = 'ready' | 'offline' | 'checking'
+const PULSE_GRAFANA_URL = 'http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-24h&to=now'
 
 export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean }) {
   const { controlReady, isStarting, startService } = useOptionalServices({ probeControl: true })
@@ -48,7 +49,7 @@ export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean 
 
 function ServiceStartProgressBar({ progress, compact = false }: { progress: ServiceStartProgress; compact?: boolean }) {
   const width = Math.max(0, Math.min(100, progress.percent))
-  const label = progress.service === 'scraper' ? 'Analytics' : 'Clip Studio'
+  const label = progress.service === 'scraper' ? 'Analytics' : progress.service === 'pulse' ? 'Pulse Dashboards' : 'Clip Studio'
   return (
     <div className={`rounded-lg border border-white/10 bg-white/[0.035] ${compact ? 'p-2.5' : 'p-3'}`}>
       <div className={`mb-2 flex items-center justify-between gap-2 font-black uppercase tracking-wide text-zinc-300 ${
@@ -81,6 +82,9 @@ function ServiceCard({
   busy,
   error,
   progress,
+  readyHref,
+  readyLabel,
+  onReadyOpen,
 }: {
   title: string
   detail: string
@@ -90,6 +94,9 @@ function ServiceCard({
   busy?: boolean
   error?: string | null
   progress?: ServiceStartProgress | null
+  readyHref?: string
+  readyLabel?: string
+  onReadyOpen?: () => void
 }) {
   const good = status === 'ready'
   const checking = status === 'checking'
@@ -120,13 +127,24 @@ function ServiceCard({
           {busy ? 'Starting…' : actionLabel}
         </button>
       ) : null}
+      {readyHref && status === 'ready' ? (
+        <a
+          href={readyHref}
+          target="_blank"
+          rel="noreferrer"
+          onClick={onReadyOpen}
+          className="inline-flex rounded border border-emerald-400/40 bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-100 transition hover:bg-emerald-500/25"
+        >
+          {readyLabel ?? 'Open'}
+        </a>
+      ) : null}
     </div>
   )
 }
 
 type OptionalServicesPanelProps = {
   variant: 'overlay' | 'banner'
-  focus?: 'scraper' | 'clipper' | 'all'
+  focus?: 'scraper' | 'clipper' | 'pulse' | 'all'
   onDismiss?: () => void
   onBrowse?: () => void
   channelLogin?: string
@@ -157,9 +175,13 @@ export default function OptionalServicesPanel({
   const coreStatus: ServiceStatus = statusLoading ? 'checking' : hasServiceSnapshot ? 'ready' : 'offline'
   const scraperStatus: ServiceStatus = statusLoading ? 'checking' : services?.scraper ?? 'offline'
   const clipperStatus: ServiceStatus = statusLoading ? 'checking' : services?.clipper ?? 'offline'
+  const pulseStatus: ServiceStatus = statusLoading ? 'checking' : services?.pulse ?? 'offline'
 
   const showScraper = focus === 'all' || focus === 'scraper'
   const showClipper = focus === 'all' || focus === 'clipper'
+  const showPulse = focus === 'all' || focus === 'pulse'
+  const showPrimaryPulseCard = showPulse && focus === 'pulse'
+  const showDeveloperPulseCard = showPulse && focus !== 'pulse'
 
   if (variant === 'banner') {
     const scraperBanner = showScraper && scraperOffline && (profile === 'core' || profileNeedsScraper(profile))
@@ -234,13 +256,16 @@ export default function OptionalServicesPanel({
             ) : null}
           </div>
         </div>
-        {(startProgressByService.scraper || startProgressByService.clipper) ? (
+        {(startProgressByService.scraper || startProgressByService.clipper || startProgressByService.pulse) ? (
           <div className="mt-2 space-y-2">
             {startProgressByService.scraper ? (
               <ServiceStartProgressBar progress={startProgressByService.scraper} compact />
             ) : null}
             {startProgressByService.clipper ? (
               <ServiceStartProgressBar progress={startProgressByService.clipper} compact />
+            ) : null}
+            {startProgressByService.pulse ? (
+              <ServiceStartProgressBar progress={startProgressByService.pulse} compact />
             ) : null}
           </div>
         ) : null}
@@ -252,12 +277,12 @@ export default function OptionalServicesPanel({
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 text-zinc-100">
+    <div className="space-y-5 text-zinc-100">
       <div className="space-y-2">
         <div className="text-xs font-black uppercase tracking-[0.2em] text-violet-300">Welcome to Streamclone</div>
         <h1 className="text-2xl font-black text-white">What is running right now</h1>
         <p className="text-sm font-semibold leading-6 text-zinc-400">
-          Live checks for the core stack and optional Analytics and Clip Studio services.
+          Live checks for the core stack and optional Analytics, Clip Studio, and Pulse dashboard services.
         </p>
       </div>
 
@@ -279,13 +304,16 @@ export default function OptionalServicesPanel({
         </button>
       </div>
 
-      {(startProgressByService.scraper || startProgressByService.clipper) ? (
+      {(startProgressByService.scraper || startProgressByService.clipper || startProgressByService.pulse) ? (
         <div className="space-y-2">
           {startProgressByService.scraper ? (
             <ServiceStartProgressBar progress={startProgressByService.scraper} />
           ) : null}
           {startProgressByService.clipper ? (
             <ServiceStartProgressBar progress={startProgressByService.clipper} />
+          ) : null}
+          {startProgressByService.pulse ? (
+            <ServiceStartProgressBar progress={startProgressByService.pulse} />
           ) : null}
         </div>
       ) : null}
@@ -296,7 +324,7 @@ export default function OptionalServicesPanel({
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="mx-auto grid w-full max-w-5xl justify-center gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))]">
         <ServiceCard
           title="Core app"
           detail="Directory, playback, chat, emotes, and analytics API."
@@ -324,7 +352,46 @@ export default function OptionalServicesPanel({
             progress={startProgressByService.clipper ?? null}
           />
         ) : null}
+        {showPrimaryPulseCard ? (
+          <ServiceCard
+            title="Pulse Dashboards"
+            detail="Optional Grafana dashboard for your local synced stats."
+            status={pulseStatus}
+            actionLabel="Start Pulse"
+            onAction={() => void startService('pulse')}
+            busy={isStarting('pulse')}
+            progress={startProgressByService.pulse ?? null}
+            readyHref={PULSE_GRAFANA_URL}
+            readyLabel="Open Grafana"
+          />
+        ) : null}
       </div>
+
+      {showDeveloperPulseCard ? (
+        <details className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+          <summary className="cursor-pointer list-none text-sm font-black text-zinc-100">
+            Developer Dashboards
+            <span className="ml-2 text-[11px] uppercase tracking-wide text-zinc-500">Advanced</span>
+          </summary>
+          <p className="mt-2 text-xs font-semibold leading-5 text-zinc-400">
+            Pulse is a Grafana and Influx investigation surface for export health and synced rollups.
+            Most viewers can ignore it unless they want low-level dashboard tooling.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <ServiceCard
+              title="Pulse Dashboards"
+              detail="Optional Grafana dashboard for local synced stats and export debugging."
+              status={pulseStatus}
+              actionLabel="Start Pulse"
+              onAction={() => void startService('pulse')}
+              busy={isStarting('pulse')}
+              progress={startProgressByService.pulse ?? null}
+              readyHref={PULSE_GRAFANA_URL}
+              readyLabel="Open Grafana"
+            />
+          </div>
+        </details>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <button

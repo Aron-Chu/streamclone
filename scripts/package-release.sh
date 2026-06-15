@@ -78,6 +78,8 @@ cat >"$STAGE/README-quickstart.md" <<'EOF'
 3. Every day: double-click **Start Streamclone.cmd**
 4. Open http://localhost:8090/
 
+Optional: open **Stack status** in the app to start Analytics, Clip Studio, or **Pulse Dashboards**. Pulse runs local Grafana/InfluxDB on demand; normal Analytics works without it.
+
 Stop (pause, keep data): **Stop Streamclone.cmd** / **Stop Streamclone.command**
 
 Remove everything: **Uninstall Streamclone.cmd** / **Uninstall Streamclone.command**

@@ -7,6 +7,7 @@ import {
   getAnalyticsLive,
   getAnalyticsStream,
   getAnalyticsStreams,
+  getTimeseriesStatus,
   prefetchAnalyticsTracker,
   getChannel,
   getChannelStreamHistory,
@@ -41,7 +42,6 @@ import {
 } from '../api'
 import TierIndicator from './analytics/TierIndicator'
 import ClipsTabEmptyState from './analytics/ClipsTabEmptyState'
-import LiveStatsBand from './analytics/LiveStatsBand'
 import LiveCollectionWarmup from './analytics/LiveCollectionWarmup'
 import MostReactedLive from './analytics/MostReactedLive'
 import type { HeatmapEmote, ReplayHeatmapDetailPoint, ReplayHeatmapPoint } from '../types/heatmap'
@@ -103,6 +103,26 @@ const analyticsViewModes: Array<{ id: AnalyticsViewMode; label: string }> = [
   { id: 'emotes', label: 'Emotes' },
   { id: 'spikes', label: 'Spikes' },
 ]
+
+const PULSE_DASHBOARD_URL = 'http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-24h&to=now'
+
+function pulseDashboardUrl(channel: string, stream?: AnalyticsStream, fallbackStreamId?: string) {
+  const url = new URL(PULSE_DASHBOARD_URL)
+  if (channel) url.searchParams.set('var-channel', channel)
+  const streamId = stream?.streamId || fallbackStreamId
+  if (streamId) url.searchParams.set('var-stream', streamId)
+  if (stream?.startedAt) {
+    const startMs = Date.parse(stream.startedAt)
+    const endMs = stream.endedAt ? Date.parse(stream.endedAt) : Date.now()
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+      url.searchParams.set('from', String(startMs))
+      url.searchParams.set('to', String(endMs))
+      url.searchParams.set('var-stream_start', String(startMs))
+      url.searchParams.set('var-stream_end', String(endMs))
+    }
+  }
+  return url.toString()
+}
 
 function count(value: number | null | undefined) {
   if (value === null || value === undefined) return '-'
@@ -3569,6 +3589,13 @@ export default function Analytics() {
     queryFn: getSetupWelcome,
     staleTime: 60_000,
   })
+  const timeseriesStatusQuery = useQuery({
+    queryKey: ['analytics-timeseries-status'],
+    queryFn: getTimeseriesStatus,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
+  })
 
   const coreMinuteChartsBlocked = useMemo(
     () => coreMinuteChartsNeedScraper(
@@ -4244,6 +4271,12 @@ export default function Analytics() {
     if (selected.size > 0) return selected
     return new Set((detail?.topEmotes ?? []).slice(0, 4).map(emote => emote.key))
   }, [analyticsViewMode, selected, detail?.topEmotes])
+  const pulseReady = setupQuery.data?.services.pulse === 'ready' || timeseriesStatusQuery.data?.state === 'ready'
+  const clipperReady = setupQuery.data?.services.clipper === 'ready'
+  const pulseUrl = useMemo(
+    () => pulseDashboardUrl(login, stream, targetQueryStreamId || undefined),
+    [login, stream, targetQueryStreamId],
+  )
 
   const toggleSelected = (key: string) => {
     setSelected(current => {
@@ -4304,6 +4337,16 @@ export default function Analytics() {
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <StackStatusButton />
+            {pulseReady ? (
+              <a
+                href={pulseUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded border border-emerald-400/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-black uppercase text-emerald-100 transition hover:bg-emerald-500/20"
+              >
+                Open in Pulse
+              </a>
+            ) : null}
             <button
               type="button"
               onClick={handleRefresh}
@@ -4348,14 +4391,6 @@ export default function Analytics() {
           />
           <StatCard label="Duration" value={duration(stream)} />
         </section>
-
-        {detail?.state === 'live' ? (
-          <LiveStatsBand
-            login={login}
-            enabled
-            className="rounded border border-white/10 bg-[#0d0d12] p-3"
-          />
-        ) : null}
 
         {stream?.tags?.length ? (
           <div className="flex flex-wrap gap-2">
@@ -4510,6 +4545,7 @@ export default function Analytics() {
                     {activeClipsTab === 'edits' ? (
                       <RecentClipsList
                         login={login}
+                        clipperReady={clipperReady}
                         isTab={true}
                         rollups={detail?.rollups ?? []}
                         onSync={() => void handleSync(chatOnlySyncAvailable ? { chatOnly: true } : undefined)}
@@ -4559,12 +4595,14 @@ export default function Analytics() {
 
 function RecentClipsList({
   login,
+  clipperReady,
   isTab = false,
   rollups,
   onSync,
   onOpenMoments,
 }: {
   login: string
+  clipperReady: boolean
   isTab?: boolean
   rollups?: AnalyticsMinuteRollup[]
   onSync?: () => void
@@ -4576,6 +4614,11 @@ function RecentClipsList({
   const [retryError, setRetryError] = useState<string | null>(null)
 
   const fetchJobs = async () => {
+    if (!clipperReady) {
+      setJobs([])
+      setLoading(false)
+      return
+    }
     try {
       const res = await getClipperJobs(50, login)
       const filtered = res.items || []
@@ -4606,6 +4649,11 @@ function RecentClipsList({
   }
 
   useEffect(() => {
+    if (!clipperReady) {
+      setJobs([])
+      setLoading(false)
+      return
+    }
     fetchJobs()
     const handleClipCreated = () => {
       fetchJobs()
@@ -4616,7 +4664,15 @@ function RecentClipsList({
       window.removeEventListener('streamclone:clip-created', handleClipCreated)
       clearInterval(timer)
     }
-  }, [login])
+  }, [login, clipperReady])
+
+  if (!clipperReady) {
+    return (
+      <div className={`p-3 text-center text-xs font-semibold text-zinc-500 ${!isTab ? 'rounded border border-white/10 bg-white/[0.035]' : ''}`}>
+        Clip Studio is offline. Start Clip Studio from Stack status to view Streamclone clip jobs.
+      </div>
+    )
+  }
 
   if (loading) {
     return <div className="text-zinc-500 text-xs font-semibold px-3 py-2">Loading clips list...</div>

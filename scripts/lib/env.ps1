@@ -17,18 +17,19 @@ function Get-EnvRandomHex {
 }
 
 function Get-EnvProfileFragment {
-    param([ValidateSet('core', 'scraper', 'clipper', 'full')][string]$Profile)
+    param([ValidateSet('core', 'scraper', 'clipper', 'full', 'pulse')][string]$Profile)
     $root = Get-EnvRepoRoot
     return Join-Path $root "deploy\env\profile-$Profile.env"
 }
 
 function Get-EnvComposeProfiles {
-    param([ValidateSet('core', 'scraper', 'clipper', 'full')][string]$Profile)
+    param([ValidateSet('core', 'scraper', 'clipper', 'full', 'pulse')][string]$Profile)
     switch ($Profile) {
         'core' { return @() }
         'scraper' { return @('scraper') }
         'clipper' { return @('clipper') }
         'full' { return @('scraper', 'clipper') }
+        'pulse' { return @('pulse') }
     }
 }
 
@@ -402,8 +403,55 @@ function Invoke-EnvCapturedProcess {
     }
 }
 
+function Test-StreamcloneUseWslDockerCli {
+    param([string]$Root = '')
+    if ($env:WSL_DISTRO_NAME) { return $false }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return $false }
+    try {
+        $wslProxy = (& wsl.exe docker ps --filter 'name=streamclone-local-proxy' --format '{{.Names}}' 2>$null | Select-Object -First 1)
+        $winProxy = (& docker ps --filter 'name=streamclone-local-proxy' --format '{{.Names}}' 2>$null | Select-Object -First 1)
+        $wslProxy = if ($wslProxy) { "$wslProxy".Trim() } else { '' }
+        $winProxy = if ($winProxy) { "$winProxy".Trim() } else { '' }
+        if ($wslProxy -and -not $winProxy) { return $true }
+        if ($wslProxy -and $winProxy -and $wslProxy -ne $winProxy) { return $true }
+    } catch { }
+    return $false
+}
+
+function Get-StreamcloneWslRootPath {
+    param([string]$Root)
+    if ([string]::IsNullOrWhiteSpace($Root)) { return $null }
+    $full = [System.IO.Path]::GetFullPath($Root)
+    if ($full -match '^([A-Za-z]):\\(.*)$') {
+        $drive = $Matches[1].ToLower()
+        $rest = ($Matches[2] -replace '\\', '/').TrimEnd('/')
+        return "/mnt/$drive/$rest"
+    }
+    $trimmed = (& wsl.exe -- wslpath -a $full 2>$null | Select-Object -First 1)
+    if ($trimmed) { return "$trimmed".Trim() }
+    return $null
+}
+
 function Invoke-EnvDockerCaptured {
-    param([string[]]$Arguments)
+    param(
+        [string[]]$Arguments,
+        [string]$Root = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($Root)) {
+        try {
+            $location = Get-Location
+            if ($location.Provider.Name -eq 'FileSystem' -and $location.ProviderPath) {
+                $Root = $location.ProviderPath
+            }
+        } catch { }
+    }
+    if (Test-StreamcloneUseWslDockerCli -Root $Root) {
+        $wslRoot = Get-StreamcloneWslRootPath -Root $Root
+        if ($wslRoot) {
+            $bashCmd = "cd $(($wslRoot -replace "'", "'\\''")) && docker $(Join-EnvProcessArguments -Arguments $Arguments)"
+            return Invoke-EnvCapturedProcess -FilePath 'wsl.exe' -ArgumentList @('bash', '-lc', $bashCmd)
+        }
+    }
     $docker = Get-EnvDockerExe
     if (-not $docker) {
         return [pscustomobject]@{

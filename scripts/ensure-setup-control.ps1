@@ -34,9 +34,21 @@ function Test-SetupControlHealth {
     return ($null -ne $body -and [bool]$body.ok)
 }
 
+function Test-SetupControlProxiedHealth {
+    if (Test-SetupControlHealth -HealthPort 9191) { return $true }
+    try {
+        $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:8090/v1/setup-control/health' -UseBasicParsing -TimeoutSec 5
+        if ($resp.StatusCode -ne 200) { return $false }
+        $body = $resp.Content | ConvertFrom-Json
+        return [bool]$body.ok
+    } catch {
+        return $false
+    }
+}
+
 function Get-SetupControlDaemonPids {
     Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like '*setup-control.ps1*' } |
+        Where-Object { $_.CommandLine -like '*setup-control.ps1*' -and $_.CommandLine -notlike '*ensure-setup-control.ps1*' } |
         ForEach-Object { [int]$_.ProcessId }
 }
 
@@ -107,6 +119,7 @@ $envStale = Test-SetupControlEnvStale -StalePidFile $pidFile
 $scriptStale = Test-SetupControlScriptStale -StalePidFile $pidFile
 $rootMismatch = Test-SetupControlRootMismatch -HealthPort $Port -ExpectedPidFile $pidFile
 
+$proxyStale = $false
 if (Test-SetupControlHealth -HealthPort $Port) {
     if (-not $envStale -and -not $scriptStale -and -not $rootMismatch) {
         return
@@ -132,11 +145,17 @@ Start-Process -FilePath 'powershell.exe' `
     -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $controlScript, '-Port', "$Port", '-Root', $resolvedRoot) `
     -WorkingDirectory $resolvedRoot | Out-Null
 
-for ($i = 0; $i -lt 10; $i++) {
-    Start-Sleep -Milliseconds 300
-    if (Test-SetupControlHealth -HealthPort $Port) {
-        return
-    }
+for ($i = 0; $i -lt 60; $i++) {
+    Start-Sleep -Milliseconds 500
+    if (-not (Test-SetupControlHealth -HealthPort $Port)) { continue }
+    $proxyStale = -not (Test-SetupControlProxiedHealth)
+    return
 }
 
-Write-Warning 'setup-control did not respond on port 9191. Use Start Streamclone.cmd or run scripts\ensure-setup-control.ps1'
+if (Test-SetupControlHealth -HealthPort $Port) {
+    Write-Warning 'setup-control is up on :9191 but Caddy cannot reach it (check Docker / host.docker.internal).'
+} else {
+    Write-Warning 'setup-control did not respond on port 9191. Use Start Streamclone.cmd or run scripts\ensure-setup-control.ps1'
+}
+
+exit 0

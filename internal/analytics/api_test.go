@@ -119,3 +119,34 @@ func TestSlimRollupsForChartOmitsEmotes(t *testing.T) {
 		t.Fatalf("expected chat count preserved, got %d", out[0].ChatCount)
 	}
 }
+
+func TestSummarizeStreamMetricsUsesPostgresRollups(t *testing.T) {
+	start := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
+	end := start.Add(10 * time.Minute)
+	stream := &StreamRecord{
+		StreamID:    "123",
+		Login:       "jynxzi",
+		StartedAt:   start,
+		LastSeenAt:  end,
+		EndedAt:     &end,
+		PeakViewers: 1000,
+	}
+	rollups := []MinuteRollup{
+		{MinuteTS: start, ViewerLatest: 100, ViewerSamples: 1, ChatCount: 10, TotalEmoteCount: 5, SevenTVEmoteCount: 4},
+		{MinuteTS: start.Add(time.Minute), ViewerLatest: 120, ViewerSamples: 1, ChatCount: 30, TotalEmoteCount: 15, SevenTVEmoteCount: 6},
+	}
+
+	got := summarizeStreamMetrics(stream, rollups)
+	if got.ChatPerMin != 20 {
+		t.Fatalf("chat/min = %.2f, want 20", got.ChatPerMin)
+	}
+	if got.EmotesPerMin != 10 {
+		t.Fatalf("emotes/min = %.2f, want 10", got.EmotesPerMin)
+	}
+	if got.ProviderSharePct != 50 {
+		t.Fatalf("provider share = %.2f, want 50", got.ProviderSharePct)
+	}
+	if got.SyncHealthState == "" || got.SyncHealthState == "stats_only" {
+		t.Fatalf("sync health = %q, want rollup-backed state", got.SyncHealthState)
+	}
+}

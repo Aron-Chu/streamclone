@@ -101,6 +101,13 @@ Optional fields on Redis `SyncStatus.timing` surface in the **`SyncProgressPanel
 - Core compose profile (`deploy/env/profile-core.env`) ships analytics without the scraper service; minute-level TwitchTracker charts need the scraper profile.
 - UI **Start Analytics** (banner, Stack status, or `OptionalServicesPanel`) starts the scraper tier via host setup-control — see `.kiro/steering/windows-dev.md` if the button does nothing.
 
+### Optional Pulse dashboards
+
+- Pulse is an optional Grafana/Influx dashboard layer, not the Analytics read path. Postgres remains canonical for stream metadata, sync state, VOD chat, date routing, replay heatmap inputs, and app detail views.
+- User-facing Pulse runs through Docker Compose profile `pulse` with `influxdb:2.7-alpine` on host `127.0.0.1:18086` and `grafana/grafana:11.5.0` on `127.0.0.1:3000`. The Helm chart under `.local/helm-pulse` / `charts/pulse` remains a developer sandbox.
+- UI **Start Pulse** uses setup-control, merges `deploy/env/profile-pulse.env` into `.env`, starts Influx/Grafana, and recreates analytics with `TIMESERIES_ENABLED=true`. Normal `/analytics` must still work when Pulse is offline or export is unhealthy.
+- Metric definitions live in `docs/pulse-metrics.md`; additive Postgres summary endpoints are `/v1/analytics/streams/{streamId}/summary?channel=` and `/v1/analytics/channels/{login}/streams/ranked?sort=&period=`.
+
 ### GQL VOD comments (`fetchVODComments` / `sync_gql_parallel.go`)
 
 - Persisted-query hash must match current Twitch GQL (update when sync returns empty comment bodies).

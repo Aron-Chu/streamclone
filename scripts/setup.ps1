@@ -166,6 +166,7 @@ if (-not $NoUp) {
     Write-Host ''
     Write-Host 'Streamclone: http://localhost:8090/'
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root (Get-Location)
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-localhost-relays.ps1') -Ports 8090
 }
 
 if (-not $NoSmoke -and -not $NoUp) {
@@ -181,6 +182,7 @@ if (-not $NoSmoke -and -not $NoUp) {
         Write-Host 'Setup failed: smoke checks did not pass.' -ForegroundColor Red
         exit $LASTEXITCODE
     }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-localhost-relays.ps1') -Ports 8090
 
     if ($needsScraper -and ($scraperUseImages -or (Test-Path (Get-EnvScraperSiblingPath)))) {
         $preflight = Join-Path $PSScriptRoot 'scraper-preflight.ps1'

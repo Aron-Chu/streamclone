@@ -148,6 +148,14 @@ services:
       ANALYTICS_TT_MAX_AGE_MS: ${ANALYTICS_TT_MAX_AGE_MS:-0}
       ANALYTICS_TT_STALE_MAX_AGE_MS: ${ANALYTICS_TT_STALE_MAX_AGE_MS:-604800000}
       ANALYTICS_TT_PREFETCH_ENABLED: ${ANALYTICS_TT_PREFETCH_ENABLED:-true}
+      TIMESERIES_ENABLED: ${TIMESERIES_ENABLED:-false}
+      TIMESERIES_BACKEND: ${TIMESERIES_BACKEND:-influxdb}
+      INFLUXDB_URL: ${INFLUXDB_URL:-}
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-}
+      INFLUXDB_ORG: ${INFLUXDB_ORG:-streamclone}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-streamclone}
+      TIMESERIES_WRITE_TIMEOUT_MS: ${TIMESERIES_WRITE_TIMEOUT_MS:-1000}
+      TIMESERIES_QUEUE_SIZE: ${TIMESERIES_QUEUE_SIZE:-1024}
       # Direct HTTP fast path skips the browser scrape when TT serves plain HTTP;
       # auto-disables for 1h if success rate drops below 10% (internal/analytics/direct_http.go).
       ANALYTICS_TT_DIRECT_HTTP_ENABLED: ${ANALYTICS_TT_DIRECT_HTTP_ENABLED:-true}
@@ -292,9 +300,61 @@ services:
       retries: 6
       start_period: 30s
 
+  influxdb:
+    profiles: [pulse]
+    image: influxdb:2.7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_INIT_USERNAME:-admin}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_INIT_PASSWORD:-streampulse}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-streamclone}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-streamclone}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-local-pulse-token}
+    volumes:
+      - influx-data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8086/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  grafana:
+    profiles: [pulse]
+    image: grafana/grafana:11.5.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-streampulse}
+      GF_USERS_DEFAULT_THEME: dark
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-local-pulse-token}
+      INFLUXDB_ORG: ${INFLUXDB_ORG:-streamclone}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-streamclone}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
 volumes:
   pg-data:
   minio-data:
   clipper-data:
   scraper-profile:
   camoufox-cache:
+  influx-data:
+  grafana-data:

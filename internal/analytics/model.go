@@ -88,6 +88,37 @@ type StreamsResponse struct {
 	UpdatedAt int64          `json:"updatedAt"`
 }
 
+type StreamSummaryMetrics struct {
+	ChatPerMin        float64 `json:"chat_per_min"`
+	EmotesPerMin      float64 `json:"emotes_per_min"`
+	SevenTVPerMin     float64 `json:"seventv_per_min"`
+	ProviderSharePct  float64 `json:"provider_share_pct"`
+	ReactionScore     float64 `json:"reaction_score_0_100"`
+	ViewerMomentum5M  float64 `json:"viewer_momentum_5m"`
+	DataCoveragePct   float64 `json:"data_coverage_pct"`
+	SyncHealthState   string  `json:"sync_health_state"`
+	MinutesWithData   int     `json:"minutesWithData"`
+	ViewerSampleCount int     `json:"viewerSampleCount"`
+}
+
+type StreamSummaryResponse struct {
+	Channel   string               `json:"channel"`
+	Stream    *StreamRecord        `json:"stream,omitempty"`
+	Metrics   StreamSummaryMetrics `json:"metrics"`
+	TopEmotes []TopEmote           `json:"topEmotes"`
+	Sources   []SourceStatus       `json:"sources"`
+	UpdatedAt int64                `json:"updatedAt"`
+}
+
+type RankedStreamsResponse struct {
+	Channel   string         `json:"channel"`
+	Sort      string         `json:"sort"`
+	Period    string         `json:"period"`
+	Items     []StreamRecord `json:"items"`
+	Sources   []SourceStatus `json:"sources"`
+	UpdatedAt int64          `json:"updatedAt"`
+}
+
 type LiveStream struct {
 	ID            string
 	BroadcasterID string

@@ -26,6 +26,7 @@ type SetupWelcomeOptions struct {
 type setupWelcomeServices struct {
 	Scraper string `json:"scraper"`
 	Clipper string `json:"clipper"`
+	Pulse   string `json:"pulse"`
 }
 
 type setupWelcomeResponse struct {
@@ -69,6 +70,7 @@ func (h *Handler) setupWelcome(w http.ResponseWriter, r *http.Request) {
 	services := setupWelcomeServices{
 		Scraper: statuses["scraper"],
 		Clipper: statuses["clipper"],
+		Pulse:   h.pulseServiceReady(ctx),
 	}
 
 	incomplete := false
@@ -76,6 +78,9 @@ func (h *Handler) setupWelcome(w http.ResponseWriter, r *http.Request) {
 		incomplete = true
 	}
 	if profileHasClipper(profile) && services.Clipper == "offline" {
+		incomplete = true
+	}
+	if profileHasPulse(profile) && services.Pulse == "offline" {
 		incomplete = true
 	}
 
@@ -101,6 +106,23 @@ func profileHasScraper(profile string) bool {
 
 func profileHasClipper(profile string) bool {
 	return profile == "clipper" || profile == "full"
+}
+
+func profileHasPulse(profile string) bool {
+	return profile == "pulse"
+}
+
+func (h *Handler) pulseServiceReady(ctx context.Context) string {
+	targets := []string{
+		"http://host.docker.internal:3000/api/health",
+		"http://grafana:3000/api/health",
+	}
+	for _, rawURL := range targets {
+		if h.probeServiceHealth(ctx, rawURL) {
+			return "ready"
+		}
+	}
+	return "offline"
 }
 
 func scraperHealthURL(scrapeURL string) string {

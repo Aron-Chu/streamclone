@@ -3,8 +3,10 @@ package analytics
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"streamclone/internal/analytics/heatmap"
+	"streamclone/internal/timeseries"
 )
 
 var loginRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{2,24}$`)
@@ -24,6 +27,7 @@ type Handler struct {
 	helix        *HelixClient
 	syncService  *SyncService
 	heatmapCache *heatmap.Cache
+	timeseries   timeseries.Writer
 }
 
 func NewHandler(store *Store, collector *Collector, helix *HelixClient, syncService *SyncService) *Handler {
@@ -35,6 +39,11 @@ func (h *Handler) WithHeatmapCache(cache *heatmap.Cache) *Handler {
 	return h
 }
 
+func (h *Handler) WithTimeseries(writer timeseries.Writer) *Handler {
+	h.timeseries = writer
+	return h
+}
+
 func (h *Handler) Routes(r chi.Router) {
 	r.Route("/v1/analytics", func(r chi.Router) {
 		r.Get("/always-tracked", h.getAlwaysTracked)
@@ -42,13 +51,16 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Post("/channels/{login}/watch", h.watchChannel)
 		r.Get("/channels/{login}/live", h.channelLive)
 		r.Get("/channels/{login}/streams", h.channelStreams)
+		r.Get("/channels/{login}/streams/ranked", h.channelStreamsRanked)
 		r.Get("/streams/{streamID}", h.streamDetail)
+		r.Get("/streams/{streamID}/summary", h.streamSummary)
 		r.Post("/streams/{streamID}/prefetch-tracker", h.prefetchTracker)
 		r.Post("/streams/{streamID}/sync", h.syncStream)
 		r.Get("/streams/{streamID}/sync/status", h.syncStreamStatus)
 		r.Get("/streams/{streamID}/games", h.getStreamGames)
 		r.Get("/streams/{streamID}/replay-heatmap", h.replayHeatmap)
 		r.Delete("/streams/{streamID}/replay-heatmap/cache", h.invalidateHeatmapCache)
+		r.Get("/timeseries/status", h.timeseriesStatus)
 	})
 }
 
@@ -137,6 +149,38 @@ func (h *Handler) channelStreams(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) channelStreamsRanked(w http.ResponseWriter, r *http.Request) {
+	login, ok := validLogin(chi.URLParam(r, "login"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_channel"})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	sortKey := normalizeRankedSort(r.URL.Query().Get("sort"))
+	period := normalizeRankedPeriod(r.URL.Query().Get("period"))
+	streams, err := h.store.StreamsByLogin(r.Context(), login, 100)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	streams = filterStreamsByPeriod(streams, period, time.Now().UTC())
+	sortStreamsByRank(streams, sortKey)
+	if len(streams) > limit {
+		streams = streams[:limit]
+	}
+	writeJSON(w, http.StatusOK, RankedStreamsResponse{
+		Channel:   login,
+		Sort:      sortKey,
+		Period:    period,
+		Items:     streams,
+		Sources:   []SourceStatus{{Source: "analytics_db", State: "ready"}},
+		UpdatedAt: time.Now().UnixMilli(),
+	})
+}
+
 func (h *Handler) streamDetail(w http.ResponseWriter, r *http.Request) {
 	streamID := strings.TrimSpace(chi.URLParam(r, "streamID"))
 	if streamID == "" {
@@ -153,6 +197,49 @@ func (h *Handler) streamDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeStreamDetail(w, r, stream, http.StatusOK)
+}
+
+func (h *Handler) streamSummary(w http.ResponseWriter, r *http.Request) {
+	streamID := strings.TrimSpace(chi.URLParam(r, "streamID"))
+	if streamID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_stream_id"})
+		return
+	}
+	stream, err := h.store.StreamByID(r.Context(), streamID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "stream_not_found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if channel, ok := validLogin(r.URL.Query().Get("channel")); ok && stream.Login != "" && channel != normalizeLogin(stream.Login) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "stream_channel_mismatch"})
+		return
+	}
+	rollups, err := h.store.RollupsByStream(r.Context(), stream.StreamID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	metrics := summarizeStreamMetrics(stream, rollups)
+	writeJSON(w, http.StatusOK, StreamSummaryResponse{
+		Channel:   stream.Login,
+		Stream:    stream,
+		Metrics:   metrics,
+		TopEmotes: TopEmotesFromRollups(rollups, 25),
+		Sources:   []SourceStatus{{Source: "analytics_db", State: "ready"}},
+		UpdatedAt: time.Now().UnixMilli(),
+	})
+}
+
+func (h *Handler) timeseriesStatus(w http.ResponseWriter, r *http.Request) {
+	if h.timeseries == nil {
+		writeJSON(w, http.StatusOK, timeseries.Status{Enabled: false, Configured: false, Backend: timeseries.DefaultBackend, State: "disabled"})
+		return
+	}
+	writeJSON(w, http.StatusOK, h.timeseries.Status())
 }
 
 func (h *Handler) writeMissingStreamDetail(w http.ResponseWriter, r *http.Request, streamID string) {
@@ -262,6 +349,187 @@ func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stre
 		VodDurationSec:  vodDurationSec,
 		ChatCoverage:    &chatCoverage,
 	})
+}
+
+func summarizeStreamMetrics(stream *StreamRecord, rollups []MinuteRollup) StreamSummaryMetrics {
+	if stream == nil {
+		return StreamSummaryMetrics{SyncHealthState: "missing"}
+	}
+	var chat, emotes, seventv, viewerSamples int
+	minutesWithData := 0
+	firstViewer := 0
+	lastViewer := 0
+	for _, rollup := range rollups {
+		if rollup.Missing {
+			continue
+		}
+		if rollup.ChatCount > 0 || rollup.TotalEmoteCount > 0 || rollup.ViewerSamples > 0 {
+			minutesWithData++
+		}
+		chat += rollup.ChatCount
+		emotes += rollup.TotalEmoteCount
+		seventv += rollup.SevenTVEmoteCount
+		viewerSamples += rollup.ViewerSamples
+		viewer := rollup.ViewerLatest
+		if viewer == 0 {
+			viewer = rollup.ViewerMax
+		}
+		if viewer == 0 {
+			viewer = rollup.ViewerAvg
+		}
+		if viewer > 0 {
+			if firstViewer == 0 {
+				firstViewer = viewer
+			}
+			lastViewer = viewer
+		}
+	}
+	minutes := math.Max(1, float64(minutesWithData))
+	providerShare := 0.0
+	if emotes > 0 {
+		providerShare = clampPct(float64(seventv) / float64(emotes) * 100)
+	}
+	reactionScore := 0.0
+	if chat+emotes > 0 {
+		reactionScore = clampPct(float64(emotes+seventv) / float64(chat+emotes) * 100)
+	}
+	viewerMomentum := 0.0
+	if firstViewer > 0 {
+		viewerMomentum = float64(lastViewer-firstViewer) / float64(firstViewer) * 100
+	}
+	coverage := 0.0
+	if !stream.StartedAt.IsZero() {
+		end := stream.LastSeenAt
+		if stream.EndedAt != nil {
+			end = *stream.EndedAt
+		}
+		expected := math.Max(1, math.Ceil(end.Sub(stream.StartedAt).Minutes()))
+		coverage = clampPct(float64(minutesWithData) / expected * 100)
+	}
+	state := "stats_only"
+	if viewerSamples > 0 && chat > 0 {
+		state = "synced"
+	} else if viewerSamples > 0 {
+		state = "viewer_only"
+	} else if chat > 0 {
+		state = "chat_only"
+	}
+	if coverage > 0 && coverage < 80 {
+		state = "partial"
+	}
+	return StreamSummaryMetrics{
+		ChatPerMin:        round2(float64(chat) / minutes),
+		EmotesPerMin:      round2(float64(emotes) / minutes),
+		SevenTVPerMin:     round2(float64(seventv) / minutes),
+		ProviderSharePct:  round2(providerShare),
+		ReactionScore:     round2(reactionScore),
+		ViewerMomentum5M:  round2(viewerMomentum),
+		DataCoveragePct:   round2(coverage),
+		SyncHealthState:   state,
+		MinutesWithData:   minutesWithData,
+		ViewerSampleCount: viewerSamples,
+	}
+}
+
+func normalizeRankedSort(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "peak", "peak_viewers":
+		return "peak_viewers"
+	case "avg", "avg_viewers":
+		return "avg_viewers"
+	case "chat", "chat_per_min":
+		return "chat"
+	case "emotes", "emotes_per_min":
+		return "emotes"
+	case "seventv", "seventv_share":
+		return "seventv_share"
+	case "synced":
+		return "synced"
+	default:
+		return "recent"
+	}
+}
+
+func normalizeRankedPeriod(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "24h", "7d", "30d", "all":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "30d"
+	}
+}
+
+func filterStreamsByPeriod(streams []StreamRecord, period string, now time.Time) []StreamRecord {
+	if period == "all" {
+		return streams
+	}
+	dur := 30 * 24 * time.Hour
+	switch period {
+	case "24h":
+		dur = 24 * time.Hour
+	case "7d":
+		dur = 7 * 24 * time.Hour
+	}
+	cutoff := now.Add(-dur)
+	out := streams[:0]
+	for _, stream := range streams {
+		if stream.StartedAt.IsZero() || stream.StartedAt.After(cutoff) {
+			out = append(out, stream)
+		}
+	}
+	return out
+}
+
+func sortStreamsByRank(streams []StreamRecord, sortKey string) {
+	sort.SliceStable(streams, func(i, j int) bool {
+		a, b := streams[i], streams[j]
+		switch sortKey {
+		case "peak_viewers":
+			if a.PeakViewers != b.PeakViewers {
+				return a.PeakViewers > b.PeakViewers
+			}
+		case "avg_viewers":
+			if a.AvgViewers != b.AvgViewers {
+				return a.AvgViewers > b.AvgViewers
+			}
+		case "chat":
+			if a.ChatMessages != b.ChatMessages {
+				return a.ChatMessages > b.ChatMessages
+			}
+		case "emotes":
+			if a.TotalEmoteUses != b.TotalEmoteUses {
+				return a.TotalEmoteUses > b.TotalEmoteUses
+			}
+		case "seventv_share":
+			aShare := ratio(a.SevenTVEmoteUses, a.TotalEmoteUses)
+			bShare := ratio(b.SevenTVEmoteUses, b.TotalEmoteUses)
+			if aShare != bShare {
+				return aShare > bShare
+			}
+		case "synced":
+			aSynced := a.ViewerSamples + int(a.ChatMessages)
+			bSynced := b.ViewerSamples + int(b.ChatMessages)
+			if aSynced != bSynced {
+				return aSynced > bSynced
+			}
+		}
+		return a.LastSeenAt.After(b.LastSeenAt)
+	})
+}
+
+func ratio(num, denom int64) float64 {
+	if denom <= 0 {
+		return 0
+	}
+	return float64(num) / float64(denom)
+}
+
+func clampPct(value float64) float64 {
+	return math.Max(0, math.Min(100, value))
+}
+
+func round2(value float64) float64 {
+	return math.Round(value*100) / 100
 }
 
 func validLogin(value string) (string, bool) {

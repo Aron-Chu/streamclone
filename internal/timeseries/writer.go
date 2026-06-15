@@ -51,6 +51,7 @@ type Rollup struct {
 
 type Writer interface {
 	EnqueueRollups([]Rollup)
+	Status() Status
 	Close(context.Context) error
 }
 
@@ -58,9 +59,40 @@ type sink interface {
 	WriteRollups(context.Context, []Rollup) error
 }
 
-type NoopWriter struct{}
+type Status struct {
+	Enabled     bool       `json:"enabled"`
+	Configured  bool       `json:"configured"`
+	Backend     string     `json:"backend"`
+	Org         string     `json:"org,omitempty"`
+	Bucket      string     `json:"bucket,omitempty"`
+	State       string     `json:"state"`
+	Attempts    uint64     `json:"attempts"`
+	Failures    uint64     `json:"failures"`
+	Drops       uint64     `json:"drops"`
+	LastWriteAt *time.Time `json:"lastWriteAt,omitempty"`
+	LastErrorAt *time.Time `json:"lastErrorAt,omitempty"`
+	LastError   string     `json:"lastError,omitempty"`
+}
+
+type NoopWriter struct {
+	status Status
+}
 
 func (NoopWriter) EnqueueRollups([]Rollup) {}
+func (w NoopWriter) Status() Status {
+	status := w.status
+	if status.Backend == "" {
+		status.Backend = DefaultBackend
+	}
+	if status.State == "" {
+		if status.Enabled {
+			status.State = "misconfigured"
+		} else {
+			status.State = "disabled"
+		}
+	}
+	return status
+}
 func (NoopWriter) Close(context.Context) error {
 	return nil
 }
@@ -68,19 +100,19 @@ func (NoopWriter) Close(context.Context) error {
 func NewAsyncWriter(cfg Config, logger *slog.Logger) Writer {
 	backend := normalizeBackend(cfg.Backend)
 	if !cfg.Enabled {
-		return NoopWriter{}
+		return NoopWriter{status: Status{Enabled: false, Configured: false, Backend: backend, Org: cfg.Org, Bucket: cfg.Bucket, State: "disabled"}}
 	}
 	if backend != DefaultBackend {
 		if logger != nil {
 			logger.Warn("time-series writer disabled; unsupported backend", "backend", cfg.Backend)
 		}
-		return NoopWriter{}
+		return NoopWriter{status: Status{Enabled: true, Configured: false, Backend: backend, Org: cfg.Org, Bucket: cfg.Bucket, State: "misconfigured", LastError: "unsupported backend"}}
 	}
 	if strings.TrimSpace(cfg.URL) == "" || strings.TrimSpace(cfg.Org) == "" || strings.TrimSpace(cfg.Bucket) == "" {
 		if logger != nil {
 			logger.Warn("time-series writer disabled; missing InfluxDB URL, org, or bucket")
 		}
-		return NoopWriter{}
+		return NoopWriter{status: Status{Enabled: true, Configured: false, Backend: backend, Org: cfg.Org, Bucket: cfg.Bucket, State: "misconfigured", LastError: "missing InfluxDB URL, org, or bucket"}}
 	}
 	if cfg.WriteTimeout <= 0 {
 		cfg.WriteTimeout = DefaultWriteTimeout
@@ -100,6 +132,14 @@ func NewAsyncWriter(cfg Config, logger *slog.Logger) Writer {
 		}),
 		logger: logger,
 		done:   make(chan struct{}),
+		status: Status{
+			Enabled:    true,
+			Configured: true,
+			Backend:    backend,
+			Org:        cfg.Org,
+			Bucket:     cfg.Bucket,
+			State:      "idle",
+		},
 	}
 	w.wg.Add(1)
 	go w.run()
@@ -112,6 +152,8 @@ type AsyncWriter struct {
 	writeTimeout time.Duration
 	sink         sink
 	logger       *slog.Logger
+	statusMu     sync.RWMutex
+	status       Status
 	wg           sync.WaitGroup
 	closeOnce    sync.Once
 	done         chan struct{}
@@ -128,11 +170,21 @@ func (w *AsyncWriter) EnqueueRollups(rollups []Rollup) {
 	select {
 	case w.queue <- batch:
 	default:
+		w.recordDrops(uint64(len(batch)))
 		metrics.TimeseriesQueueDrops.WithLabelValues(w.backend).Add(float64(len(batch)))
 		if w.logger != nil {
 			w.logger.Warn("time-series rollup batch dropped; queue full", "backend", w.backend, "rollups", len(batch))
 		}
 	}
+}
+
+func (w *AsyncWriter) Status() Status {
+	if w == nil {
+		return Status{Enabled: false, Configured: false, Backend: DefaultBackend, State: "disabled"}
+	}
+	w.statusMu.RLock()
+	defer w.statusMu.RUnlock()
+	return w.status
 }
 
 func (w *AsyncWriter) Close(ctx context.Context) error {
@@ -170,12 +222,45 @@ func (w *AsyncWriter) write(batch []Rollup) {
 	err := w.sink.WriteRollups(ctx, batch)
 	if err != nil {
 		result = "error"
+		w.recordWriteError(err)
 		if w.logger != nil {
 			w.logger.Warn("time-series write failed", "backend", w.backend, "rollups", len(batch), "err", err)
 		}
+	} else {
+		w.recordWriteSuccess()
 	}
 	metrics.TimeseriesWriteAttempts.WithLabelValues(w.backend, result).Inc()
 	metrics.TimeseriesWriteDuration.WithLabelValues(w.backend, result).Observe(time.Since(started).Seconds())
+}
+
+func (w *AsyncWriter) recordDrops(count uint64) {
+	w.statusMu.Lock()
+	defer w.statusMu.Unlock()
+	w.status.Drops += count
+	if w.status.State == "idle" {
+		w.status.State = "degraded"
+	}
+}
+
+func (w *AsyncWriter) recordWriteSuccess() {
+	now := time.Now().UTC()
+	w.statusMu.Lock()
+	defer w.statusMu.Unlock()
+	w.status.Attempts++
+	w.status.State = "ready"
+	w.status.LastWriteAt = &now
+	w.status.LastError = ""
+}
+
+func (w *AsyncWriter) recordWriteError(err error) {
+	now := time.Now().UTC()
+	w.statusMu.Lock()
+	defer w.statusMu.Unlock()
+	w.status.Attempts++
+	w.status.Failures++
+	w.status.State = "degraded"
+	w.status.LastErrorAt = &now
+	w.status.LastError = err.Error()
 }
 
 type InfluxConfig struct {

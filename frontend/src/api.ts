@@ -1,4 +1,4 @@
-import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN, SETUP_CONTROL_AVAILABLE, SETUP_CONTROL_TOKEN } from './config'
+import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN, SETUP_CONTROL_AVAILABLE, SETUP_CONTROL_BASE, SETUP_CONTROL_TOKEN } from './config'
 import type { ClipPeriod, PlaybackLatencyMode, StatsPeriod } from './settings'
 import { buildVodStartRequestBody } from './utils/vodDeepLink'
 import type { HeatmapDetailResponse, HeatmapResponse } from './types/heatmap'
@@ -138,6 +138,48 @@ export interface AnalyticsStreamsResponse {
   items: AnalyticsStream[]
   sources: SourceStatus[]
   updatedAt: number
+}
+
+export interface AnalyticsStreamSummaryMetrics {
+  chat_per_min: number
+  emotes_per_min: number
+  seventv_per_min: number
+  provider_share_pct: number
+  reaction_score_0_100: number
+  viewer_momentum_5m: number
+  data_coverage_pct: number
+  sync_health_state: string
+  minutesWithData: number
+  viewerSampleCount: number
+}
+
+export interface AnalyticsStreamSummary {
+  channel: string
+  stream?: AnalyticsStream
+  metrics: AnalyticsStreamSummaryMetrics
+  topEmotes: AnalyticsTopEmote[]
+  sources: SourceStatus[]
+  updatedAt: number
+}
+
+export interface RankedAnalyticsStreamsResponse extends AnalyticsStreamsResponse {
+  sort: string
+  period: string
+}
+
+export interface TimeseriesStatus {
+  enabled: boolean
+  configured: boolean
+  backend: string
+  org?: string
+  bucket?: string
+  state: 'disabled' | 'misconfigured' | 'idle' | 'ready' | 'degraded'
+  attempts: number
+  failures: number
+  drops: number
+  lastWriteAt?: string
+  lastErrorAt?: string
+  lastError?: string
 }
 
 export interface ChatBadge {
@@ -305,6 +347,7 @@ export type SetupServiceState = 'ready' | 'offline'
 export interface SetupWelcomeServices {
   scraper: SetupServiceState
   clipper: SetupServiceState
+  pulse: SetupServiceState
 }
 
 export interface SetupWelcome {
@@ -331,7 +374,7 @@ export interface SetupControlStartResponse {
 
 export interface SetupControlStartStatus {
   ok: boolean
-  service: 'scraper' | 'clipper'
+  service: 'scraper' | 'clipper' | 'pulse'
   percent: number
   phase: string
   detail: string
@@ -357,7 +400,7 @@ export interface HostDiagnostics {
   containers: HostDiagnosticsContainer[]
   optionalServices: SetupWelcomeServices
   scraperSibling: { path: string; present: boolean }
-  recentStartLogs: { scraper: string; clipper: string }
+  recentStartLogs: { scraper: string; clipper: string; pulse?: string }
   suggestions: string[]
 }
 
@@ -369,6 +412,7 @@ export interface MetadataDiagnosticsServices {
   analytics: SetupServiceState
   scraper: SetupServiceState
   clipper: SetupServiceState
+  pulse: SetupServiceState
 }
 
 export interface MetadataDiagnostics {
@@ -683,6 +727,18 @@ export const getAnalyticsLive = (login: string): Promise<AnalyticsStreamDetail> 
 export const getAnalyticsStreams = (login: string, limit = 20): Promise<AnalyticsStreamsResponse> =>
   fetch(`${ANALYTICS}/v1/analytics/channels/${encodeURIComponent(login)}/streams?limit=${encodeURIComponent(limit)}`).then(r => json<AnalyticsStreamsResponse>(r))
 
+export const getRankedAnalyticsStreams = (
+  login: string,
+  params: { sort?: string; period?: string; limit?: number } = {},
+): Promise<RankedAnalyticsStreamsResponse> => {
+  const qs = new URLSearchParams()
+  if (params.sort) qs.set('sort', params.sort)
+  if (params.period) qs.set('period', params.period)
+  if (params.limit) qs.set('limit', String(params.limit))
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return fetch(`${ANALYTICS}/v1/analytics/channels/${encodeURIComponent(login)}/streams/ranked${suffix}`).then(r => json<RankedAnalyticsStreamsResponse>(r))
+}
+
 export interface AlwaysTrackedResponse {
   channels: string[]
 }
@@ -713,6 +769,19 @@ export const getAnalyticsStream = async (
   if (res.status === 404) return null
   return json<AnalyticsStreamDetail>(res)
 }
+
+export const getAnalyticsStreamSummary = (
+  streamId: string,
+  opts?: { channel?: string },
+): Promise<AnalyticsStreamSummary> => {
+  const params = new URLSearchParams()
+  if (opts?.channel) params.set('channel', opts.channel)
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}/summary${suffix}`).then(r => json<AnalyticsStreamSummary>(r))
+}
+
+export const getTimeseriesStatus = (): Promise<TimeseriesStatus> =>
+  fetch(`${ANALYTICS}/v1/analytics/timeseries/status`).then(r => json<TimeseriesStatus>(r))
 
 export interface GameSegment {
   id: number
@@ -948,7 +1017,7 @@ export const getSetupWelcome = (): Promise<SetupWelcome> =>
   fetch(`${METADATA}/v1/setup/welcome`).then(r => json<SetupWelcome>(r))
 
 export const getSetupControlHealth = (): Promise<SetupControlHealth> =>
-  fetch('/v1/setup-control/health').then(r => json<SetupControlHealth>(r))
+  fetch(`${SETUP_CONTROL_BASE}/health`).then(r => json<SetupControlHealth>(r))
 
 function setupControlStartError(status: number, body: SetupControlStartResponse): ApiError {
   if (status === 401) {
@@ -969,15 +1038,15 @@ function setupControlStartError(status: number, body: SetupControlStartResponse)
   return new ApiError(body.error || 'Unable to start service', status, body.error, status >= 500)
 }
 
-export const getSetupStartStatus = (service: 'scraper' | 'clipper'): Promise<SetupControlStartStatus> =>
-  fetch(`/v1/setup-control/start/${service}/status`).then(r => json<SetupControlStartStatus>(r))
+export const getSetupStartStatus = (service: 'scraper' | 'clipper' | 'pulse'): Promise<SetupControlStartStatus> =>
+  fetch(`${SETUP_CONTROL_BASE}/start/${service}/status`).then(r => json<SetupControlStartStatus>(r))
 
-export const startSetupService = (service: 'scraper' | 'clipper'): Promise<SetupControlStartResponse> => {
+export const startSetupService = (service: 'scraper' | 'clipper' | 'pulse'): Promise<SetupControlStartResponse> => {
   const headers: Record<string, string> = {}
   if (SETUP_CONTROL_TOKEN) {
     headers['X-Streamclone-Setup-Token'] = SETUP_CONTROL_TOKEN
   }
-  return fetch(`/v1/setup-control/start/${service}`, { method: 'POST', headers }).then(async r => {
+  return fetch(`${SETUP_CONTROL_BASE}/start/${service}`, { method: 'POST', headers }).then(async r => {
     const body = await r.json().catch(() => ({})) as SetupControlStartResponse
     if (!r.ok) {
       throw setupControlStartError(r.status, body)
@@ -994,7 +1063,7 @@ export const syncClipperAuthFromSignIn = (): Promise<{ ok: boolean; merged?: boo
   if (SETUP_CONTROL_TOKEN) {
     headers['X-Streamclone-Setup-Token'] = SETUP_CONTROL_TOKEN
   }
-  return fetch('/v1/setup-control/sync-clipper-auth', { method: 'POST', headers }).then(async r => {
+  return fetch(`${SETUP_CONTROL_BASE}/sync-clipper-auth`, { method: 'POST', headers }).then(async r => {
     const body = await r.json().catch(() => ({})) as { ok: boolean; merged?: boolean; recreated?: boolean; message?: string; error?: string }
     if (!r.ok) {
       throw new ApiError(body.error || r.statusText, r.status)
@@ -1004,7 +1073,7 @@ export const syncClipperAuthFromSignIn = (): Promise<{ ok: boolean; merged?: boo
 }
 
 export const getHostDiagnostics = (): Promise<HostDiagnostics> =>
-  fetch('/v1/setup-control/diagnostics').then(r => json<HostDiagnostics>(r))
+  fetch(`${SETUP_CONTROL_BASE}/diagnostics`).then(r => json<HostDiagnostics>(r))
 
 export const getMetadataDiagnostics = (): Promise<MetadataDiagnostics> =>
   fetch(`${METADATA}/v1/setup/diagnostics`).then(r => json<MetadataDiagnostics>(r))
