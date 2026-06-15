@@ -2,11 +2,16 @@
 # Local-only HTTP helper so the directory status UI can start optional compose profiles.
 param(
     [int]$Port = 9191,
-    [string]$PidFile = ''
+    [string]$PidFile = '',
+    [string]$Root = ''
 )
 
 $ErrorActionPreference = 'Stop'
-$Root = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($Root)) {
+    $Root = Split-Path -Parent $PSScriptRoot
+} else {
+    $Root = (Resolve-Path -LiteralPath $Root).Path
+}
 if ([string]::IsNullOrWhiteSpace($PidFile)) {
     $PidFile = Join-Path $Root '.streamclone-setup-control.pid'
 }
@@ -523,7 +528,11 @@ try {
 
         try {
             if ($request.HttpMethod -eq 'GET' -and ($path -eq '/health' -or $path -eq '/')) {
-                Write-JsonResponse -Response $response -StatusCode 200 -Body @{ ok = $true; service = 'setup-control' }
+                Write-JsonResponse -Response $response -StatusCode 200 -Body @{
+                    ok = $true
+                    service = 'setup-control'
+                    root = $Root
+                }
                 continue
             }
 

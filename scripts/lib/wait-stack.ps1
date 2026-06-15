@@ -97,16 +97,31 @@ function Wait-StreamcloneAppsReady {
         @{ Url = 'http://localhost:8086/healthz'; Label = 'analytics' }
     )
     Write-Host 'Tier 2/3: application services' -ForegroundColor Cyan
-    foreach ($check in $checks) {
-        $label = $check.Label
-        $url = $check.Url
-        $ok = Wait-StreamclonePollUntil -Label $label -TimeoutSec $TimeoutSec -IntervalSec $IntervalSec -Test {
-            $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
-            $resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500
+    $ready = @{}
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $attempt = 0
+    while ((Get-Date) -lt $deadline) {
+        $attempt++
+        foreach ($check in $checks) {
+            if ($ready.ContainsKey($check.Label)) { continue }
+            try {
+                $resp = Invoke-WebRequest -Uri $check.Url -UseBasicParsing -TimeoutSec 5
+                if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) {
+                    $ready[$check.Label] = $true
+                    Write-Host "  $($check.Label) ready (attempt $attempt)" -ForegroundColor Green
+                }
+            } catch { }
         }
-        if (-not $ok) { return $false }
+        if ($ready.Count -eq $checks.Count) { return $true }
+        if ($attempt % 5 -eq 0) {
+            $pending = @($checks | Where-Object { -not $ready.ContainsKey($_.Label) } | ForEach-Object { $_.Label })
+            Write-Host "  waiting for apps: $($pending -join ', ') (attempt $attempt)" -ForegroundColor DarkGray
+        }
+        Start-Sleep -Seconds $IntervalSec
     }
-    return $true
+    $pending = @($checks | Where-Object { -not $ready.ContainsKey($_.Label) } | ForEach-Object { $_.Label })
+    Write-Host "  application services not ready within ${TimeoutSec}s (pending: $($pending -join ', '))" -ForegroundColor Red
+    return $false
 }
 
 function Wait-StreamcloneProxyReady {

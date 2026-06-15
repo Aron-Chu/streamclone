@@ -5,9 +5,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 run_ui=false
+skip_readiness=false
 for arg in "$@"; do
   case "$arg" in
     --ui) run_ui=true ;;
+    --skip-readiness) skip_readiness=true ;;
   esac
 done
 
@@ -16,26 +18,37 @@ fail() {
   exit 1
 }
 
-wait_url() {
-  local url="$1"
-  local label="$2"
-  echo "Checking $label ($url)..."
+wait_all_services() {
+  local urls=(
+    "http://localhost:8090/|Caddy proxy (frontend)"
+    "http://localhost:8081/healthz|metadata"
+    "http://localhost:8082/healthz|video"
+    "http://localhost:8083/healthz|chat"
+    "http://localhost:8084/healthz|emote"
+    "http://localhost:8086/healthz|analytics"
+  )
+  echo "Checking core services..."
   for i in $(seq 1 60); do
-    if curl --connect-timeout 2 --max-time 5 -fsS "$url" >/dev/null 2>&1; then
-      echo "  ok"
+    local all_ok=true
+    for entry in "${urls[@]}"; do
+      local url="${entry%%|*}"
+      if ! curl --connect-timeout 2 --max-time 5 -fsS "$url" >/dev/null 2>&1; then
+        all_ok=false
+        break
+      fi
+    done
+    if [ "$all_ok" = true ]; then
+      echo "  all core services ready (attempt $i)"
       return 0
     fi
     sleep 2
   done
-  fail "$label failed — is the stack up? Run 'make bootstrap' or 'make up'."
+  fail "core services failed — is the stack up? Run 'make bootstrap' or 'make up'."
 }
 
-wait_url "http://localhost:8090/" "Caddy proxy (frontend)"
-wait_url "http://localhost:8081/healthz" "metadata"
-wait_url "http://localhost:8082/healthz" "video"
-wait_url "http://localhost:8083/healthz" "chat"
-wait_url "http://localhost:8084/healthz" "emote"
-wait_url "http://localhost:8086/healthz" "analytics"
+if [ "$skip_readiness" = false ]; then
+  wait_all_services
+fi
 
 if [ "$run_ui" = true ]; then
   echo "Running Playwright smoke-core..."

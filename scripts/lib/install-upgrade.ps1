@@ -379,19 +379,75 @@ function Invoke-StreamcloneReleaseDownloadWithProgress {
     }
 }
 
+function Get-StreamcloneBootstrapOverlayCachePath {
+    param([string]$Dir)
+    return Join-Path $Dir '.streamclone-bootstrap-overlay.json'
+}
+
+function Get-StreamcloneBootstrapOverlayCache {
+    param([string]$Dir)
+    $cachePath = Get-StreamcloneBootstrapOverlayCachePath -Dir $Dir
+    if (-not (Test-Path $cachePath)) { return $null }
+    try {
+        return (Get-Content -LiteralPath $cachePath -Raw | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
+}
+
+function Set-StreamcloneBootstrapOverlayCache {
+    param(
+        [string]$Dir,
+        [string]$Sha
+    )
+    $cachePath = Get-StreamcloneBootstrapOverlayCachePath -Dir $Dir
+    Set-Content -LiteralPath $cachePath -Value (@{
+        sha       = $Sha
+        updatedAt = (Get-Date).ToString('o')
+    } | ConvertTo-Json -Compress) -Encoding UTF8
+}
+
 function Get-StreamcloneGitHubMasterSha {
-    param([string]$Repo = 'Aron-Chu/streamclone')
+    param(
+        [string]$Repo = 'Aron-Chu/streamclone',
+        [int]$TimeoutSec = 10
+    )
     $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
-    return (Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/commits/master" -Headers $headers).sha
+    return (Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/commits/master" -Headers $headers -TimeoutSec $TimeoutSec).sha
 }
 
 function Update-StreamcloneBootstrapOverlayFromMaster {
     param(
         [string]$Dir,
         [string]$Repo = 'Aron-Chu/streamclone',
-        [string[]]$OverlayPaths = $Script:StreamcloneBootstrapOverlayPaths
+        [string[]]$OverlayPaths = $Script:StreamcloneBootstrapOverlayPaths,
+        [int]$RecheckHours = 24
     )
-    $masterSha = Get-StreamcloneGitHubMasterSha -Repo $Repo
+    $Dir = (Resolve-Path -LiteralPath $Dir).Path
+    $cache = Get-StreamcloneBootstrapOverlayCache -Dir $Dir
+    if ($cache -and $cache.sha -and $cache.updatedAt) {
+        try {
+            $cachedAt = [datetime]$cache.updatedAt
+            if (((Get-Date) - $cachedAt).TotalHours -lt $RecheckHours) {
+                return
+            }
+        } catch { }
+    }
+
+    $masterSha = $null
+    try {
+        $masterSha = Get-StreamcloneGitHubMasterSha -Repo $Repo
+    } catch {
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($masterSha)) { return }
+
+    $cachedSha = if ($cache) { [string]$cache.sha } else { '' }
+    if ($cachedSha -eq $masterSha) {
+        Set-StreamcloneBootstrapOverlayCache -Dir $Dir -Sha $masterSha
+        return
+    }
+
     $masterRawBase = "https://raw.githubusercontent.com/$Repo/$masterSha"
     $headers = @{ 'User-Agent' = 'streamclone-bootstrap' }
     foreach ($rel in $OverlayPaths) {
@@ -407,6 +463,7 @@ function Update-StreamcloneBootstrapOverlayFromMaster {
             Write-Host "  script overlay skipped: $rel ($($_.Exception.Message))" -ForegroundColor DarkYellow
         }
     }
+    Set-StreamcloneBootstrapOverlayCache -Dir $Dir -Sha $masterSha
 }
 
 function Invoke-StreamcloneUpgrade {

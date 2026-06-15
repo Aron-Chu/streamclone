@@ -217,8 +217,10 @@ if [ "$SKIP_UP" = false ]; then
 fi
 
 if [ "$SKIP_SMOKE" = false ] && [ "$SKIP_UP" = false ]; then
-  echo "Running smoke checks..."
-  bash "$ROOT/scripts/smoke-core.sh"
+  echo "Waiting for tiered readiness..."
+  bash "$ROOT/scripts/lib/wait-stack.sh"
+  echo "Running smoke checks (readiness already verified)..."
+  bash "$ROOT/scripts/smoke-core.sh" --skip-readiness
 
   if [ "$needs_scraper" = true ] && { [ "$scraper_use_images" = "1" ] || [ -d "$(env_scraper_sibling_path)" ]; }; then
     if [ -z "${SCRAPER_SKIP_PREFLIGHT:-}" ]; then

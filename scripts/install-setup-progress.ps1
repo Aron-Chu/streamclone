@@ -189,7 +189,7 @@ try {
         if (-not (Wait-StreamcloneStackReadyWithProgress)) { throw 'services did not become ready' }
 
         Set-InstallProgress -Title 'Verifying install' -Detail 'Running quick health checks.'
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'scripts\smoke-core.ps1')
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'scripts\smoke-core.ps1') -SkipReadiness
         if ($LASTEXITCODE -ne 0) { throw 'smoke checks failed' }
     }
 

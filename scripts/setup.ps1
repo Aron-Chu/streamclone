@@ -175,8 +175,8 @@ if (-not $NoSmoke -and -not $NoUp) {
         Write-Host 'Setup failed: required readiness tier did not pass.' -ForegroundColor Red
         exit $LASTEXITCODE
     }
-    Write-Host 'Running smoke checks...'
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'smoke-core.ps1')
+    Write-Host 'Running smoke checks (readiness already verified)...'
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'smoke-core.ps1') -SkipReadiness
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'Setup failed: smoke checks did not pass.' -ForegroundColor Red
         exit $LASTEXITCODE

@@ -9,25 +9,46 @@ $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($Root)) {
     $Root = Split-Path -Parent $PSScriptRoot
 }
+$resolvedRoot = (Resolve-Path -LiteralPath $Root).Path
 
-$controlScript = Join-Path $PSScriptRoot 'setup-control.ps1'
-$pidFile = Join-Path $Root '.streamclone-setup-control.pid'
+$controlScript = Join-Path $resolvedRoot 'scripts\setup-control.ps1'
+if (-not (Test-Path $controlScript)) {
+    $controlScript = Join-Path $PSScriptRoot 'setup-control.ps1'
+}
+$pidFile = Join-Path $resolvedRoot '.streamclone-setup-control.pid'
 
-function Test-SetupControlHealth {
+function Get-SetupControlHealthInfo {
     param([int]$HealthPort = 9191)
     try {
         $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$HealthPort/health" -UseBasicParsing -TimeoutSec 2
         if ($resp.StatusCode -eq 200) {
-            $body = $resp.Content | ConvertFrom-Json
-            return [bool]$body.ok
+            return ($resp.Content | ConvertFrom-Json)
         }
     } catch { }
-    return $false
+    return $null
+}
+
+function Test-SetupControlHealth {
+    param([int]$HealthPort = 9191)
+    $body = Get-SetupControlHealthInfo -HealthPort $HealthPort
+    return ($null -ne $body -and [bool]$body.ok)
+}
+
+function Get-SetupControlDaemonPids {
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*setup-control.ps1*' } |
+        ForEach-Object { [int]$_.ProcessId }
+}
+
+function Stop-SetupControlListeners {
+    foreach ($procId in (Get-SetupControlDaemonPids)) {
+        try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch { }
+    }
 }
 
 function Test-SetupControlEnvStale {
     param([string]$StalePidFile)
-    $envFile = Join-Path $Root '.env'
+    $envFile = Join-Path $resolvedRoot '.env'
     if (-not (Test-Path $envFile)) { return $false }
     if (-not (Test-Path $StalePidFile)) { return $false }
     $raw = (Get-Content $StalePidFile -Raw).Trim()
@@ -48,21 +69,46 @@ function Test-SetupControlScriptStale {
     return ((Get-Item $controlScript).LastWriteTimeUtc -gt $proc.StartTime.ToUniversalTime())
 }
 
-function Stop-StaleSetupControl {
-    param([string]$StalePidFile)
-    if (-not (Test-Path $StalePidFile)) { return }
-    $raw = (Get-Content $StalePidFile -Raw).Trim()
-    if ($raw -match '^\d+$') {
-        $proc = Get-Process -Id ([int]$raw) -ErrorAction SilentlyContinue
-        if ($proc) {
-            try { Stop-Process -Id ([int]$raw) -Force -ErrorAction SilentlyContinue } catch { }
+function Test-SetupControlRootMismatch {
+    param(
+        [int]$HealthPort = 9191,
+        [string]$ExpectedPidFile
+    )
+    $health = Get-SetupControlHealthInfo -HealthPort $HealthPort
+    if (-not $health -or -not $health.ok) { return $false }
+
+    $healthRoot = [string]$health.root
+    if (-not [string]::IsNullOrWhiteSpace($healthRoot)) {
+        try {
+            $normalizedHealthRoot = (Resolve-Path -LiteralPath $healthRoot).Path
+            if ($normalizedHealthRoot -ne $resolvedRoot) { return $true }
+        } catch {
+            return $true
         }
     }
+
+    $daemonPids = @(Get-SetupControlDaemonPids)
+    if ($daemonPids.Count -eq 0) { return $false }
+    if (-not (Test-Path $ExpectedPidFile)) { return $true }
+
+    $raw = (Get-Content $ExpectedPidFile -Raw).Trim()
+    if ($raw -notmatch '^\d+$') { return $true }
+    return ([int]$raw -notin $daemonPids)
+}
+
+function Stop-StaleSetupControl {
+    param([string]$StalePidFile)
+    Stop-SetupControlListeners
+    if (-not (Test-Path $StalePidFile)) { return }
     Remove-Item $StalePidFile -Force -ErrorAction SilentlyContinue
 }
 
+$envStale = Test-SetupControlEnvStale -StalePidFile $pidFile
+$scriptStale = Test-SetupControlScriptStale -StalePidFile $pidFile
+$rootMismatch = Test-SetupControlRootMismatch -HealthPort $Port -ExpectedPidFile $pidFile
+
 if (Test-SetupControlHealth -HealthPort $Port) {
-    if (-not (Test-SetupControlEnvStale -StalePidFile $pidFile) -and -not (Test-SetupControlScriptStale -StalePidFile $pidFile)) {
+    if (-not $envStale -and -not $scriptStale -and -not $rootMismatch) {
         return
     }
     Stop-StaleSetupControl -StalePidFile $pidFile
@@ -72,7 +118,7 @@ if (Test-Path $pidFile) {
     Stop-StaleSetupControl -StalePidFile $pidFile
 }
 
-if (-not (Test-Path (Join-Path $Root '.env'))) {
+if (-not (Test-Path (Join-Path $resolvedRoot '.env'))) {
     Write-Warning 'setup-control not started: missing .env (run setup first).'
     return
 }
@@ -83,8 +129,8 @@ if (-not (Test-Path $controlScript)) {
 }
 
 Start-Process -FilePath 'powershell.exe' `
-    -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $controlScript, '-Port', "$Port") `
-    -WorkingDirectory $Root | Out-Null
+    -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $controlScript, '-Port', "$Port", '-Root', $resolvedRoot) `
+    -WorkingDirectory $resolvedRoot | Out-Null
 
 for ($i = 0; $i -lt 10; $i++) {
     Start-Sleep -Milliseconds 300

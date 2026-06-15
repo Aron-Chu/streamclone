@@ -85,7 +85,7 @@ if (-not $SkipSetup -and -not (Test-Path $envFile)) {
 & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'validate-env.ps1') -Profile $Profile -EnvFile $envFile 2>&1 | Out-Host
 $null = $LASTEXITCODE
 
-& (Join-Path $PSScriptRoot 'lib\wait-stack.ps1')
+& (Join-Path $PSScriptRoot 'lib\wait-stack.ps1') -SkipHLS
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 . (Join-Path $PSScriptRoot 'lib\env.ps1')
