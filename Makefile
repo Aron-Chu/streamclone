@@ -16,6 +16,7 @@ TWITCH_ACTION ?= sync
 TWITCH_CLIP_LOGIN ?= sodapoppin
 CLIPPER_PYTHON ?= python3
 PROFILE ?= core
+PORTS ?= 8090
 
 CODEGRAPH_VENV ?= .codegraph/.venv
 CODEGRAPH_PY ?= $(CODEGRAPH_VENV)/bin/python
@@ -35,7 +36,7 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote
 	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp \
 	docs-screenshots docs-media frontend-build frontend-restart frontend-logs \
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
-	preflight-deps start stop-user
+	preflight-deps start stop-user ensure-localhost
 
 help:
 	@printf 'Streamclone — common targets\n\n'
@@ -67,16 +68,19 @@ env:
 up app: env ensure-oauth
 	$(COMPOSE_CORE) up -d --build --remove-orphans
 	@$(MAKE) reload-env-if-stale
+	@$(MAKE) ensure-localhost PORTS=8090
 
 up-scraper: env ensure-oauth
 	$(COMPOSE_SCRAPER) up -d --build --remove-orphans
 	@$(MAKE) reload-env-if-stale
+	@$(MAKE) ensure-localhost PORTS=8090
 	@if [ -z "$$SCRAPER_SKIP_PREFLIGHT" ]; then $(MAKE) scraper-preflight; fi
 
 up-full: env ensure-oauth
 	$(COMPOSE_FULL) up -d --build --remove-orphans
 	@$(MAKE) reload-env-if-stale
 	@$(MAKE) ensure-clipper-auth
+	@$(MAKE) ensure-localhost PORTS=8090
 	@if [ -z "$$SCRAPER_SKIP_PREFLIGHT" ]; then $(MAKE) scraper-preflight; fi
 
 stop down:
@@ -97,6 +101,9 @@ reload-env: env
 
 reload-env-if-stale: env
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/reload-env-if-stale.ps1 -EnvFile $(ENV_FILE)
+
+ensure-localhost:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-localhost-relays.ps1 -Ports "$(PORTS)" || true
 
 ensure-oauth: env
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-oauth-env.ps1 -EnvFile $(ENV_FILE) || true
@@ -144,7 +151,8 @@ helm-up: helm-kubeconfig
 		-n $(HELM_NAMESPACE) --create-namespace $$values --wait
 	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-pulse-sync-token.sh
 	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh start all
-	@printf '\nGrafana: http://localhost:3000/d/streamclone-emote-pulse/emote-pulse (admin / devpulse)\n'
+	@$(MAKE) ensure-localhost PORTS=3000
+	@printf '\nGrafana: http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-24h&to=now (admin / devpulse)\n'
 	@printf 'Persistent on Docker Desktop: LoadBalancer → localhost (no port-forward tunnel).\n'
 
 helm-down:
@@ -183,10 +191,12 @@ helm-pulse-check: helm-kubeconfig
 		bash scripts/helm-pulse-check.sh
 
 helm-pulse: helm-up helm-pulse-wire
+	@$(MAKE) ensure-localhost PORTS=3000,8090
 
 helm-pulse-on: helm-kubeconfig
 	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh start all
-	@printf '\nGrafana: http://localhost:3000/d/streamclone-emote-pulse/emote-pulse (admin / devpulse)\n'
+	@$(MAKE) ensure-localhost PORTS=3000,8090
+	@printf '\nGrafana: http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-24h&to=now (admin / devpulse)\n'
 	@printf 'Docker Desktop: LoadBalancer on localhost — no tunnel needed when probe succeeds.\n'
 
 helm-pulse-watch: helm-kubeconfig
@@ -286,10 +296,13 @@ frontend-build:
 frontend-restart: env
 	$(COMPOSE_CORE) build frontend
 	$(COMPOSE_CORE) up -d --no-deps --force-recreate frontend local-proxy
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-setup-control.ps1
+	@$(MAKE) ensure-localhost PORTS=8090
 
 clipper-restart: env ensure-clipper-auth
 	$(COMPOSE_FULL) build clipper
 	$(COMPOSE_FULL) up -d --no-deps --force-recreate clipper local-proxy
+	@$(MAKE) ensure-localhost PORTS=8090
 
 frontend-logs: env
 	$(COMPOSE_CORE) logs -f frontend

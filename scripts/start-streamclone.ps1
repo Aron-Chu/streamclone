@@ -89,6 +89,7 @@ $null = $LASTEXITCODE
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 . (Join-Path $PSScriptRoot 'lib\env.ps1')
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-localhost-relays.ps1') -Ports 8090
 if (-not (Test-StreamcloneWebReachable -Url 'http://localhost:8090/' -TimeoutSec 3) -and (Test-StreamcloneWebReachable -Url (Get-StreamcloneAppUrl))) {
     Write-Host ''
     Write-Host 'Note: http://localhost:8090 fails on this PC (WSL port relay). Use http://127.0.0.1:8090/' -ForegroundColor Yellow

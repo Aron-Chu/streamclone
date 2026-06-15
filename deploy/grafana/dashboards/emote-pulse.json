@@ -1,0 +1,605 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Open Streamclone",
+      "tooltip": "Open the Streamclone app",
+      "type": "link",
+      "url": "http://localhost:8090/"
+    }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": [],
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group()\n  |> sum()",
+          "refId": "A"
+        }
+      ],
+      "title": "Emote uses",
+      "type": "stat"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "purple",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "max"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> aggregateWindow(every: 1m, fn: sum, createEmpty: false)\n  |> group()\n  |> max()",
+          "refId": "A"
+        }
+      ],
+      "title": "Peak chat/min",
+      "type": "stat"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "query": "base = from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n\ntotal = base |> filter(fn: (r) => r._field == \"total_emote_count\") |> group() |> sum() |> findRecord(fn: (key) => true, idx: 0)\nseventv = base |> filter(fn: (r) => r._field == \"seventv_emote_count\") |> group() |> sum() |> findRecord(fn: (key) => true, idx: 0)\narray.from(rows: [{_time: now(), _value: if total._value > 0 then float(v: seventv._value) / float(v: total._value) * 100.0 else 0.0}])",
+          "refId": "A"
+        }
+      ],
+      "title": "7TV share",
+      "type": "stat"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "green",
+                "value": 85
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "query": "minutes = uint(v: (uint(v: v.timeRangeStop) - uint(v: v.timeRangeStart)) / uint(v: 60000000000))\npoints = from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group(columns: [\"stream_id\"])\n  |> count()\n  |> group()\n  |> sum()\n  |> findRecord(fn: (key) => true, idx: 0)\narray.from(rows: [{_time: now(), _value: if minutes > 0 then float(v: points._value) / float(v: minutes) * 100.0 else 0.0}])",
+          "refId": "A"
+        }
+      ],
+      "title": "Data coverage",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 6,
+      "panels": [],
+      "title": "Investigation queue",
+      "type": "row"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 7,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => r._field == \"chat_count\" or r._field == \"total_emote_count\" or r._field == \"seventv_emote_count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group(columns: [\"channel_login\", \"stream_id\", \"_field\"])\n  |> sum()\n  |> pivot(rowKey: [\"channel_login\", \"stream_id\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({r with reaction_score_0_100: if r.chat_count + r.total_emote_count <= 0 then 0.0 else float(v: r.total_emote_count + r.seventv_emote_count) / float(v: r.chat_count + r.total_emote_count) * 100.0}))\n  |> sort(columns: [\"reaction_score_0_100\"], desc: true)\n  |> limit(n: 20)",
+          "refId": "A"
+        }
+      ],
+      "title": "Top streams by reaction score",
+      "type": "table"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 8,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group(columns: [\"channel_login\", \"stream_id\", \"provider\", \"emote_id\", \"emote_name\"])\n  |> sum()\n  |> group()\n  |> sort(columns: [\"_value\"], desc: true)\n  |> limit(n: 25)",
+          "refId": "A"
+        }
+      ],
+      "title": "Top emotes",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 9,
+      "panels": [],
+      "title": "Selected stream drilldown",
+      "type": "row"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => r._field == \"chat_count\" or r._field == \"total_emote_count\" or r._field == \"seventv_emote_count\" or r._field == \"viewer_max\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> yield(name: \"activity\")",
+          "refId": "A"
+        }
+      ],
+      "title": "Chat, emotes, 7TV, and viewers",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 11,
+      "panels": [],
+      "title": "Data quality and export health",
+      "type": "row"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "id": 12,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "query": "from(bucket: v.bucket)\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> group(columns: [\"channel_login\", \"stream_id\"])\n  |> last()\n  |> map(fn: (r) => ({channel_login: r.channel_login, stream_id: r.stream_id, last_export: r._time, minutes_since_export: int(v: (uint(v: now()) - uint(v: r._time)) / uint(v: 60000000000))}))\n  |> sort(columns: [\"minutes_since_export\"], desc: true)\n  |> limit(n: 50)",
+          "refId": "A"
+        }
+      ],
+      "title": "Latest exported streams",
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "streamclone",
+    "pulse",
+    "optional"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "InfluxDB",
+        "definition": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: v.bucket, tag: \"channel_login\", start: -30d)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Channel",
+        "multi": false,
+        "name": "channel",
+        "options": [],
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: v.bucket, tag: \"channel_login\", start: -30d)",
+        "refresh": 1,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All streams",
+          "value": "$__all"
+        },
+        "datasource": "InfluxDB",
+        "definition": "channelSel = \"${channel}\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -__STREAM_LIST_DAYS__d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"channel_login\", \"stream_id\"])\n  |> last()\n  |> group()\n  |> sort(columns: [\"stream_started\", \"_time\"], desc: true)\n  |> map(fn: (r) => ({\n      _value: r.stream_id,\n      _text: (if exists r.channel_login and r.channel_login != \"\" then r.channel_login + \" ? \" else \"\") +\n        (if exists r.stream_started and r.stream_started != \"\" then string(v: r.stream_started) + \" ? \" else \"\") +\n        (if exists r.stream_title and r.stream_title != \"\" then r.stream_title else r.stream_id)\n    }))\n  |> keep(columns: [\"_value\", \"_text\"])",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Stream",
+        "multi": false,
+        "name": "stream",
+        "options": [],
+        "query": "channelSel = \"${channel}\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -__STREAM_LIST_DAYS__d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"channel_login\", \"stream_id\"])\n  |> last()\n  |> group()\n  |> sort(columns: [\"stream_started\", \"_time\"], desc: true)\n  |> map(fn: (r) => ({\n      _value: r.stream_id,\n      _text: (if exists r.channel_login and r.channel_login != \"\" then r.channel_login + \" ? \" else \"\") +\n        (if exists r.stream_started and r.stream_started != \"\" then string(v: r.stream_started) + \" ? \" else \"\") +\n        (if exists r.stream_title and r.stream_title != \"\" then r.stream_title else r.stream_id)\n    }))\n  |> keep(columns: [\"_value\", \"_text\"])",
+        "refresh": 1,
+        "regex": "",
+        "sort": 1,
+        "type": "query",
+        "allValue": ".*"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Emote Pulse",
+  "uid": "streamclone-emote-pulse",
+  "version": 1,
+  "weekStart": ""
+}

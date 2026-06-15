@@ -44,7 +44,8 @@ Reinstalls and **Start** use `--pull missing` so already-downloaded images are n
 | **Core Watch** | Setup.exe / default install | **~383 MB** core GHCR images at `v0.1.4-rc1` (+ third-party on first compose up) | Docker Desktop running | Directory, live playback, chat, emotes, Helix/VOD stream history, TwitchTracker **summary** stats (avg/peak on stream rows) |
 | **Analytics** | **Start Analytics** in the app, `setup.ps1 -Profile scraper`, or compose `--profile scraper` | + scraper image (`ghcr.io/aron-chu/streamclone/scraper:${IMAGE_TAG}` when `SCRAPER_USE_IMAGES=1`) | Docker Desktop; source builds can also use a sibling [`streamclone-scraper`](https://github.com/Aron-Chu/streamclone-scraper) repo | Minute-level viewer charts on Analytics, reliable TwitchTracker sync |
 | **Clip Studio** | `--profile clipper` or **Start Clip Studio** in Stack status | + ~1 GB `clipper` image | Optional **Sign in** on localhost (no Twitch CLI) | Clip Studio at `/studio` |
-| **Full** | both profiles | Analytics + Clip Studio sizes combined | Scraper image or sibling repo; sign-in for clips | All optional features |
+| **Pulse Dashboards** | **Start Pulse** in Stack status or compose `--profile pulse` | + upstream `influxdb:2.7-alpine` and `grafana/grafana:11.5.0` images | Docker Desktop; synced Analytics rollups for populated panels | Optional Grafana dashboard layer only; in-app Analytics remains available without Grafana/Influx |
+| **Full** | Analytics + Clip Studio profiles | Analytics + Clip Studio sizes combined | Scraper image or sibling repo; sign-in for clips | All optional app features except Pulse, which stays separately opt-in |
 
 ### Optional Twitch sign-in (chat send, follows, Clip Studio)
 
@@ -187,7 +188,13 @@ Install and **Start** open **`http://localhost:8090/`** (the live directory). Th
 - **Clip Studio without clipper:** same pattern with **Start Clip Studio** on the error screen or Stack status.
 - Legacy `/welcome` URLs redirect to `/` and show the overlay once.
 
-Core Watch does not require scraper or clipper. Minute-level charts and Clip Studio are optional tiers — see [options.md](options.md).
+Core Watch does not require scraper, clipper, Grafana, or InfluxDB. Minute-level charts and Clip Studio are optional tiers, and **Pulse Dashboards** are a separate optional Grafana view over synced local stats — see [options.md](options.md) and [pulse-metrics.md](pulse-metrics.md).
+
+### Pulse Dashboards
+
+Pulse starts local InfluxDB on `127.0.0.1:18086` and Grafana on `http://localhost:3000`. It is useful for dashboard-style exploration of synced streams, top emotes, provider share, and data coverage. It does not replace the Analytics page and it is not required for `/analytics/{channel}`.
+
+Use **Stack status → Start Pulse** after Streamclone is running. First start creates the local Pulse volumes and recreates the analytics container with `TIMESERIES_ENABLED=true` so future rollup writes export to Influx. Existing synced streams may need a resync or new rollups before Grafana panels show data.
 
 ---
 

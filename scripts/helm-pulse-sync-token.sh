@@ -13,11 +13,49 @@ INFLUX_ORG="${PULSE_INFLUX_ORG:-streamclone}"
 INFLUX_BUCKET="${PULSE_INFLUX_BUCKET:-streamclone}"
 LEGACY_TOKEN="change-me-influx-token"
 
+docker_can_reach_url() {
+  local url="$1"
+  docker run --rm curlimages/curl:8.5.0 -sf -m 3 "${url}/health" >/dev/null 2>&1
+}
+
+wsl_primary_ip() {
+  hostname -I 2>/dev/null | awk '{print $1}'
+}
+
+resolve_influx_url_for_docker() {
+  local url
+  for url in \
+    "http://host.docker.internal:${PULSE_INFLUX_LOCAL_PORT}" \
+    "http://gateway.docker.internal:${PULSE_INFLUX_LOCAL_PORT}"; do
+    if docker_can_reach_url "$url"; then
+      echo "$url"
+      return 0
+    fi
+  done
+
+  if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then
+    local ip
+    ip="$(wsl_primary_ip)"
+    if [ -n "$ip" ]; then
+      url="http://${ip}:${PULSE_INFLUX_LOCAL_PORT}"
+      if docker_can_reach_url "$url"; then
+        echo "$url"
+        return 0
+      fi
+    fi
+  fi
+}
+
+influx_url="$(resolve_influx_url_for_docker || true)"
+if [ -z "$influx_url" ]; then
+  influx_url="http://host.docker.internal:${PULSE_INFLUX_LOCAL_PORT}"
+fi
+
 influx_write_probe() {
   local try_token="$1"
   local code
   code="$(docker run --rm curlimages/curl:8.5.0 -s -m 5 -o /dev/null -w '%{http_code}' \
-    -XPOST "http://host.docker.internal:${PULSE_INFLUX_LOCAL_PORT}/api/v2/write?org=${INFLUX_ORG}&bucket=${INFLUX_BUCKET}&precision=s" \
+    -XPOST "${influx_url}/api/v2/write?org=${INFLUX_ORG}&bucket=${INFLUX_BUCKET}&precision=s" \
     -H "Authorization: Token ${try_token}" \
     -H 'Content-Type: text/plain' \
     --data-binary 'stream_activity_1m,channel_login=probe,stream_id=probe chat_count=0i 1' 2>/dev/null || echo "000")"
@@ -27,10 +65,15 @@ influx_write_probe() {
 influx_query_code() {
   local try_token="$1"
   docker run --rm curlimages/curl:8.5.0 -s -m 5 -o /dev/null -w '%{http_code}' \
-    "http://host.docker.internal:${PULSE_INFLUX_LOCAL_PORT}/api/v2/query?org=${INFLUX_ORG}" \
+    "${influx_url}/api/v2/query?org=${INFLUX_ORG}" \
     -H "Authorization: Token ${try_token}" \
     -H "Content-Type: application/vnd.flux" \
-    --data-binary 'from(bucket:"streamclone") |> range(start: -1h) |> limit(n: 1)' 2>/dev/null || echo "000"
+    --data-binary "from(bucket:\"${INFLUX_BUCKET}\") |> range(start: -1h) |> limit(n: 1)" 2>/dev/null || echo "000"
+}
+
+restart_grafana() {
+  kubectl -n "$HELM_NAMESPACE" rollout restart deployment/"${HELM_RELEASE}-grafana" >/dev/null 2>&1 || return 0
+  kubectl -n "$HELM_NAMESPACE" rollout status deployment/"${HELM_RELEASE}-grafana" --timeout=90s >/dev/null 2>&1 || true
 }
 
 if ! helm status "$HELM_RELEASE" -n "$HELM_NAMESPACE" >/dev/null 2>&1; then
@@ -44,6 +87,8 @@ secret_query_code="$(influx_query_code "$secret_token")"
 legacy_query_code="$(influx_query_code "$LEGACY_TOKEN")"
 
 if [ "$secret_query_code" = "200" ]; then
+  bash scripts/helm-pulse-patch-secret.sh "$HELM_NAMESPACE" "$SECRET_NAME" "$secret_token" >/dev/null
+  restart_grafana
   echo "Influx token OK (Grafana secret matches PVC)."
   exit 0
 fi
@@ -61,10 +106,12 @@ if [ -z "$working_token" ]; then
 fi
 
 if [ "$working_token" = "$secret_token" ]; then
+  bash scripts/helm-pulse-patch-secret.sh "$HELM_NAMESPACE" "$SECRET_NAME" "$secret_token" >/dev/null
+  restart_grafana
   exit 0
 fi
 
 echo "Syncing Grafana Influx token to PVC token (${working_token})..."
 bash scripts/helm-pulse-patch-secret.sh "$HELM_NAMESPACE" "$SECRET_NAME" "$working_token"
-kubectl -n "$HELM_NAMESPACE" rollout restart deployment/"${HELM_RELEASE}-grafana" >/dev/null 2>&1 || true
+restart_grafana
 echo "Grafana datasource token synced (secret patch). Run 'make helm-pulse-wire' if .env INFLUXDB_TOKEN still differs."

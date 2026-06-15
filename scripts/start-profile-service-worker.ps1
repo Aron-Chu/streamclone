@@ -2,7 +2,7 @@
 # Queued optional-service compose start (runs when another compose up holds the lock).
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('scraper', 'clipper')]
+    [ValidateSet('scraper', 'clipper', 'pulse')]
     [string]$Service,
     [string]$Root = ''
 )
@@ -61,12 +61,17 @@ function Start-QueuedServiceCompose {
     }
 
     $envValues = Read-EnvKeyValueFile -Path $envPath
+    if ($Service -eq 'pulse') {
+        Enable-StreamclonePulseEnv -Root $Root
+        $envValues = Read-EnvKeyValueFile -Path $envPath
+    }
     $useImages = ($envValues['SCRAPER_USE_IMAGES'] -eq '1') -or
         ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1') -or
         (-not [string]::IsNullOrWhiteSpace($envValues['IMAGE_TAG']))
 
     $sourceBuild = ($Service -eq 'scraper') -and (Test-ScraperBuildFromSource -Root $Root)
-    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $Service -UseImages:$useImages -ScraperSourceBuild:$sourceBuild
+    $profileForCompose = if ($Service -eq 'pulse' -and (Test-StreamcloneHostPulseReady)) { 'core' } else { $Service }
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profileForCompose -UseImages:$useImages -ScraperSourceBuild:$sourceBuild
     $docker = Get-EnvDockerExe
     if (-not $docker) { throw 'Docker not found' }
 
@@ -79,7 +84,11 @@ function Start-QueuedServiceCompose {
     $args = $composeArgs + @('up', '-d', '--remove-orphans')
     if ($useImages -and -not $sourceBuild) { $args += '--pull', 'missing' }
     if ($sourceBuild) { $args += '--build' }
-    $args += $Service
+    if ($Service -eq 'pulse') {
+        $args = Get-StreamclonePulseComposeUpArgs -ComposeArgs $composeArgs -PullImages:$useImages -ScraperSourceBuild:$sourceBuild
+    } else {
+        $args += $Service
+    }
 
     $proc = Start-Process -FilePath $docker `
         -ArgumentList (Join-EnvProcessArguments -Arguments $args) `

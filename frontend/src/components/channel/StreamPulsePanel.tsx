@@ -1,8 +1,6 @@
-import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 
 import type {
-  AnalyticsMinuteRollup,
   AnalyticsStreamDetail,
   AnalyticsTopEmote,
   ChannelInsights,
@@ -13,16 +11,10 @@ import { normalizeBrowserOriginUrl } from '../../config.ts'
 import { useOptionalServices } from '../../hooks/useOptionalServices.ts'
 import {
   analyticsNotTrackedMessage,
-  formatPeakOffset,
   isLsfPending,
   isLsfWarming,
-  pickTopPeakOffsetSeconds,
-  rollupsWarmingMessage,
-  slicePulseRollups,
   summarizeLsfEmptyState,
 } from '../../utils/pulseEmptyState.ts'
-import ActivityWaveform from '../analytics/ActivityWaveform.tsx'
-import { LiveStatsBand } from '../analytics/LiveStatsBand.tsx'
 
 function fullCount(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return '—'
@@ -167,7 +159,6 @@ export interface StreamPulsePanelProps {
   trackLiveAnalytics: boolean
   trackAnalyticsPending: boolean
   onTrackAnalytics: (track: boolean) => void
-  liveActivityRollups: AnalyticsMinuteRollup[]
   autoUpdate: boolean
   onAutoUpdateChange: (next: boolean) => void
 }
@@ -185,7 +176,6 @@ function StreamPulsePanel({
   trackLiveAnalytics,
   trackAnalyticsPending,
   onTrackAnalytics,
-  liveActivityRollups,
   autoUpdate,
   onAutoUpdateChange,
 }: StreamPulsePanelProps) {
@@ -197,12 +187,6 @@ function StreamPulsePanel({
   const lsfPending = isLsfPending(insights?.sources)
   const clipSpike = insights?.clips?.[0]
   const topEmotes = liveAnalytics?.topEmotes?.slice(0, 8) ?? []
-
-  const pulseRollups = useMemo(
-    () => slicePulseRollups(liveActivityRollups),
-    [liveActivityRollups],
-  )
-  const peakOffset = useMemo(() => pickTopPeakOffsetSeconds(pulseRollups), [pulseRollups])
 
   return (
     <div className="flex h-full flex-col">
@@ -235,14 +219,6 @@ function StreamPulsePanel({
             </button>
           </label>
         </div>
-
-        <section>
-          <LiveStatsBand
-            login={channelLogin}
-            enabled
-            className="rounded-lg border border-white/10 bg-zinc-950/60 p-3"
-          />
-        </section>
 
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-2">
@@ -348,36 +324,6 @@ function StreamPulsePanel({
             <div className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-4 text-xs font-semibold text-zinc-500">
               No recent clips loaded for this channel.
             </div>
-          )}
-        </section>
-
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-xs font-black uppercase text-zinc-400">Chat spike correlation</h3>
-            <span className="text-[10px] font-semibold text-zinc-600">Last 15 minutes</span>
-          </div>
-          {!trackLiveAnalytics ? (
-            <div className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-4 text-xs font-semibold text-zinc-500">
-              {analyticsNotTrackedMessage()}
-            </div>
-          ) : pulseRollups.length === 0 ? (
-            <div className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-4 text-xs font-semibold text-zinc-500">
-              {rollupsWarmingMessage()}
-            </div>
-          ) : (
-            <>
-              {peakOffset != null ? (
-                <div className="text-[11px] font-semibold text-emerald-400">
-                  Peak at {formatPeakOffset(peakOffset)}
-                </div>
-              ) : null}
-              <ActivityWaveform
-                rollups={pulseRollups}
-                totalDurationSec={Math.max(pulseRollups.length * 60, 60)}
-                variant="player"
-                className="rounded-lg border border-white/10 bg-black/20 px-2 py-2"
-              />
-            </>
           )}
         </section>
 

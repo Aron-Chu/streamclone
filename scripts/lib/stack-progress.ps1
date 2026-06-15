@@ -6,7 +6,8 @@
 
 function Test-StreamcloneUseImagesFromRoot {
     param([string]$Root)
-    if (Test-Path (Join-Path $Root 'VERSION')) { return $true }
+  # Release installs set STREAMCLONE_USE_IMAGES=1 / IMAGE_TAG in .env (see release-bundle.env).
+  # Git checkouts also ship VERSION for tagging — that alone must not enable GHCR pulls.
     if ($env:STREAMCLONE_USE_IMAGES -eq '1') { return $true }
     $envPath = Join-Path $Root '.env'
     if (-not (Test-Path $envPath)) { return $false }
@@ -85,7 +86,8 @@ function Get-StreamcloneComposeArgs {
         [string]$Profile = '',
         [switch]$UseImages,
         [switch]$NoUseImages,
-        [switch]$ScraperSourceBuild
+        [switch]$ScraperSourceBuild,
+        [switch]$RelativePaths
     )
     if ([string]::IsNullOrWhiteSpace($Profile)) {
         $Profile = Get-StreamcloneProfileFromRoot -Root $Root
@@ -97,16 +99,30 @@ function Get-StreamcloneComposeArgs {
         $pullImages = $false
     }
     $scraperImages = Test-StreamcloneScraperUseImagesFromRoot -Root $Root
-    $args = @(
-        'compose', '--env-file', (Join-Path $Root '.env'),
-        '-f', (Join-Path $Root 'deploy\docker-compose.yml'),
-        '-f', (Join-Path $Root 'deploy\docker-compose.local-tunnel.yml')
-    )
-    if ($pullImages -or $scraperImages) {
-        $args += '-f', (Join-Path $Root 'deploy\docker-compose.release.yml')
-    }
-    if ($ScraperSourceBuild.IsPresent -or (Test-ScraperBuildFromSource -Root $Root)) {
-        $args += '-f', (Join-Path $Root 'deploy\docker-compose.scraper-source.yml')
+    if ($RelativePaths.IsPresent) {
+        $args = @(
+            'compose', '--env-file', '.env',
+            '-f', 'deploy/docker-compose.yml',
+            '-f', 'deploy/docker-compose.local-tunnel.yml'
+        )
+        if ($pullImages -or $scraperImages) {
+            $args += '-f', 'deploy/docker-compose.release.yml'
+        }
+        if ($ScraperSourceBuild.IsPresent -or (Test-ScraperBuildFromSource -Root $Root)) {
+            $args += '-f', 'deploy/docker-compose.scraper-source.yml'
+        }
+    } else {
+        $args = @(
+            'compose', '--env-file', (Join-Path $Root '.env'),
+            '-f', (Join-Path $Root 'deploy\docker-compose.yml'),
+            '-f', (Join-Path $Root 'deploy\docker-compose.local-tunnel.yml')
+        )
+        if ($pullImages -or $scraperImages) {
+            $args += '-f', (Join-Path $Root 'deploy\docker-compose.release.yml')
+        }
+        if ($ScraperSourceBuild.IsPresent -or (Test-ScraperBuildFromSource -Root $Root)) {
+            $args += '-f', (Join-Path $Root 'deploy\docker-compose.scraper-source.yml')
+        }
     }
     foreach ($p in (Get-EnvComposeProfiles -Profile $Profile)) {
         $args += '--profile', $p
@@ -202,4 +218,88 @@ function Wait-StreamcloneStackReady {
     Write-Host 'Streamclone did not become ready in time.' -ForegroundColor Red
     Show-StreamcloneContainerStatus
     return $false
+}
+
+function Test-StreamcloneHostServiceHealth {
+    param([string]$Url)
+    try {
+        $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3
+        return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300)
+    } catch {
+        return $false
+    }
+}
+
+function Test-StreamcloneHostPulseReady {
+    return (
+        (Test-StreamcloneHostServiceHealth -Url 'http://localhost:3000/api/health') -and
+        (Test-StreamcloneHostServiceHealth -Url 'http://localhost:18086/health')
+    )
+}
+
+function Enable-StreamclonePulseEnv {
+    param([string]$Root)
+    $envPath = Join-Path $Root '.env'
+    $pulseEnv = Join-Path $Root 'deploy\env\profile-pulse.env'
+    $defaults = if (Test-Path $pulseEnv) { Read-EnvKeyValueFile -Path $pulseEnv } else { @{} }
+    $current = if (Test-Path $envPath) { Read-EnvKeyValueFile -Path $envPath } else { @{} }
+    if (Test-StreamcloneHostPulseReady) {
+        Set-EnvFileValue -Path $envPath -Key 'TIMESERIES_ENABLED' -Value 'true'
+        Set-EnvFileValue -Path $envPath -Key 'TIMESERIES_BACKEND' -Value 'influxdb'
+        Set-EnvFileValue -Path $envPath -Key 'INFLUXDB_URL' -Value 'http://host.docker.internal:18086'
+        foreach ($key in @('INFLUXDB_ORG', 'INFLUXDB_BUCKET', 'TIMESERIES_WRITE_TIMEOUT_MS', 'TIMESERIES_QUEUE_SIZE')) {
+            $value = [string]$current[$key]
+            if ([string]::IsNullOrWhiteSpace($value)) { $value = [string]$defaults[$key] }
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                Set-EnvFileValue -Path $envPath -Key $key -Value $value
+            }
+        }
+        $token = [string]$current['INFLUXDB_TOKEN']
+        if ([string]::IsNullOrWhiteSpace($token)) { $token = [string]$defaults['INFLUXDB_TOKEN'] }
+        if (-not [string]::IsNullOrWhiteSpace($token)) {
+            Set-EnvFileValue -Path $envPath -Key 'INFLUXDB_TOKEN' -Value $token
+        }
+        return
+    }
+    foreach ($key in @(
+        'TIMESERIES_ENABLED',
+        'TIMESERIES_BACKEND',
+        'INFLUXDB_URL',
+        'INFLUXDB_ORG',
+        'INFLUXDB_BUCKET',
+        'TIMESERIES_WRITE_TIMEOUT_MS',
+        'TIMESERIES_QUEUE_SIZE',
+        'INFLUXDB_INIT_USERNAME',
+        'INFLUXDB_INIT_PASSWORD',
+        'GRAFANA_ADMIN_USER',
+        'GRAFANA_ADMIN_PASSWORD'
+    )) {
+        $value = [string]$defaults[$key]
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            Set-EnvFileValue -Path $envPath -Key $key -Value $value
+        }
+    }
+    $token = [string]$current['INFLUXDB_TOKEN']
+    if ([string]::IsNullOrWhiteSpace($token)) { $token = [string]$defaults['INFLUXDB_TOKEN'] }
+    if ([string]::IsNullOrWhiteSpace($token)) { $token = 'local-pulse-token' }
+    Set-EnvFileValue -Path $envPath -Key 'INFLUXDB_TOKEN' -Value $token
+}
+
+function Get-StreamclonePulseComposeUpArgs {
+    param(
+        [string[]]$ComposeArgs,
+        [bool]$PullImages,
+        [bool]$ScraperSourceBuild
+    )
+    $helmPulse = Test-StreamcloneHostPulseReady
+    $args = @($ComposeArgs) + @('up', '-d', '--remove-orphans', '--no-deps')
+    if ($PullImages -and -not $ScraperSourceBuild) { $args += '--pull', 'missing' }
+    if ($ScraperSourceBuild -or -not $PullImages) { $args += '--build' }
+    $args += '--force-recreate'
+    if ($helmPulse) {
+        $args += 'analytics'
+    } else {
+        $args += 'influxdb', 'grafana', 'analytics'
+    }
+    return $args
 }

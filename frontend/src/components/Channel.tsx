@@ -39,7 +39,6 @@ import { emoteLoadPercent, formatEmoteProviderProgress, sortChannelEmotesByUsage
 import { normalizeVodId } from '../utils/vodId'
 import { buildVodDeepLink, buildVodSeekTarget, parseVodAnalyticsContext } from '../utils/vodDeepLink'
 import { buildTwitchVodUrl } from '../utils/twitchVodUrl'
-import ActivityWaveform from './analytics/ActivityWaveform'
 import VodChatReplayPanel from './analytics/VodChatReplayPanel'
 import ChannelTabShell from './channel/ChannelTabShell'
 import ChannelVodsPanel from './channel/ChannelVodsPanel'
@@ -1115,7 +1114,7 @@ function ChannelMeta({
         </div>
       </div>
       {listeners != null && listeners > 0 ? (
-        <div className="border-t border-white/[0.06] pt-2 text-[11px] font-medium text-zinc-600">
+        <div className="mt-3 border-t border-white/[0.06] pt-2 text-[11px] font-medium text-zinc-600">
           {fullCount(listeners)} watching on this relay · {quality}
         </div>
       ) : null}
@@ -1801,17 +1800,6 @@ export default function Channel() {
     enabled: Boolean(channelLogin),
     staleTime: 60_000,
   })
-
-  const liveActivityRollups = useMemo(
-    () => (liveAnalytics.data?.rollups ?? []).filter(rollup => !rollup.missing),
-    [liveAnalytics.data?.rollups],
-  )
-  const showLiveActivityWaveform = Boolean(
-    !isVodPlayback
-    && details.data?.isLive
-    && trackLiveAnalytics
-    && liveActivityRollups.length > 0,
-  )
 
   const vodRollupsQuery = useQuery({
     queryKey: ['vod-activity-rollups', vodAnalyticsStreamId, channelLogin],
@@ -2617,24 +2605,6 @@ export default function Channel() {
                   trackAnalyticsPending={trackAnalyticsMutation.isPending}
                   onTrackAnalytics={track => trackAnalyticsMutation.mutate(track)}
                 />
-                {showLiveActivityWaveform ? (
-                  <div className="border-t border-white/10 bg-[#0a0a0e] px-3 py-2 lg:px-5">
-                    <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">Live chat activity</span>
-                      <span className="text-[10px] font-semibold text-zinc-600">{liveActivityRollups.length} min collected</span>
-                    </div>
-                    <ActivityWaveform
-                      rollups={liveActivityRollups}
-                      totalDurationSec={Math.max(liveActivityRollups.length * 60, 60)}
-                      variant="player"
-                      showLayerToggles
-                    />
-                  </div>
-                ) : details.data?.isLive && trackLiveAnalytics && !liveAnalytics.isLoading && liveActivityRollups.length === 0 ? (
-                  <div className="border-t border-white/10 bg-[#0a0a0e] px-3 py-2 text-[11px] font-semibold text-zinc-500 lg:px-5">
-                    Analytics tracking is on — the activity chart will appear after the first minute of rollups.
-                  </div>
-                ) : null}
                 </div>
             </div>
             <aside className={`${mobilePane === 'chat' ? 'flex' : 'hidden'} min-h-0 shrink-0 flex-col overflow-hidden border-t border-white/10 bg-[#111117] lg:flex lg:w-[400px] lg:border-l lg:border-t-0`}>
@@ -2696,7 +2666,6 @@ export default function Channel() {
                     trackLiveAnalytics={trackLiveAnalytics}
                     trackAnalyticsPending={trackAnalyticsMutation.isPending}
                     onTrackAnalytics={track => trackAnalyticsMutation.mutate(track)}
-                    liveActivityRollups={liveActivityRollups}
                     autoUpdate={pulseAutoUpdate}
                     onAutoUpdateChange={setPulseAutoUpdate}
                   />

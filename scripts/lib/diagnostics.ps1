@@ -15,6 +15,13 @@ function Test-StreamcloneHostServiceHealth {
     }
 }
 
+function Test-StreamcloneHostPulseReady {
+    return (
+        (Test-StreamcloneHostServiceHealth -Url 'http://localhost:3000/api/health') -and
+        (Test-StreamcloneHostServiceHealth -Url 'http://localhost:18086/health')
+    )
+}
+
 function Test-StreamcloneSetupControlHealth {
     param([int]$HealthPort = 9191)
     try {
@@ -160,6 +167,7 @@ function Get-StreamcloneDiagnostics {
             break
         }
     }
+    $pulseReady = Test-StreamcloneHostPulseReady
 
     $sibling = Get-EnvScraperSiblingPath
     $siblingPresent = (Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile'))
@@ -188,6 +196,7 @@ function Get-StreamcloneDiagnostics {
         optionalServices = @{
             scraper = if ($scraperReady) { 'ready' } else { 'offline' }
             clipper = if ($clipperReady) { 'ready' } else { 'offline' }
+            pulse   = if ($pulseReady) { 'ready' } else { 'offline' }
         }
         scraperSibling   = @{
             path    = $sibling
@@ -196,6 +205,7 @@ function Get-StreamcloneDiagnostics {
         recentStartLogs  = @{
             scraper = Get-StreamcloneStartLogTail -Root $Root -Service 'scraper'
             clipper = Get-StreamcloneStartLogTail -Root $Root -Service 'clipper'
+            pulse   = Get-StreamcloneStartLogTail -Root $Root -Service 'pulse'
         }
         suggestions      = @($suggestions)
     }

@@ -11,21 +11,24 @@ import {
 } from '../api'
 import { SETUP_CONTROL_AVAILABLE } from '../config'
 
+export type OptionalService = 'scraper' | 'clipper' | 'pulse'
+
 export type ServiceStartProgress = {
-  service: 'scraper' | 'clipper'
+  service: OptionalService
   percent: number
   phase: string
   detail: string
 }
 
-const START_LABELS: Record<'scraper' | 'clipper', string> = {
+const START_LABELS: Record<OptionalService, string> = {
   scraper: 'Analytics',
   clipper: 'Clip Studio',
+  pulse: 'Pulse Dashboards',
 }
 
 function serviceReadyFromDiagnostics(
   diagnostics: MetadataDiagnostics | undefined,
-  service: 'scraper' | 'clipper',
+  service: OptionalService,
 ): boolean {
   if (!diagnostics) return false
   return diagnostics.services[service] === 'ready'
@@ -33,7 +36,7 @@ function serviceReadyFromDiagnostics(
 
 function serviceReadyFromWelcome(
   welcome: SetupWelcome | undefined,
-  service: 'scraper' | 'clipper',
+  service: OptionalService,
 ): boolean {
   if (!welcome) return false
   return welcome.services[service] === 'ready'
@@ -42,23 +45,23 @@ function serviceReadyFromWelcome(
 function isServiceReady(
   welcome: SetupWelcome | undefined,
   diagnostics: MetadataDiagnostics | undefined,
-  service: 'scraper' | 'clipper',
+  service: OptionalService,
 ): boolean {
   return serviceReadyFromDiagnostics(diagnostics, service) || serviceReadyFromWelcome(welcome, service)
 }
 
 export function useOptionalServices(options: { probeControl?: boolean; pollActive?: boolean } = {}) {
   const queryClient = useQueryClient()
-  const [starting, setStarting] = useState<Set<'scraper' | 'clipper'>>(() => new Set())
+  const [starting, setStarting] = useState<Set<OptionalService>>(() => new Set())
   const [startProgressByService, setStartProgressByService] = useState<
-    Partial<Record<'scraper' | 'clipper', ServiceStartProgress>>
+    Partial<Record<OptionalService, ServiceStartProgress>>
   >({})
   const [actionError, setActionError] = useState<string | null>(null)
 
   const anyStarting = starting.size > 0
   const pollActive = options.pollActive ?? false
   const statusPollMs = anyStarting ? 2_000 : pollActive ? 15_000 : 60_000
-  const startProgress = startProgressByService.scraper ?? startProgressByService.clipper ?? null
+  const startProgress = startProgressByService.scraper ?? startProgressByService.clipper ?? startProgressByService.pulse ?? null
 
   const setup = useQuery({
     queryKey: ['setup-welcome'],
@@ -95,12 +98,16 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
       clipper: diag?.clipper === 'ready' || welcome?.clipper === 'ready'
         ? 'ready'
         : welcome?.clipper ?? diag?.clipper ?? 'offline',
+      pulse: diag?.pulse === 'ready' || welcome?.pulse === 'ready'
+        ? 'ready'
+        : welcome?.pulse ?? diag?.pulse ?? 'offline',
     } as const
   }, [setup.data?.services, diagnostics.data?.services])
 
   const controlReady = Boolean(control.data?.ok)
   const scraperOffline = services.scraper === 'offline'
   const clipperOffline = services.clipper === 'offline'
+  const pulseOffline = services.pulse === 'offline'
 
   const refreshStatus = async () => {
     setActionError(null)
@@ -113,7 +120,7 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
     ])
   }
 
-  const startService = async (service: 'scraper' | 'clipper') => {
+  const startService = async (service: OptionalService) => {
     setActionError(null)
     if (!controlReady) {
       setActionError(
@@ -152,11 +159,13 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
             phase: 'Docker compose running',
             detail: service === 'scraper'
               ? 'First start may build a large browser image (5–15 min).'
-              : 'Bringing optional containers online...',
+              : service === 'pulse'
+                ? 'Starting local Grafana and InfluxDB, then enabling export...'
+                : 'Bringing optional containers online...',
           },
         }))
       }
-      const maxAttempts = service === 'scraper' ? 450 : 45
+      const maxAttempts = service === 'scraper' ? 450 : service === 'pulse' ? 90 : 45
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise(resolve => window.setTimeout(resolve, 2000))
         let hostPercent = 18
@@ -215,7 +224,7 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
           }))
           return true
         }
-        if (hostPercent >= 82 && hostPhase === 'Container is up' && service === 'clipper') {
+        if (hostPercent >= 82 && hostPhase === 'Container is up' && service !== 'scraper') {
           setStartProgressByService(prev => ({
             ...prev,
             [service]: {
@@ -230,7 +239,9 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
       setActionError(
         service === 'scraper'
           ? 'Analytics is still building or starting. First install can take 5–15 minutes — leave Docker Desktop open and refresh status.'
-          : 'Clip Studio is still starting. Check Docker Desktop and retry in a minute.',
+          : service === 'pulse'
+            ? 'Pulse is still starting. Check Docker Desktop, then refresh Stack status in a minute.'
+            : 'Clip Studio is still starting. Check Docker Desktop and retry in a minute.',
       )
       return false
     } catch (err) {
@@ -253,7 +264,7 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
     }
   }
 
-  const isStarting = (service: 'scraper' | 'clipper') => starting.has(service)
+  const isStarting = (service: OptionalService) => starting.has(service)
 
   return {
     setup,
@@ -266,7 +277,8 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
     controlReady,
     scraperOffline,
     clipperOffline,
-    starting: isStarting('scraper') ? 'scraper' : isStarting('clipper') ? 'clipper' : null,
+    pulseOffline,
+    starting: isStarting('scraper') ? 'scraper' : isStarting('clipper') ? 'clipper' : isStarting('pulse') ? 'pulse' : null,
     startingServices: starting,
     startProgress,
     startProgressByService,

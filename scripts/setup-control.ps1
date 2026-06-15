@@ -99,7 +99,7 @@ function Format-StreamcloneStartDetail {
 
 function Start-StreamcloneComposeLockWatcher {
     param(
-        [ValidateSet('scraper', 'clipper')]
+        [ValidateSet('scraper', 'clipper', 'pulse')]
         [string]$Service,
         [int]$ProcessId
     )
@@ -198,9 +198,27 @@ function Get-SetupControlUseImages {
         (-not [string]::IsNullOrWhiteSpace($envValues['IMAGE_TAG']))
 }
 
+function Get-StreamcloneOptionalServiceLabel {
+    param([string]$Service)
+    switch ($Service) {
+        'scraper' { return 'Analytics' }
+        'clipper' { return 'Clip Studio' }
+        'pulse' { return 'Pulse Dashboards' }
+        default { return $Service }
+    }
+}
+
+function Get-StreamcloneOptionalComposeTargets {
+    param([string]$Service)
+    if ($Service -eq 'pulse') {
+        return @('influxdb', 'grafana', 'analytics')
+    }
+    return @($Service)
+}
+
 function Invoke-ProfileServiceUp {
     param(
-        [ValidateSet('scraper', 'clipper')]
+        [ValidateSet('scraper', 'clipper', 'pulse')]
         [string]$Service
     )
 
@@ -212,14 +230,24 @@ function Invoke-ProfileServiceUp {
     $profile = $Service
     if ($Service -eq 'scraper') {
         Ensure-ScraperSiblingRepo
+    } elseif ($Service -eq 'pulse') {
+        Enable-StreamclonePulseEnv -Root $Root
+        $script:envValues = Read-EnvKeyValueFile -Path $envPath
     }
 
     $useImages = Get-SetupControlUseImages
-    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile -UseImages:$useImages
-    $upArgs = @('up', '-d', '--remove-orphans')
-    if ($useImages) { $upArgs += '--pull', 'missing' }
-    $upArgs += $Service
-    $result = Invoke-EnvDockerCaptured -Arguments ($composeArgs + $upArgs)
+    $pullImages = $useImages -or (Test-StreamcloneUseImagesFromRoot -Root $Root)
+    $useWslDocker = Test-StreamcloneUseWslDockerCli -Root $Root
+    $profileForCompose = if ($Service -eq 'pulse' -and (Test-StreamcloneHostPulseReady)) { 'core' } else { $Service }
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profileForCompose -UseImages:$useImages -RelativePaths:$useWslDocker
+    if ($Service -eq 'pulse') {
+        $upArgs = Get-StreamclonePulseComposeUpArgs -ComposeArgs $composeArgs -PullImages:$pullImages -ScraperSourceBuild:$false
+    } else {
+        $upArgs = $composeArgs + @('up', '-d', '--remove-orphans')
+        if ($useImages) { $upArgs += '--pull', 'missing' }
+        $upArgs += Get-StreamcloneOptionalComposeTargets -Service $Service
+    }
+    $result = Invoke-EnvDockerCaptured -Arguments $upArgs -Root $Root
     $output = ($result.Output -join [Environment]::NewLine).Trim()
     if ($result.ExitCode -ne 0) {
         throw "docker compose failed: $output"
@@ -229,7 +257,7 @@ function Invoke-ProfileServiceUp {
 
 function Start-ProfileServiceUpAsync {
     param(
-        [ValidateSet('scraper', 'clipper')]
+        [ValidateSet('scraper', 'clipper', 'pulse')]
         [string]$Service
     )
 
@@ -247,8 +275,8 @@ function Start-ProfileServiceUpAsync {
         }
         if ($lock.service -ne $Service) {
             [void](Add-StreamcloneOptionalStartQueue -Service $Service)
-            $other = if ($lock.service -eq 'scraper') { 'Analytics' } else { 'Clip Studio' }
-            $self = if ($Service -eq 'scraper') { 'Analytics' } else { 'Clip Studio' }
+            $other = Get-StreamcloneOptionalServiceLabel -Service $lock.service
+            $self = Get-StreamcloneOptionalServiceLabel -Service $Service
             return "$self queued - will start automatically after $other finishes (Docker runs one compose step at a time)."
         }
     }
@@ -257,10 +285,16 @@ function Start-ProfileServiceUpAsync {
     if ($Service -eq 'scraper') {
         Ensure-ScraperSiblingRepo
         $scraperSourceBuild = Test-ScraperBuildFromSource -Root $Root
+    } elseif ($Service -eq 'pulse') {
+        Enable-StreamclonePulseEnv -Root $Root
+        $script:envValues = Read-EnvKeyValueFile -Path $envPath
     }
 
     $useImages = Get-SetupControlUseImages
-    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $Service -UseImages:$useImages -ScraperSourceBuild:$scraperSourceBuild
+    $pullImages = $useImages -or (Test-StreamcloneUseImagesFromRoot -Root $Root)
+    $useWslDocker = Test-StreamcloneUseWslDockerCli -Root $Root
+    $profileForCompose = if ($Service -eq 'pulse' -and (Test-StreamcloneHostPulseReady)) { 'core' } else { $Service }
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profileForCompose -UseImages:$useImages -RelativePaths:$useWslDocker -ScraperSourceBuild:$scraperSourceBuild
     $docker = Get-EnvDockerExe
     if (-not $docker) {
         throw "Docker is required. Install Docker Desktop and ensure 'docker.exe' is on PATH."
@@ -271,18 +305,35 @@ function Start-ProfileServiceUpAsync {
     foreach ($path in @($logFile, $errLog)) {
         if (Test-Path $path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
     }
-    $args = $composeArgs + @('up', '-d', '--remove-orphans')
-    if ($useImages -and -not $scraperSourceBuild) { $args += '--pull', 'missing' }
-    if ($scraperSourceBuild) { $args += '--build' }
-    $args += $Service
+    $args = if ($Service -eq 'pulse') {
+        Get-StreamclonePulseComposeUpArgs -ComposeArgs $composeArgs -PullImages:$pullImages -ScraperSourceBuild:$scraperSourceBuild
+    } else {
+        $serviceArgs = $composeArgs + @('up', '-d', '--remove-orphans')
+        if ($pullImages -and -not $scraperSourceBuild) { $serviceArgs += '--pull', 'missing' }
+        if ($scraperSourceBuild) { $serviceArgs += '--build' }
+        $serviceArgs += Get-StreamcloneOptionalComposeTargets -Service $Service
+        $serviceArgs
+    }
 
-    $proc = Start-Process -FilePath $docker `
-        -ArgumentList (Join-EnvProcessArguments -Arguments $args) `
-        -WorkingDirectory $Root `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $logFile `
-        -RedirectStandardError $errLog `
-        -PassThru
+    $proc = if ($useWslDocker) {
+        $wslRoot = Get-StreamcloneWslRootPath -Root $Root
+        if (-not $wslRoot) { throw 'Could not resolve WSL path for Streamclone root.' }
+        $bashCmd = "cd $(($wslRoot -replace "'", "'\\''")) && docker $(Join-EnvProcessArguments -Arguments $args)"
+        Start-Process -FilePath 'wsl.exe' `
+            -ArgumentList @('bash', '-lc', $bashCmd) `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $logFile `
+            -RedirectStandardError $errLog `
+            -PassThru
+    } else {
+        Start-Process -FilePath $docker `
+            -ArgumentList (Join-EnvProcessArguments -Arguments $args) `
+            -WorkingDirectory $Root `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $logFile `
+            -RedirectStandardError $errLog `
+            -PassThru
+    }
 
     Set-Content -LiteralPath $composeLockPath -Value (@{
         service = $Service
@@ -327,7 +378,7 @@ function Start-ScraperCamoufoxWarmupAsync {
 
 function Get-StreamcloneProfileStartStatus {
     param(
-        [ValidateSet('scraper', 'clipper')]
+        [ValidateSet('scraper', 'clipper', 'pulse')]
         [string]$Service
     )
 
@@ -355,6 +406,7 @@ function Get-StreamcloneProfileStartStatus {
                 $percent = 12
                 $phase = 'Queued'
                 $other = if ($Service -eq 'scraper') { 'Clip Studio' } else { 'Analytics' }
+                if ($Service -eq 'pulse') { $other = 'another optional service' }
                 $detail = "Waiting for $other to finish - $other compose will run first, then this service starts automatically."
                 break
             }
@@ -389,7 +441,7 @@ function Get-StreamcloneProfileStartStatus {
         $detail = Format-StreamcloneStartDetail -Service $Service -Detail $detail -Blob $blob
     }
 
-    $nameFilter = if ($Service -eq 'scraper') { 'streamclone-scraper' } else { 'streamclone-clipper' }
+    $nameFilter = if ($Service -eq 'scraper') { 'streamclone-scraper' } elseif ($Service -eq 'pulse') { 'streamclone-grafana' } else { 'streamclone-clipper' }
     $ps = Invoke-EnvDockerCaptured -Arguments @('ps', '--filter', "name=$nameFilter", '--format', '{{.Status}}')
     if ($ps.ExitCode -eq 0 -and $ps.Output) {
         $status = ($ps.Output | Select-Object -First 1).Trim()
@@ -504,10 +556,49 @@ function Invoke-SyncClipperAuth {
 
 Set-Content -Path $PidFile -Value $PID -NoNewline
 
-$listener = [System.Net.HttpListener]::new()
-$listener.Prefixes.Add("http://127.0.0.1:$Port/")
-$listener.Prefixes.Add("http://[::1]:$Port/")
-$listener.Start()
+function Ensure-SetupControlUrlAcl {
+    param([int]$ListenerPort = 9191)
+    $url = "http://+:$ListenerPort/"
+    $show = & netsh http show urlacl url=$url 2>&1 | Out-String
+    if ($show -match [regex]::Escape($url)) { return $true }
+    $user = if ($env:USERNAME) { "$env:USERDOMAIN\$env:USERNAME" } else { 'Everyone' }
+    $null = & netsh http add urlacl url=$url user=$user 2>&1
+    $show = & netsh http show urlacl url=$url 2>&1 | Out-String
+    return ($show -match [regex]::Escape($url))
+}
+
+function Start-SetupControlHttpListener {
+    param([int]$ListenerPort = 9191)
+    $wildcard = "http://+:$ListenerPort/"
+    if (Ensure-SetupControlUrlAcl -ListenerPort $ListenerPort) {
+        $listener = [System.Net.HttpListener]::new()
+        $listener.Prefixes.Add($wildcard)
+        try {
+            $listener.Start()
+            return $listener
+        } catch {
+            try { $listener.Close() } catch { }
+        }
+    }
+
+    $listener = [System.Net.HttpListener]::new()
+    $prefixes = [System.Collections.Generic.List[string]]::new()
+    $prefixes.Add("http://127.0.0.1:$ListenerPort/")
+    $prefixes.Add("http://[::1]:$ListenerPort/")
+    foreach ($prefix in $prefixes) {
+        if (-not $listener.Prefixes.Contains($prefix)) {
+            $listener.Prefixes.Add($prefix)
+        }
+    }
+    try {
+        $listener.Start()
+    } catch {
+        throw
+    }
+    return $listener
+}
+
+$listener = Start-SetupControlHttpListener -ListenerPort $Port
 
 try {
     while ($listener.IsListening) {
@@ -546,8 +637,10 @@ try {
                         @{ method = 'GET'; path = '/endpoints'; auth = $false; description = 'This route list' }
                         @{ method = 'GET'; path = '/start/scraper/status'; auth = $false; description = 'Async scraper profile start progress' }
                         @{ method = 'GET'; path = '/start/clipper/status'; auth = $false; description = 'Async clipper profile start progress' }
+                        @{ method = 'GET'; path = '/start/pulse/status'; auth = $false; description = 'Async Pulse profile start progress' }
                         @{ method = 'POST'; path = '/start/scraper'; auth = $true; description = 'Start analytics scraper compose profile' }
                         @{ method = 'POST'; path = '/start/clipper'; auth = $true; description = 'Start clipper compose profile' }
+                        @{ method = 'POST'; path = '/start/pulse'; auth = $true; description = 'Start Pulse Grafana/Influx compose profile' }
                         @{ method = 'POST'; path = '/sync-clipper-auth'; auth = $true; description = 'Merge signed-in Twitch tokens into clipper env' }
                     )
                     scripts = @(
@@ -563,7 +656,7 @@ try {
                 continue
             }
 
-            if ($request.HttpMethod -eq 'GET' -and $path -match '^/start/(scraper|clipper)/status$') {
+            if ($request.HttpMethod -eq 'GET' -and $path -match '^/start/(scraper|clipper|pulse)/status$') {
                 $service = $Matches[1]
                 $status = Get-StreamcloneProfileStartStatus -Service $service
                 Write-JsonResponse -Response $response -StatusCode 200 -Body @{
@@ -578,7 +671,7 @@ try {
                 continue
             }
 
-            if ($request.HttpMethod -eq 'POST' -and $path -match '^/start/(scraper|clipper)$') {
+            if ($request.HttpMethod -eq 'POST' -and $path -match '^/start/(scraper|clipper|pulse)$') {
                 if (-not (Test-SetupControlAuthorized -Request $request)) {
                     Write-JsonResponse -Response $response -StatusCode 401 -Body @{ ok = $false; error = 'unauthorized' }
                     continue

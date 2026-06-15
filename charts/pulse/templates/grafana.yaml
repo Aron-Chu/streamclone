@@ -21,7 +21,7 @@ data:
           organization: {{ .Values.influxdb.org | quote }}
           defaultBucket: {{ .Values.influxdb.bucket | quote }}
         secureJsonData:
-          token: $__file{/etc/pulse-secrets/influxdb-token}
+          token: ${PULSE_INFLUXDB_TOKEN}
       {{- end }}
   dashboards.yml: |
     apiVersion: 1
@@ -85,6 +85,11 @@ spec:
                   key: grafana-admin-password
             - name: GF_USERS_DEFAULT_THEME
               value: dark
+            - name: PULSE_INFLUXDB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pulse.secretName" . }}
+                  key: influxdb-token
           volumeMounts:
             - name: provisioning
               mountPath: /etc/grafana/provisioning/datasources/datasources.yml
@@ -94,9 +99,6 @@ spec:
               subPath: dashboards.yml
             - name: dashboards
               mountPath: /var/lib/grafana/dashboards
-            - name: secrets
-              mountPath: /etc/pulse-secrets
-              readOnly: true
       volumes:
         - name: provisioning
           configMap:
@@ -104,9 +106,6 @@ spec:
         - name: dashboards
           configMap:
             name: {{ include "pulse.fullname" . }}-grafana-dashboards
-        - name: secrets
-          secret:
-            secretName: {{ include "pulse.secretName" . }}
 ---
 apiVersion: v1
 kind: Service

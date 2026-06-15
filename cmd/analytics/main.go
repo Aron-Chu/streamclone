@@ -136,6 +136,7 @@ func main() {
 	handler := analytics.NewHandler(store, collector, helix, syncService)
 	heatmapCache := heatmap.NewCache(rdb, logger)
 	handler.WithHeatmapCache(heatmapCache)
+	handler.WithTimeseries(tsWriter)
 	chatReplayStore := chatreplay.NewStore(pool)
 	chatReplayHandler := chatreplay.NewHandler(chatReplayStore).WithLogger(logger)
 
