@@ -21,19 +21,15 @@ import {
   sortCategories,
   type CategorySort,
 } from '../utils/categorySort'
-import {
-  getStoredBrowseTab,
-  setStoredBrowseTab,
-  type BrowseTab,
-} from '../utils/browseTabs'
 import { buildHomeFeed, followedChannelToStream } from '../utils/homeFeed'
-import { CategoryBrowseGrid } from './directory/CategoryBrowseGrid'
-import { CategorySortBar } from './directory/CategorySortBar'
+import { CategoryShowcaseRow } from './directory/CategoryShowcaseRow'
+import { CategoryStreamShelfSection } from './directory/CategoryStreamShelfSection'
 import { DirectoryLayout } from './directory/DirectoryLayout'
 import { DirectorySection } from './directory/DirectorySection'
 import { DirectorySortBar } from './directory/DirectorySortBar'
 import { EmptyStreams } from './directory/EmptyStreams'
 import { RandomLiveHero } from './directory/RandomLiveHero'
+import { ShowAllLink } from './directory/ShowAllLink'
 import {
   CategoryGridSkeleton,
   SkeletonGrid,
@@ -44,6 +40,8 @@ import {
 
 const PAGE_SIZE = 30
 const CATEGORY_PAGE_SIZE = 42
+const HOME_CATEGORY_SHELVES = 5
+const HOME_CATEGORY_SHOWCASE = 16
 
 function ShowMoreButton({
   loading,
@@ -66,51 +64,6 @@ function ShowMoreButton({
   )
 }
 
-function BrowseTabButton({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean
-  children: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={`rounded-md px-3 py-1.5 text-sm font-bold transition ${
-        active
-          ? 'bg-[#9147ff] text-white'
-          : 'border border-[#3a3a3d] bg-[#18181b] text-zinc-300 hover:border-[#53535a] hover:bg-[#1f1f23] hover:text-white'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-
-function HomeBrowseTabs({
-  activeTab,
-  onChange,
-}: {
-  activeTab: BrowseTab
-  onChange: (tab: BrowseTab) => void
-}) {
-  return (
-    <div className="flex items-center gap-2" role="tablist" aria-label="Browse">
-      <BrowseTabButton active={activeTab === 'categories'} onClick={() => onChange('categories')}>
-        Categories
-      </BrowseTabButton>
-      <BrowseTabButton active={activeTab === 'live'} onClick={() => onChange('live')}>
-        Live Channels
-      </BrowseTabButton>
-    </div>
-  )
-}
-
 export default function Directory() {
   const [q, setQ] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null)
@@ -122,17 +75,11 @@ export default function Directory() {
   useThemeEffect(settings.theme)
 
   const [sort, setSort] = useState<DirectorySort>(() => getStoredDirectorySort())
-  const [categorySort, setCategorySort] = useState<CategorySort>('viewers')
-  const [browseTab, setBrowseTab] = useState<BrowseTab>(() => getStoredBrowseTab())
+  const [categorySort] = useState<CategorySort>('viewers')
 
   const handleSortChange = (value: DirectorySort) => {
     setSort(value)
     setStoredDirectorySort(value)
-  }
-
-  const handleBrowseTabChange = (value: BrowseTab) => {
-    setBrowseTab(value)
-    setStoredBrowseTab(value)
   }
 
   const handleSearchChange = (value: string) => {
@@ -176,7 +123,7 @@ export default function Directory() {
     queryFn: ({ pageParam }) => getCategoriesPage({ limit: CATEGORY_PAGE_SIZE, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: lastPage => (lastPage.cursor ? lastPage.cursor : undefined),
-    enabled: homeMode && browseTab === 'categories',
+    enabled: homeMode,
   })
 
   const followed = useQuery({
@@ -223,15 +170,9 @@ export default function Directory() {
     [browseCategories, categorySort],
   )
 
-  const shownBrowseStreams = useMemo(
-    () => sortDirectoryStreams(topStreams, sort),
-    [topStreams, sort],
-  )
-
-  const rawSearchStreams = searchResults.data?.streams ?? []
-  const shownSearchStreams = useMemo(
-    () => sortDirectoryStreams(rawSearchStreams, sort),
-    [rawSearchStreams, sort],
+  const homeCategoryShelves = useMemo(
+    () => shownBrowseCategories.slice(0, HOME_CATEGORY_SHELVES),
+    [shownBrowseCategories],
   )
 
   const selectedCategoryStreams = useMemo(
@@ -244,6 +185,12 @@ export default function Directory() {
     [selectedCategoryStreams, sort],
   )
 
+  const rawSearchStreams = searchResults.data?.streams ?? []
+  const shownSearchStreams = useMemo(
+    () => sortDirectoryStreams(rawSearchStreams, sort),
+    [rawSearchStreams, sort],
+  )
+
   const loading = query ? searchResults.isLoading : streamsQuery.isLoading
   const error = query ? searchResults.error : streamsQuery.error
 
@@ -251,6 +198,7 @@ export default function Directory() {
     <DirectoryLayout
       searchValue={q}
       onSearchChange={handleSearchChange}
+      showBrowseLink
     >
       {homeMode ? (
         <>
@@ -284,75 +232,28 @@ export default function Directory() {
           </DirectorySection>
 
           <DirectorySection
-            title="Browse"
-            subtitle={browseTab === 'categories' ? 'Categories sorted by live viewers' : 'Live channels sorted by viewers'}
-            action={
-              <div className="flex flex-col items-end gap-2">
-                <div className="flex flex-wrap items-center gap-3">
-                  <HomeBrowseTabs activeTab={browseTab} onChange={handleBrowseTabChange} />
-                  {browseTab === 'categories' ? (
-                    <CategorySortBar sort={categorySort} onSortChange={setCategorySort} />
-                  ) : (
-                    <DirectorySortBar sort={sort} onSortChange={handleSortChange} />
-                  )}
-                </div>
-                {browseTab === 'categories' && categorySort === 'name' ? (
-                  <p className="text-xs text-zinc-500">Name sort applies to loaded categories only</p>
-                ) : null}
-              </div>
-            }
+            title="Categories"
+            subtitle="Browse games and categories"
+            action={<ShowAllLink to="/browse" />}
           >
-            {browseTab === 'categories' ? (
-              categoriesQuery.error ? (
-                <div className="rounded-md border border-red-400/30 bg-red-500/10 p-5 text-sm font-semibold text-red-100">
-                  Metadata service is not responding yet.
-                </div>
-              ) : categoriesQuery.isLoading ? (
-                <CategoryGridSkeleton />
-              ) : shownBrowseCategories.length ? (
-                <>
-                  <CategoryBrowseGrid
-                    categories={shownBrowseCategories}
-                    onSelect={category => {
-                      setQ('')
-                      setSelectedCategory(category)
-                    }}
-                  />
-                  {categoriesQuery.hasNextPage ? (
-                    <ShowMoreButton
-                      loading={categoriesQuery.isFetchingNextPage}
-                      onClick={() => categoriesQuery.fetchNextPage()}
-                    />
-                  ) : null}
-                </>
-              ) : (
-                <div className="grid min-h-64 place-items-center rounded-md bg-[#18181b] px-6 text-center">
-                  <div>
-                    <div className="text-lg font-bold text-white">No categories loaded yet</div>
-                    <div className="mt-2 text-sm text-zinc-400">Categories will appear when metadata finishes loading.</div>
-                  </div>
-                </div>
-              )
-            ) : error ? (
+            {categoriesQuery.error ? (
               <div className="rounded-md border border-red-400/30 bg-red-500/10 p-5 text-sm font-semibold text-red-100">
                 Metadata service is not responding yet.
               </div>
-            ) : loading ? (
-              <SkeletonGrid />
-            ) : shownBrowseStreams.length ? (
-              <>
-                <StreamGrid streams={shownBrowseStreams} />
-                {streamsQuery.hasNextPage ? (
-                  <ShowMoreButton
-                    loading={streamsQuery.isFetchingNextPage}
-                    onClick={() => streamsQuery.fetchNextPage()}
-                  />
-                ) : null}
-              </>
+            ) : categoriesQuery.isLoading ? (
+              <CategoryGridSkeleton />
+            ) : shownBrowseCategories.length ? (
+              <CategoryShowcaseRow categories={shownBrowseCategories.slice(0, HOME_CATEGORY_SHOWCASE)} />
             ) : (
-              <EmptyStreams />
+              <div className="grid min-h-32 place-items-center rounded-md bg-[#18181b] px-6 text-center">
+                <div className="text-sm text-zinc-400">Categories will appear when metadata finishes loading.</div>
+              </div>
             )}
           </DirectorySection>
+
+          {homeCategoryShelves.map(category => (
+            <CategoryStreamShelfSection key={category.id} category={category} />
+          ))}
         </>
       ) : selectedCategory && !query ? (
         <DirectorySection

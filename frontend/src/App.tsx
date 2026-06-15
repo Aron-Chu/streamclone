@@ -7,6 +7,7 @@ const Channel = lazy(() => import('./components/Channel'))
 const Analytics = lazy(() => import('./components/Analytics'))
 const ClipStudio = lazy(() => import('./components/ClipStudio'))
 const ClipStudioIndex = lazy(() => import('./components/ClipStudioIndex'))
+const BrowsePage = lazy(() => import('./components/BrowsePage'))
 
 function RouteLoadingSkeleton() {
   return (
@@ -63,6 +64,9 @@ export default function App() {
         <Routes>
           <Route path="/welcome" element={<Navigate to="/" replace state={{ showOnboarding: true }} />} />
           <Route path="/" element={<Directory />} />
+          <Route path="/browse" element={<BrowsePage />} />
+          <Route path="/browse/live" element={<BrowsePage />} />
+          <Route path="/browse/category/:categoryId" element={<BrowsePage />} />
           <Route path="/c/:login" element={<Channel />} />
           <Route path="/analytics/:login" element={<Analytics />} />
           <Route path="/analytics/:login/:streamId" element={<Analytics />} />
