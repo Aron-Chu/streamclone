@@ -109,6 +109,7 @@ Windows installer / bootstrap / `%USERPROFILE%\streamclone` lifecycle. End-user 
 | 2026-06-13 | `4bb1298` | Bootstrap from `%TEMP%`: load `env.ps1` from bootstrap lib dir, not `%TEMP%\lib`; same-version reinstall without re-downloading ZIP |
 | 2026-06-13 | `966c6b0` | Fetch bootstrap and script overlay by GitHub commit SHA (raw `/master/` CDN was stale) |
 | 2026-06-13 | `a67bd05` | Repair `deploy/Caddyfile.local-tunnel` when Docker created a directory (broke `local-proxy` / `:8090`) |
+| 2026-06-15 | `fc6406c` | Release `Install Streamclone.cmd` asset called `/releases/latest`, so rc1 downloads pulled v0.2.10; package step now pins `-Version` per tag |
 
 ## When adding new docs
 
