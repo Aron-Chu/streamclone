@@ -37,13 +37,13 @@ If Docker Desktop is not running during uninstall, Streamclone can defer Docker 
 
 ## Optional Features
 
-Core Watch is installed by default. Optional tiers can be started from the app or setup profiles:
+Core Watch is installed by default. Optional tiers can be started from the app. Analytics and Clip Studio also have setup profiles for scripted installs:
 
 | Tier | Adds | How to start |
 |------|------|--------------|
 | Analytics | minute-level TwitchTracker charts | **Start Analytics** or scraper profile |
 | Clip Studio | `/studio` clip workflow | **Start Clip Studio** or clipper profile |
-| Pulse | Grafana/Influx dashboards | **Start Pulse** or pulse profile |
+| Pulse | Grafana/Influx dashboards | **Start Pulse** from Stack status |
 | Full | Analytics + Clip Studio | full profile |
 
 Details: [options.md](options.md). Scraper details: [scraper-cloudflare-and-proxy.md](scraper-cloudflare-and-proxy.md).

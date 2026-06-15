@@ -21,6 +21,8 @@ Analytics turns Twitch stream history, viewer data, chat rollups, emotes, VOD co
 
 Pulse is optional Grafana/Influx over local Analytics rollups. In-app Analytics remains canonical.
 
+For release installs, Pulse readiness is gated through Stack status: analytics should backfill existing local minute rollups into Influx when timeseries is enabled, writes must be idempotent, and the ready state should wait for Grafana, Influx, analytics timeseries, and backfill completion.
+
 ## Codegraph Hints
 
 - `get_blast_radius("mergeMinuteRollups")`

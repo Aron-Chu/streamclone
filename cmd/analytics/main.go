@@ -63,6 +63,36 @@ func main() {
 	}()
 
 	store := analytics.NewStore(pool).WithTelemetry(tsWriter)
+	if cfg.TimeseriesEnabled && cfg.TimeseriesBackfillOnStart {
+		status := tsWriter.Status()
+		if status.Configured {
+			go func() {
+				deadline := time.Now().Add(2 * time.Minute)
+				for attempt := 1; ; attempt++ {
+					backfillCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+					logger.Info("time-series backfill started", "attempt", attempt)
+					summary, err := store.BackfillTimeseries(backfillCtx, 500)
+					cancel()
+					if err == nil {
+						logger.Info("time-series backfill completed", "streams", summary.StreamCount, "rollups", summary.RollupCount, "exported", summary.ExportedCount)
+						return
+					}
+					if time.Now().After(deadline) {
+						logger.Warn("time-series backfill failed", "attempt", attempt, "err", err)
+						return
+					}
+					delay := time.Duration(attempt*2) * time.Second
+					if delay > 10*time.Second {
+						delay = 10 * time.Second
+					}
+					logger.Warn("time-series backfill attempt failed; retrying", "attempt", attempt, "retryIn", delay.String(), "err", err)
+					time.Sleep(delay)
+				}
+			}()
+		} else {
+			logger.Warn("time-series backfill skipped; writer is not configured", "state", status.State, "err", status.LastError)
+		}
+	}
 	helix := analytics.NewHelixClient(
 		cfg.TwitchAPIURL,
 		cfg.TwitchTokenURL,

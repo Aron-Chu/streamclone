@@ -210,7 +210,7 @@ function Get-StreamcloneOptionalServiceLabel {
 
 function Get-StreamcloneOptionalComposeTargets {
     param([string]$Service)
-    if ($Service -eq 'pulse') {
+    if ($Service -eq 'pulse' -and $phase -ne 'Docker reported an error') {
         return @('influxdb', 'grafana', 'analytics')
     }
     return @($Service)
@@ -459,6 +459,60 @@ function Get-StreamcloneProfileStartStatus {
         }
     }
 
+    if ($Service -eq 'pulse') {
+        if (-not (Test-StreamcloneHostPulseReady)) {
+            $percent = [math]::Max($percent, 86)
+            $phase = 'Waiting for Grafana and InfluxDB'
+            $detail = 'Waiting for Grafana on localhost:3000 and InfluxDB on localhost:18086...'
+        } else {
+            $ts = Get-StreamclonePulseTimeseriesStatus
+            if ($null -eq $ts) {
+                $percent = [math]::Max($percent, 88)
+                $phase = 'Waiting for analytics export'
+                $detail = 'Grafana and InfluxDB are up - waiting for Analytics to report Pulse export status.'
+            } elseif (($ts.enabled -ne $true) -or ($ts.configured -ne $true)) {
+                $percent = [math]::Max($percent, 90)
+                $phase = 'Enabling analytics export'
+                $detail = 'Analytics is restarting with InfluxDB export enabled.'
+            } else {
+                $backfillState = [string]$ts.backfillState
+                $rollupCount = 0L
+                $exportedCount = 0L
+                if ($null -ne $ts.backfillRollups) { $rollupCount = [int64]$ts.backfillRollups }
+                if ($null -ne $ts.backfillExported) { $exportedCount = [int64]$ts.backfillExported }
+                if ($backfillState -eq 'running') {
+                    $ratio = if ($rollupCount -gt 0) { [math]::Min(1.0, $exportedCount / [double]$rollupCount) } else { 0.5 }
+                    $percent = [math]::Max($percent, [int](90 + (8 * $ratio)))
+                    $phase = 'Backfilling analytics'
+                    $detail = if ($rollupCount -gt 0) {
+                        "Exported $exportedCount / $rollupCount local rollups to InfluxDB."
+                    } else {
+                        'Scanning local analytics history for Pulse backfill...'
+                    }
+                } elseif ($backfillState -eq 'failed') {
+                    $percent = 5
+                    $phase = 'Analytics export failed'
+                    $detail = [string]$ts.backfillLastError
+                    if ([string]::IsNullOrWhiteSpace($detail)) { $detail = [string]$ts.lastError }
+                    if ([string]::IsNullOrWhiteSpace($detail)) { $detail = 'Pulse backfill failed; check analytics container logs.' }
+                } elseif (([string]$ts.state -eq 'ready') -and ([string]::IsNullOrWhiteSpace($backfillState) -or $backfillState -eq 'completed')) {
+                    $percent = 100
+                    $phase = 'Ready'
+                    $detail = 'Pulse dashboards are ready - Grafana, InfluxDB, analytics export, and backfill are online.'
+                } elseif ([string]$ts.state -eq 'degraded') {
+                    $percent = 5
+                    $phase = 'Analytics export degraded'
+                    $detail = [string]$ts.lastError
+                    if ([string]::IsNullOrWhiteSpace($detail)) { $detail = 'InfluxDB export is degraded; check analytics container logs.' }
+                } else {
+                    $percent = [math]::Max($percent, 92)
+                    $phase = 'Waiting for analytics export'
+                    $detail = "Timeseries state: $($ts.state); backfill: $backfillState"
+                }
+            }
+        }
+    }
+
     $warmup = $null
     if ($Service -eq 'scraper') {
         $warmupLog = Join-Path $Root '.streamclone-scraper-warmup.log'
@@ -637,10 +691,10 @@ try {
                         @{ method = 'GET'; path = '/endpoints'; auth = $false; description = 'This route list' }
                         @{ method = 'GET'; path = '/start/scraper/status'; auth = $false; description = 'Async scraper profile start progress' }
                         @{ method = 'GET'; path = '/start/clipper/status'; auth = $false; description = 'Async clipper profile start progress' }
-                        @{ method = 'GET'; path = '/start/pulse/status'; auth = $false; description = 'Async Pulse profile start progress' }
+                        @{ method = 'GET'; path = '/start/pulse/status'; auth = $false; description = 'Async Pulse service start progress' }
                         @{ method = 'POST'; path = '/start/scraper'; auth = $true; description = 'Start analytics scraper compose profile' }
                         @{ method = 'POST'; path = '/start/clipper'; auth = $true; description = 'Start clipper compose profile' }
-                        @{ method = 'POST'; path = '/start/pulse'; auth = $true; description = 'Start Pulse Grafana/Influx compose profile' }
+                        @{ method = 'POST'; path = '/start/pulse'; auth = $true; description = 'Start Pulse Grafana/Influx services' }
                         @{ method = 'POST'; path = '/sync-clipper-auth'; auth = $true; description = 'Merge signed-in Twitch tokens into clipper env' }
                     )
                     scripts = @(

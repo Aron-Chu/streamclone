@@ -9,10 +9,9 @@ Core Watch is the default: directory, live playback, chat read, emotes, basic st
 | `core` | Directory, playback, chat, emotes | Default |
 | `scraper` | TwitchTracker minute charts | Uses optional scraper repo/image |
 | `clipper` | Clip Studio at `/studio` | Sign in for Twitch clip creation |
-| `pulse` | Grafana + Influx dashboards | Optional dashboard layer |
 | `full` | Scraper + clipper | Does not include Pulse |
 
-Start optional tiers from the app, or with setup:
+Start Analytics, Clip Studio, and Pulse from Stack status in the app. Use setup profiles when scripting Analytics or Clip Studio installs:
 
 ```powershell
 powershell -File scripts\setup.ps1 -Profile full
@@ -44,7 +43,7 @@ See [scraper-cloudflare-and-proxy.md](scraper-cloudflare-and-proxy.md) for Cloud
 
 ## Pulse Dashboards
 
-Pulse exports local Analytics rollups to InfluxDB 2.7 and Grafana 11.5.
+Pulse is an optional local dashboard layer started with **Start Pulse** from Stack status. It exports local Analytics rollups to InfluxDB 2.7 and Grafana 11.5, then opens the Grafana dashboard from in-app Analytics.
 
 Canonical measurements:
 

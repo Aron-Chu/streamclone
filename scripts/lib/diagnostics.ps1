@@ -167,7 +167,7 @@ function Get-StreamcloneDiagnostics {
             break
         }
     }
-    $pulseReady = Test-StreamcloneHostPulseReady
+    $pulseReady = Test-StreamclonePulseReady
 
     $sibling = Get-EnvScraperSiblingPath
     $siblingPresent = (Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile'))

@@ -62,7 +62,8 @@ export function pickSyncedLiveStreamTarget(
       : combinedStreams[0]
     const collectorIsStale = !liveRow || !streamHasSyncedMinutes(liveRow)
     const newestSynced = synced[0]
-    if (collectorIsStale && newestSynced && isRecentSyncedSession(newestSynced)) {
+    const referenceMs = streamReferenceTimeMs(liveRow) ?? newestStreamReferenceTimeMs(combinedStreams) ?? Date.now()
+    if (collectorIsStale && newestSynced && isRecentSyncedSession(newestSynced, referenceMs)) {
       return newestSynced
     }
     return undefined
@@ -72,9 +73,28 @@ export function pickSyncedLiveStreamTarget(
 }
 
 /** Long streams stay "live" for many hours; allow redirect for recent synced sessions. */
-function isRecentSyncedSession(stream: AnalyticsStream, nowMs = Date.now()): boolean {
+function isRecentSyncedSession(stream: AnalyticsStream, referenceMs = Date.now()): boolean {
   if (!stream.startedAt) return false
   const started = Date.parse(stream.startedAt)
   if (Number.isNaN(started)) return false
-  return nowMs-started < 48 * 60 * 60 * 1000
+  return referenceMs-started < 48 * 60 * 60 * 1000
+}
+
+function streamReferenceTimeMs(stream?: AnalyticsStream): number | undefined {
+  for (const value of [stream?.endedAt, stream?.lastSeenAt, stream?.startedAt]) {
+    if (!value) continue
+    const parsed = Date.parse(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function newestStreamReferenceTimeMs(streams: AnalyticsStream[]): number | undefined {
+  let newest: number | undefined
+  for (const stream of streams) {
+    const parsed = streamReferenceTimeMs(stream)
+    if (parsed === undefined) continue
+    if (newest === undefined || parsed > newest) newest = parsed
+  }
+  return newest
 }

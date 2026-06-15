@@ -29,6 +29,14 @@ type streamMeta struct {
 	startedAt time.Time
 }
 
+const defaultTimeseriesBackfillBatchSize = 500
+
+type TimeseriesBackfillSummary struct {
+	StreamCount   uint64
+	RollupCount   uint64
+	ExportedCount uint64
+}
+
 func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
 }
@@ -873,6 +881,130 @@ func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rol
 	}
 	s.enqueueRollupTelemetry(ctx, streamID, rollups)
 	return nil
+}
+
+func (s *Store) BackfillTimeseries(ctx context.Context, batchSize int) (TimeseriesBackfillSummary, error) {
+	var summary TimeseriesBackfillSummary
+	if s == nil || s.db == nil || s.telemetry == nil {
+		return summary, nil
+	}
+	if batchSize <= 0 {
+		batchSize = defaultTimeseriesBackfillBatchSize
+	}
+	reporter, _ := s.telemetry.(timeseries.BackfillReporter)
+
+	var streamCount, rollupCount int64
+	err := s.db.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT r.stream_id), COUNT(*)
+		FROM analytics_minute_rollups r
+		JOIN analytics_streams s ON s.stream_id = r.stream_id
+		WHERE COALESCE(s.login, '') <> ''`).Scan(&streamCount, &rollupCount)
+	if err != nil {
+		if reporter != nil {
+			reporter.StartBackfill(0, 0)
+			reporter.FinishBackfill(err)
+		}
+		return summary, err
+	}
+	if streamCount > 0 {
+		summary.StreamCount = uint64(streamCount)
+	}
+	if rollupCount > 0 {
+		summary.RollupCount = uint64(rollupCount)
+	}
+	if reporter != nil {
+		reporter.StartBackfill(summary.StreamCount, summary.RollupCount)
+	}
+	finish := func(err error) (TimeseriesBackfillSummary, error) {
+		if reporter != nil {
+			reporter.FinishBackfill(err)
+		}
+		return summary, err
+	}
+	if summary.RollupCount == 0 {
+		return finish(nil)
+	}
+
+	rows, err := s.db.Query(ctx, `
+		SELECT
+			s.login,
+			r.stream_id,
+			COALESCE(s.title, ''),
+			s.started_at,
+			r.minute_ts,
+			r.viewer_avg,
+			r.viewer_max,
+			r.chat_count,
+			r.total_emote_count,
+			r.seventv_emote_count,
+			COALESCE(r.emotes_json, '{}'::jsonb)
+		FROM analytics_minute_rollups r
+		JOIN analytics_streams s ON s.stream_id = r.stream_id
+		WHERE COALESCE(s.login, '') <> ''
+		ORDER BY s.started_at ASC, r.stream_id ASC, r.minute_ts ASC`)
+	if err != nil {
+		return finish(err)
+	}
+	defer rows.Close()
+
+	batch := make([]timeseries.Rollup, 0, batchSize)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if err := s.telemetry.WriteRollups(ctx, batch); err != nil {
+			return err
+		}
+		exported := uint64(len(batch))
+		summary.ExportedCount += exported
+		if reporter != nil {
+			reporter.AddBackfillProgress(exported)
+		}
+		batch = batch[:0]
+		return nil
+	}
+
+	for rows.Next() {
+		var rollup timeseries.Rollup
+		var rawEmotes []byte
+		if err := rows.Scan(
+			&rollup.ChannelLogin,
+			&rollup.StreamID,
+			&rollup.StreamTitle,
+			&rollup.StreamStartedAt,
+			&rollup.MinuteTS,
+			&rollup.ViewerAvg,
+			&rollup.ViewerMax,
+			&rollup.ChatCount,
+			&rollup.TotalEmoteCount,
+			&rollup.SevenTVEmoteCount,
+			&rawEmotes,
+		); err != nil {
+			return finish(err)
+		}
+		rollup.ChannelLogin = normalizeLogin(rollup.ChannelLogin)
+		if len(rawEmotes) > 0 {
+			if err := json.Unmarshal(rawEmotes, &rollup.Emotes); err != nil {
+				return finish(err)
+			}
+		}
+		if rollup.Emotes == nil {
+			rollup.Emotes = map[string]int{}
+		}
+		batch = append(batch, rollup)
+		if len(batch) >= batchSize {
+			if err := flush(); err != nil {
+				return finish(err)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return finish(err)
+	}
+	if err := flush(); err != nil {
+		return finish(err)
+	}
+	return finish(nil)
 }
 
 func (s *Store) enqueueRollupTelemetry(ctx context.Context, streamID string, rollups []MinuteRollup) {
