@@ -85,8 +85,10 @@ if (-not $SkipSetup -and -not (Test-Path $envFile)) {
 & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'validate-env.ps1') -Profile $Profile -EnvFile $envFile 2>&1 | Out-Host
 $null = $LASTEXITCODE
 
+$global:LASTEXITCODE = 0
 & (Join-Path $PSScriptRoot 'lib\wait-stack.ps1') -SkipHLS
-if (-not $?) { exit 1 }
+$waitExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+if ($waitExitCode -ne 0) { exit $waitExitCode }
 
 . (Join-Path $PSScriptRoot 'lib\env.ps1')
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-localhost-relays.ps1') -Ports 8090
@@ -107,7 +109,8 @@ if (Test-Path (Join-Path $Root 'VERSION')) {
 $controlPidFile = Join-Path $Root '.streamclone-setup-control.pid'
 $controlScript = Join-Path $PSScriptRoot 'setup-control.ps1'
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root $Root -RequireProxy
-if (-not $?) { exit 1 }
+$setupControlExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+if ($setupControlExitCode -ne 0) { exit $setupControlExitCode }
 
 
 Write-Host ''

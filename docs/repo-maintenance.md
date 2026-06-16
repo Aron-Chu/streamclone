@@ -54,6 +54,7 @@ Bug fixes ship from this repo. Copying source into the release install only upda
 | 2026-06-13 | `966c6b0` | Fetch bootstrap and script overlay by GitHub commit SHA |
 | 2026-06-13 | `a67bd05` | Repair `deploy/Caddyfile.local-tunnel` when Docker creates a directory |
 | 2026-06-15 | `fc6406c` | Pin release install asset version per tag |
+| 2026-06-15 | pending | Require setup-control proxy readiness during install/start/repair and clean stale Docker resources without `.env` |
 | 2026-06-15 | pending | Repair localhost relays for IPv4 and IPv6 |
 | 2026-06-15 | pending | Repo hygiene: `make check`, CodeQL, CODEOWNERS, issue templates, `.gitignore` cleanup |
 

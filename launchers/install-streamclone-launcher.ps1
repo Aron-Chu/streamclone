@@ -99,7 +99,8 @@ function Invoke-StreamcloneInstall {
                 Write-Host ''
                 Write-Host 'Opening Streamclone in your browser...' -ForegroundColor Green
                 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\ensure-setup-control.ps1') -Root $root -RequireProxy
-                if (-not $?) { exit 1 }
+                $setupControlExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+                if ($setupControlExitCode -ne 0) { exit $setupControlExitCode }
                 Start-Process (Get-StreamcloneAppUrl)
             }
             Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
@@ -179,9 +180,11 @@ function Invoke-StreamcloneInstall {
             Write-Host 'Opening Streamclone in your browser...' -ForegroundColor Green
             if (-not (Test-StreamcloneWebOk)) {
                 & $startPs1 -NoBrowser
+                if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             } else {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\ensure-setup-control.ps1') -Root $root -RequireProxy
-                if (-not $?) { exit 1 }
+                $setupControlExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+                if ($setupControlExitCode -ne 0) { exit $setupControlExitCode }
             }
             Start-Process (Get-StreamcloneWelcomeUrl)
         }
@@ -218,6 +221,7 @@ switch ($Action) {
         }
         Write-Host 'Starting Docker stack and opening browser...' -ForegroundColor Cyan
         & $startPs1
+        exit $LASTEXITCODE
     }
     'stop' {
         $stopPs1 = Join-Path $root 'scripts\stop-streamclone.ps1'
@@ -226,6 +230,7 @@ switch ($Action) {
         }
         Write-Host 'Stopping Docker stack (config and data are kept)...' -ForegroundColor Cyan
         & $stopPs1
+        exit $LASTEXITCODE
     }
     'uninstall' {
         $uninstallPs1 = Join-Path $root 'scripts\uninstall-streamclone.ps1'
@@ -248,6 +253,7 @@ switch ($Action) {
             throw "Manager script missing at $root."
         }
         & $managerPs1 -Action repair -InstallDir $root
+        exit $LASTEXITCODE
     }
     'update' {
         $managerPs1 = Join-Path $root 'scripts\streamclone-manager.ps1'

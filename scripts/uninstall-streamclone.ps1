@@ -90,7 +90,15 @@ function Test-StreamcloneUninstallNeedsDocker {
         [bool]$RemoveImages
     )
     if ($RemoveImages) { return $true }
-    return (Test-Path (Join-Path $Root '.env'))
+    if (Test-Path (Join-Path $Root '.env')) { return $true }
+    if (Test-Path (Join-Path $Root 'deploy\docker-compose.yml')) { return $true }
+    if (-not (Test-StreamcloneDockerEngineRunning)) { return $false }
+    $resources = Invoke-EnvDockerCapturedWithTimeout -Arguments @(
+        'ps', '-a',
+        '--filter', 'label=com.docker.compose.project=streamclone',
+        '--format', '{{.ID}}'
+    ) -TimeoutSec 10
+    return (-not $resources.TimedOut -and $resources.ExitCode -eq 0 -and @($resources.Output).Count -gt 0)
 }
 
 function Resolve-StreamcloneUninstallDockerPlan {
@@ -204,7 +212,8 @@ function Invoke-StreamcloneComposeDown {
     )
     $envFile = Join-Path $Root '.env'
     if (-not (Test-Path $envFile)) {
-        Write-Host 'No .env - skipping compose down.' -ForegroundColor Yellow
+        Write-Host 'No .env - removing any leftover Streamclone Docker resources by project label.' -ForegroundColor Yellow
+        Invoke-StreamcloneDockerResourceCleanup -Volumes:$Volumes
         return
     }
 
@@ -267,6 +276,65 @@ function Invoke-StreamcloneComposeDown {
             }
             $result = Invoke-EnvDockerCaptured -Arguments ($composeArgsNoProfiles + $downArgs)
             foreach ($line in $result.Output) { Write-Host $line }
+        }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+function Invoke-StreamcloneDockerResourceCleanup {
+    param([switch]$Volumes)
+
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $containers = Invoke-EnvDockerCaptured -Arguments @(
+            'ps', '-a',
+            '--filter', 'label=com.docker.compose.project=streamclone',
+            '--format', '{{.ID}}'
+        )
+        if ($containers.ExitCode -eq 0 -and $containers.Output) {
+            Write-Host 'Removing leftover Streamclone containers...' -ForegroundColor Cyan
+            Invoke-EnvDockerCaptured -Arguments (@('rm', '-f') + @($containers.Output)) | Out-Null
+        }
+
+        if ($Volumes) {
+            $volumes = Invoke-EnvDockerCaptured -Arguments @(
+                'volume', 'ls',
+                '--filter', 'label=com.docker.compose.project=streamclone',
+                '--format', '{{.Name}}'
+            )
+            $volumeNames = @()
+            if ($volumes.ExitCode -eq 0 -and $volumes.Output) {
+                $volumeNames += @($volumes.Output)
+            }
+            $prefixVolumes = Invoke-EnvDockerCaptured -Arguments @('volume', 'ls', '--format', '{{.Name}}')
+            if ($prefixVolumes.ExitCode -eq 0 -and $prefixVolumes.Output) {
+                $volumeNames += @($prefixVolumes.Output | Where-Object { $_ -like 'streamclone_*' })
+            }
+            $volumeNames = @($volumeNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+            if ($volumeNames.Count -gt 0) {
+                Write-Host 'Removing leftover Streamclone volumes...' -ForegroundColor Cyan
+                Invoke-EnvDockerCaptured -Arguments (@('volume', 'rm', '-f') + $volumeNames) | Out-Null
+            }
+        }
+
+        $networks = Invoke-EnvDockerCaptured -Arguments @(
+            'network', 'ls',
+            '--filter', 'label=com.docker.compose.project=streamclone',
+            '--format', '{{.Name}}'
+        )
+        $networkNames = @()
+        if ($networks.ExitCode -eq 0 -and $networks.Output) {
+            $networkNames += @($networks.Output)
+        }
+        $prefixNetworks = Invoke-EnvDockerCaptured -Arguments @('network', 'ls', '--format', '{{.Name}}')
+        if ($prefixNetworks.ExitCode -eq 0 -and $prefixNetworks.Output) {
+            $networkNames += @($prefixNetworks.Output | Where-Object { $_ -like 'streamclone_*' })
+        }
+        $networkNames = @($networkNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+        foreach ($network in $networkNames) {
+            Invoke-EnvDockerCaptured -Arguments @('network', 'rm', $network) | Out-Null
         }
     } finally {
         $ErrorActionPreference = $prev

@@ -189,7 +189,13 @@ function Get-StreamcloneDiagnostics {
         [void]$suggestions.Add('Clone streamclone-scraper sibling repo for Analytics charts.')
     }
 
-    $healthy = ($dockerState -eq 'running') -and $webOk -and ($configReady -or ($containers.Count -gt 0))
+    $healthy = (
+        ($dockerState -eq 'running') -and
+        $configReady -and
+        $webOk -and
+        $setupControl -and
+        $setupControlProxy
+    )
 
     return [ordered]@{
         ok               = $true
