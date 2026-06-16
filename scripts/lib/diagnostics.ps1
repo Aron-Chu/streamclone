@@ -165,8 +165,12 @@ function Get-StreamcloneDiagnostics {
         }
     }
 
-    $setupControl = Test-StreamcloneSetupControlHealth
-    $setupControlProxy = $setupControl -and (Test-StreamcloneSetupControlProxyHealth)
+    $setupControl = $false
+    $setupControlProxy = $false
+    if ($configReady) {
+        $setupControl = Test-StreamcloneSetupControlHealth
+        $setupControlProxy = $setupControl -and (Test-StreamcloneSetupControlProxyHealth)
+    }
     if (-not $setupControl) {
         [void]$suggestions.Add('Run Start Streamclone.cmd once, or: powershell -File scripts\ensure-setup-control.ps1')
     } elseif (-not $setupControlProxy) {

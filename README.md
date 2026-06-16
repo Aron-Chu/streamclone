@@ -38,7 +38,7 @@ make setup
 
 <img src="docs/images/channel.gif" alt="Channel playback, chat, and emotes" width="720" />
 
-<img src="docs/images/analytics.gif" alt="Analytics charts" width="720" />
+<img src="docs/images/load.png" alt="Analytics charts" width="720" />
 
 <img src="docs/images/pulse.gif" alt="Emote Pulse Grafana dashboard" width="720" />
 

@@ -115,6 +115,9 @@ function Invoke-ManagerUpdate {
     if ($LASTEXITCODE -ne 0) { throw 'Preflight failed - start Docker Desktop and retry.' }
 
     Invoke-StreamcloneUpgrade -Root $Root
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root $Root -RequireProxy
+    $setupControlExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    if ($setupControlExitCode -ne 0) { throw 'setup helper is not reachable through the app proxy' }
 }
 
 function Invoke-ManagerUninstall {
