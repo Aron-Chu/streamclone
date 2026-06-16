@@ -22,15 +22,15 @@ if ($env:SETUP_MODE -eq 'release') {
 }
 
 Write-Host 'Streamclone setup'
-Write-Host '─────────────────'
+Write-Host '-----------------'
 
 if (-not $NonInteractive) {
     Write-Host @'
 
-[1] Core only          — watch + chat + emotes (no Twitch login required)
-[2] + Analytics charts — uses scraper image or streamclone-scraper sibling repo
-[3] + Clip Studio      — needs Twitch device-code login
-[4] Full stack         — scraper + clipper
+[1] Core only          - watch + chat + emotes (no Twitch login required)
+[2] + Analytics charts - uses scraper image or streamclone-scraper sibling repo
+[3] + Clip Studio      - needs Twitch device-code login
+[4] Full stack         - scraper + clipper
 
 '@
     $choice = Read-Host 'Choose profile [1-4, default 1]'
@@ -87,7 +87,7 @@ if (-not $SkipTwitch) {
         }
     } else {
         Write-Host 'Twitch CLI: not found (optional for Clip Studio)'
-        Write-Host '  Use Sign in (optional) at http://localhost:8090 after the stack starts — no CLI required.'
+        Write-Host '  Use Sign in (optional) at http://localhost:8090 after the stack starts - no CLI required.'
         Write-Host '  Developers: https://github.com/twitchdev/twitch-cli#installation' -ForegroundColor DarkGray
     }
 }
@@ -166,15 +166,21 @@ if (-not $NoUp) {
     Write-Host ''
     Write-Host 'Streamclone: http://localhost:8090/'
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root (Get-Location)
+    $setupControlExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    if ($setupControlExitCode -ne 0) {
+        Write-Host 'Setup failed: setup helper could not start.' -ForegroundColor Red
+        exit $setupControlExitCode
+    }
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-localhost-relays.ps1') -Ports 8090
 }
 
 if (-not $NoSmoke -and -not $NoUp) {
     Write-Host 'Waiting for tiered readiness...'
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'lib\wait-stack.ps1') -Root (Get-Location) -SkipHLS
-    if (-not $?) {
+    $waitExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    if ($waitExitCode -ne 0) {
         Write-Host 'Setup failed: required readiness tier did not pass.' -ForegroundColor Red
-        exit 1
+        exit $waitExitCode
     }
     Write-Host 'Running smoke checks (readiness already verified)...'
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'smoke-core.ps1') -SkipReadiness
@@ -184,9 +190,10 @@ if (-not $NoSmoke -and -not $NoUp) {
     }
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-localhost-relays.ps1') -Ports 8090
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root (Get-Location) -RequireProxy
-    if (-not $?) {
+    $setupControlProxyExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    if ($setupControlProxyExitCode -ne 0) {
         Write-Host 'Setup failed: setup helper is not reachable through the app proxy.' -ForegroundColor Red
-        exit 1
+        exit $setupControlProxyExitCode
     }
 
     if ($needsScraper -and ($scraperUseImages -or (Test-Path (Get-EnvScraperSiblingPath)))) {

@@ -79,9 +79,13 @@ function Invoke-ManagerRepair {
         throw "docker compose up failed: $($up.Output -join [Environment]::NewLine)"
     }
 
+    $global:LASTEXITCODE = 0
     & (Join-Path $PSScriptRoot 'lib\wait-stack.ps1') -TimeoutSec 300
+    $waitExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    if ($waitExitCode -ne 0) { throw 'services did not become ready after repair' }
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root $Root -RequireProxy
-    if (-not $?) { throw 'setup helper is not reachable through the app proxy' }
+    $setupControlExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    if ($setupControlExitCode -ne 0) { throw 'setup helper is not reachable through the app proxy' }
     Write-Host ''
     Write-Host 'Repair complete.' -ForegroundColor Green
 }
