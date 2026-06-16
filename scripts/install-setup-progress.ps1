@@ -198,7 +198,8 @@ try {
         & $shortcutPs1 -InstallDir $InstallDir
     }
 
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'scripts\ensure-setup-control.ps1') -Root $InstallDir
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'scripts\ensure-setup-control.ps1') -Root $InstallDir -RequireProxy
+    if (-not $?) { throw 'setup helper is not reachable through the app proxy' }
 
     if ($env:STREAMCLONE_NO_BROWSER -ne '1') {
         Start-Process (Get-StreamcloneWelcomeUrl)

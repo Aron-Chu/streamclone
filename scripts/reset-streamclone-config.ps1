@@ -67,6 +67,12 @@ if (Test-Path $controlPidFile) {
     Remove-Item $controlPidFile -Force -ErrorAction SilentlyContinue
 }
 
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like '*setup-control.ps1*' -and $_.CommandLine -notlike '*ensure-setup-control.ps1*' } |
+    ForEach-Object {
+        try { Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue } catch { }
+    }
+
 foreach ($name in @('.env', '.streamclone-profile')) {
     $path = Join-Path $root $name
     if (Test-Path $path) {

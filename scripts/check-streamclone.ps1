@@ -102,10 +102,12 @@ if (-not $Json) {
         }
     }
 
-    if ($report.setupControl) {
-        Write-StatusLine 'Setup helper' 'ok' 'Ready for Start Analytics / Clip Studio (port 9191)'
+    if ($report.setupControl -and $report.setupControlProxy) {
+        Write-StatusLine 'Setup helper' 'ok' 'Ready for Start Analytics / Clip Studio / Pulse (app proxy + port 9191)'
+    } elseif ($report.setupControl) {
+        Write-StatusLine 'Setup helper' 'warn' 'Running on port 9191, but app proxy cannot reach it'
     } else {
-        Write-StatusLine 'Setup helper' 'warn' 'Not running - Start Analytics button will not work'
+        Write-StatusLine 'Setup helper' 'warn' 'Not running - Start Analytics / Pulse buttons will not work'
     }
 
     Write-Host ''
