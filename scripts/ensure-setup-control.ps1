@@ -118,6 +118,13 @@ function Stop-StaleSetupControl {
 $envStale = Test-SetupControlEnvStale -StalePidFile $pidFile
 $scriptStale = Test-SetupControlScriptStale -StalePidFile $pidFile
 $rootMismatch = Test-SetupControlRootMismatch -HealthPort $Port -ExpectedPidFile $pidFile
+$envFile = Join-Path $resolvedRoot '.env'
+
+if (-not (Test-Path $envFile)) {
+    Stop-StaleSetupControl -StalePidFile $pidFile
+    Write-Warning 'setup-control not started: missing .env (run setup first).'
+    exit 1
+}
 
 if (Test-SetupControlHealth -HealthPort $Port) {
     if (-not $envStale -and -not $scriptStale -and -not $rootMismatch) {
@@ -132,11 +139,6 @@ if (Test-SetupControlHealth -HealthPort $Port) {
 
 if (Test-Path $pidFile) {
     Stop-StaleSetupControl -StalePidFile $pidFile
-}
-
-if (-not (Test-Path (Join-Path $resolvedRoot '.env'))) {
-    Write-Warning 'setup-control not started: missing .env (run setup first).'
-    exit 1
 }
 
 if (-not (Test-Path $controlScript)) {

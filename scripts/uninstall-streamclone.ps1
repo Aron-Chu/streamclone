@@ -277,6 +277,7 @@ function Invoke-StreamcloneComposeDown {
             $result = Invoke-EnvDockerCaptured -Arguments ($composeArgsNoProfiles + $downArgs)
             foreach ($line in $result.Output) { Write-Host $line }
         }
+        Invoke-StreamcloneDockerResourceCleanup -Volumes:$Volumes
     } finally {
         $ErrorActionPreference = $prev
     }

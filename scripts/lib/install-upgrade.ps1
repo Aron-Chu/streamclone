@@ -507,7 +507,12 @@ function Invoke-StreamcloneUpgrade {
 
     $waitScript = Join-Path $PSScriptRoot 'wait-stack.ps1'
     if (Test-Path $waitScript) {
+        $global:LASTEXITCODE = 0
         & $waitScript -TimeoutSec $WaitTimeoutSec
+        $waitExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+        if ($waitExitCode -ne 0) {
+            throw "services did not become ready after upgrade (exit $waitExitCode)."
+        }
     }
     Write-Host 'Upgrade complete.' -ForegroundColor Green
 }
