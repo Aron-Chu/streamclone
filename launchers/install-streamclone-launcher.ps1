@@ -98,7 +98,8 @@ function Invoke-StreamcloneInstall {
             if (Test-Path $startPs1) {
                 Write-Host ''
                 Write-Host 'Opening Streamclone in your browser...' -ForegroundColor Green
-                & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\ensure-setup-control.ps1') -Root $root
+                & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\ensure-setup-control.ps1') -Root $root -RequireProxy
+                if (-not $?) { exit 1 }
                 Start-Process (Get-StreamcloneAppUrl)
             }
             Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
@@ -179,7 +180,8 @@ function Invoke-StreamcloneInstall {
             if (-not (Test-StreamcloneWebOk)) {
                 & $startPs1 -NoBrowser
             } else {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\ensure-setup-control.ps1') -Root $root
+                & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\ensure-setup-control.ps1') -Root $root -RequireProxy
+                if (-not $?) { exit 1 }
             }
             Start-Process (Get-StreamcloneWelcomeUrl)
         }

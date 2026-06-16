@@ -172,9 +172,9 @@ if (-not $NoUp) {
 if (-not $NoSmoke -and -not $NoUp) {
     Write-Host 'Waiting for tiered readiness...'
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'lib\wait-stack.ps1') -Root (Get-Location) -SkipHLS
-    if ($LASTEXITCODE -ne 0) {
+    if (-not $?) {
         Write-Host 'Setup failed: required readiness tier did not pass.' -ForegroundColor Red
-        exit $LASTEXITCODE
+        exit 1
     }
     Write-Host 'Running smoke checks (readiness already verified)...'
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'smoke-core.ps1') -SkipReadiness
@@ -183,6 +183,11 @@ if (-not $NoSmoke -and -not $NoUp) {
         exit $LASTEXITCODE
     }
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-localhost-relays.ps1') -Ports 8090
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root (Get-Location) -RequireProxy
+    if (-not $?) {
+        Write-Host 'Setup failed: setup helper is not reachable through the app proxy.' -ForegroundColor Red
+        exit 1
+    }
 
     if ($needsScraper -and ($scraperUseImages -or (Test-Path (Get-EnvScraperSiblingPath)))) {
         $preflight = Join-Path $PSScriptRoot 'scraper-preflight.ps1'

@@ -80,6 +80,8 @@ function Invoke-ManagerRepair {
     }
 
     & (Join-Path $PSScriptRoot 'lib\wait-stack.ps1') -TimeoutSec 300
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root $Root -RequireProxy
+    if (-not $?) { throw 'setup helper is not reachable through the app proxy' }
     Write-Host ''
     Write-Host 'Repair complete.' -ForegroundColor Green
 }

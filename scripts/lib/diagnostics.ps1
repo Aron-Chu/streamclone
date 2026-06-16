@@ -34,6 +34,17 @@ function Test-StreamcloneSetupControlHealth {
     return $false
 }
 
+function Test-StreamcloneSetupControlProxyHealth {
+    try {
+        $resp = Invoke-WebRequest -Uri (Get-StreamcloneAppUrl '/v1/setup-control/health') -UseBasicParsing -TimeoutSec 5
+        if ($resp.StatusCode -eq 200) {
+            $body = $resp.Content | ConvertFrom-Json
+            return [bool]$body.ok
+        }
+    } catch { }
+    return $false
+}
+
 function Get-StreamcloneStartLogTail {
     param(
         [string]$Root,
@@ -155,8 +166,11 @@ function Get-StreamcloneDiagnostics {
     }
 
     $setupControl = Test-StreamcloneSetupControlHealth
+    $setupControlProxy = $setupControl -and (Test-StreamcloneSetupControlProxyHealth)
     if (-not $setupControl) {
         [void]$suggestions.Add('Run Start Streamclone.cmd once, or: powershell -File scripts\ensure-setup-control.ps1')
+    } elseif (-not $setupControlProxy) {
+        [void]$suggestions.Add('Run Start Streamclone.cmd once; the setup helper is running but the app proxy cannot reach it.')
     }
 
     $scraperReady = Test-StreamcloneHostServiceHealth -Url 'http://localhost:8000/health'
@@ -192,6 +206,7 @@ function Get-StreamcloneDiagnostics {
         webUrl           = $WebUrl
         hlsProxyConfigOk = $hlsProxyConfigOk
         setupControl     = $setupControl
+        setupControlProxy = $setupControlProxy
         containers       = @($containers)
         optionalServices = @{
             scraper = if ($scraperReady) { 'ready' } else { 'offline' }

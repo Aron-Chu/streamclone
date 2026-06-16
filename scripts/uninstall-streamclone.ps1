@@ -182,12 +182,19 @@ function Install-StreamcloneFinishDockerCleanupShortcut {
 function Stop-StreamcloneControlProcess {
     param([string]$Root)
     $controlPidFile = Join-Path $Root '.streamclone-setup-control.pid'
-    if (-not (Test-Path $controlPidFile)) { return }
-    $controlPid = (Get-Content $controlPidFile -Raw).Trim()
-    if ($controlPid -match '^\d+$') {
-        Stop-Process -Id ([int]$controlPid) -Force -ErrorAction SilentlyContinue
+    if (Test-Path $controlPidFile) {
+        $controlPid = (Get-Content $controlPidFile -Raw).Trim()
+        if ($controlPid -match '^\d+$') {
+            Stop-Process -Id ([int]$controlPid) -Force -ErrorAction SilentlyContinue
+        }
+        Remove-Item $controlPidFile -Force -ErrorAction SilentlyContinue
     }
-    Remove-Item $controlPidFile -Force -ErrorAction SilentlyContinue
+
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*setup-control.ps1*' -and $_.CommandLine -notlike '*ensure-setup-control.ps1*' } |
+        ForEach-Object {
+            try { Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue } catch { }
+        }
 }
 
 function Invoke-StreamcloneComposeDown {
@@ -224,7 +231,7 @@ function Invoke-StreamcloneComposeDown {
         # Unknown/legacy profile marker: tear down everything to be safe.
         $profile = 'full'
     }
-    $optionalProfiles = @(Get-EnvComposeProfiles -Profile $profile)
+    $optionalProfiles = @((Get-EnvComposeProfiles -Profile $profile) + @('pulse') | Select-Object -Unique)
     if ($optionalProfiles.Count -gt 0) {
         Write-Host "Installed profile: $profile (optional services: $($optionalProfiles -join ', '))" -ForegroundColor DarkGray
     } else {

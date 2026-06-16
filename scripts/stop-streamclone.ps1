@@ -5,6 +5,15 @@ Set-Location (Split-Path -Parent $PSScriptRoot)
 
 $Root = Split-Path -Parent $PSScriptRoot
 $controlPidFile = Join-Path $Root '.streamclone-setup-control.pid'
+
+function Stop-StreamcloneSetupControlListeners {
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*setup-control.ps1*' -and $_.CommandLine -notlike '*ensure-setup-control.ps1*' } |
+        ForEach-Object {
+            try { Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue } catch { }
+        }
+}
+
 if (Test-Path $controlPidFile) {
     $controlPid = (Get-Content $controlPidFile -Raw).Trim()
     if ($controlPid -match '^\d+$') {
@@ -12,6 +21,7 @@ if (Test-Path $controlPidFile) {
     }
     Remove-Item $controlPidFile -Force -ErrorAction SilentlyContinue
 }
+Stop-StreamcloneSetupControlListeners
 
 Write-Host 'Stopping Streamclone...' -ForegroundColor Cyan
 $prev = $ErrorActionPreference
@@ -21,7 +31,7 @@ try {
         'compose', '--env-file', '.env',
         '-f', 'deploy/docker-compose.yml',
         '-f', 'deploy/docker-compose.local-tunnel.yml',
-        '--profile', 'scraper', '--profile', 'clipper',
+        '--profile', 'scraper', '--profile', 'clipper', '--profile', 'pulse',
         'down', '--remove-orphans', '--timeout', '30'
     )
     $result = Invoke-EnvDockerCaptured -Arguments $withProfiles
