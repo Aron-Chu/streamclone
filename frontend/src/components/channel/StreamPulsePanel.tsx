@@ -15,6 +15,7 @@ import {
   isLsfWarming,
   summarizeLsfEmptyState,
 } from '../../utils/pulseEmptyState.ts'
+import { LiveStatsBand } from '../analytics/LiveStatsBand.tsx'
 
 function fullCount(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return '—'
@@ -219,6 +220,14 @@ function StreamPulsePanel({
             </button>
           </label>
         </div>
+
+        <section>
+          <LiveStatsBand
+            login={channelLogin}
+            enabled
+            className="rounded-lg border border-white/10 bg-zinc-950/60 p-3"
+          />
+        </section>
 
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-2">
