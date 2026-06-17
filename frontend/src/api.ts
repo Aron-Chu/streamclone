@@ -394,6 +394,107 @@ export interface HostDiagnosticsContainer {
   status: string
 }
 
+export interface HostNetworkContainerStats {
+  name: string
+  cpuPerc: string
+  memUsage: string
+  rxBytes: number
+  txBytes: number
+  rxHuman: string
+  txHuman: string
+}
+
+export interface HostNetworkDiagnostics {
+  ok?: boolean
+  containers: HostNetworkContainerStats[]
+  updatedAt: number
+}
+
+export interface OpsNetworkPromSeries {
+  labels?: Record<string, string>
+  value: number
+}
+
+export interface OpsNetworkPromMetric {
+  query: string
+  value?: number | null
+  series?: OpsNetworkPromSeries[]
+}
+
+export interface OpsNetworkPrometheus {
+  httpRequestsPerSec?: OpsNetworkPromMetric
+  chatConnections?: OpsNetworkPromMetric
+  streamListeners?: OpsNetworkPromMetric
+  chatMessagesOutPerSec?: OpsNetworkPromMetric
+  upstreamP95Sec?: OpsNetworkPromMetric
+  streamListenersByChannel?: OpsNetworkPromMetric
+  analyticsBytesByChannelOp?: OpsNetworkPromMetric
+  analyticsSyncActive?: OpsNetworkPromMetric
+}
+
+export interface SyncNetworkUsage {
+  trackerScrapeBytes?: number
+  gqlFetchBytes?: number
+  emotePreloadBytes?: number
+  helixBytes?: number
+  totalBytes?: number
+  lastRateBps?: number
+}
+
+export interface ActiveAnalyticsSyncJobChat {
+  gqlPages?: number
+  segmentsDone?: number
+  segmentsTotal?: number
+}
+
+export interface ActiveAnalyticsSyncJobTracker {
+  active?: boolean
+}
+
+export interface ActiveAnalyticsSyncJob {
+  streamId: string
+  channel: string
+  phase?: string
+  network?: SyncNetworkUsage
+  chat?: ActiveAnalyticsSyncJobChat
+  tracker?: ActiveAnalyticsSyncJobTracker
+}
+
+export interface ActiveAnalyticsSyncsResponse {
+  jobs: ActiveAnalyticsSyncJob[]
+  updatedAt: number
+}
+
+export interface TrackingSnapshot {
+  tracked: string[]
+  alwaysTracked?: string[]
+  active?: number
+  max?: number
+  updatedAt?: number
+}
+
+export interface OpsActiveStream {
+  channel: string
+  listeners: number
+  quality?: string
+  liveEdge?: number
+  workerBackend?: string
+  hlsProbeDurationMs?: number
+  targetDuration?: string
+  bandwidth?: number
+  latencyMode?: string
+}
+
+export interface OpsNetworkSnapshot {
+  services: MetadataDiagnosticsServices
+  pulseReady: boolean
+  prometheus?: OpsNetworkPrometheus
+  activeStreams: OpsActiveStream[]
+  activeAnalyticsSyncs?: ActiveAnalyticsSyncsResponse
+  trackingSnapshot?: TrackingSnapshot
+  updatedAt: number
+}
+
 export interface HostDiagnostics {
   ok: boolean
   healthy: boolean
@@ -1062,6 +1163,20 @@ export const startSetupService = (service: 'scraper' | 'clipper' | 'pulse'): Pro
   })
 }
 
+export const stopSetupService = (service: 'scraper' | 'clipper' | 'pulse'): Promise<{ ok: boolean; message?: string; error?: string }> => {
+  const headers: Record<string, string> = {}
+  if (SETUP_CONTROL_TOKEN) {
+    headers['X-Streamclone-Setup-Token'] = SETUP_CONTROL_TOKEN
+  }
+  return fetch(`${SETUP_CONTROL_BASE}/stop/${service}`, { method: 'POST', headers }).then(async r => {
+    const body = await r.json().catch(() => ({})) as { ok: boolean; message?: string; error?: string }
+    if (!r.ok) {
+      throw new ApiError(body.error || r.statusText, r.status)
+    }
+    return body
+  })
+}
+
 export const syncClipperAuthFromSignIn = (): Promise<{ ok: boolean; merged?: boolean; recreated?: boolean; message?: string }> => {
   if (!SETUP_CONTROL_AVAILABLE) {
     return Promise.resolve({ ok: false, message: 'Install helper unavailable in this browser context.' })
@@ -1082,8 +1197,14 @@ export const syncClipperAuthFromSignIn = (): Promise<{ ok: boolean; merged?: boo
 export const getHostDiagnostics = (): Promise<HostDiagnostics> =>
   fetch(`${SETUP_CONTROL_BASE}/diagnostics`).then(r => json<HostDiagnostics>(r))
 
+export const getHostNetworkDiagnostics = (): Promise<HostNetworkDiagnostics> =>
+  fetch(`${SETUP_CONTROL_BASE}/diagnostics/network`).then(r => json<HostNetworkDiagnostics>(r))
+
 export const getMetadataDiagnostics = (): Promise<MetadataDiagnostics> =>
   fetch(`${METADATA}/v1/setup/diagnostics`).then(r => json<MetadataDiagnostics>(r))
+
+export const getOpsNetworkSnapshot = (): Promise<OpsNetworkSnapshot> =>
+  fetch(`${METADATA}/v1/ops/network`).then(r => json<OpsNetworkSnapshot>(r))
 
 export const getAuthDebug = (): Promise<AuthDebug> =>
   fetch(`${CHAT_HTTP}/v1/auth/debug`, { credentials: 'include' }).then(r => json<AuthDebug>(r))
@@ -1557,3 +1678,68 @@ export const getClipperSourceVideoUrl = (jobId: string): string =>
 
 export const getClipperFinalVideoUrl = (jobId: string): string =>
   `${CLIPPER_BASE}/jobs/${encodeURIComponent(jobId)}/final.mp4`
+
+export interface ChannelChatLogStream {
+  streamId: string
+  title?: string
+  startedAt: string
+  endedAt?: string
+  messageCount: number
+  firstOffsetSeconds: number
+  lastOffsetSeconds: number
+  source: string
+}
+
+export interface ChannelChatLogsResponse {
+  streams: ChannelChatLogStream[]
+  liveMessageCount: number
+}
+
+export interface UnifiedLogEntry {
+  kind: 'message' | 'mod_event'
+  id: number
+  ts: string
+  offsetSeconds?: number
+  displayName?: string
+  login?: string
+  senderHash?: string
+  messageId?: string
+  text?: string
+  emoteFrags?: { name: string; id: string; provider: string; imageUrl: string }[]
+  modKind?: string
+  modText?: string
+  source: string
+  streamId?: string
+  streamTitle?: string
+  streamStartedAt?: string
+}
+
+export interface ChannelChatLogMessagesResponse {
+  entries: UnifiedLogEntry[]
+  nextCursor: string
+}
+
+export const fetchChannelChatLogs = (login: string) =>
+  fetch(`${ANALYTICS}/v1/analytics/channels/${encodeURIComponent(login)}/chat-logs`).then(r => json<ChannelChatLogsResponse>(r))
+
+export const fetchChannelChatLogMessages = (
+  login: string,
+  params: {
+    streamId?: string
+    q?: string
+    user?: string
+    senderHash?: string
+    cursor?: string
+    limit?: number
+  } = {},
+) => {
+  const search = new URLSearchParams()
+  if (params.streamId) search.set('streamId', params.streamId)
+  if (params.q) search.set('q', params.q)
+  if (params.user) search.set('user', params.user)
+  if (params.senderHash) search.set('senderHash', params.senderHash)
+  if (params.cursor) search.set('cursor', params.cursor)
+  if (params.limit) search.set('limit', String(params.limit))
+  const suffix = search.toString()
+  return fetch(`${ANALYTICS}/v1/analytics/channels/${encodeURIComponent(login)}/chat-logs/messages${suffix ? `?${suffix}` : ''}`).then(r => json<ChannelChatLogMessagesResponse>(r))
+}
