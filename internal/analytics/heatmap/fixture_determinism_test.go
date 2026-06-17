@@ -129,37 +129,37 @@ var (
 		{
 			offsetSeconds: 0, durationSeconds: 60, score: 5, confidence: 1.0, reason: ReasonChatSpike,
 			emotes: []expectedEmote{
-				{id: "e1", name: "KEKW", imageURL: "/emotes/e1/1x.webp", count: 5, provider: "seventv"},
-				{id: "t1", name: "Kappa", imageURL: "/emotes/t1/1x.webp", count: 3, provider: "twitch"},
+				{id: "e1", name: "KEKW", imageURL: "https://cdn.7tv.app/emote/e1/4x.webp", count: 5, provider: "seventv"},
+				{id: "t1", name: "Kappa", imageURL: "https://static-cdn.jtvnw.net/emoticons/v2/t1/default/dark/2.0", count: 3, provider: "twitch"},
 			},
 		},
 		{
 			offsetSeconds: 60, durationSeconds: 60, score: 6, confidence: 1.0, reason: ReasonChatSpike,
 			emotes: []expectedEmote{
-				{id: "e1", name: "KEKW", imageURL: "/emotes/e1/1x.webp", count: 20, provider: "seventv"},
-				{id: "t1", name: "Kappa", imageURL: "/emotes/t1/1x.webp", count: 10, provider: "twitch"},
+				{id: "e1", name: "KEKW", imageURL: "https://cdn.7tv.app/emote/e1/4x.webp", count: 20, provider: "seventv"},
+				{id: "t1", name: "Kappa", imageURL: "https://static-cdn.jtvnw.net/emoticons/v2/t1/default/dark/2.0", count: 10, provider: "twitch"},
 			},
 		},
 		{
 			offsetSeconds: 120, durationSeconds: 60, score: 22, confidence: 1.0, reason: ReasonSevenTVSpike,
 			emotes: []expectedEmote{
-				{id: "e2", name: "OMEGALUL", imageURL: "/emotes/e2/1x.webp", count: 300, provider: "seventv"},
-				{id: "t1", name: "Kappa", imageURL: "/emotes/t1/1x.webp", count: 70, provider: "twitch"},
-				{id: "f1", name: "Pog", imageURL: "/emotes/f1/1x.webp", count: 40, provider: "ffz"},
+				{id: "e2", name: "OMEGALUL", imageURL: "https://cdn.7tv.app/emote/e2/4x.webp", count: 300, provider: "seventv"},
+				{id: "t1", name: "Kappa", imageURL: "https://static-cdn.jtvnw.net/emoticons/v2/t1/default/dark/2.0", count: 70, provider: "twitch"},
+				{id: "f1", name: "Pog", imageURL: "https://cdn.frankerfacez.com/emoticon/f1/4", count: 40, provider: "ffz"},
 			},
 		},
 		{
 			offsetSeconds: 240, durationSeconds: 60, score: 9, confidence: 1.0, reason: ReasonChatSpike,
 			emotes: []expectedEmote{
-				{id: "e2", name: "OMEGALUL", imageURL: "/emotes/e2/1x.webp", count: 30, provider: "seventv"},
-				{id: "t1", name: "Kappa", imageURL: "/emotes/t1/1x.webp", count: 15, provider: "twitch"},
+				{id: "e2", name: "OMEGALUL", imageURL: "https://cdn.7tv.app/emote/e2/4x.webp", count: 30, provider: "seventv"},
+				{id: "t1", name: "Kappa", imageURL: "https://static-cdn.jtvnw.net/emoticons/v2/t1/default/dark/2.0", count: 15, provider: "twitch"},
 			},
 		},
 		{
 			offsetSeconds: 300, durationSeconds: 60, score: 14, confidence: 1.0, reason: ReasonSevenTVSpike,
 			emotes: []expectedEmote{
-				{id: "e3", name: "PepeLaugh", imageURL: "/emotes/e3/1x.webp", count: 50, provider: "seventv"},
-				{id: "f1", name: "Pog", imageURL: "/emotes/f1/1x.webp", count: 20, provider: "ffz"},
+				{id: "e3", name: "PepeLaugh", imageURL: "https://cdn.7tv.app/emote/e3/4x.webp", count: 50, provider: "seventv"},
+				{id: "f1", name: "Pog", imageURL: "https://cdn.frankerfacez.com/emoticon/f1/4", count: 20, provider: "ffz"},
 			},
 		},
 	}

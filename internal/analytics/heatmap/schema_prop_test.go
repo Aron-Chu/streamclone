@@ -16,7 +16,7 @@ import (
 //
 // **Validates: Requirements 8.1, 28.1, 28.2, 28.3, 28.4**
 func TestPropSchemaConformance(t *testing.T) {
-	emoteURLPattern := regexp.MustCompile(`^/emotes/[^/]+/1x\.webp$`)
+	emoteURLPattern := regexp.MustCompile(`^(/emotes/[a-zA-Z0-9_-]+/1x\.webp|https://static-cdn\.jtvnw\.net/emoticons/v2/[^/]+/default/dark/2\.0|https://cdn\.7tv\.app/emote/[^/]+/4x\.webp|https://cdn\.frankerfacez\.com/emoticon/[^/]+/4|https://cdn\.betterttv\.net/emote/[^/]+/3x)$`)
 
 	genEmoteKey := rapid.Custom(func(t *rapid.T) string {
 		provider := rapid.SampledFrom([]string{"seventv", "twitch", "ffz"}).Draw(t, "provider")
@@ -230,7 +230,7 @@ func TestPropSchemaConformance(t *testing.T) {
 						t.Fatalf("point[%d].TopEmotes[%d].ID is empty", i, j)
 					}
 					if !emoteURLPattern.MatchString(emote.ImageURL) {
-						t.Fatalf("point[%d].TopEmotes[%d].ImageURL = %q, want /emotes/{id}/1x.webp", i, j, emote.ImageURL)
+						t.Fatalf("point[%d].TopEmotes[%d].ImageURL = %q, want resolved emote CDN/local URL", i, j, emote.ImageURL)
 					}
 				}
 			}
