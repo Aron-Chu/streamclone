@@ -30,6 +30,10 @@ export interface MostReactedLiveProps {
   login: string
   /** Resolved VOD id, when known, for "Jump back" deep links. */
   vodId?: string
+  /** Analytics stream id for sid= deep link (Twitch embed + activity graph). */
+  analyticsStreamId?: string
+  /** Stream start time for absolute VOD seek offsets. */
+  streamStartedAt?: string
   /** Disable polling when off-screen or the stream is not live. */
   enabled?: boolean
   className?: string
@@ -40,6 +44,7 @@ function toLiveHeatInput(detail: AnalyticsStreamDetail) {
     state: detail.state,
     rollups: detail.rollups ?? [],
     topEmotes: detail.topEmotes ?? [],
+    streamStartedAt: detail.stream?.startedAt,
   }
 }
 
@@ -89,10 +94,12 @@ function MomentRow({
   point,
   login,
   vodId,
+  analyticsStreamId,
 }: {
   point: LiveHeatPoint
   login: string
   vodId?: string
+  analyticsStreamId?: string
 }) {
   const offsetLabel = formatHeatOffset(point.offsetSeconds)
   const canJump = Boolean(vodId)
@@ -131,9 +138,11 @@ function MomentRow({
     return body
   }
 
+  const deepLink = buildVodDeepLink(login, vodId as string, point.offsetSeconds, analyticsStreamId)
+
   return (
     <a
-      href={buildVodDeepLink(login, vodId as string, point.offsetSeconds)}
+      href={deepLink}
       className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
       aria-label={`Play moment in Streamclone at ${offsetLabel}, score ${point.score}, ${point.reasonLabel}`}
     >
@@ -142,7 +151,7 @@ function MomentRow({
   )
 }
 
-export function MostReactedLive({ login, vodId, enabled = true, className }: MostReactedLiveProps) {
+export function MostReactedLive({ login, vodId, analyticsStreamId, enabled = true, className }: MostReactedLiveProps) {
   const query = useQuery({
     queryKey: ['analytics-live-heat', login],
     queryFn: () => getAnalyticsLive(login),
@@ -175,10 +184,10 @@ export function MostReactedLive({ login, vodId, enabled = true, className }: Mos
 
       <div className="flex flex-col gap-2">
         {heat.points.map(point => (
-          <MomentRow key={point.minuteTs} point={point} login={login} vodId={vodId} />
+          <MomentRow key={point.minuteTs} point={point} login={login} vodId={vodId} analyticsStreamId={analyticsStreamId} />
         ))}
         {heat.collectingPoint && (
-          <MomentRow point={heat.collectingPoint} login={login} vodId={vodId} />
+          <MomentRow point={heat.collectingPoint} login={login} vodId={vodId} analyticsStreamId={analyticsStreamId} />
         )}
       </div>
     </section>

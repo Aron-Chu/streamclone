@@ -1,5 +1,6 @@
 import type { ReplayHeatmapPoint } from '../types/heatmap'
 import type { ClipperMomentContext } from '../api'
+import { REPLAYFORGE_UI } from '../config'
 
 export interface ClipRequest {
   channel: string
@@ -89,6 +90,10 @@ export function selectBatchClipCandidates(
 }
 
 export function clipStudioUrl(jobId: string): string {
+  const ui = REPLAYFORGE_UI.replace(/\/$/, '')
+  if (ui) {
+    return `${ui}/studio/${encodeURIComponent(jobId)}`
+  }
   return `/studio/${encodeURIComponent(jobId)}`
 }
 

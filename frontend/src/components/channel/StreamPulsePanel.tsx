@@ -9,6 +9,7 @@ import type {
 } from '../../api.ts'
 import { normalizeBrowserOriginUrl } from '../../config.ts'
 import { useOptionalServices } from '../../hooks/useOptionalServices.ts'
+import { resolveEmoteImageUrl } from '../../utils/emoteImageUrl.ts'
 import {
   analyticsNotTrackedMessage,
   isLsfPending,
@@ -16,6 +17,7 @@ import {
   summarizeLsfEmptyState,
 } from '../../utils/pulseEmptyState.ts'
 import { LiveStatsBand } from '../analytics/LiveStatsBand.tsx'
+import TrackAnalyticsToggle from './TrackAnalyticsToggle.tsx'
 
 function fullCount(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return '—'
@@ -31,9 +33,13 @@ function formatClipDuration(seconds?: number) {
 }
 
 function emoteImageUrl(emote: AnalyticsTopEmote): string | undefined {
-  if (emote.imageUrl) return normalizeBrowserOriginUrl(emote.imageUrl, ['/emotes/'])
-  if (emote.id) return normalizeBrowserOriginUrl(`/emotes/${emote.id}/2x.webp`, ['/emotes/'])
-  return undefined
+  const url = resolveEmoteImageUrl({
+    provider: emote.provider,
+    id: emote.id,
+    imageUrl: emote.imageUrl,
+    scale: '2x',
+  })
+  return url ? normalizeBrowserOriginUrl(url, ['/emotes/']) : undefined
 }
 
 function PulseLsfLoadingSkeleton({ subtitle }: { subtitle: string }) {
@@ -205,20 +211,29 @@ function StreamPulsePanel({
             </div>
             <p className="mt-1 text-xs font-semibold text-zinc-500">Top r/LivestreamFail threads about this streamer from the past 7 days.</p>
           </div>
-          <label className="flex shrink-0 items-center gap-2 text-[11px] font-semibold text-zinc-400">
-            <span>Auto-updating</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={autoUpdate}
-              onClick={() => onAutoUpdateChange(!autoUpdate)}
-              className={`relative h-5 w-9 rounded-full transition ${autoUpdate ? 'bg-violet-600' : 'bg-zinc-700'}`}
-            >
-              <span
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${autoUpdate ? 'left-4' : 'left-0.5'}`}
-              />
-            </button>
-          </label>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <TrackAnalyticsToggle
+              tracked={trackLiveAnalytics}
+              pending={trackAnalyticsPending}
+              onToggle={onTrackAnalytics}
+              trackLabel="Track streamer"
+              trackingLabel="Tracking"
+            />
+            <label className="flex items-center gap-2 text-[11px] font-semibold text-zinc-400">
+              <span>Auto-updating</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoUpdate}
+                onClick={() => onAutoUpdateChange(!autoUpdate)}
+                className={`relative h-5 w-9 rounded-full transition ${autoUpdate ? 'bg-violet-600' : 'bg-zinc-700'}`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${autoUpdate ? 'left-4' : 'left-0.5'}`}
+                />
+              </button>
+            </label>
+          </div>
         </div>
 
         <section>
@@ -289,15 +304,7 @@ function StreamPulsePanel({
           <h3 className="text-xs font-black uppercase text-zinc-400">Top emotes</h3>
           {!trackLiveAnalytics ? (
             <div className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-4 text-xs font-semibold text-zinc-500">
-              {analyticsNotTrackedMessage()}
-              <button
-                type="button"
-                disabled={trackAnalyticsPending}
-                onClick={() => onTrackAnalytics(true)}
-                className="mt-3 block rounded border border-violet-400/30 bg-violet-500/10 px-3 py-1.5 text-[11px] font-black uppercase text-violet-200 transition hover:border-violet-300/50 disabled:opacity-60"
-              >
-                {trackAnalyticsPending ? 'Saving…' : 'Track analytics'}
-              </button>
+              {analyticsNotTrackedMessage()} Use <span className="text-violet-200">Track streamer</span> above to enable live emote spikes.
             </div>
           ) : liveAnalyticsLoading && !topEmotes.length ? (
             <div className="text-xs font-semibold text-zinc-500">Loading live emotes…</div>

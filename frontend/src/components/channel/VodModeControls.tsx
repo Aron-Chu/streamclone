@@ -41,6 +41,10 @@ export interface VodModeControlsProps {
    * Analytics" action is hidden. Requirement 20.5.
    */
   analyticsHref?: string | null
+  /** Full chat log page for this stream, when analytics context is present. */
+  chatLogHref?: string | null
+  /** True while the relay is repositioning after a far seek. */
+  seekPending?: boolean
   className?: string
 }
 
@@ -62,6 +66,8 @@ export function VodModeControls({
   currentTimeSec,
   totalDurationSec,
   analyticsHref,
+  chatLogHref,
+  seekPending = false,
   className,
 }: VodModeControlsProps) {
   const offsetLabel = formatVodTimestamp(offsetSeconds)
@@ -80,6 +86,12 @@ export function VodModeControls({
       <span className="rounded bg-violet-500/20 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-violet-100">
         VOD mode
       </span>
+      {seekPending ? (
+        <span className="flex items-center gap-1.5 rounded bg-amber-500/20 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-amber-100">
+          <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-amber-200/30 border-t-amber-100" aria-hidden />
+          Repositioning…
+        </span>
+      ) : null}
       <span className="font-mono text-zinc-300" title="Twitch VOD identifier">
         #{vodId}
       </span>
@@ -103,6 +115,14 @@ export function VodModeControls({
         >
           Back to live channel
         </Link>
+        {chatLogHref ? (
+          <Link
+            to={chatLogHref}
+            className="rounded border border-cyan-400/30 bg-cyan-500/15 px-3 py-1.5 text-[11px] font-black text-cyan-100 transition hover:bg-cyan-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+          >
+            Chat log
+          </Link>
+        ) : null}
         {analyticsHref ? (
           <Link
             to={analyticsHref}

@@ -68,12 +68,27 @@ const maxFatalMediaRecoveries = 2
 const stallDowngradeThreshold = 3
 const rebufferDowngradeMs = 4000
 
-/** VOD relays publish a short live HLS window; never seek past buffered duration. */
+/** VOD relays publish a short live HLS window; clamp when duration is known. */
 function clampVodRelaySeek(video: HTMLVideoElement, seekTarget: number): number {
   if (!Number.isFinite(seekTarget) || seekTarget <= 0) return 0
   const duration = video.duration
-  if (!Number.isFinite(duration) || duration <= 0) return 0
+  if (!Number.isFinite(duration) || duration <= 0) return seekTarget
   return Math.min(seekTarget, Math.max(0, duration - 0.5))
+}
+
+function applyVodRelaySeek(video: HTMLVideoElement, seekTarget: number): boolean {
+  if (!Number.isFinite(seekTarget) || seekTarget <= 0) return true
+  const clamped = clampVodRelaySeek(video, seekTarget)
+  if (clamped <= 0) return false
+  video.currentTime = clamped
+  return true
+}
+
+/** Resume VOD relay playback without snapping to the live edge of the sliding window. */
+function vodResumePosition(video: HTMLVideoElement, seekTarget: number): number {
+  if (Number.isFinite(video.currentTime) && video.currentTime > 0.5) return video.currentTime
+  if (seekTarget > 0) return seekTarget
+  return 0
 }
 
 function nextLatencyMode(mode: PlaybackLatencyMode): PlaybackLatencyMode | null {
@@ -110,6 +125,10 @@ interface UseHlsPlaybackOptions {
   mode?: 'live' | 'vod'
   /** Seconds into the relayed stream to seek once playback starts (VOD mode). */
   seekOnStart?: number
+  /** Bumps when the VOD relay repositions so HLS re-attaches even if the URL is unchanged. */
+  relayEpoch?: number
+  /** Softer 401 / LevelLoadError recovery while the relay is repositioning. */
+  vodRepositioning?: boolean
   onLatencyDowngrade?: (mode: PlaybackLatencyMode) => void
   /** Fired after repeated 401s on HLS playlists — usually stale session or dead relay. */
   onUnauthorizedHls?: () => void
@@ -119,6 +138,8 @@ interface UseHlsPlaybackOptions {
 function hlsVodRelayConfig() {
   return {
     lowLatencyMode: false,
+    // VOD relays publish a short live HLS window — stay at buffered position, not live edge.
+    liveSyncMode: 'buffered' as const,
     liveSyncDurationCount: 2,
     liveMaxLatencyDurationCount: 5,
     maxBufferLength: 30,
@@ -181,6 +202,16 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
   const startedAtRef = useRef<number>(0)
   const lastFragRef = useRef<{ bytes: number; duration: number } | null>(null)
   const fpsRef = useRef<{ startedAt: number; frames: number; fps: number | null }>({ startedAt: 0, frames: 0, fps: null })
+  const seekOnStartRef = useRef(0)
+  seekOnStartRef.current = Math.max(0, options.seekOnStart ?? 0)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (options.mode !== 'vod' || !options.enabled || !options.src || !video) return
+    const target = seekOnStartRef.current
+    if (target <= 0) return
+    applyVodRelaySeek(video, target)
+  }, [options.enabled, options.mode, options.seekOnStart, options.src, videoRef])
 
   useEffect(() => {
     const video = videoRef.current
@@ -196,6 +227,18 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     video.play().catch(() => undefined)
     return true
   }, [videoRef])
+
+  const seekVodRelay = useCallback((relativeSec: number) => {
+    const hls = hlsRef.current
+    const video = videoRef.current
+    if (!hls || !video || options.mode !== 'vod') return false
+    const clamped = clampVodRelaySeek(video, relativeSec)
+    if (clamped > 0) {
+      video.currentTime = clamped
+    }
+    hls.startLoad(clamped > 0 ? clamped : undefined)
+    return true
+  }, [options.mode, videoRef])
 
   useEffect(() => {
     setEffectiveLatencyMode(options.latencyMode ?? 'stable')
@@ -237,7 +280,8 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     setError(null)
     const playbackMode = options.mode ?? 'live'
     const latencyMode = playbackMode === 'vod' ? 'stable' : effectiveLatencyMode
-    const seekTarget = playbackMode === 'vod' ? Math.max(0, options.seekOnStart ?? 0) : 0
+    const seekTarget = playbackMode === 'vod' ? seekOnStartRef.current : 0
+    const isVodRepositioning = playbackMode === 'vod' && Boolean(options.vodRepositioning)
     let seekApplied = seekTarget <= 0
     setMetrics({ ...emptyMetrics, hlsStage: 'starting', latencyMode: latencyModeLabel(latencyMode) })
     video.muted = Boolean(options.muted)
@@ -264,9 +308,7 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     const markPlaying = () => {
       if (!alive) return
       if (!seekApplied && seekTarget > 0) {
-        const clamped = clampVodRelaySeek(video, seekTarget)
-        if (clamped > 0) video.currentTime = clamped
-        seekApplied = true
+        seekApplied = applyVodRelaySeek(video, seekTarget)
       }
       if (rebufferStartedRef.current !== null) {
         const rebufferMs = performance.now() - rebufferStartedRef.current
@@ -281,6 +323,16 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
       stageRef.current = 'first-frame'
       setState('playing')
       updateMetrics()
+    }
+
+    const vodHoldPosition = () => vodResumePosition(video, seekTarget)
+
+    const setVodRecoveryState = () => {
+      if (isVodRepositioning || firstFrameRef.current !== null) {
+        setState('buffering')
+        return
+      }
+      setState('retrying')
     }
 
     const onPlaying = () => markPlaying()
@@ -307,6 +359,12 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     video.addEventListener('playing', onPlaying)
     video.addEventListener('waiting', onWaiting)
     video.addEventListener('error', onError)
+    const onDurationReady = () => {
+      if (!alive || seekApplied || seekTarget <= 0) return
+      seekApplied = applyVodRelaySeek(video, seekTarget)
+    }
+    video.addEventListener('loadedmetadata', onDurationReady)
+    video.addEventListener('durationchange', onDurationReady)
 
     const frameLoop = () => {
       if (!alive) return
@@ -335,6 +393,7 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
         const maxNetworkRecoveries = playbackMode === 'vod' ? 6 : maxFatalNetworkRecoveries
         const hls = new HlsPlayer({
           ...latency,
+          ...(playbackMode === 'vod' && seekTarget > 0 ? { startPosition: seekTarget } : {}),
           capLevelToPlayerSize: true,
           maxBufferHole: 0.5,
           enableWorker: true,
@@ -351,9 +410,7 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
           stageRef.current = 'manifest-parsed'
           updateMetrics()
           if (!seekApplied && seekTarget > 0) {
-            const clamped = clampVodRelaySeek(video, seekTarget)
-            if (clamped > 0) video.currentTime = clamped
-            seekApplied = true
+            seekApplied = applyVodRelaySeek(video, seekTarget)
           }
           if (options.autoPlay !== false) video.play().catch(() => undefined)
         })
@@ -382,16 +439,35 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
             unauthorizedReloadCount += 1
             stageRef.current = data.details || 'hls-unauthorized'
             updateMetrics()
-            if (unauthorizedReloadCount <= 2) {
-              setState('retrying')
-              hls.loadSource(src)
+            const maxUnauthorizedReloads = isVodRepositioning ? 12 : playbackMode === 'vod' ? 5 : 2
+            if (unauthorizedReloadCount <= maxUnauthorizedReloads) {
+              seekApplied = false
+              if (playbackMode === 'vod') {
+                setVodRecoveryState()
+                applyVodRelaySeek(video, vodHoldPosition())
+                hls.loadSource(src)
+              } else {
+                setState('retrying')
+                hls.loadSource(src)
+              }
               return
             }
             hls.stopLoad()
-            if (!unauthorizedEscalated) {
+            if (!unauthorizedEscalated && playbackMode !== 'vod') {
               unauthorizedEscalated = true
               setState('retrying')
               options.onUnauthorizedHls?.()
+              return
+            }
+            if (playbackMode === 'vod') {
+              seekApplied = false
+              applyVodRelaySeek(video, vodHoldPosition())
+              if (isVodRepositioning) {
+                setState('buffering')
+                hls.startLoad(vodHoldPosition())
+                return
+              }
+              hls.startLoad(vodHoldPosition())
               return
             }
             setState('error')
@@ -405,8 +481,8 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
               && responseCode === 404
               && details.includes('frag')
             ) {
-              stageRef.current = 'frag-404-live-edge'
-              hls.startLoad(-1)
+              stageRef.current = 'frag-404-recover'
+              hls.startLoad(vodHoldPosition())
               updateMetrics()
             }
             return
@@ -415,8 +491,27 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
           stageRef.current = data.details || 'hls-error'
           updateMetrics()
           if (data.type === HlsPlayer.ErrorTypes.NETWORK_ERROR) {
+            const isLevelOrManifestLoad =
+              responseCode === 401 || details.includes('levelload') || details.includes('manifestload')
+            if (isVodRepositioning && isLevelOrManifestLoad) {
+              recoveryRef.current = Math.max(1, Math.floor(recoveryRef.current / 2))
+              seekApplied = false
+              setState('buffering')
+              applyVodRelaySeek(video, vodHoldPosition())
+              hls.loadSource(src)
+              updateMetrics()
+              return
+            }
             if (recoveryRef.current > maxNetworkRecoveries) {
-              if (playbackMode === 'vod' && options.onVodRelayStale) {
+              if (playbackMode === 'vod') {
+                const hold = vodHoldPosition()
+                recoveryRef.current = Math.max(1, Math.floor(maxNetworkRecoveries / 2))
+                setState('buffering')
+                hls.startLoad(hold)
+                updateMetrics()
+                return
+              }
+              if (options.onVodRelayStale) {
                 setState('retrying')
                 options.onVodRelayStale()
                 return
@@ -425,9 +520,19 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
               setError(normalizePlaybackError(`HLS ${data.details || 'network error'}`))
               return
             }
-            setState('retrying')
+            if (playbackMode === 'vod') {
+              setVodRecoveryState()
+            } else {
+              setState('retrying')
+            }
             if (responseCode === 401 || details.includes('levelload') || details.includes('manifestload')) {
+              seekApplied = false
+              if (playbackMode === 'vod') {
+                applyVodRelaySeek(video, vodHoldPosition())
+              }
               hls.loadSource(src)
+            } else if (playbackMode === 'vod') {
+              hls.startLoad(vodHoldPosition())
             } else {
               hls.startLoad()
             }
@@ -480,6 +585,8 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
       video.removeEventListener('playing', onPlaying)
       video.removeEventListener('waiting', onWaiting)
       video.removeEventListener('error', onError)
+      video.removeEventListener('loadedmetadata', onDurationReady)
+      video.removeEventListener('durationchange', onDurationReady)
       if (hlsRef.current) {
         hlsRef.current.destroy()
         hlsRef.current = null
@@ -488,9 +595,9 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
       video.removeAttribute('src')
       video.load()
     }
-  }, [effectiveLatencyMode, options.autoPlay, options.enabled, options.mode, options.muted, options.onLatencyDowngrade, options.onUnauthorizedHls, options.onVodRelayStale, options.seekOnStart, options.src, videoRef])
+  }, [effectiveLatencyMode, options.autoPlay, options.enabled, options.mode, options.muted, options.onLatencyDowngrade, options.onUnauthorizedHls, options.onVodRelayStale, options.relayEpoch, options.seekOnStart, options.src, options.vodRepositioning, videoRef])
 
-  return useMemo(() => ({ state, error, metrics, jumpLive, effectiveLatencyMode }), [state, error, metrics, jumpLive, effectiveLatencyMode])
+  return useMemo(() => ({ state, error, metrics, jumpLive, seekVodRelay, effectiveLatencyMode }), [state, error, metrics, jumpLive, seekVodRelay, effectiveLatencyMode])
 }
 
 export function getLiveEdgeMetrics(video: HTMLVideoElement, hls: Hls | null) {

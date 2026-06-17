@@ -37,3 +37,25 @@ func TestVodRegistryAndMediaKeys(t *testing.T) {
 		t.Fatalf("unexpected media key: %q", got)
 	}
 }
+
+func TestFormatVodTimeOffset(t *testing.T) {
+	if got := FormatVodTimeOffset(0); got != "0s" {
+		t.Fatalf("expected 0s, got %q", got)
+	}
+	if got := FormatVodTimeOffset(45); got != "45s" {
+		t.Fatalf("expected 45s, got %q", got)
+	}
+	if got := FormatVodTimeOffset(4541); got != "1h15m41s" {
+		t.Fatalf("expected 1h15m41s, got %q", got)
+	}
+}
+
+func TestVodPageURLWithOffset(t *testing.T) {
+	if got := VodPageURLWithOffset("2798379989", 0); got != "https://www.twitch.tv/videos/2798379989" {
+		t.Fatalf("unexpected base url: %q", got)
+	}
+	want := "https://www.twitch.tv/videos/2798379989?t=1h15m11s"
+	if got := VodPageURLWithOffset("2798379989", 4541); got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}

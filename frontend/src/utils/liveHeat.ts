@@ -22,7 +22,9 @@
 // utils/liveStats.ts) so they can be unit-tested without rendering and stay
 // importable by the node --experimental-strip-types test runner. They define
 // their own minimal input shapes (mirroring AnalyticsMinuteRollup /
-// AnalyticsTopEmote from api.ts) so the module has no runtime imports.
+// AnalyticsTopEmote from api.ts).
+
+import { resolveEmoteImageUrl } from './emoteImageUrl.ts'
 
 /** Refresh cadence for the live heat section (Req 19.1). */
 export const LIVE_HEAT_REFRESH_MS = 30000
@@ -106,6 +108,8 @@ export interface LiveHeatInput {
   state: LiveHeatStreamState
   rollups: LiveHeatRollup[]
   topEmotes?: LiveHeatCatalogEmote[]
+  /** When set, offsets are absolute seconds from stream start (VOD seek). */
+  streamStartedAt?: string
 }
 
 export interface LiveHeatResult {
@@ -182,12 +186,19 @@ function topEmotesFromRollup(
       const parsed = parseEmoteKey(key)
       const match = catalog.get(key) ?? byName.get(parsed.name.toLowerCase())
       const id = match?.id ?? parsed.id
+      const provider = match?.provider ?? (parsed.provider && parsed.provider !== 'unknown' ? parsed.provider : undefined)
+      const imageUrl = resolveEmoteImageUrl({
+        provider,
+        id,
+        imageUrl: match?.imageUrl,
+        scale: '1x',
+      })
       return {
         key,
         name: match?.name ?? parsed.name,
         id,
-        provider: match?.provider ?? (parsed.provider && parsed.provider !== 'unknown' ? parsed.provider : undefined),
-        imageUrl: match?.imageUrl ?? (id ? `/emotes/${id}/1x.webp` : undefined),
+        provider,
+        imageUrl: imageUrl || undefined,
         count,
       }
     })
@@ -242,13 +253,15 @@ function buildPoint(
   catalog: Map<string, LiveHeatCatalogEmote>,
   byName: Map<string, LiveHeatCatalogEmote>,
   collecting: boolean,
+  streamStartedMs?: number,
 ): LiveHeatPoint {
   const topEmotes = topEmotesFromRollup(r, catalog, byName)
   const reason = detectReason(r, baselines, topEmotes)
   const minuteMs = parseMinuteMs(r.minuteTs)
+  const anchorMs = Number.isFinite(streamStartedMs) ? streamStartedMs! : firstMs
   const offsetSeconds =
-    Number.isFinite(minuteMs) && Number.isFinite(firstMs)
-      ? Math.max(0, Math.round((minuteMs - firstMs) / 1000))
+    Number.isFinite(minuteMs) && Number.isFinite(anchorMs)
+      ? Math.max(0, Math.round((minuteMs - anchorMs) / 1000))
       : 0
   return {
     minuteTs: r.minuteTs ?? '',
@@ -298,16 +311,17 @@ export function deriveLiveHeat(input: LiveHeatInput): LiveHeatResult {
 
   const baselines = computeBaselines(completed.length ? completed : dataRollups)
   const firstMs = parseMinuteMs(dataRollups[0]?.minuteTs)
+  const streamStartedMs = parseMinuteMs(input.streamStartedAt)
 
   const collectingPoint = collectingRollup
-    ? buildPoint(collectingRollup, baselines, firstMs, catalog, byName, true)
+    ? buildPoint(collectingRollup, baselines, firstMs, catalog, byName, true, streamStartedMs)
     : null
 
   const visible = completed.length >= LIVE_HEAT_MIN_COMPLETED_ROLLUPS
 
   const points = visible
     ? completed
-        .map(r => buildPoint(r, baselines, firstMs, catalog, byName, false))
+        .map(r => buildPoint(r, baselines, firstMs, catalog, byName, false, streamStartedMs))
         .filter(p => p.score > 0)
         .sort((a, b) => b.score - a.score || a.offsetSeconds - b.offsetSeconds)
         .slice(0, LIVE_HEAT_MAX_POINTS)
