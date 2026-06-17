@@ -131,6 +131,12 @@ var (
 	AnalyticsScraperRequests = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "analytics_scraper_requests_total", Help: "Analytics scraper requests by source and result.",
 	}, []string{"source", "result"})
+	AnalyticsSyncBytesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_sync_bytes_total", Help: "Historical analytics sync response bytes by channel and operation.",
+	}, []string{"channel", "op"})
+	AnalyticsSyncActive = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "analytics_sync_active", Help: "Active historical analytics sync jobs by channel and phase.",
+	}, []string{"channel", "phase"})
 )
 
 type statusRecorder struct {

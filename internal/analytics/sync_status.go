@@ -131,8 +131,18 @@ type SyncTrackerProgress struct {
 	Message string `json:"message,omitempty"`
 }
 
+type SyncNetworkUsage struct {
+	TrackerScrapeBytes int64 `json:"trackerScrapeBytes,omitempty"`
+	GQLFetchBytes      int64 `json:"gqlFetchBytes,omitempty"`
+	EmotePreloadBytes  int64 `json:"emotePreloadBytes,omitempty"`
+	HelixBytes         int64 `json:"helixBytes,omitempty"`
+	TotalBytes         int64 `json:"totalBytes,omitempty"`
+	LastRateBps        float64 `json:"lastRateBps,omitempty"`
+}
+
 type SyncStatus struct {
 	StreamID        string               `json:"streamId"`
+	Channel         string               `json:"channel,omitempty"`
 	Phase           SyncPhase            `json:"phase"`
 	Message         string               `json:"message,omitempty"`
 	StartedAt       time.Time            `json:"startedAt"`
@@ -147,6 +157,7 @@ type SyncStatus struct {
 	Timing          *SyncPhaseTiming     `json:"timing,omitempty"`
 	Chat            *SyncChatProgress    `json:"chat,omitempty"`
 	Tracker         *SyncTrackerProgress `json:"tracker,omitempty"`
+	Network         *SyncNetworkUsage    `json:"network,omitempty"`
 }
 
 func syncStatusIsStale(status *SyncStatus) bool {
@@ -252,6 +263,7 @@ func (s *SyncService) saveSyncStatus(ctx context.Context, status SyncStatus) err
 	if s.rdb == nil {
 		return nil
 	}
+	s.updateNetworkUsage(&status)
 	status.UpdatedAt = time.Now().UTC()
 	raw, err := json.Marshal(status)
 	if err != nil {
@@ -297,6 +309,14 @@ func (s *SyncService) setSyncPhase(ctx context.Context, streamID string, phase S
 	if mutate != nil {
 		mutate(status)
 	}
+	if status.Channel != "" {
+		s.setSyncChannel(streamID, status.Channel)
+	}
+	s.updateNetworkUsage(status)
+	s.setActiveSyncPhase(streamID, phase)
+	if phase.IsTerminal() {
+		s.detachSyncNetwork(streamID)
+	}
 	if err := s.persistSyncStatus(ctx, *status, true); err != nil {
 		s.log.Warn("failed to persist sync status", "stream_id", streamID, "phase", phase, "err", err)
 	}
@@ -330,6 +350,7 @@ func (s *SyncService) updateChatProgress(ctx context.Context, streamID string, m
 	if status.Phase != prevPhase {
 		force = true
 	}
+	s.updateNetworkUsage(status)
 	if err := s.persistSyncStatus(ctx, *status, force); err != nil {
 		s.log.Warn("failed to persist chat sync progress", "stream_id", streamID, "err", err)
 	}
@@ -408,8 +429,10 @@ func (s *SyncService) TryStartSync(ctx context.Context, streamID, channelOpt str
 	}
 
 	now := time.Now().UTC()
+	channel := normalizeLogin(channelOpt)
 	status := &SyncStatus{
 		StreamID:    streamID,
+		Channel:     channel,
 		Phase:       SyncPhaseStarting,
 		Message:     "Starting historical sync",
 		StartedAt:   now,
