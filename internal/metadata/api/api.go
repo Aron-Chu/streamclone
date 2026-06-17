@@ -194,6 +194,7 @@ func (h *Handler) WithRedditOptions(opts RedditOptions) *Handler {
 func (h *Handler) Mount(r *chi.Mux) {
 	r.Get("/v1/setup/welcome", h.setupWelcome)
 	r.Get("/v1/setup/diagnostics", h.setupDiagnostics)
+	r.Get("/v1/ops/network", h.opsNetwork)
 	r.Get("/v1/followed", h.followedList)
 	r.Get("/v1/streams", h.streams)
 	r.Get("/v1/streams/random", h.randomStream)
