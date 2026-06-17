@@ -79,11 +79,17 @@ import {
   emoteProviderTone,
   parseEmoteKey,
 } from '../emoteUtils'
+import { pulseDashboardUrl } from '../utils/pulseDashboard.ts'
+import { resolveEmoteImageUrl } from '../utils/emoteImageUrl.ts'
 
 function getEmoteImageUrl(emote: { provider?: string; id?: string; imageUrl?: string }) {
-  if (emote.imageUrl) return emote.imageUrl
-  if (!emote.id) return undefined
-  return `/emotes/${emote.id}/1x.webp`
+  const url = resolveEmoteImageUrl({
+    provider: emote.provider,
+    id: emote.id,
+    imageUrl: emote.imageUrl,
+    scale: '1x',
+  })
+  return url || undefined
 }
 
 type Series = {
@@ -103,26 +109,6 @@ const analyticsViewModes: Array<{ id: AnalyticsViewMode; label: string }> = [
   { id: 'emotes', label: 'Emotes' },
   { id: 'spikes', label: 'Spikes' },
 ]
-
-const PULSE_DASHBOARD_URL = 'http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-24h&to=now'
-
-function pulseDashboardUrl(channel: string, stream?: AnalyticsStream, fallbackStreamId?: string) {
-  const url = new URL(PULSE_DASHBOARD_URL)
-  if (channel) url.searchParams.set('var-channel', channel)
-  const streamId = stream?.streamId || fallbackStreamId
-  if (streamId) url.searchParams.set('var-stream', streamId)
-  if (stream?.startedAt) {
-    const startMs = Date.parse(stream.startedAt)
-    const endMs = stream.endedAt ? Date.parse(stream.endedAt) : Date.now()
-    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
-      url.searchParams.set('from', String(startMs))
-      url.searchParams.set('to', String(endMs))
-      url.searchParams.set('var-stream_start', String(startMs))
-      url.searchParams.set('var-stream_end', String(endMs))
-    }
-  }
-  return url.toString()
-}
 
 function count(value: number | null | undefined) {
   if (value === null || value === undefined) return '-'
@@ -394,7 +380,7 @@ function topEmotesFromRollup(
         name: match?.name ?? parsed.name,
         provider: match?.provider ?? (parsed.provider !== 'unknown' ? parsed.provider : undefined),
         count,
-        image_url: match ? getEmoteImageUrl(match) : (parsed.id ? `/emotes/${parsed.id}/1x.webp` : undefined),
+        image_url: match ? getEmoteImageUrl(match) : (parsed.id ? getEmoteImageUrl({ provider: parsed.provider, id: parsed.id }) : undefined),
       }
     })
 }
@@ -4267,7 +4253,12 @@ export default function Analytics() {
     [syncing, detail?.rollups],
   )
   const chartEmoteKeys = useMemo(() => {
-    if (analyticsViewMode === 'overview') return selected
+    const topEmoteKey = detail?.topEmotes?.[0]?.key
+    if (analyticsViewMode === 'overview') {
+      // Always surface the single most-used emote, even with nothing selected.
+      if (selected.size > 0) return selected
+      return topEmoteKey ? new Set([topEmoteKey]) : selected
+    }
     if (selected.size > 0) return selected
     return new Set((detail?.topEmotes ?? []).slice(0, 4).map(emote => emote.key))
   }, [analyticsViewMode, selected, detail?.topEmotes])
@@ -4330,7 +4321,15 @@ export default function Analytics() {
               {stream?.category ? <span>{stream.category}</span> : null}
               {stream?.startedAt ? <span>Started {relativeTime(stream.startedAt)}</span> : null}
               {isHistoricalRoute && stream?.streamId ? (
-                <span className="font-mono text-[11px] text-zinc-600">{stream.streamId}</span>
+                <>
+                  <span className="font-mono text-[11px] text-zinc-600">{stream.streamId}</span>
+                  <Link
+                    to={`/logs/${encodeURIComponent(login)}/${encodeURIComponent(stream.streamId)}`}
+                    className="rounded border border-violet-400/30 bg-violet-500/10 px-2 py-0.5 text-[11px] font-black uppercase text-violet-200 transition hover:bg-violet-500/20"
+                  >
+                    Open full chat log
+                  </Link>
+                </>
               ) : null}
               <span>
                 {lastRefreshedAt
@@ -4507,6 +4506,8 @@ export default function Analytics() {
                       <MostReactedLive
                         login={login}
                         vodId={streamVodId}
+                        analyticsStreamId={stream?.streamId}
+                        streamStartedAt={stream?.startedAt}
                         enabled
                         className="flex flex-col gap-3 border-b border-white/10 p-3"
                       />

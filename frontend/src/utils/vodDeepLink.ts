@@ -51,6 +51,20 @@ export function buildVodSeekTarget(
   return Math.max(0, offset - seek)
 }
 
+/** Relay preroll pad (must match internal/video/worker.VodSeekPad). */
+export const VOD_RELAY_SEEK_PAD_SECONDS = 30
+
+/** ffmpeg -ss target for a requested VOD offset (server-side seek). */
+export function estimateVodRelaySeekSeconds(offsetSeconds: number): number {
+  const offset = Number.isFinite(offsetSeconds) ? Math.max(0, Math.trunc(offsetSeconds)) : 0
+  return Math.max(0, offset - VOD_RELAY_SEEK_PAD_SECONDS)
+}
+
+/** Player seek into the relay window before the server start response arrives. */
+export function estimateVodPlayerSeekTarget(offsetSeconds: number): number {
+  return buildVodSeekTarget(offsetSeconds, estimateVodRelaySeekSeconds(offsetSeconds))
+}
+
 /** Request body sent to `POST /v1/stream/vod/start`. */
 export interface VodStartRequestBody {
   vod_id: string
@@ -101,15 +115,15 @@ export interface VodAnalyticsContext {
  * Re-sync actions (Req 20.5, 34.3).
  */
 /**
- * Analytics VOD review uses Twitch embed + local rollups instead of the HLS relay.
- * Relay often fails with anonymous Usher tokens even when Twitch's player works.
+ * Analytics VOD review uses the Streamclone HLS relay plus synced rollups (heatmap + Pulse tab).
+ * Twitch embed is reserved for explicit relay fallback only.
  */
 export function preferTwitchEmbedReview(
-  isVodPlayback: boolean,
-  fromAnalytics: boolean,
-  streamId: string,
+  _isVodPlayback: boolean,
+  _fromAnalytics: boolean,
+  _streamId: string,
 ): boolean {
-  return isVodPlayback && fromAnalytics && streamId.trim().length > 0
+  return false
 }
 
 export function parseVodAnalyticsContext(

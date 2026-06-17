@@ -355,22 +355,8 @@ func (h *Orchestrator) startVodWorker(ctx context.Context, vodID, quality string
 }
 
 func vodWorkerBackends(backends []string) []string {
-	normalized := normalizeBackends(backends)
-	if len(normalized) == 0 {
-		return normalized
-	}
-	out := make([]string, 0, len(normalized))
-	for _, backend := range normalized {
-		if backend == "streamlink" {
-			out = append(out, backend)
-		}
-	}
-	for _, backend := range normalized {
-		if backend != "streamlink" {
-			out = append(out, backend)
-		}
-	}
-	return out
+	// Preserve STREAM_WORKER_BACKENDS order (profile defaults to direct_hls,streamlink).
+	return normalizeBackends(backends)
 }
 
 func (h *Orchestrator) spawnVodBackend(vodID, quality string, offsetSeconds int, rtmp, backend string, selected *usher.Rendition, viewerOAuth string) (registry.Streamer, error) {

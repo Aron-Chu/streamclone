@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 
 import { ANALYTICS } from '../../config.ts'
 import { computeBucketStart, computeBucketEnd } from '../../utils/vodChatReplay.ts'
+import { linkifyText } from '../../utils/linkifyText'
+import ChatUserMenu, { type ChatUserFilter } from '../chat/ChatUserMenu'
 
 export interface EmoteFrag {
   name: string
@@ -17,6 +19,7 @@ export interface VODChatMessage {
   minuteTs: string
   messageId: string
   displayName: string
+  commenterLogin?: string
   senderHash: string
   text: string
   emoteFrags?: EmoteFrag[]
@@ -35,10 +38,10 @@ export interface VodChatReplayPanelProps {
   currentOffsetSeconds: number
   isSyncing?: boolean
   onSync?: () => void
+  /** Stream has minute rollups but no persisted chat-replay rows yet. */
+  needsChatReplayResync?: boolean
   className?: string
 }
-
-
 
 async function fetchChatReplay(
   streamId: string,
@@ -62,9 +65,13 @@ async function fetchChatReplay(
   return res.json() as Promise<ChatReplayResponse>
 }
 
-function renderMessageText(text: string, emoteFrags?: EmoteFrag[]): React.ReactNode {
+function renderMessageText(
+  text: string,
+  emoteFrags?: EmoteFrag[],
+  onFilterUser?: (filter: ChatUserFilter) => void,
+): React.ReactNode {
   if (!emoteFrags || emoteFrags.length === 0) {
-    return <span>{text}</span>
+    return <span>{linkifyText(text, 'vod')}</span>
   }
 
   const parts: React.ReactNode[] = []
@@ -84,13 +91,26 @@ function renderMessageText(text: string, emoteFrags?: EmoteFrag[]): React.ReactN
           src={emote.imageUrl}
           alt={emote.name}
           title={emote.name}
-          className="inline-block h-5 w-5 align-middle"
+          className="mx-0.5 inline-block h-7 max-w-[2rem] align-middle object-contain"
           loading="lazy"
           decoding="async"
         />,
       )
+    } else if (word.startsWith('@') && word.length > 1) {
+      const login = word.replace(/^@+/, '').toLowerCase()
+      parts.push(
+        <ChatUserMenu
+          key={`m-${i}`}
+          displayName={word.replace(/^@+/, '')}
+          login={login}
+          onFilterUser={onFilterUser}
+          className="font-black text-violet-300 hover:underline"
+        >
+          {word}
+        </ChatUserMenu>,
+      )
     } else {
-      parts.push(<span key={i}>{word}</span>)
+      parts.push(<span key={i}>{linkifyText(word, `w-${i}`)}</span>)
     }
     if (i < words.length - 1) {
       parts.push(<span key={`sp-${i}`}> </span>)
@@ -105,6 +125,7 @@ export function VodChatReplayPanel({
   currentOffsetSeconds,
   isSyncing = false,
   onSync,
+  needsChatReplayResync = false,
   className,
 }: VodChatReplayPanelProps) {
   const bucketStart = computeBucketStart(currentOffsetSeconds)
@@ -113,17 +134,14 @@ export function VodChatReplayPanel({
   const [prevBucket, setPrevBucket] = useState(bucketStart)
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
 
-  const queryKey = ['vod-chat-replay', streamId, bucketStart]
-
   const { data, isLoading, isError } = useQuery({
-    queryKey,
+    queryKey: ['vod-chat-replay', streamId, bucketStart],
     queryFn: () => fetchChatReplay(streamId, bucketStart, bucketEnd),
     enabled: Boolean(streamId),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   })
 
-  // Track bucket crossing and auto-scroll behavior
   useEffect(() => {
     if (bucketStart !== prevBucket) {
       setPrevBucket(bucketStart)
@@ -131,7 +149,6 @@ export function VodChatReplayPanel({
     }
   }, [bucketStart, prevBucket])
 
-  // Auto-scroll to bottom on new messages within same bucket
   useEffect(() => {
     if (shouldAutoScroll && scrollRef.current && data?.messages?.length) {
       const el = scrollRef.current
@@ -146,7 +163,6 @@ export function VodChatReplayPanel({
     setShouldAutoScroll(isAtBottom)
   }, [])
 
-  // No-data / sync CTA: unavailable flag means no persisted messages exist
   if (data?.unavailable) {
     return (
       <div
@@ -172,8 +188,10 @@ export function VodChatReplayPanel({
         <p className="text-sm font-semibold text-zinc-300">
           Chat replay not available
         </p>
-        <p className="text-xs text-zinc-500">
-          Sync this stream to enable chat replay.
+        <p className="text-xs leading-relaxed text-zinc-500">
+          {needsChatReplayResync
+            ? 'Rollups exist but chat replay was not stored for this sync. Re-sync chat in Analytics to backfill messages.'
+            : 'Sync this stream to enable chat replay.'}
         </p>
         <button
           type="button"
@@ -196,86 +214,81 @@ export function VodChatReplayPanel({
     <div
       className={
         className ??
-        'flex flex-col rounded-xl border border-white/10 bg-zinc-950/60 overflow-hidden'
+        'flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-zinc-950/60'
       }
     >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/5 px-3 py-2">
-        <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">
-          Chat replay
-        </span>
-        <span className="font-mono text-[10px] text-zinc-600">
-          {formatMinuteLabel(bucketStart)}
-        </span>
+      <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2.5">
+        <div>
+          <div className="text-sm font-black text-zinc-200">Chat replay</div>
+          <div className="text-[11px] font-semibold text-zinc-500">
+            Minute bucket · {formatMinuteLabel(bucketStart)}
+          </div>
+        </div>
+        {isSyncing ? (
+          <span className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-300">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
+            </span>
+            Syncing…
+          </span>
+        ) : null}
       </div>
 
-      {/* Partial-progress indicator during in-progress sync */}
-      {isSyncing && (
-        <div className="flex items-center gap-2 border-b border-amber-400/10 bg-amber-500/5 px-3 py-1.5">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
-          </span>
-          <span className="text-[11px] font-semibold text-amber-300">
-            Syncing in progress…
-          </span>
-        </div>
-      )}
+      <div className="relative min-h-0 flex-1">
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center py-8">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-600 border-t-violet-400" />
+          </div>
+        ) : null}
 
-      {/* Loading state */}
-      {isLoading && (
-        <div className="flex flex-1 items-center justify-center py-8">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-600 border-t-violet-400" />
-        </div>
-      )}
+        {isError ? (
+          <div className="flex h-full items-center justify-center px-4 py-8">
+            <p className="text-sm text-zinc-500">
+              Failed to load chat replay. Retrying…
+            </p>
+          </div>
+        ) : null}
 
-      {/* Error state */}
-      {isError && (
-        <div className="flex flex-1 items-center justify-center px-4 py-8">
-          <p className="text-xs text-zinc-500">
-            Failed to load chat replay. Retrying…
-          </p>
-        </div>
-      )}
+        {isEmptyMinute ? (
+          <div className="flex h-full items-center justify-center px-4 py-8">
+            <p className="text-sm italic text-zinc-500">
+              No messages in this minute
+            </p>
+          </div>
+        ) : null}
 
-      {/* Empty-minute indicator: distinct from no-data state */}
-      {isEmptyMinute && (
-        <div className="flex flex-1 items-center justify-center px-4 py-8">
-          <p className="text-xs italic text-zinc-600">
-            No messages in this minute
-          </p>
-        </div>
-      )}
-
-      {/* Message list */}
-      {hasMessages && (
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="flex-1 overflow-y-auto px-3 py-2"
-          style={{ maxHeight: '320px' }}
-          role="log"
-          aria-label="VOD chat messages"
-          aria-live="polite"
-        >
-          {messages.map(msg => (
-            <div
-              key={msg.id}
-              className="flex gap-1.5 py-0.5 text-[13px] leading-snug"
-            >
-              <span
-                className="shrink-0 font-bold"
-                style={{ color: hashToColor(msg.senderHash) }}
+        {hasMessages ? (
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="h-full overflow-y-auto py-2"
+            role="log"
+            aria-label="VOD chat messages"
+            aria-live="polite"
+          >
+            {messages.map(msg => (
+              <div
+                key={msg.id}
+                className="chat-row px-3 py-1 text-sm leading-snug transition hover:bg-white/[0.045]"
               >
-                {msg.displayName}
-              </span>
-              <span className="text-zinc-300 break-words min-w-0">
-                {renderMessageText(msg.text, msg.emoteFrags)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+                <ChatUserMenu
+                  displayName={msg.displayName}
+                  login={msg.commenterLogin}
+                  senderHash={msg.senderHash}
+                  color={hashToColor(msg.senderHash)}
+                  className="mr-1 font-black hover:underline"
+                >
+                  {msg.displayName}:
+                </ChatUserMenu>
+                <span className="break-words text-zinc-200">
+                  {renderMessageText(msg.text, msg.emoteFrags)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -284,7 +297,8 @@ function formatMinuteLabel(bucketStart: number): string {
   const mm = Math.floor(bucketStart / 60)
   const hh = Math.floor(mm / 60)
   const remainMm = mm % 60
-  return `${hh.toString().padStart(2, '0')}:${remainMm.toString().padStart(2, '0')}`
+  const ss = bucketStart % 60
+  return `${hh.toString().padStart(2, '0')}:${remainMm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`
 }
 
 function hashToColor(senderHash: string): string {

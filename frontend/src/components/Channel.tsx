@@ -18,6 +18,7 @@ import {
   getFollowedChannels,
   getLocalFollowedChannels,
   getStreamDiagnostics,
+  getSyncStatus,
   keepaliveStream,
   startStream,
   setAlwaysTracked,
@@ -33,16 +34,20 @@ import { useAuth } from '../auth'
 import { useChatStore } from '../chatStore'
 import { normalizeBrowserOriginUrl } from '../config'
 import { useHlsPlayback, type PlaybackMetrics, type PlaybackState } from '../playback'
+import { computeEndToEndLiveDelaySec } from '../playbackMath'
 import { useThemeEffect, useUiSettings, type BottomDensityMode, type ClipPeriod, type PlaybackLatencyMode, type StatsPeriod, type VideoFitMode } from '../settings'
 import { autoHighStableQuality, defaultQualityOptions, requestQuality } from '../streamQuality'
 import { emoteLoadPercent, formatEmoteProviderProgress, sortChannelEmotesByUsage } from '../emoteUtils'
 import { normalizeVodId } from '../utils/vodId'
-import { buildVodDeepLink, buildVodSeekTarget, parseVodAnalyticsContext } from '../utils/vodDeepLink'
+import { buildVodDeepLink, buildVodSeekTarget, estimateVodPlayerSeekTarget, parseVodAnalyticsContext } from '../utils/vodDeepLink'
+import { needsVodRelayRestart, readVideoSeekableRanges, vodRelativeSeekSeconds } from '../utils/vodSeek'
 import { buildTwitchVodUrl } from '../utils/twitchVodUrl'
 import VodChatReplayPanel from './analytics/VodChatReplayPanel'
 import ChannelTabShell from './channel/ChannelTabShell'
 import ChannelVodsPanel from './channel/ChannelVodsPanel'
 import TwitchVodEmbed, { type TwitchVodPlayerHandle } from './channel/TwitchVodEmbed'
+import VodStreamPulsePanel from './channel/VodStreamPulsePanel'
+import VodSeekBar from './channel/VodSeekBar'
 import { usePlayheadStore } from '../stores/playheadStore'
 import { PLAYHEAD_SYNC_INTERVAL_MS } from '../utils/chartCursorSync'
 import BrandLogo from './BrandLogo'
@@ -58,6 +63,8 @@ import type { VodErrorInput } from './channel/vodError'
 import { HLS_NOT_READY_MAX_AUTO_RETRIES } from './channel/vodError'
 import PlayerHeatmap from './channel/PlayerHeatmap'
 import StreamPulsePanel from './channel/StreamPulsePanel'
+import TrackAnalyticsToggle from './channel/TrackAnalyticsToggle'
+import SocialLinkChip from './channel/SocialLinkChip'
 import { isLsfWarming } from '../utils/pulseEmptyState.ts'
 
 type ChannelTab = 'about' | 'stats' | 'clips' | 'vods' | 'diagnostics' | 'emotes'
@@ -690,7 +697,9 @@ type StartupBenchmarkEntry = {
 function LivePlayerControls({
   playbackState,
   metrics,
+  diagnostics,
   isVod = false,
+  videoIsPlaying,
   requestedQuality,
   loadedQuality,
   renditions,
@@ -720,7 +729,10 @@ function LivePlayerControls({
 }: {
   playbackState: PlaybackState
   metrics: PlaybackMetrics
+  diagnostics?: StreamDiagnostics | null
   isVod?: boolean
+  /** When set (VOD), drives play/pause icon from the video element instead of HLS state. */
+  videoIsPlaying?: boolean
   requestedQuality: string
   loadedQuality: string
   renditions: StartResponse['renditions'] | undefined
@@ -749,6 +761,9 @@ function LivePlayerControls({
   onDetailsExpanded: (expanded: boolean) => void
 }) {
   const behind = metrics.behindLiveSec
+  const liveDelay = computeEndToEndLiveDelaySec(metrics, diagnostics)
+  const displayDelay = liveDelay.displayDelaySec
+  const liveDelayTooltip = liveDelay.tooltip
   const [qualityOpen, setQualityOpen] = useState(false)
   const qOptions = qualityOptions(renditions)
   const selectedQuality = qOptions.find(option => option.value === requestedQuality) ?? qOptions[0]
@@ -756,6 +771,7 @@ function LivePlayerControls({
   const liveTone = behind !== null && behind > Math.max((metrics.targetLatencySec ?? 0) + 4, 10)
     ? 'border-amber-300/35 bg-amber-400/15 text-amber-100'
     : 'border-red-400/35 bg-red-500/15 text-red-100'
+  const showPlaying = videoIsPlaying ?? playbackState === 'playing'
   return (
     <section className="bg-gradient-to-t from-black/90 via-black/70 to-transparent px-3 py-3 lg:px-5">
       <div className="flex flex-nowrap items-center gap-2">
@@ -765,7 +781,7 @@ function LivePlayerControls({
           aria-label="Play or pause"
           className="grid h-9 w-9 shrink-0 place-items-center rounded border border-white/10 bg-white/[0.08] text-xs font-black text-white transition hover:bg-white/15"
         >
-          {playbackState === 'playing' ? '❚❚' : '▶'}
+          {showPlaying ? '❚❚' : '▶'}
         </button>
         <button
           type="button"
@@ -867,8 +883,11 @@ function LivePlayerControls({
             </span>
             {!isVod ? (
               <>
-                <span className={`h-9 rounded border px-3 py-2 text-xs font-black uppercase ${liveTone}`}>
-                  LIVE {metrics.behindLiveSec === null ? '' : `+${fmtMetricSec(metrics.behindLiveSec)}`}
+                <span
+                  title={liveDelayTooltip}
+                  className={`h-9 rounded border px-3 py-2 text-xs font-black uppercase ${liveTone}`}
+                >
+                  LIVE {displayDelay === null ? '' : `+${fmtMetricSec(displayDelay)}`}
                 </span>
                 <button
                   type="button"
@@ -932,7 +951,8 @@ function LivePlayerControls({
               ))}
             </div>
             <div className="flex w-full flex-wrap gap-2 text-[11px] font-black uppercase text-zinc-500">
-              <span className="rounded bg-white/[0.045] px-2 py-1">Delay {fmtMetricSec(metrics.behindLiveSec)}</span>
+              <span className="rounded bg-white/[0.045] px-2 py-1" title={liveDelayTooltip}>Delay {fmtMetricSec(displayDelay)}</span>
+              <span className="rounded bg-white/[0.045] px-2 py-1">Behind sync {fmtMetricSec(metrics.behindLiveSec)}</span>
               <span className="rounded bg-white/[0.045] px-2 py-1">Buffered {fmtMetricSec(metrics.bufferSizeSec)}</span>
               <span className="rounded bg-white/[0.045] px-2 py-1">Target {fmtMetricSec(metrics.targetLatencySec)}</span>
               <span className="rounded bg-white/[0.045] px-2 py-1">Stage {formatPlaybackStage(metrics.hlsStage)}</span>
@@ -1011,36 +1031,6 @@ function ChannelMetaSkeleton({ dense }: { dense: boolean }) {
         </div>
       </div>
     </section>
-  )
-}
-
-function TrackAnalyticsToggle({
-  tracked,
-  pending,
-  onToggle,
-  prominent = false,
-}: {
-  tracked: boolean
-  pending: boolean
-  onToggle: (next: boolean) => void
-  prominent?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      disabled={pending}
-      onClick={() => onToggle(!tracked)}
-      className={`rounded font-black uppercase tracking-wide transition disabled:opacity-60 ${
-        prominent ? 'px-4 py-2 text-xs' : 'px-2.5 py-0.5 text-[11px]'
-      } ${
-        tracked
-          ? 'bg-violet-600 text-white hover:bg-violet-500'
-          : 'border border-violet-400/30 bg-violet-500/10 text-violet-200 hover:border-violet-300/50'
-      }`}
-      title={tracked ? 'Minute-level chat and emote rollups are collected for this live stream.' : 'Enable live analytics collection and the activity chart below the player.'}
-    >
-      {pending ? 'Saving…' : tracked ? 'Tracking analytics' : 'Track analytics'}
-    </button>
   )
 }
 
@@ -1511,16 +1501,8 @@ function ChannelDetailSections({ details, dense }: { details?: ChannelDetails; d
         <section className="border-t border-white/10 pt-4">
           <h4 className="text-sm font-semibold text-white">Links</h4>
           <div className="mt-3 flex flex-wrap gap-2">
-            {socialLinks.map((link, index) => (
-              <a
-                key={link.id || link.url || index}
-                href={link.url}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-[#bf94ff] transition hover:border-[#bf94ff]/40 hover:bg-[#bf94ff]/10 hover:text-[#d8b7ff]"
-              >
-                {link.title || compactUrl(link.url)}
-              </a>
+            {socialLinks.filter(link => link.url).map((link, index) => (
+              <SocialLinkChip key={link.id || link.url || index} url={link.url!} title={link.title} />
             ))}
           </div>
         </section>
@@ -1552,7 +1534,7 @@ function ChannelDetailSections({ details, dense }: { details?: ChannelDetails; d
 
 export default function Channel() {
   const { login } = useParams<{ login: string }>()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const channelLogin = login ?? ''
   const rawVodParam = searchParams.get('vod')
@@ -1561,19 +1543,28 @@ export default function Channel() {
   const isVodPlayback = vodPlaybackId.length > 0
   const vodIdInvalid = vodParamPresent && !isVodPlayback
   const vodOffsetSeconds = Math.max(0, Number.parseInt(searchParams.get('offset') || '0', 10) || 0)
+  const [relayStartOffset, setRelayStartOffset] = useState(vodOffsetSeconds)
+  const prevVodPlaybackIdRef = useRef('')
   const vodAnalyticsContext = parseVodAnalyticsContext(searchParams, channelLogin, isVodPlayback)
   const { fromAnalytics: vodFromAnalytics, streamId: vodAnalyticsStreamId, analyticsHref: vodAnalyticsHref } = vodAnalyticsContext
   const showAnalyticsActivityWaveform = isVodPlayback && vodFromAnalytics && Boolean(vodAnalyticsStreamId)
-  const useAnalyticsEmbedFirst = false
   const relaySessionKey = isVodPlayback ? vodSessionKey(vodPlaybackId) : channelLogin
   const twitchEmbedRef = useRef<TwitchVodPlayerHandle | null>(null)
   const [vodEmbedFallback, setVodEmbedFallback] = useState(false)
   const [embedMountReady, setEmbedMountReady] = useState(false)
   const showTwitchEmbed = isVodPlayback && vodEmbedFallback
   const [vodSeekOnStart, setVodSeekOnStart] = useState(0)
+  const [vodRelayEpoch, setVodRelayEpoch] = useState(0)
+  const [vodSeekPending, setVodSeekPending] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const playerFrameRef = useRef<HTMLDivElement>(null)
   const sessionIdRef = useRef<string | undefined>()
+  const internalVodSeekRef = useRef(false)
+  const vodHotRestartRef = useRef(false)
+  const hotRestartVodRelayRef = useRef<(absoluteOffset: number) => void>(() => {})
+  const pendingFarSeekRef = useRef<number | null>(null)
+  const farSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const keepaliveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [vodRelayError, setVodRelayError] = useState<VodErrorInput | null>(null)
   const [retryKey, setRetryKey] = useState(0)
@@ -1617,30 +1608,34 @@ export default function Channel() {
     setRetryKey(k => k + 1)
   }, [])
   const handleUnauthorizedHls = useCallback(() => {
+    if (isVodPlayback) {
+      // VOD: keep relay alive; playback.ts reloads the playlist and re-seeks in-player.
+      return
+    }
     if (autoRetryAttemptsRef.current >= 2) {
       setRelayState('error')
-      if (isVodPlayback) {
-        setVodRelayError({ code: 'hls_proxy_auth', retryable: true })
-        setError(null)
-      } else {
-        setError('Video relay unavailable. Try Retry in a moment or switch channels.')
-      }
+      setError('Video relay unavailable. Try Retry in a moment or switch channels.')
       setHlsUrl('')
       return
     }
     autoRetryAttemptsRef.current += 1
     retryStream()
   }, [isVodPlayback, retryStream])
+  const vodRelayBaseSeconds = useMemo(() => {
+    if (!isVodPlayback) return 0
+    const resp = streamSession as VodStartResponse | null
+    if (!resp || typeof resp.offset_seconds !== 'number') return 0
+    return Math.max(0, resp.offset_seconds - buildVodSeekTarget(resp.offset_seconds, resp.seek_seconds))
+  }, [isVodPlayback, streamSession])
   const handleVodRelayStale = useCallback(() => {
-    if (autoRetryAttemptsRef.current >= 3) {
-      setRelayState('error')
-      setVodRelayError({ code: 'hls_not_ready', retryable: true })
-      setError(null)
-      return
+    if (!isVodPlayback || vodHotRestartRef.current) return
+    const video = videoRef.current
+    let absolute = vodOffsetSeconds
+    if (video && Number.isFinite(video.currentTime)) {
+      absolute = vodRelayBaseSeconds + Math.max(0, video.currentTime)
     }
-    autoRetryAttemptsRef.current += 1
-    retryStream()
-  }, [retryStream])
+    void hotRestartVodRelayRef.current(Math.floor(absolute))
+  }, [isVodPlayback, vodOffsetSeconds, vodRelayBaseSeconds])
   const playback = useHlsPlayback(videoRef, {
     src: hlsUrl,
     enabled: Boolean(hlsUrl),
@@ -1648,6 +1643,8 @@ export default function Channel() {
     autoPlay: true,
     mode: isVodPlayback ? 'vod' : 'live',
     seekOnStart: isVodPlayback ? vodSeekOnStart : undefined,
+    relayEpoch: isVodPlayback ? vodRelayEpoch : undefined,
+    vodRepositioning: isVodPlayback && vodSeekPending,
     latencyMode: isVodPlayback ? 'stable' : settings.playbackLatencyMode,
     onUnauthorizedHls: handleUnauthorizedHls,
     onVodRelayStale: isVodPlayback ? handleVodRelayStale : undefined,
@@ -1663,17 +1660,141 @@ export default function Channel() {
   // start response (currentTime === seekTarget corresponds to the requested
   // offset_seconds).
   const vodPlayheadStreamId = vodAnalyticsStreamId || vodPlaybackId
-  const vodRelayBaseSeconds = useMemo(() => {
-    if (!isVodPlayback) return 0
-    const resp = streamSession as VodStartResponse | null
-    if (!resp || typeof resp.offset_seconds !== 'number') return 0
-    return Math.max(0, resp.offset_seconds - buildVodSeekTarget(resp.offset_seconds, resp.seek_seconds))
-  }, [isVodPlayback, streamSession])
 
   useEffect(() => {
-    if (useAnalyticsEmbedFirst) return
+    if (prevVodPlaybackIdRef.current === vodPlaybackId) return
+    prevVodPlaybackIdRef.current = vodPlaybackId
+    setRelayStartOffset(vodOffsetSeconds)
+  }, [vodPlaybackId, vodOffsetSeconds])
+
+  const hotRestartVodRelay = useCallback(async (absoluteOffset: number) => {
+    if (!isVodPlayback || !vodPlaybackId || vodHotRestartRef.current) return
+    const safe = Math.max(0, Math.floor(absoluteOffset))
+    vodHotRestartRef.current = true
+    setVodSeekPending(true)
+    setHlsUrl('')
+    const prevSession = sessionIdRef.current
+    setRelayState('buffering')
+    setVodRelayError(null)
+    try {
+      if (keepaliveIntervalRef.current) {
+        clearInterval(keepaliveIntervalRef.current)
+        keepaliveIntervalRef.current = null
+      }
+      await stopStream(relaySessionKey, prevSession).catch(() => undefined)
+      const vodStartQuality = vodFromAnalytics && settings.preferredQuality === 'best'
+        ? autoHighStableQuality
+        : settings.preferredQuality
+      const response = await startVodPlayback(
+        vodPlaybackId,
+        safe,
+        requestQuality(vodStartQuality),
+        'stable',
+      )
+      sessionIdRef.current = response.session_id
+      setStreamSession(response)
+      setListeners(response.listeners ?? null)
+      const vodResponse = response as VodStartResponse
+      const seekTarget = buildVodSeekTarget(vodResponse.offset_seconds, vodResponse.seek_seconds)
+      setVodSeekOnStart(seekTarget)
+      setVodRelayEpoch(epoch => epoch + 1)
+      const playableUrl = await resolvePlayableHlsUrl(response.hlsUrl)
+      setHlsUrl(playableUrl)
+      setRelayState('playing')
+      keepaliveIntervalRef.current = setInterval(() => {
+        keepaliveStream(relaySessionKey, sessionIdRef.current).catch(() => undefined)
+      }, 20000)
+    } catch (e) {
+      setRelayState('error')
+      if (e instanceof ApiError) {
+        setVodRelayError({
+          code: e.code,
+          message: e.message,
+          retryable: e.retryable,
+          reason: e.reason,
+        })
+      } else {
+        setVodRelayError({
+          message: (e as Error).message || 'VOD seek failed',
+        })
+      }
+    } finally {
+      vodHotRestartRef.current = false
+      setVodSeekPending(false)
+    }
+  }, [isVodPlayback, relaySessionKey, settings.preferredQuality, vodFromAnalytics, vodPlaybackId])
+
+  hotRestartVodRelayRef.current = (absoluteOffset: number) => {
+    void hotRestartVodRelay(absoluteOffset)
+  }
+
+  const seekVodAbsoluteOffset = useCallback((absoluteOffset: number) => {
+    const safe = Math.max(0, Math.floor(absoluteOffset))
+    internalVodSeekRef.current = true
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.set('offset', String(safe))
+      return next
+    }, { replace: true })
+
+    const clearInternalSeek = () => {
+      requestAnimationFrame(() => {
+        internalVodSeekRef.current = false
+      })
+    }
+
+    if (showTwitchEmbed) {
+      twitchEmbedRef.current?.seek(safe)
+      clearInternalSeek()
+      return
+    }
+
+    const video = videoRef.current
+    const relative = vodRelativeSeekSeconds(safe, vodRelayBaseSeconds)
+    const seekableRanges = video ? readVideoSeekableRanges(video) : []
+    const duration = video && Number.isFinite(video.duration) ? video.duration : null
+    const restartNeeded = needsVodRelayRestart(safe, vodRelayBaseSeconds, seekableRanges, 30, duration)
+
+    if (!restartNeeded && video) {
+      pendingFarSeekRef.current = null
+      if (farSeekTimerRef.current) {
+        clearTimeout(farSeekTimerRef.current)
+        farSeekTimerRef.current = null
+      }
+      setVodSeekPending(false)
+      video.currentTime = relative
+      playback.seekVodRelay(relative)
+      clearInternalSeek()
+      return
+    }
+
+    pendingFarSeekRef.current = safe
+    setVodSeekPending(true)
+    if (farSeekTimerRef.current) {
+      clearTimeout(farSeekTimerRef.current)
+    }
+    farSeekTimerRef.current = window.setTimeout(() => {
+      const target = pendingFarSeekRef.current
+      pendingFarSeekRef.current = null
+      farSeekTimerRef.current = null
+      if (target != null) {
+        void hotRestartVodRelay(target)
+      } else {
+        setVodSeekPending(false)
+      }
+    }, 300)
+    clearInternalSeek()
+  }, [hotRestartVodRelay, playback, setSearchParams, showTwitchEmbed, vodRelayBaseSeconds])
+
+  useEffect(() => () => {
+    if (farSeekTimerRef.current) {
+      clearTimeout(farSeekTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
     setVodEmbedFallback(false)
-  }, [channelLogin, vodPlaybackId, retryKey, useAnalyticsEmbedFirst])
+  }, [channelLogin, vodPlaybackId, retryKey])
 
   useEffect(() => {
     if (!isVodPlayback || !vodPlayheadStreamId) {
@@ -1739,7 +1860,7 @@ export default function Channel() {
     refetchInterval: emoteStatus.state === 'loading' || emoteStatus.state === 'processing' ? 5000 : false,
   })
   const isLiveStream = Boolean(details.data?.isLive && !isVodPlayback)
-  const showPulseSidebarTab = isLiveStream
+  const showPulseSidebarTab = isLiveStream || showAnalyticsActivityWaveform
 
   const liveAnalytics = useQuery({
     queryKey: ['channel-live-analytics', channelLogin],
@@ -1875,7 +1996,7 @@ export default function Channel() {
     setHlsUrl('')
     setStreamSession(null)
     setListeners(null)
-    setVodSeekOnStart(0)
+    setVodSeekOnStart(isVodPlayback ? estimateVodPlayerSeekTarget(relayStartOffset) : 0)
 
     if (!isVodPlayback) {
       subscribe(channelLogin)
@@ -1888,7 +2009,7 @@ export default function Channel() {
           : settings.preferredQuality
         const requestedQuality = requestQuality(vodStartQuality)
         const response: StartResponse | VodStartResponse = isVodPlayback
-          ? await startVodPlayback(vodPlaybackId, vodOffsetSeconds, requestedQuality, 'stable')
+          ? await startVodPlayback(vodPlaybackId, relayStartOffset, requestedQuality, 'stable')
           : await startStream(channelLogin, requestedQuality, settings.playbackLatencyMode)
         if (!alive) {
           await stopStream(relaySessionKey, response.session_id).catch(() => undefined)
@@ -1897,23 +2018,24 @@ export default function Channel() {
         sessionIdRef.current = response.session_id
         setStreamSession(response)
         setListeners(response.listeners ?? null)
-        if (isVodPlayback) {
-          const vodResponse = response as VodStartResponse
-          const seekTarget = buildVodSeekTarget(vodResponse.offset_seconds, vodResponse.seek_seconds)
-          setVodSeekOnStart(seekTarget)
-        }
         const playableUrl = await resolvePlayableHlsUrl(response.hlsUrl)
         if (!alive) {
           await stopStream(relaySessionKey, response.session_id).catch(() => undefined)
           return
         }
+        if (isVodPlayback) {
+          const vodResponse = response as VodStartResponse
+          const seekTarget = buildVodSeekTarget(vodResponse.offset_seconds, vodResponse.seek_seconds)
+          setVodSeekOnStart(seekTarget)
+        }
         setHlsUrl(playableUrl)
         setRelayState('playing')
         setVodRelayError(null)
 
-        intervalId = setInterval(() => {
+        keepaliveIntervalRef.current = setInterval(() => {
           keepaliveStream(relaySessionKey, sessionIdRef.current).catch(() => undefined)
         }, 20000)
+        intervalId = keepaliveIntervalRef.current
       } catch (e) {
         if (!alive) return
         const isOffline = !isVodPlayback && e instanceof ApiError && e.code === 'channel_offline'
@@ -1953,11 +2075,13 @@ export default function Channel() {
     return () => {
       alive = false
       if (intervalId) clearInterval(intervalId)
-      setHlsUrl('')
+      if (keepaliveIntervalRef.current === intervalId) {
+        keepaliveIntervalRef.current = null
+      }
       if (!isVodPlayback) unsubscribe(channelLogin)
       stopStream(relaySessionKey, sessionIdRef.current).catch(() => undefined)
     }
-  }, [channelLogin, isVodPlayback, relaySessionKey, retryKey, settings.playbackLatencyMode, settings.preferredQuality, subscribe, unsubscribe, vodFromAnalytics, vodIdInvalid, vodOffsetSeconds, vodPlaybackId])
+  }, [channelLogin, isVodPlayback, relaySessionKey, relayStartOffset, retryKey, settings.preferredQuality, subscribe, unsubscribe, vodFromAnalytics, vodIdInvalid, vodPlaybackId])
 
   useEffect(() => {
     setEmoteStatus({ state: 'idle', count: 0, pending: 0 })
@@ -2085,18 +2209,27 @@ export default function Channel() {
   const [vodResyncPending, setVodResyncPending] = useState(false)
 
   const handleVodResync = useCallback(async () => {
-    if (!channelLogin) return
+    if (!channelLogin || !vodAnalyticsStreamId) return
     setVodResyncPending(true)
-    if (vodAnalyticsStreamId) {
-      try {
-        await startHistoricalSync(vodAnalyticsStreamId, channelLogin, { vodId: vodPlaybackId })
-      } catch {
-        // Still navigate so the user can watch sync progress on analytics.
+    try {
+      await startHistoricalSync(vodAnalyticsStreamId, channelLogin, {
+        vodId: vodPlaybackId,
+        forceChat: true,
+      })
+      for (let attempt = 0; attempt < 180; attempt += 1) {
+        await new Promise(resolve => window.setTimeout(resolve, 2000))
+        const status = await getSyncStatus(vodAnalyticsStreamId).catch(() => null)
+        if (!status) break
+        if (status.phase === 'completed' || status.phase === 'failed') break
       }
+      await queryClient.invalidateQueries({ queryKey: ['vod-chat-replay', vodAnalyticsStreamId] })
+      await queryClient.invalidateQueries({ queryKey: ['analytics-stream', vodAnalyticsStreamId] })
+    } catch {
+      // Keep the panel open; user can retry or open Analytics.
+    } finally {
+      setVodResyncPending(false)
     }
-    setVodResyncPending(false)
-    if (vodAnalyticsHref) window.location.assign(vodAnalyticsHref)
-  }, [channelLogin, vodAnalyticsHref, vodAnalyticsStreamId, vodPlaybackId])
+  }, [channelLogin, queryClient, vodAnalyticsStreamId, vodPlaybackId])
 
   const [embedMetrics, setEmbedMetrics] = useState<{ current: number | null; duration: number | null }>({
     current: null,
@@ -2143,9 +2276,52 @@ export default function Channel() {
     return vodAnalyticsDurationSec ?? playback.metrics.seekableEndSec
   }, [showTwitchEmbed, embedMetrics.duration, vodAnalyticsDurationSec, playback.metrics.seekableEndSec])
 
+  const [vodVideoIsPlaying, setVodVideoIsPlaying] = useState(false)
+  const [vodHasFirstFrame, setVodHasFirstFrame] = useState(false)
+
+  useEffect(() => {
+    setVodHasFirstFrame(false)
+    setVodVideoIsPlaying(false)
+  }, [vodPlaybackId])
+
+  useEffect(() => {
+    if (playback.metrics.firstFrameMs !== null) {
+      setVodHasFirstFrame(true)
+    }
+  }, [playback.metrics.firstFrameMs])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !isVodPlayback || showTwitchEmbed || !hlsUrl) {
+      setVodVideoIsPlaying(false)
+      return
+    }
+    const sync = () => setVodVideoIsPlaying(!video.paused && !video.ended)
+    video.addEventListener('play', sync)
+    video.addEventListener('pause', sync)
+    video.addEventListener('playing', sync)
+    video.addEventListener('ended', sync)
+    sync()
+    return () => {
+      video.removeEventListener('play', sync)
+      video.removeEventListener('pause', sync)
+      video.removeEventListener('playing', sync)
+      video.removeEventListener('ended', sync)
+    }
+  }, [hlsUrl, isVodPlayback, showTwitchEmbed])
+
   const playbackState = showTwitchEmbed ? relayState : (hlsUrl ? playback.state : relayState)
+  const playbackError = error || playback.error
   const hasVodStructuredError = isVodPlayback && vodRelayError !== null && !showTwitchEmbed
   const showStructuredVodError = hasVodStructuredError && (playbackState === 'error' || playbackState === 'retrying')
+  const showStartupOverlay = !isChannelOffline
+    && !showTwitchEmbed
+    && !vodSeekPending
+    && playbackState !== 'playing'
+    && playbackState !== 'buffering'
+    && (playbackState === 'error' || playbackState === 'retrying' || playback.metrics.firstFrameMs === null)
+    && !(isVodPlayback && vodHasFirstFrame && playbackState === 'retrying')
+    && !(playbackError && details.data && !details.data.isLive && !isVodPlayback && !showStructuredVodError)
 
   useEffect(() => {
     const video = videoRef.current
@@ -2173,6 +2349,7 @@ export default function Channel() {
   }, [playbackState])
 
   useEffect(() => {
+    if (isVodPlayback) return
     if (!hlsUrl || error || !playback.error || playback.state !== 'error') return
     const stage = playback.metrics.hlsStage.toLowerCase()
     const retryableStage = ['levelloaderror', 'levelloadtimeout', 'manifestloaderror', 'manifestloadtimeout', 'fragloaderror', 'fragloadtimeout']
@@ -2202,7 +2379,6 @@ export default function Channel() {
     return { [channelLogin]: details.data.viewers }
   }, [channelLogin, details.data?.viewers])
   const streamPoster = details.data?.thumbnailUrl?.replace('{width}', '960').replace('{height}', '540')
-  const playbackError = error || playback.error
   const activeRenditions = streamSession?.renditions ?? diagnostics.data?.renditions
   const activeSelectedRendition = streamSession?.selectedRendition ?? diagnostics.data?.selectedRendition
   const requestedQuality = resolveRequestedQuality(activeRenditions, settings.preferredQuality, activeSelectedRendition)
@@ -2305,12 +2481,12 @@ export default function Channel() {
 
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
             <div
-              className={`${mobilePane === 'chat' ? 'hidden' : 'flex'} min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-y-contain bg-[#0e0e10] lg:flex`}
+              className={`${mobilePane === 'chat' ? 'hidden' : 'flex'} scrollbar-hidden min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-y-contain bg-[#0e0e10] lg:flex`}
             >
                 <div className={`${mobilePane === 'watch' ? 'block' : 'hidden'} shrink-0 lg:block`}>
                   <div className={playerViewportClass}>
                     <div ref={playerFrameRef} className="group absolute inset-0 overflow-hidden bg-black">
-                    <video ref={videoRef} className={`absolute inset-0 h-full w-full bg-black ${showTwitchEmbed ? 'hidden' : ''} ${videoObjectFitClass}`} autoPlay muted={muted} playsInline poster={streamPoster || undefined} />
+                    <video key={isVodPlayback ? vodPlaybackId : channelLogin} ref={videoRef} className={`absolute inset-0 h-full w-full bg-black ${showTwitchEmbed ? 'hidden' : ''} ${videoObjectFitClass}`} autoPlay muted={muted} playsInline poster={streamPoster || undefined} />
 
                     {showTwitchEmbed && !embedMountReady ? (
                       <div className="absolute inset-0 z-20 grid place-items-center bg-black">
@@ -2343,7 +2519,13 @@ export default function Channel() {
                           channelLogin={channelLogin}
                           currentTimeSec={vodBannerCurrentSec}
                           totalDurationSec={vodBannerTotalSec}
+                          seekPending={vodSeekPending}
                           analyticsHref={vodAnalyticsHref}
+                          chatLogHref={
+                            vodAnalyticsStreamId
+                              ? `/logs/${encodeURIComponent(channelLogin)}/${encodeURIComponent(vodAnalyticsStreamId)}`
+                              : null
+                          }
                         />
                       </div>
                     ) : null}
@@ -2401,7 +2583,7 @@ export default function Channel() {
                     ) : null}
 
                     {/* Startup overlay — subtler bottom-left bar instead of large centered modal */}
-                    {!isChannelOffline && !showTwitchEmbed && playbackState !== 'playing' && playbackState !== 'buffering' && (playbackState === 'error' || playbackState === 'retrying' || playback.metrics.firstFrameMs === null) && !(playbackError && details.data && !details.data.isLive && !isVodPlayback && !showStructuredVodError) ? (
+                    {showStartupOverlay ? (
                       <div className={`absolute inset-0 ${showStructuredVodError ? 'z-40' : 'z-10'}`}>
                         {/* Blurred profile background during startup */}
                         {details.data?.profileImage ? (
@@ -2499,7 +2681,7 @@ export default function Channel() {
                     {playbackState === 'playing' && showTwitchEmbed ? (
                       <div className="absolute bottom-3 left-3 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-black/70 px-3 py-1.5 text-[11px] font-black uppercase text-zinc-300 shadow-lg shadow-black/40 backdrop-blur-sm">
                         <span className="h-2 w-2 rounded-full bg-purple-400 shadow-sm shadow-purple-400/50" />
-                        <span>{useAnalyticsEmbedFirst ? 'Twitch player' : 'Twitch embed fallback'}</span>
+                        <span>Twitch embed fallback</span>
                         {vodFromAnalytics && vodAnalyticsStreamId ? <span className="text-zinc-500">+ activity graph</span> : null}
                       </div>
                     ) : null}
@@ -2507,7 +2689,10 @@ export default function Channel() {
                       <div className={`absolute left-3 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-black/70 px-3 py-1.5 text-[11px] font-black uppercase text-zinc-300 shadow-lg shadow-black/40 backdrop-blur-sm transition-opacity hover:opacity-100 ${playerControlsVisible ? 'bottom-16 opacity-80' : 'bottom-3 opacity-60'}`}>
                         <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" />
                         <span>HLS relay</span>
-                        {playback.metrics.behindLiveSec !== null ? <span className="text-zinc-500">+{fmtMetricSec(playback.metrics.behindLiveSec)}</span> : null}
+                        {(() => {
+                          const overlayDelay = computeEndToEndLiveDelaySec(playback.metrics, diagnostics.data).displayDelaySec
+                          return overlayDelay !== null ? <span className="text-zinc-500">+{fmtMetricSec(overlayDelay)}</span> : null
+                        })()}
                       </div>
                     ) : null}
                     {!showStructuredVodError ? (
@@ -2519,14 +2704,7 @@ export default function Channel() {
                             totalDurationSec={vodBannerTotalSec ?? ((activityRollups?.length ?? 0) * 60)}
                             isLoading={vodRollupsQuery.isLoading}
                             isError={vodRollupsQuery.isError}
-                            onSeek={(offsetSec) => {
-                              if (showTwitchEmbed) {
-                                twitchEmbedRef.current?.seek(offsetSec)
-                                return
-                              }
-                              const video = videoRef.current
-                              if (video) video.currentTime = Math.max(0, offsetSec - vodRelayBaseSeconds)
-                            }}
+                            onSeek={seekVodAbsoluteOffset}
                           />
                         </div>
                       ) : showAnalyticsActivityWaveform && !vodRollupsQuery.isLoading ? (
@@ -2534,10 +2712,19 @@ export default function Channel() {
                           Activity graph needs synced analytics data for this stream.
                         </div>
                       ) : null}
+                      {isVodPlayback && vodBannerTotalSec ? (
+                        <VodSeekBar
+                          currentSec={vodBannerCurrentSec ?? 0}
+                          totalSec={vodBannerTotalSec}
+                          onSeek={seekVodAbsoluteOffset}
+                        />
+                      ) : null}
                       <LivePlayerControls
                         playbackState={playbackState}
                         metrics={playback.metrics}
+                        diagnostics={diagnostics.data}
                         isVod={isVodPlayback}
+                        videoIsPlaying={isVodPlayback && !showTwitchEmbed ? vodVideoIsPlaying : undefined}
                         requestedQuality={requestedQuality}
                         loadedQuality={loadedQuality}
                         renditions={activeRenditions}
@@ -2636,20 +2823,48 @@ export default function Channel() {
                   </div>
                 </div>
               ) : null}
-              <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 {isVodPlayback && vodAnalyticsStreamId ? (
-                  <VodChatReplayPanel
-                    streamId={vodAnalyticsStreamId}
-                    currentOffsetSeconds={vodBannerCurrentSec ?? vodOffsetSeconds}
-                    isSyncing={vodResyncPending}
-                    onSync={handleVodResync}
-                    className="flex h-full flex-col border-0 bg-transparent"
-                  />
+                  chatSidebarTab === 'pulse' && showAnalyticsActivityWaveform ? (
+                    <VodStreamPulsePanel
+                      channelLogin={channelLogin}
+                      streamId={vodAnalyticsStreamId}
+                      detail={vodRollupsQuery.data}
+                      currentOffsetSec={vodBannerCurrentSec ?? vodOffsetSeconds}
+                      onSeekMoment={seekVodAbsoluteOffset}
+                      isLoading={vodRollupsQuery.isLoading}
+                      isError={vodRollupsQuery.isError}
+                      className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                    />
+                  ) : (
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                      <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2.5">
+                        <div className="text-[11px] font-semibold text-zinc-500">
+                          Synced replay follows playback
+                        </div>
+                        <Link
+                          to={`/logs/${encodeURIComponent(channelLogin)}/${encodeURIComponent(vodAnalyticsStreamId)}`}
+                          className="rounded border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-black uppercase text-cyan-200 transition hover:bg-cyan-500/20"
+                        >
+                          Chat log
+                        </Link>
+                      </div>
+                      <VodChatReplayPanel
+                        streamId={vodAnalyticsStreamId}
+                        currentOffsetSeconds={vodBannerCurrentSec ?? vodOffsetSeconds}
+                        isSyncing={vodResyncPending}
+                        onSync={handleVodResync}
+                        needsChatReplayResync={hasActivityRollups}
+                        className="flex min-h-0 flex-1 flex-col overflow-hidden border-0 bg-transparent"
+                      />
+                    </div>
+                  )
                 ) : isVodPlayback ? (
                   <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
                     <p className="text-sm font-semibold text-zinc-300">VOD chat replay</p>
                     <p className="text-xs leading-relaxed text-zinc-500">
-                      Sync chat and emotes for this VOD in Analytics first so the URL includes <code className="text-violet-200">sid=</code> and synced chat can load.
+                      Sync chat and emotes for this VOD in Analytics first so the URL includes <code className="text-violet-200">sid=</code>.
+                      Streams synced before chat replay was enabled need one <strong className="font-bold text-zinc-400">Sync chat</strong> in Analytics or from the Chat tab after you open a synced VOD.
                     </p>
                   </div>
                 ) : chatSidebarTab === 'pulse' && showPulseSidebarTab ? (

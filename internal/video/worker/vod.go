@@ -36,6 +36,32 @@ func VodPageURL(vodID string) string {
 	return "https://www.twitch.tv/videos/" + vodID
 }
 
+// FormatVodTimeOffset formats seconds for Twitch ?t= and streamlink --hls-start-offset.
+func FormatVodTimeOffset(seconds int) string {
+	if seconds <= 0 {
+		return "0s"
+	}
+	h := seconds / 3600
+	m := (seconds % 3600) / 60
+	s := seconds % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%dm%ds", h, m, s)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm%ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
+}
+
+// VodPageURLWithOffset returns a Twitch VOD URL with ?t= seek for streamlink.
+func VodPageURLWithOffset(vodID string, offsetSeconds int) string {
+	seekSec := VodSeekSeconds(offsetSeconds)
+	if seekSec <= 0 {
+		return VodPageURL(vodID)
+	}
+	return VodPageURL(vodID) + "?t=" + FormatVodTimeOffset(seekSec)
+}
+
 func VodSeekSeconds(offsetSeconds int) int {
 	seek := offsetSeconds - VodSeekPad
 	if seek < 0 {
@@ -53,6 +79,7 @@ func StartVod(vodID, quality string, offsetSeconds int, rtmpURL string, logw io.
 	}
 	seekSec := VodSeekSeconds(offsetSeconds)
 	mediaKey := VodMediaKey(vodID)
+	pageURL := VodPageURLWithOffset(vodID, offsetSeconds)
 
 	slArgs := []string{
 		"streamlink",
@@ -64,15 +91,17 @@ func StartVod(vodID, quality string, offsetSeconds int, rtmpURL string, logw io.
 		"--stream-segment-attempts", "3",
 		"--stdout",
 	}
+	if seekSec > 0 {
+		slArgs = append(slArgs, "--hls-start-offset", FormatVodTimeOffset(seekSec))
+	}
 	if strings.TrimSpace(twitchOAuth) != "" {
 		slArgs = append(slArgs, "--twitch-oauth-token", strings.TrimSpace(twitchOAuth))
 	}
-	slArgs = append(slArgs, VodPageURL(vodID), quality)
+	slArgs = append(slArgs, pageURL, quality)
 	sl := exec.Command(slArgs[0], slArgs[1:]...)
+	// Streamlink must seek via ?t= / --hls-start-offset; -ss before pipe:0 cannot skip
+	// ahead in a live stdout stream and would decode from the VOD start (multi-minute delay).
 	ffArgs := append(ffmpegPipeInputFlags(), "-i", "pipe:0", "-c", "copy", "-f", "flv", rtmpURL)
-	if seekSec > 0 {
-		ffArgs = append([]string{"-ss", strconv.Itoa(seekSec)}, ffArgs...)
-	}
 	ff := exec.Command("ffmpeg", ffArgs...)
 
 	pr, pw, err := os.Pipe()
