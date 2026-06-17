@@ -6,7 +6,28 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "icon": "clock-nine",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Snap time range to stream",
+      "tooltip": "Reload dashboard with from/to set to the selected stream start and end",
+      "type": "link",
+      "url": "/d/streamclone-emote-pulse/emote-pulse?from=${var-stream_start}&to=${var-stream_end}"
+    },
+    {
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": true,
+      "title": "Open Streamclone Analytics",
+      "tooltip": "Open in-app Analytics for the selected channel",
+      "type": "link",
+      "url": "http://localhost:8090/analytics?channel=${channel}"
+    }
+  ],
   "liveNow": false,
   "panels": [
     {
@@ -53,7 +74,7 @@
       },
       "targets": [
         {
-          "query": "rangeStart = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group(columns: [\"channel_login\"])\n  |> count()\n  |> group()\n  |> count()",
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> group(columns: [\"channel_login\"])\n  |> count()\n  |> group()\n  |> count()",
           "refId": "A"
         }
       ],
@@ -104,7 +125,7 @@
       },
       "targets": [
         {
-          "query": "rangeStart = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group()\n  |> sum()",
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> group()\n  |> sum()",
           "refId": "A"
         }
       ],
@@ -155,7 +176,7 @@
       },
       "targets": [
         {
-          "query": "rangeStart = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> aggregateWindow(every: 1m, fn: sum, createEmpty: false)\n  |> group()\n  |> max()",
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> aggregateWindow(every: 1m, fn: sum, createEmpty: false)\n  |> group()\n  |> max()",
           "refId": "A"
         }
       ],
@@ -208,7 +229,7 @@
       },
       "targets": [
         {
-          "query": "rangeStart = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group()\n  |> reduce(\n      identity: {total: 0.0, seventv: 0.0},\n      fn: (r, accumulator) => ({\n        total: accumulator.total + float(v: r._value),\n        seventv: accumulator.seventv + (if r.provider == \"seventv\" then float(v: r._value) else 0.0),\n      }),\n    )\n  |> map(fn: (r) => ({_value: if r.total > 0.0 then r.seventv / r.total * 100.0 else 0.0}))",
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> group()\n  |> reduce(\n      identity: {total: 0.0, seventv: 0.0},\n      fn: (r, accumulator) => ({\n        total: accumulator.total + float(v: r._value),\n        seventv: accumulator.seventv + (if r.provider == \"seventv\" then float(v: r._value) else 0.0),\n      }),\n    )\n  |> map(fn: (r) => ({_value: if r.total > 0.0 then r.seventv / r.total * 100.0 else 0.0}))",
           "refId": "A"
         }
       ],
@@ -390,7 +411,7 @@
       },
       "targets": [
         {
-          "query": "emoteImageURL = (provider, id) =>\n  if provider == \"twitch\" and id =~ /^[0-9]+$/ then\n    \"https://static-cdn.jtvnw.net/emoticons/v2/\" + id + \"/default/dark/2.0\"\n  else\n    \"http://localhost:8090/emotes/\" + id + \"/2x.webp\"\n\nrangeStart = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group(columns: [\"channel_login\", \"provider\", \"emote_id\", \"emote_name\"])\n  |> sum()\n  |> group()\n  |> sort(columns: [\"_value\"], desc: true)\n  |> limit(n: 15)\n  |> map(fn: (r) => ({\n      channel_login: r.channel_login,\n      emote_id: r.emote_id,\n      emote_name: r.emote_name,\n      provider: r.provider,\n      uses: r._value,\n      emote_url: emoteImageURL(provider: r.provider, id: r.emote_id)\n    }))\n  |> drop(columns: [\"_start\", \"_stop\", \"_field\", \"_measurement\", \"_time\", \"result\", \"table\"])",
+          "query": "emoteImageURL = (provider, id) =>\n  if provider == \"twitch\" and id =~ /^[0-9]+$/ then\n    \"https://static-cdn.jtvnw.net/emoticons/v2/\" + id + \"/default/dark/2.0\"\n  else\n    \"http://localhost:8090/emotes/\" + id + \"/2x.webp\"\n\nrangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> group(columns: [\"channel_login\", \"provider\", \"emote_id\", \"emote_name\"])\n  |> sum()\n  |> group()\n  |> sort(columns: [\"_value\"], desc: true)\n  |> limit(n: 15)\n  |> map(fn: (r) => ({\n      channel_login: r.channel_login,\n      emote_id: r.emote_id,\n      emote_name: r.emote_name,\n      provider: r.provider,\n      uses: r._value,\n      emote_url: emoteImageURL(provider: r.provider, id: r.emote_id)\n    }))\n  |> drop(columns: [\"_start\", \"_stop\", \"_field\", \"_measurement\", \"_time\", \"result\", \"table\"])",
           "refId": "A"
         }
       ],
@@ -473,7 +494,7 @@
       },
       "targets": [
         {
-          "query": "providerName = (p) =>\n  if p == \"seventv\" then \"7TV\"\n  else if p == \"twitch\" then \"Twitch\"\n  else if p == \"ffz\" then \"FFZ\"\n  else p\n\nrangeStart = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group(columns: [\"channel_login\", \"provider\", \"emote_name\"])\n  |> sum()\n  |> group()\n  |> sort(columns: [\"_value\"], desc: true)\n  |> limit(n: 10)\n  |> map(fn: (r) => ({\n      label: providerName(p: r.provider) + \" - \" + r.emote_name + \" - \" + r.channel_login,\n      uses: r._value\n    }))",
+          "query": "providerName = (p) =>\n  if p == \"seventv\" then \"7TV\"\n  else if p == \"twitch\" then \"Twitch\"\n  else if p == \"ffz\" then \"FFZ\"\n  else p\n\nrangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> group(columns: [\"channel_login\", \"provider\", \"emote_name\"])\n  |> sum()\n  |> group()\n  |> sort(columns: [\"_value\"], desc: true)\n  |> limit(n: 10)\n  |> map(fn: (r) => ({\n      label: providerName(p: r.provider) + \" - \" + r.emote_name + \" - \" + r.channel_login,\n      uses: r._value\n    }))",
           "refId": "A"
         }
       ],
@@ -574,7 +595,7 @@
       },
       "targets": [
         {
-          "query": "import \"array\"\n\nproviderName = (p) =>\n  if p == \"seventv\" then \"7TV\"\n  else if p == \"twitch\" then \"Twitch\"\n  else if p == \"ffz\" then \"FFZ\"\n  else p\n\nrangeStart = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\ntopKeys = from(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group(columns: [\"channel_login\", \"provider\", \"emote_id\", \"emote_name\"])\n  |> sum()\n  |> group()\n  |> sort(columns: [\"_value\"], desc: true)\n  |> limit(n: 8)\n  |> map(fn: (r) => ({r with _key: r.channel_login + \"|\" + r.provider + \"|\" + r.emote_id}))\n  |> findColumn(fn: (key) => true, column: \"_key\")\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> map(fn: (r) => ({r with _key: r.channel_login + \"|\" + r.provider + \"|\" + r.emote_id}))\n  |> filter(fn: (r) => contains(value: r._key, set: topKeys))\n  |> map(fn: (r) => ({r with legend: providerName(p: r.provider) + \" - \" + r.emote_name + \" - \" + r.channel_login}))\n  |> group(columns: [\"legend\"])\n  |> aggregateWindow(every: 1m, fn: sum, createEmpty: false)",
+          "query": "import \"array\"\n\nproviderName = (p) =>\n  if p == \"seventv\" then \"7TV\"\n  else if p == \"twitch\" then \"Twitch\"\n  else if p == \"ffz\" then \"FFZ\"\n  else p\n\nrangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\ntopKeys = from(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> group(columns: [\"channel_login\", \"provider\", \"emote_id\", \"emote_name\"])\n  |> sum()\n  |> group()\n  |> sort(columns: [\"_value\"], desc: true)\n  |> limit(n: 8)\n  |> map(fn: (r) => ({r with _key: r.channel_login + \"|\" + r.provider + \"|\" + r.emote_id}))\n  |> findColumn(fn: (key) => true, column: \"_key\")\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> map(fn: (r) => ({r with _key: r.channel_login + \"|\" + r.provider + \"|\" + r.emote_id}))\n  |> filter(fn: (r) => contains(value: r._key, set: topKeys))\n  |> map(fn: (r) => ({r with legend: providerName(p: r.provider) + \" - \" + r.emote_name + \" - \" + r.channel_login}))\n  |> group(columns: [\"legend\"])\n  |> aggregateWindow(every: 1m, fn: sum, createEmpty: false)",
           "refId": "A"
         }
       ],
@@ -747,7 +768,7 @@
       },
       "targets": [
         {
-          "query": "emoteImageURL = (provider, id) =>\n  if provider == \"twitch\" and id =~ /^[0-9]+$/ then\n    \"https://static-cdn.jtvnw.net/emoticons/v2/\" + id + \"/default/dark/2.0\"\n  else\n    \"http://localhost:8090/emotes/\" + id + \"/2x.webp\"\n\nuseStreamBounds = not (\"${stream}\" == \"$__all\" or \"${stream}\" == \".*\") and \"${stream_start}\" != \"\" and \"${stream_end}\" != \"\" and int(v: \"${stream_start}\") > 0 and int(v: \"${stream_end}\") > 0\nstreamStart = if useStreamBounds then time(v: int(v: \"${stream_start}\") * int(v: 1000000)) else now()\nrangeStop = if useStreamBounds then time(v: int(v: \"${stream_end}\") * int(v: 1000000)) else now()\nrangeFloor = time(v: int(v: rangeStop) - int(v: 15m))\nrangeStart = if useStreamBounds and int(v: streamStart) > int(v: rangeFloor) then streamStart else rangeFloor\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group(columns: [\"channel_login\", \"provider\", \"emote_id\", \"emote_name\"])\n  |> sum()\n  |> group()\n  |> sort(columns: [\"_value\"], desc: true)\n  |> limit(n: 8)\n  |> map(fn: (r) => ({\n      channel_login: r.channel_login,\n      emote_id: r.emote_id,\n      emote_name: r.emote_name,\n      provider: r.provider,\n      uses: r._value,\n      emote_url: emoteImageURL(provider: r.provider, id: r.emote_id)\n    }))\n  |> drop(columns: [\"_value\", \"_start\", \"_stop\", \"_field\", \"_measurement\", \"_time\", \"result\", \"table\"])",
+          "query": "emoteImageURL = (provider, id) =>\n  if provider == \"twitch\" and id =~ /^[0-9]+$/ then\n    \"https://static-cdn.jtvnw.net/emoticons/v2/\" + id + \"/default/dark/2.0\"\n  else\n    \"http://localhost:8090/emotes/\" + id + \"/2x.webp\"\n\nuseStreamBounds = not (\"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\") and \"${stream_start}\" != \"\" and \"${stream_end}\" != \"\" and int(v: \"${stream_start}\") > 0 and int(v: \"${stream_end}\") > 0\nstreamStart = if useStreamBounds then time(v: int(v: \"${stream_start}\") * int(v: 1000000)) else now()\nrangeStop = if useStreamBounds then time(v: int(v: \"${stream_end}\") * int(v: 1000000)) else now()\nrangeFloor = time(v: int(v: rangeStop) - int(v: 15m))\nrangeStart = if useStreamBounds and int(v: streamStart) > int(v: rangeFloor) then streamStart else rangeFloor\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> group(columns: [\"channel_login\", \"provider\", \"emote_id\", \"emote_name\"])\n  |> sum()\n  |> group()\n  |> sort(columns: [\"_value\"], desc: true)\n  |> limit(n: 8)\n  |> map(fn: (r) => ({\n      channel_login: r.channel_login,\n      emote_id: r.emote_id,\n      emote_name: r.emote_name,\n      provider: r.provider,\n      uses: r._value,\n      emote_url: emoteImageURL(provider: r.provider, id: r.emote_id)\n    }))\n  |> drop(columns: [\"_value\", \"_start\", \"_stop\", \"_field\", \"_measurement\", \"_time\", \"result\", \"table\"])",
           "refId": "A"
         }
       ],
@@ -845,7 +866,7 @@
       },
       "targets": [
         {
-          "query": "rangeStart = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> group(columns: [\"provider\"])\n  |> sum()\n  |> group()",
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"emote_usage_1m\" and r._field == \"count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> group(columns: [\"provider\"])\n  |> sum()\n  |> group()",
           "refId": "A"
         }
       ],
@@ -1004,7 +1025,7 @@
       },
       "targets": [
         {
-          "query": "rangeStart = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => r._field == \"chat_count\" or r._field == \"total_emote_count\" or r._field == \"seventv_emote_count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> aggregateWindow(every: 1m, fn: sum, createEmpty: false)\n  |> group(columns: [\"channel_login\", \"_field\"])\n  |> last()\n  |> pivot(rowKey: [\"channel_login\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({\n      channel_login: r.channel_login,\n      chat_per_min: if exists r.chat_count then r.chat_count else 0,\n      emotes_per_min: if exists r.total_emote_count then r.total_emote_count else 0,\n      seventv_per_min: if exists r.seventv_emote_count then r.seventv_emote_count else 0\n    }))\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"result\", \"table\"])",
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => r._field == \"chat_count\" or r._field == \"total_emote_count\" or r._field == \"seventv_emote_count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> aggregateWindow(every: 1m, fn: sum, createEmpty: false)\n  |> group(columns: [\"channel_login\", \"_field\"])\n  |> last()\n  |> pivot(rowKey: [\"channel_login\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({\n      channel_login: r.channel_login,\n      chat_per_min: if exists r.chat_count then r.chat_count else 0,\n      emotes_per_min: if exists r.total_emote_count then r.total_emote_count else 0,\n      seventv_per_min: if exists r.seventv_emote_count then r.seventv_emote_count else 0\n    }))\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"result\", \"table\"])",
           "refId": "A"
         }
       ],
@@ -1172,7 +1193,7 @@
       },
       "targets": [
         {
-          "query": "rangeStart = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream}\" == \"$__all\" or \"${stream}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => r._field == \"chat_count\" or r._field == \"total_emote_count\" or r._field == \"seventv_emote_count\" or r._field == \"viewer_avg\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream:regex}/)\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)",
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => r._field == \"chat_count\" or r._field == \"total_emote_count\" or r._field == \"seventv_emote_count\" or r._field == \"viewer_avg\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)",
           "refId": "A"
         }
       ],
@@ -1278,12 +1299,381 @@
       },
       "targets": [
         {
-          "query": "channelSel = \"${channel}\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => if isAllChannel then false else r.channel_login == channelSel)\n  |> filter(fn: (r) => r._field == \"chat_count\" or r._field == \"total_emote_count\")\n  |> group(columns: [\"stream_id\", \"stream_title\", \"stream_started\", \"_field\"])\n  |> sum()\n  |> pivot(rowKey: [\"stream_id\", \"stream_title\", \"stream_started\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()\n  |> sort(columns: [\"stream_started\"], desc: true)\n  |> limit(n: 12)\n  |> map(fn: (r) => ({\n      title: if exists r.stream_title and r.stream_title != \"\" then r.stream_title else r.stream_id,\n      started: if exists r.stream_started and r.stream_started != \"\" then r.stream_started else string(v: int(v: r.stream_id)),\n      chat_total: if exists r.chat_count then float(v: r.chat_count) else 0.0,\n      emote_total: if exists r.total_emote_count then float(v: r.total_emote_count) else 0.0\n    }))\n  |> drop(columns: [\"stream_id\", \"stream_title\", \"stream_started\", \"_start\", \"_stop\", \"result\", \"table\"])",
+          "query": "channelSel = \"${channel}\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => if isAllChannel then false else r.channel_login == channelSel)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> filter(fn: (r) => r._field == \"chat_count\" or r._field == \"total_emote_count\")\n  |> group(columns: [\"stream_id\", \"stream_title\", \"stream_started\", \"_field\"])\n  |> sum()\n  |> pivot(rowKey: [\"stream_id\", \"stream_title\", \"stream_started\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()\n  |> sort(columns: [\"stream_started\"], desc: true)\n  |> limit(n: 12)\n  |> map(fn: (r) => ({\n      title: if exists r.stream_title and r.stream_title != \"\" then r.stream_title else r.stream_id,\n      started: if exists r.stream_started and r.stream_started != \"\" then r.stream_started else string(v: int(v: r.stream_id)),\n      chat_total: if exists r.chat_count then float(v: r.chat_count) else 0.0,\n      emote_total: if exists r.total_emote_count then float(v: r.total_emote_count) else 0.0\n    }))\n  |> drop(columns: [\"stream_id\", \"stream_title\", \"stream_started\", \"_start\", \"_stop\", \"result\", \"table\"])",
           "refId": "A"
         }
       ],
       "title": "Recent streams",
       "type": "table"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "id": 106,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => r._field == \"total_emote_count\" or r._field == \"chat_count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> aggregateWindow(every: 1m, fn: sum, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({\n      _time: r._time,\n      _value: if exists r.chat_count and float(v: r.chat_count) > 0.0 then float(v: r.total_emote_count) / float(v: r.chat_count) else 0.0\n    }))",
+          "refId": "A"
+        }
+      ],
+      "title": "Emote/chat ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "id": 107,
+      "description": "5-minute chat sum delta vs the prior 5-minute window.",
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> aggregateWindow(every: 5m, fn: sum, createEmpty: false)\n  |> group()\n  |> difference(nonNegative: false)",
+          "refId": "A"
+        }
+      ],
+      "title": "Chat spikes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "viewer_max"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Peak viewers"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "viewer_avg"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Avg viewers"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "id": 108,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\")\n  |> filter(fn: (r) => r._field == \"viewer_max\" or r._field == \"viewer_avg\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)",
+          "refId": "A"
+        }
+      ],
+      "title": "Viewer peak vs avg",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "InfluxDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "id": 109,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "rangeStart = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStart\n  else if \"${stream_start}\" == \"\" or int(v: \"${stream_start}\") <= 0\n  then v.timeRangeStart\n  else time(v: int(v: \"${stream_start}\") * int(v: 1000000))\nrangeStop = if \"${stream_id}\" == \"$__all\" or \"${stream_id}\" == \".*\"\n  then v.timeRangeStop\n  else if \"${stream_end}\" == \"\" or int(v: \"${stream_end}\") <= 0\n  then v.timeRangeStop\n  else time(v: int(v: \"${stream_end}\") * int(v: 1000000))\n\nfrom(bucket: v.bucket)\n  |> range(start: rangeStart, stop: rangeStop)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"unique_emote_count\")\n  |> filter(fn: (r) => r.channel_login =~ /${channel:regex}/)\n  |> filter(fn: (r) => r.stream_id =~ /${stream_id:regex}/)\n  |> filter(fn: (r) => r.stream_category =~ /${category:regex}/)\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)",
+          "refId": "A"
+        }
+      ],
+      "title": "Unique emotes/min",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -1325,15 +1715,59 @@
           "value": "$__all"
         },
         "datasource": "InfluxDB",
-        "definition": "channelSel = \"${channel}\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"channel_login\", \"stream_id\"])\n  |> last()\n  |> group()\n  |> sort(columns: [\"stream_started\", \"_time\"], desc: true)\n  |> map(fn: (r) => ({\n      _value: r.stream_id,\n      _text: (if exists r.channel_login and r.channel_login != \"\" then r.channel_login + \" - \" else \"\") +\n        (if exists r.stream_started and r.stream_started != \"\" then string(v: r.stream_started) + \" - \" else \"\") +\n        (if exists r.stream_title and r.stream_title != \"\" then r.stream_title else r.stream_id)\n    }))\n  |> keep(columns: [\"_value\", \"_text\"])",
+        "definition": "import \"strings\"\n\nchannelSel = \"${channel}\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"channel_login\", \"stream_id\"])\n  |> last()\n  |> group()\n  |> sort(columns: [\"_time\"], desc: true)\n  |> map(fn: (r) => {\n      startedLabel = strings.replace(v: strings.substring(v: string(v: r._time), start: 0, end: 16), t: \"T\", u: \" \", i: 1)\n      titleLabel = if exists r.stream_title and r.stream_title != \"\" then r.stream_title else r.stream_id\n      channelPrefix = if exists r.channel_login and r.channel_login != \"\" then r.channel_login + \" · \" else \"\"\n      return {_value: r.stream_id, _text: channelPrefix + startedLabel + \" · \" + titleLabel}\n    })\n  |> keep(columns: [\"_value\", \"_text\"])",
+        "description": "Pick a stream by local date and title. Panels auto-filter to that stream; use Snap time range to align the picker.",
         "hide": 0,
         "includeAll": true,
         "label": "Stream",
         "multi": false,
         "name": "stream",
         "options": [],
-        "query": "channelSel = \"${channel}\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"channel_login\", \"stream_id\"])\n  |> last()\n  |> group()\n  |> sort(columns: [\"stream_started\", \"_time\"], desc: true)\n  |> map(fn: (r) => ({\n      _value: r.stream_id,\n      _text: (if exists r.channel_login and r.channel_login != \"\" then r.channel_login + \" - \" else \"\") +\n        (if exists r.stream_started and r.stream_started != \"\" then string(v: r.stream_started) + \" - \" else \"\") +\n        (if exists r.stream_title and r.stream_title != \"\" then r.stream_title else r.stream_id)\n    }))\n  |> keep(columns: [\"_value\", \"_text\"])",
+        "query": "import \"strings\"\n\nchannelSel = \"${channel}\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"channel_login\", \"stream_id\"])\n  |> last()\n  |> group()\n  |> sort(columns: [\"_time\"], desc: true)\n  |> map(fn: (r) => {\n      startedLabel = strings.replace(v: strings.substring(v: string(v: r._time), start: 0, end: 16), t: \"T\", u: \" \", i: 1)\n      titleLabel = if exists r.stream_title and r.stream_title != \"\" then r.stream_title else r.stream_id\n      channelPrefix = if exists r.channel_login and r.channel_login != \"\" then r.channel_login + \" · \" else \"\"\n      return {_value: r.stream_id, _text: channelPrefix + startedLabel + \" · \" + titleLabel}\n    })\n  |> keep(columns: [\"_value\", \"_text\"])",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "InfluxDB",
+        "definition": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: v.bucket, tag: \"stream_category\")",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Category",
+        "multi": false,
+        "name": "category",
+        "options": [],
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: v.bucket, tag: \"stream_category\")",
         "refresh": 2,
+        "regex": "",
+        "skipUrlSync": true,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": ".*",
+          "value": ".*"
+        },
+        "datasource": "InfluxDB",
+        "definition": "import \"array\"\nimport \"strings\"\n\nstreamSel = \"${stream}\"\nchannelSel = \"${channel}\"\nisAllStream = streamSel == \"$__all\" or streamSel == \".*\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\nisNumeric = streamSel =~ /^[0-9]+$/\n\nlabels =\n  from(bucket: v.bucket)\n    |> range(start: -90d)\n    |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n    |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n    |> group(columns: [\"channel_login\", \"stream_id\"])\n    |> last()\n    |> group()\n    |> map(fn: (r) => ({\n        textLabel:\n          (if exists r.channel_login and r.channel_login != \"\" then r.channel_login + \" · \" else \"\")\n            + strings.replace(v: strings.substring(v: string(v: r._time), start: 0, end: 16), t: \"T\", u: \" \", i: 1)\n            + \" · \"\n            + (if exists r.stream_title and r.stream_title != \"\" then r.stream_title else r.stream_id),\n        streamId: r.stream_id,\n      }))\n\nif isAllStream then array.from(rows: [{_value: \".*\"}])\nelse if isNumeric then array.from(rows: [{_value: streamSel}])\nelse\n  labels\n    |> filter(fn: (r) => r.textLabel == streamSel)\n    |> map(fn: (r) => ({_value: r.streamId}))\n    |> limit(n: 1)",
+        "hide": 2,
+        "includeAll": false,
+        "label": "stream_id",
+        "multi": false,
+        "name": "stream_id",
+        "options": [],
+        "query": "import \"array\"\nimport \"strings\"\n\nstreamSel = \"${stream}\"\nchannelSel = \"${channel}\"\nisAllStream = streamSel == \"$__all\" or streamSel == \".*\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\nisNumeric = streamSel =~ /^[0-9]+$/\n\nlabels =\n  from(bucket: v.bucket)\n    |> range(start: -90d)\n    |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n    |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n    |> group(columns: [\"channel_login\", \"stream_id\"])\n    |> last()\n    |> group()\n    |> map(fn: (r) => ({\n        textLabel:\n          (if exists r.channel_login and r.channel_login != \"\" then r.channel_login + \" · \" else \"\")\n            + strings.replace(v: strings.substring(v: string(v: r._time), start: 0, end: 16), t: \"T\", u: \" \", i: 1)\n            + \" · \"\n            + (if exists r.stream_title and r.stream_title != \"\" then r.stream_title else r.stream_id),\n        streamId: r.stream_id,\n      }))\n\nif isAllStream then array.from(rows: [{_value: \".*\"}])\nelse if isNumeric then array.from(rows: [{_value: streamSel}])\nelse\n  labels\n    |> filter(fn: (r) => r.textLabel == streamSel)\n    |> map(fn: (r) => ({_value: r.streamId}))\n    |> limit(n: 1)",
+        "refresh": 1,
         "regex": "",
         "skipUrlSync": true,
         "sort": 0,
@@ -1346,17 +1780,17 @@
           "value": "0"
         },
         "datasource": "InfluxDB",
-        "definition": "streamSel = \"${stream}\"\nchannelSel = \"${channel}\"\nisAllStream = streamSel == \"$__all\" or streamSel == \".*\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllStream then false else r.stream_id == streamSel)\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"stream_id\"])\n  |> first()\n  |> map(fn: (r) => ({\n      _value: if exists r.stream_started and r.stream_started != \"\"\n        then int(v: r.stream_started) * 1000\n        else int(v: r._time) / int(v: 1000000)\n    }))",
+        "definition": "streamSel = \"${stream_id}\"\nchannelSel = \"${channel}\"\nisAllStream = streamSel == \"$__all\" or streamSel == \".*\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllStream then false else r.stream_id == streamSel)\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"stream_id\"])\n  |> first()\n  |> map(fn: (r) => ({ _value: int(v: r._time) / int(v: 1000000) }))",
         "hide": 2,
         "includeAll": false,
         "label": "stream_start",
         "multi": false,
         "name": "stream_start",
         "options": [],
-        "query": "streamSel = \"${stream}\"\nchannelSel = \"${channel}\"\nisAllStream = streamSel == \"$__all\" or streamSel == \".*\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllStream then false else r.stream_id == streamSel)\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"stream_id\"])\n  |> first()\n  |> map(fn: (r) => ({\n      _value: if exists r.stream_started and r.stream_started != \"\"\n        then int(v: r.stream_started) * 1000\n        else int(v: r._time) / int(v: 1000000)\n    }))",
-        "refresh": 2,
+        "query": "streamSel = \"${stream_id}\"\nchannelSel = \"${channel}\"\nisAllStream = streamSel == \"$__all\" or streamSel == \".*\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllStream then false else r.stream_id == streamSel)\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"stream_id\"])\n  |> first()\n  |> map(fn: (r) => ({ _value: int(v: r._time) / int(v: 1000000) }))",
+        "refresh": 1,
         "regex": "",
-        "skipUrlSync": true,
+        "skipUrlSync": false,
         "sort": 0,
         "type": "query"
       },
@@ -1367,30 +1801,30 @@
           "value": "0"
         },
         "datasource": "InfluxDB",
-        "definition": "streamSel = \"${stream}\"\nchannelSel = \"${channel}\"\nisAllStream = streamSel == \"$__all\" or streamSel == \".*\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\nnowNs = int(v: now())\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllStream then false else r.stream_id == streamSel)\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"stream_id\"])\n  |> last()\n  |> map(fn: (r) => ({\n      _value: if int(v: r._time) > nowNs - int(v: 300000000000)\n        then nowNs / int(v: 1000000)\n        else int(v: r._time) / int(v: 1000000)\n    }))",
+        "definition": "streamSel = \"${stream_id}\"\nchannelSel = \"${channel}\"\nisAllStream = streamSel == \"$__all\" or streamSel == \".*\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\nnowNs = int(v: now())\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllStream then false else r.stream_id == streamSel)\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"stream_id\"])\n  |> last()\n  |> map(fn: (r) => ({\n      _value: if int(v: r._time) > nowNs - int(v: 300000000000)\n        then nowNs / int(v: 1000000)\n        else int(v: r._time) / int(v: 1000000) + int(v: 60000)\n    }))",
         "hide": 2,
         "includeAll": false,
         "label": "stream_end",
         "multi": false,
         "name": "stream_end",
         "options": [],
-        "query": "streamSel = \"${stream}\"\nchannelSel = \"${channel}\"\nisAllStream = streamSel == \"$__all\" or streamSel == \".*\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\nnowNs = int(v: now())\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllStream then false else r.stream_id == streamSel)\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"stream_id\"])\n  |> last()\n  |> map(fn: (r) => ({\n      _value: if int(v: r._time) > nowNs - int(v: 300000000000)\n        then nowNs / int(v: 1000000)\n        else int(v: r._time) / int(v: 1000000)\n    }))",
-        "refresh": 2,
+        "query": "streamSel = \"${stream_id}\"\nchannelSel = \"${channel}\"\nisAllStream = streamSel == \"$__all\" or streamSel == \".*\"\nisAllChannel = channelSel == \"$__all\" or channelSel == \".*\"\nnowNs = int(v: now())\n\nfrom(bucket: v.bucket)\n  |> range(start: -90d)\n  |> filter(fn: (r) => r._measurement == \"stream_activity_1m\" and r._field == \"chat_count\")\n  |> filter(fn: (r) => if isAllStream then false else r.stream_id == streamSel)\n  |> filter(fn: (r) => if isAllChannel then true else r.channel_login == channelSel)\n  |> group(columns: [\"stream_id\"])\n  |> last()\n  |> map(fn: (r) => ({\n      _value: if int(v: r._time) > nowNs - int(v: 300000000000)\n        then nowNs / int(v: 1000000)\n        else int(v: r._time) / int(v: 1000000) + int(v: 60000)\n    }))",
+        "refresh": 1,
         "regex": "",
-        "skipUrlSync": true,
+        "skipUrlSync": false,
         "sort": 0,
         "type": "query"
       }
     ]
   },
   "time": {
-    "from": "now-24h",
+    "from": "now-7d",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
   "title": "Emote Pulse",
   "uid": "streamclone-emote-pulse",
-  "version": 7,
+  "version": 10,
   "weekStart": ""
 }

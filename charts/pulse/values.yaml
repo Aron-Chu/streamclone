@@ -8,8 +8,9 @@ influxdb:
   image: influxdb:2.7-alpine
   username: admin
   password: devpulse
-  # LoadBalancer on 18086 avoids compose analytics conflict on host :8086.
-  serviceType: LoadBalancer
+  # ClusterIP + port-forward (0.0.0.0) so Compose analytics can reach Influx via WSL IP.
+  # LoadBalancer on :18086 binds 127.0.0.1 only on Docker Desktop and blocks Docker.
+  serviceType: ClusterIP
   servicePort: 18086
   persistence:
     enabled: true
@@ -30,5 +31,22 @@ grafana:
 
 prometheus:
   enabled: true
-  image: prom/prometheus:v3.2.1
+  image: prom/prometheus:v2.55.0
   retention: 15d
+  serviceType: LoadBalancer
+  servicePort: 9090
+  # Scrape Streamclone Compose services on the Docker Desktop host (analytics on :8086).
+  streamcloneScrape:
+    enabled: true
+    host: host.docker.internal
+    targets:
+      - job: metadata
+        port: 8081
+      - job: video
+        port: 8082
+      - job: chat
+        port: 8083
+      - job: emote
+        port: 8084
+      - job: analytics
+        port: 8086

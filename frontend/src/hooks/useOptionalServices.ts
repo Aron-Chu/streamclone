@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  getHostDiagnostics,
   getMetadataDiagnostics,
   getSetupControlHealth,
   getSetupStartStatus,
@@ -9,7 +10,8 @@ import {
   type MetadataDiagnostics,
   type SetupWelcome,
 } from '../api'
-import { SETUP_CONTROL_AVAILABLE } from '../config'
+import { SETUP_CONTROL_AVAILABLE, SETUP_CONTROL_WAKE_ENABLED, CLIPPER } from '../config'
+import { wakeSetupControl } from '../setupControlWake'
 
 export type OptionalService = 'scraper' | 'clipper' | 'pulse'
 
@@ -85,12 +87,22 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
     retry: false,
   })
 
-  const hasServiceSnapshot = Boolean(setup.data || diagnostics.data)
-  const statusLoading = !hasServiceSnapshot && (setup.isLoading || diagnostics.isLoading)
-  const profile = setup.data?.profile ?? diagnostics.data?.profile ?? 'core'
+  const hostDiagnostics = useQuery({
+    queryKey: ['host-diagnostics'],
+    queryFn: getHostDiagnostics,
+    enabled: SETUP_CONTROL_AVAILABLE && Boolean(options.probeControl),
+    staleTime: 10_000,
+    refetchInterval: statusPollMs,
+    retry: false,
+  })
+
+  const hasServiceSnapshot = Boolean(setup.data || diagnostics.data || hostDiagnostics.data)
+  const statusLoading = !hasServiceSnapshot && (setup.isLoading || diagnostics.isLoading || hostDiagnostics.isLoading)
+  const profile = setup.data?.profile ?? diagnostics.data?.profile ?? hostDiagnostics.data?.profile ?? 'core'
   const services = useMemo(() => {
     const welcome = setup.data?.services
     const diag = diagnostics.data?.services
+    const host = hostDiagnostics.data?.optionalServices
     return {
       scraper: diag?.scraper === 'ready' || welcome?.scraper === 'ready'
         ? 'ready'
@@ -98,15 +110,32 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
       clipper: diag?.clipper === 'ready' || welcome?.clipper === 'ready'
         ? 'ready'
         : welcome?.clipper ?? diag?.clipper ?? 'offline',
-      pulse: diag?.pulse === 'ready' || welcome?.pulse === 'ready'
+      pulse: diag?.pulse === 'ready' || welcome?.pulse === 'ready' || host?.pulse === 'ready'
         ? 'ready'
-        : welcome?.pulse ?? diag?.pulse ?? 'offline',
+        : welcome?.pulse ?? diag?.pulse ?? host?.pulse ?? 'offline',
     } as const
-  }, [setup.data?.services, diagnostics.data?.services])
+  }, [setup.data?.services, diagnostics.data?.services, hostDiagnostics.data?.optionalServices])
+
+  const clipperHealth = useQuery({
+    queryKey: ['clipper-health'],
+    queryFn: async () => {
+      const res = await fetch(`${CLIPPER.replace(/\/$/, '')}/healthz`, {
+        signal: AbortSignal.timeout(5000),
+      })
+      if (!res.ok) return false
+      const body = await res.json() as { status?: string }
+      return body.status === 'ok'
+    },
+    enabled: services.clipper === 'offline',
+    staleTime: 10_000,
+    refetchInterval: statusPollMs,
+    retry: false,
+  })
 
   const controlReady = Boolean(control.data?.ok)
   const scraperOffline = services.scraper === 'offline'
-  const clipperOffline = services.clipper === 'offline'
+  const clipperReady = services.clipper === 'ready' || clipperHealth.data === true
+  const clipperOffline = !clipperReady
   const pulseOffline = services.pulse === 'offline'
 
   const refreshStatus = async () => {
@@ -114,6 +143,10 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['setup-welcome'] }),
       queryClient.invalidateQueries({ queryKey: ['setup-diagnostics'] }),
+      SETUP_CONTROL_AVAILABLE && Boolean(options.probeControl)
+        ? queryClient.invalidateQueries({ queryKey: ['host-diagnostics'] })
+        : Promise.resolve(),
+      queryClient.invalidateQueries({ queryKey: ['clipper-health'] }),
       SETUP_CONTROL_AVAILABLE && (Boolean(options.probeControl) || anyStarting)
         ? queryClient.invalidateQueries({ queryKey: ['setup-control-health'] })
         : Promise.resolve(),
@@ -121,12 +154,40 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
   }
 
   const startService = async (service: OptionalService) => {
+    // clipper: setup-control POST /start/clipper is legacy (embedded container). Prefer ReplayForge on :8095/:8096.
     setActionError(null)
-    if (!controlReady) {
-      setActionError(
-        `The install helper is not running (needed to start ${START_LABELS[service]}). Close the app tab, run Start Streamclone from Desktop, then try again.`,
-      )
-      return false
+    let helperReady = controlReady
+    if (!helperReady) {
+      if (SETUP_CONTROL_WAKE_ENABLED) {
+        setStartProgressByService(prev => ({
+          ...prev,
+          [service]: {
+            service,
+            percent: 4,
+            phase: 'Starting install helper…',
+            detail: 'Waking the local setup helper...',
+          },
+        }))
+        helperReady = await wakeSetupControl()
+        if (helperReady) {
+          await queryClient.invalidateQueries({ queryKey: ['setup-control-health'] })
+        } else {
+          setStartProgressByService(prev => {
+            if (!prev[service]) return prev
+            const next = { ...prev }
+            delete next[service]
+            return next
+          })
+        }
+      }
+      if (!helperReady) {
+        setActionError(
+          SETUP_CONTROL_WAKE_ENABLED
+            ? `The install helper did not start in time (needed for ${START_LABELS[service]}). If the browser blocked the Streamclone link, run Start Streamclone from Desktop once, then try again.`
+            : `The install helper is not running (needed to start ${START_LABELS[service]}). Close the app tab, run Start Streamclone from Desktop, then try again.`,
+        )
+        return false
+      }
     }
     setStarting(prev => new Set(prev).add(service))
     setStartProgressByService(prev => ({
@@ -276,6 +337,7 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
     services,
     controlReady,
     scraperOffline,
+    clipperReady,
     clipperOffline,
     pulseOffline,
     starting: isStarting('scraper') ? 'scraper' : isStarting('clipper') ? 'clipper' : isStarting('pulse') ? 'pulse' : null,

@@ -127,6 +127,7 @@ func (h *Handler) pulseServiceReady(ctx context.Context) string {
 	}
 	influxTargets := []string{
 		"http://host.docker.internal:18086/health",
+		"http://host.docker.internal:18087/health",
 		"http://influxdb:8086/health",
 	}
 	if !h.probeAnyServiceHealth(ctx, grafanaTargets) {

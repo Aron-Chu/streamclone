@@ -39,6 +39,7 @@ type Rollup struct {
 	ChannelLogin      string
 	StreamID          string
 	StreamTitle       string
+	StreamCategory    string
 	StreamStartedAt   time.Time
 	MinuteTS          time.Time
 	ViewerAvg         int
@@ -461,6 +462,8 @@ func writeStreamActivityLine(b *strings.Builder, rollup Rollup, ts int64) {
 	writeIntField(b, "total_emote_count", rollup.TotalEmoteCount)
 	b.WriteByte(',')
 	writeIntField(b, "seventv_emote_count", rollup.SevenTVEmoteCount)
+	b.WriteByte(',')
+	writeIntField(b, "unique_emote_count", countUniqueEmotes(rollup.Emotes))
 	b.WriteByte(' ')
 	b.WriteString(strconv.FormatInt(ts, 10))
 	b.WriteByte('\n')
@@ -474,6 +477,23 @@ func writeStreamMetaTags(b *strings.Builder, rollup Rollup) {
 	if title != "" {
 		writeTag(b, "stream_title", title)
 	}
+	category := sanitizeStreamTitle(rollup.StreamCategory)
+	if category != "" {
+		writeTag(b, "stream_category", category)
+	}
+}
+
+func countUniqueEmotes(emotes map[string]int) int {
+	if len(emotes) == 0 {
+		return 0
+	}
+	count := 0
+	for _, uses := range emotes {
+		if uses > 0 {
+			count++
+		}
+	}
+	return count
 }
 
 func sanitizeStreamTitle(title string) string {

@@ -13,6 +13,7 @@ influx_bucket="${PULSE_INFLUX_BUCKET:-streamclone}"
 influx_service_port="${PULSE_INFLUX_SERVICE_PORT:-18086}"
 stream_list_days="${PULSE_STREAM_LIST_DAYS:-90}"
 emote_proxy_url="${PULSE_EMOTE_PROXY_URL:-http://localhost:8090}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 kubectl -n "$namespace" patch secret "$secret_name" \
   --type merge \
@@ -37,6 +38,11 @@ datasources:
       defaultBucket: "{bucket}"
     secureJsonData:
       token: "{token}"
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    isDefault: false
+    url: http://{release}-prometheus:9090
 """
 print(json.dumps({"data": {"datasources.yml": datasources}}))
 PY
@@ -46,21 +52,30 @@ PY
     -p "$patch_payload"
 fi
 
-dashboard_source="charts/pulse/dashboards/emote-pulse.json"
-if [[ -f "$dashboard_source" ]] && kubectl -n "$namespace" get configmap "$dashboard_configmap_name" >/dev/null 2>&1; then
-  dashboard_payload="$(python3 - "$dashboard_source" "$stream_list_days" "$emote_proxy_url" <<'PY'
+bash "${root}/scripts/sync-pulse-chart.sh" >/dev/null
+
+emote_source="${root}/charts/pulse/dashboards/emote-pulse.json"
+ops_source="${root}/charts/pulse/dashboards/streamclone-ops.json"
+if [[ -f "$emote_source" ]] && kubectl -n "$namespace" get configmap "$dashboard_configmap_name" >/dev/null 2>&1; then
+  dashboard_payload="$(python3 - "$emote_source" "$ops_source" "$stream_list_days" "$emote_proxy_url" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-source, stream_list_days, emote_proxy_url = sys.argv[1:4]
-dashboard = Path(source).read_text(encoding="utf-8")
-dashboard = dashboard.replace("__STREAM_LIST_DAYS__", stream_list_days)
-dashboard = dashboard.replace("__EMOTE_PROXY__", emote_proxy_url)
-print(json.dumps({"data": {"emote-pulse.json": dashboard}}))
+emote_path, ops_path, stream_list_days, emote_proxy_url = sys.argv[1:5]
+emote = Path(emote_path).read_text(encoding="utf-8")
+emote = emote.replace("__STREAM_LIST_DAYS__", stream_list_days)
+emote = emote.replace("__EMOTE_PROXY__", emote_proxy_url)
+emote = emote.replace("http://localhost:8090", emote_proxy_url)
+data = {"emote-pulse.json": emote}
+ops = Path(ops_path)
+if ops.is_file():
+    data["streamclone-ops.json"] = ops.read_text(encoding="utf-8")
+print(json.dumps({"data": data}))
 PY
 )"
   kubectl -n "$namespace" patch configmap "$dashboard_configmap_name" \
     --type merge \
     -p "$dashboard_payload"
+  kubectl -n "$namespace" rollout restart "deployment/${release}-grafana" >/dev/null 2>&1 || true
 fi

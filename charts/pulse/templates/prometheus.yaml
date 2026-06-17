@@ -15,11 +15,13 @@ data:
       - job_name: prometheus
         static_configs:
           - targets: ["localhost:9090"]
-      {{- if .Values.influxdb.enabled }}
-      - job_name: pulse-influxdb
+      {{- if .Values.prometheus.streamcloneScrape.enabled }}
+      {{- range .Values.prometheus.streamcloneScrape.targets }}
+      - job_name: streamclone-{{ .job }}
         metrics_path: /metrics
         static_configs:
-          - targets: ["{{ include "pulse.fullname" . }}-influxdb:8086"]
+          - targets: ["{{ $.Values.prometheus.streamcloneScrape.host }}:{{ .port }}"]
+      {{- end }}
       {{- end }}
 ---
 apiVersion: apps/v1
@@ -71,11 +73,12 @@ metadata:
     {{- include "pulse.labels" . | nindent 4 }}
     app.kubernetes.io/component: prometheus
 spec:
+  type: {{ .Values.prometheus.serviceType }}
   selector:
     {{- include "pulse.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: prometheus
   ports:
     - name: http
-      port: 9090
+      port: {{ .Values.prometheus.servicePort }}
       targetPort: http
 {{- end }}
