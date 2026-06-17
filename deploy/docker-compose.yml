@@ -77,6 +77,8 @@ services:
     environment:
       <<: *go-env
       REDDIT_PROVIDER: ${REDDIT_PROVIDER:-off}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports: ["127.0.0.1:8081:8080"]
     depends_on:
       redis:
@@ -141,6 +143,9 @@ services:
       ANALYTICS_VOD_GQL_CONCURRENCY_MIN: ${ANALYTICS_VOD_GQL_CONCURRENCY_MIN:-3}
       ANALYTICS_VOD_GQL_CONCURRENCY_MAX: ${ANALYTICS_VOD_GQL_CONCURRENCY_MAX:-8}
       ANALYTICS_VOD_GQL_INCREMENTAL_DB: ${ANALYTICS_VOD_GQL_INCREMENTAL_DB:-true}
+      ANALYTICS_VOD_CHAT_REPLAY_ENABLED: ${ANALYTICS_VOD_CHAT_REPLAY_ENABLED:-1}
+      ANALYTICS_VOD_CHAT_SENDER_SALT: ${ANALYTICS_VOD_CHAT_SENDER_SALT:-local-dev}
+      ANALYTICS_VOD_CHAT_PRESERVE_URLS: ${ANALYTICS_VOD_CHAT_PRESERVE_URLS:-0}
       ANALYTICS_VOD_GQL_SEGMENT_SECONDS: ${ANALYTICS_VOD_GQL_SEGMENT_SECONDS:-300}
       ANALYTICS_VOD_GQL_DENSE_SEGMENT_SECONDS: ${ANALYTICS_VOD_GQL_DENSE_SEGMENT_SECONDS:-120}
       ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS: ${ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS:-120000}
@@ -208,6 +213,7 @@ services:
       STREAMCLONE_PROFILE: ${STREAMCLONE_PROFILE:-core}
       TWITCH_DEV_TOKEN_IMPORT_ENABLED: ${TWITCH_DEV_TOKEN_IMPORT_ENABLED:-false}
       SETUP_CONTROL_TOKEN: ${SETUP_CONTROL_TOKEN:-}
+      SETUP_CONTROL_WAKE_ENABLED: ${SETUP_CONTROL_WAKE_ENABLED:-false}
       STREAMCLONE_INSTALL_ID: ${STREAMCLONE_INSTALL_ID:-}
     volumes:
       - ../frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -230,23 +236,25 @@ services:
       emote:
         condition: service_healthy
 
-  clipper:
-    profiles: [clipper]
-    restart: unless-stopped
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.clipper
-    env_file:
-      - ../.env
-    environment:
-      CLIPPER_HOST: "0.0.0.0"
-      CLIPPER_PORT: 8095
-      CLIPPER_DATA_DIR: "/data"
-      CLIPPER_DB_PATH: "/data/clipper.sqlite"
-      CLIPPER_OUTPUT_DIR: "/data/output"
-    ports: ["127.0.0.1:8095:8095"]
-    volumes:
-      - clipper-data:/data
+  # Clip Studio moved to ReplayForge (sibling repo ../replayforge). Run API on :8095 and UI on :8096.
+  # Legacy in-repo clipper profile kept in git history; use ReplayForge for new installs.
+  # clipper:
+  #   profiles: [clipper]
+  #   restart: unless-stopped
+  #   build:
+  #     context: ..
+  #     dockerfile: deploy/Dockerfile.clipper
+  #   env_file:
+  #     - ../.env
+  #   environment:
+  #     CLIPPER_HOST: "0.0.0.0"
+  #     CLIPPER_PORT: 8095
+  #     CLIPPER_DATA_DIR: "/data"
+  #     CLIPPER_DB_PATH: "/data/clipper.sqlite"
+  #     CLIPPER_OUTPUT_DIR: "/data/output"
+  #   ports: ["127.0.0.1:8095:8095"]
+  #   volumes:
+  #     - clipper-data:/data
 
   # Scraper browser profiles (override via ../.env):
   #   Bridge (local Windows dev): SCRAPER_EPHEMERAL_BROWSER=true, SCRAPER_MAX_CONCURRENT=1
@@ -323,6 +331,25 @@ services:
       retries: 12
       start_period: 20s
 
+  prometheus:
+    profiles: [pulse]
+    image: prometheus/prometheus:v2.55.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   grafana:
     profiles: [pulse]
     image: grafana/grafana:11.5.0
@@ -344,6 +371,8 @@ services:
     depends_on:
       influxdb:
         condition: service_healthy
+      prometheus:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
       interval: 10s
@@ -354,7 +383,7 @@ services:
 volumes:
   pg-data:
   minio-data:
-  clipper-data:
+  # clipper-data:  # ReplayForge manages its own data dir (see ../replayforge)
   scraper-profile:
   camoufox-cache:
   influx-data:

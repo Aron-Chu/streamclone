@@ -2,6 +2,8 @@ services:
   local-proxy:
     image: caddy:2
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8090:80"
     volumes:
