@@ -52,7 +52,7 @@ func (s *Store) Insert(ctx context.Context, msg VODChatMessage) error {
 	}
 	_, err = s.db.Exec(ctx, insertSQL,
 		msg.StreamID, msg.MinuteTS, msg.MessageID, msg.DisplayName,
-		msg.SenderHash, msg.Text, frags, msg.OffsetSeconds,
+		msg.CommenterLogin, msg.SenderHash, msg.Text, frags, msg.OffsetSeconds,
 	)
 	return err
 }
@@ -76,7 +76,7 @@ func (s *Store) BulkInsert(ctx context.Context, msgs []VODChatMessage) error {
 		}
 		batch.Queue(insertSQL,
 			msg.StreamID, msg.MinuteTS, msg.MessageID, msg.DisplayName,
-			msg.SenderHash, msg.Text, frags, msg.OffsetSeconds,
+			msg.CommenterLogin, msg.SenderHash, msg.Text, frags, msg.OffsetSeconds,
 		)
 		queued++
 	}
@@ -95,9 +95,9 @@ func (s *Store) BulkInsert(ctx context.Context, msgs []VODChatMessage) error {
 
 const insertSQL = `
 	INSERT INTO analytics_vod_chat_messages (
-		stream_id, minute_ts, message_id, display_name, sender_hash, text, emote_frags, offset_seconds
+		stream_id, minute_ts, message_id, display_name, commenter_login, sender_hash, text, emote_frags, offset_seconds
 	)
-	VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+	VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8::jsonb,$9)
 	ON CONFLICT (stream_id, message_id) DO NOTHING`
 
 // QueryParams describes a paginated chat-replay query. Messages are filtered to
@@ -109,6 +109,9 @@ type QueryParams struct {
 	OffsetEnd   int
 	Limit       int
 	Cursor      string
+	Q           string
+	User        string
+	SenderHash  string
 }
 
 // QueryResult is a single page of chat-replay messages plus an opaque cursor
@@ -146,6 +149,19 @@ func (s *Store) Query(ctx context.Context, params QueryParams) (QueryResult, err
 		where = append(where, fmt.Sprintf("offset_seconds <= $%d", len(args)))
 	}
 
+	if params.SenderHash != "" {
+		args = append(args, params.SenderHash)
+		where = append(where, fmt.Sprintf("sender_hash = $%d", len(args)))
+	}
+	if params.User != "" {
+		args = append(args, params.User)
+		where = append(where, fmt.Sprintf("(display_name ILIKE $%d OR commenter_login ILIKE $%d)", len(args), len(args)))
+	}
+	if params.Q != "" {
+		args = append(args, "%"+params.Q+"%")
+		where = append(where, fmt.Sprintf("text ILIKE $%d", len(args)))
+	}
+
 	if params.Cursor != "" {
 		curOffset, curID, err := decodeCursor(params.Cursor)
 		if err != nil {
@@ -158,7 +174,7 @@ func (s *Store) Query(ctx context.Context, params QueryParams) (QueryResult, err
 	// Fetch one extra row to determine whether another page exists.
 	args = append(args, limit+1)
 	query := fmt.Sprintf(`
-		SELECT id, stream_id, minute_ts, message_id, display_name, sender_hash, text, emote_frags, offset_seconds, synced_at
+		SELECT id, stream_id, minute_ts, message_id, display_name, COALESCE(commenter_login,''), sender_hash, text, emote_frags, offset_seconds, synced_at
 		FROM analytics_vod_chat_messages
 		WHERE %s
 		ORDER BY offset_seconds ASC, id ASC
@@ -246,7 +262,7 @@ func scanMessage(rows pgx.Row) (VODChatMessage, error) {
 	var frags []byte
 	if err := rows.Scan(
 		&msg.ID, &msg.StreamID, &msg.MinuteTS, &msg.MessageID, &msg.DisplayName,
-		&msg.SenderHash, &msg.Text, &frags, &msg.OffsetSeconds, &msg.SyncedAt,
+		&msg.CommenterLogin, &msg.SenderHash, &msg.Text, &frags, &msg.OffsetSeconds, &msg.SyncedAt,
 	); err != nil {
 		return VODChatMessage{}, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"testing"
+	"time"
 )
 
 func TestCursorRoundTrip(t *testing.T) {
@@ -34,6 +35,28 @@ func TestDecodeCursorRejectsGarbage(t *testing.T) {
 	}
 	if _, _, err := decodeCursor(base64.RawURLEncoding.EncodeToString([]byte("no-colon"))); err == nil {
 		t.Fatal("expected error decoding malformed cursor")
+	}
+}
+
+func TestChannelCursorRoundTrip(t *testing.T) {
+	started := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	streamID := "123456789"
+	offset := 42
+	id := int64(987654321)
+
+	token := encodeChannelCursor(started, streamID, offset, id)
+	gotStarted, gotStreamID, gotOffset, gotID, err := decodeChannelCursor(token)
+	if err != nil {
+		t.Fatalf("decodeChannelCursor error: %v", err)
+	}
+	if !gotStarted.Equal(started) || gotStreamID != streamID || gotOffset != offset || gotID != id {
+		t.Fatalf("round-trip mismatch: got (%v,%q,%d,%d)", gotStarted, gotStreamID, gotOffset, gotID)
+	}
+}
+
+func TestDecodeChannelCursorRejectsGarbage(t *testing.T) {
+	if _, _, _, _, err := decodeChannelCursor("not-valid"); err == nil {
+		t.Fatal("expected error for invalid channel cursor")
 	}
 }
 
