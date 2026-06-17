@@ -73,9 +73,6 @@ services:
       VITE_CHAT_WS: wss://${APP_DOMAIN:?Set APP_DOMAIN in .env}/v1/ws
       VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}
 
-  clipper:
-    ports: !reset []
-
   scraper:
     ports: !reset []
 

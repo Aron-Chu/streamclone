@@ -28,7 +28,7 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote
 
 .PHONY: help env up app stop down down-clean nuke restart rebuild up-scraper up-full \
 	refresh-auth reload-env reload-env-if-stale ensure-oauth ensure-clipper-auth ensure-frontend-config \
-	scraper-reload scraper-check scraper-preflight scraper-warm ps ports migrate logs \
+	scraper-reload scraper-check scraper-preflight scraper-warm ps ports migrate logs sync-pulse-chart \
 	helm-kubeconfig helm-up helm-down helm-status helm-lint \
 	helm-grafana helm-grafana-stop helm-influx helm-influx-stop helm-open \
 	helm-pulse-wire helm-pulse-check helm-pulse helm-pulse-sync-token helm-pulse-watch \
@@ -49,8 +49,8 @@ help:
 	@printf '  make up-scraper      Core + TwitchTracker scraper\n'
 	@printf '  make up-full         Scraper + clipper\n'
 	@printf '  make stop / down     Stop compose (keep data)\n'
-	@printf '  make down-clean      Stop + remove pg/minio/clipper volumes\n'
-	@printf '  make nuke            down-clean + helm pulse + integration + orphans\n'
+	@printf '  make down-clean      Stop + remove pg/minio/clipper/influx/grafana volumes\n'
+	@printf '  make nuke            Full teardown: compose (all profiles), helm pulse, setup-control, orphans\n'
 	@printf '  make restart         stop + up\n'
 	@printf '  make rebuild         stop + up-full\n'
 	@printf '  make ps / ports / logs / migrate\n\n'
@@ -91,13 +91,16 @@ up-full: env ensure-oauth
 	@if [ -z "$$SCRAPER_SKIP_PREFLIGHT" ]; then $(MAKE) scraper-preflight; fi
 
 stop down:
-	@ENV_FILE=$(ENV_FILE) bash scripts/compose-down.sh
+	@command -v bash >/dev/null 2>&1 && ENV_FILE=$(ENV_FILE) bash scripts/compose-down.sh || \
+		wsl bash -lc "cd '$$(wslpath -a '$(CURDIR)')' && ENV_FILE='$(ENV_FILE)' bash scripts/compose-down.sh"
 
 down-clean:
-	@ENV_FILE=$(ENV_FILE) bash scripts/compose-down.sh --volumes
+	@command -v bash >/dev/null 2>&1 && ENV_FILE=$(ENV_FILE) bash scripts/compose-down.sh --volumes || \
+		wsl bash -lc "cd '$$(wslpath -a '$(CURDIR)')' && ENV_FILE='$(ENV_FILE)' bash scripts/compose-down.sh --volumes"
 
 nuke:
-	@ENV_FILE=$(ENV_FILE) bash scripts/nuke.sh
+	@command -v bash >/dev/null 2>&1 && ENV_FILE=$(ENV_FILE) bash scripts/nuke.sh || \
+		wsl bash -lc "cd '$$(wslpath -a '$(CURDIR)')' && ENV_FILE='$(ENV_FILE)' bash scripts/nuke.sh"
 
 restart: stop up
 rebuild: stop up-full
