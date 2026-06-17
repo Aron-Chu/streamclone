@@ -8,11 +8,14 @@ export interface Fragment {
   c: string
   u?: string
   zw?: boolean
+  id?: string
+  provider?: string
 }
 
 export interface Message {
   id: string
   user: string
+  login?: string
   color: string
   badges: string[]
   ts: number
@@ -26,6 +29,9 @@ export interface Message {
   ackState?: 'pending' | 'queued' | 'sent' | 'live' | 'error'
   error?: string
   echoLatencyMs?: number
+  kind?: 'message' | 'mod_event'
+  modText?: string
+  deleted?: boolean
 }
 
 export interface LatencySummary {
@@ -165,7 +171,14 @@ function userLogin(user?: AuthUser) {
 }
 
 function emoteFragment(name: string, emote: ChannelEmote): Fragment {
-  return { t: 'emote', c: name, u: emote.url, zw: emote.zw }
+  return {
+    t: 'emote',
+    c: name,
+    u: emote.url,
+    zw: emote.zw,
+    id: emote.emote_id,
+    provider: emote.provider,
+  }
 }
 
 function tokenizeClientSide(text: string, loadedEmotes?: ChannelEmote[]): Fragment[] {
@@ -340,6 +353,50 @@ function mergeIncoming(state: ChatState, incoming: Message[], frameServerSentTs?
   }
 }
 
+export interface ChatModEventFrame {
+  kind: string
+  targetLogin?: string
+  actorLogin?: string
+  durationSec?: number
+  reason?: string
+  messageId?: string
+  textPreview?: string
+  noticeMsgId?: string
+  displayText?: string
+  ts: number
+  summaryText?: string
+}
+
+function mergeEvents(state: ChatState, events: ChatModEventFrame[]): Partial<ChatState> {
+  if (!events.length) return {}
+  const rows: Message[] = [...state.messages]
+  for (const ev of events) {
+    if (ev.kind === 'delete_message' && ev.messageId) {
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].id === ev.messageId) {
+          rows[i] = { ...rows[i], deleted: true }
+        }
+      }
+    }
+    rows.push({
+      id: `mod-${ev.kind}-${ev.ts}-${ev.messageId ?? ev.targetLogin ?? Math.random().toString(36).slice(2)}`,
+      user: 'moderator',
+      color: '#fbbf24',
+      badges: [],
+      ts: ev.ts,
+      fragments: [{ t: 'text', c: ev.summaryText || ev.displayText || ev.kind }],
+      source: 'remote',
+      kind: 'mod_event',
+      modText: ev.summaryText || ev.displayText || ev.kind,
+    })
+  }
+  const nextMessages = trimMessages(rows)
+  if (state.activeChannel) {
+    schedulePersistMessages(state.activeChannel, nextMessages.filter(m => m.kind !== 'mod_event'))
+  }
+  return { messages: nextMessages, restoredFromCache: false }
+}
+
 function applyAck(messages: Message[], clientMsgId: string, state: 'queued' | 'sent'): Message[] {
   return messages.map(msg => msg.clientMsgId === clientMsgId ? { ...msg, ackState: state } : msg)
 }
@@ -370,11 +427,15 @@ export const useChatStore = create<ChatState>((set, get) => {
         state?: string
         message?: string
         messages?: Message[]
+        events?: ChatModEventFrame[]
         server_sent_ts?: number
         client_msg_id?: string
       }
       if (data.type === 'batch' && data.messages) {
         set(state => mergeIncoming(state, data.messages!, data.server_sent_ts))
+      }
+      if (data.type === 'events' && data.events?.length) {
+        set(state => mergeEvents(state, data.events!))
       }
       if (data.type === 'status') {
         set({ channelState: data.state ?? 'connected', lastError: null })

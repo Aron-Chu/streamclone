@@ -1,8 +1,9 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import type { AuthUser, ChannelEmote, ChatBadge, EmoteBenchmark, EmoteProviderStatus } from '../api'
-import { Fragment, LatencySummary, Message, useChatStore } from '../chatStore'
+import { LatencySummary, useChatStore } from '../chatStore'
 import { normalizeBrowserOriginUrl } from '../config'
+import ChatLogRow from './chat/ChatLogRow'
 
 function normalizeMentionToken(value: string) {
   return value.trim().replace(/^@+/, '').toLowerCase()
@@ -16,138 +17,11 @@ function mentionAliases(user?: AuthUser) {
   ].filter((value): value is string => Boolean(value && value.trim())).map(normalizeMentionToken))
 }
 
-function EmoteStack({ base, overlays }: { base: Fragment; overlays: Fragment[] }) {
-  const title = [base.c, ...overlays.map(overlay => overlay.c)].join(' ')
-  return (
-    <span className="relative inline-block align-middle" style={{ height: '1.65em', lineHeight: 0 }} title={title}>
-      <img
-        src={normalizeBrowserOriginUrl(base.u, ['/emotes/'])}
-        alt={base.c}
-        className="inline-block h-full w-auto max-w-none align-middle drop-shadow"
-        decoding="async"
-      />
-      {overlays.map((overlay, index) => (
-        <img
-          key={`${overlay.c}-${index}`}
-          src={normalizeBrowserOriginUrl(overlay.u, ['/emotes/'])}
-          alt={overlay.c}
-          title={overlay.c}
-          className="pointer-events-none absolute inset-0 z-10 h-full w-full object-contain drop-shadow"
-          decoding="async"
-        />
-      ))}
-    </span>
-  )
-}
-
-function Frag({ f, selfMention, mentionColor }: { f: Fragment; selfMention?: boolean; mentionColor?: string }) {
-  if (f.t === 'emote') {
-    return (
-      <img
-        src={normalizeBrowserOriginUrl(f.u, ['/emotes/'])}
-        alt={f.c}
-        title={f.c}
-        className="inline-block align-middle drop-shadow"
-        style={{ height: '1.65em', width: f.zw ? '1.65em' : undefined }}
-        decoding="async"
-      />
-    )
-  }
-  if (f.t === 'mention') {
-    if (selfMention) {
-      return <span className="whitespace-pre-wrap break-words rounded bg-violet-400/15 px-1 py-0.5 font-black text-violet-100">{f.c}</span>
-    }
-    return <span style={{ color: mentionColor || '#c4b5fd' }} className="whitespace-pre-wrap break-words font-black">{f.c}</span>
-  }
-  return <span className="whitespace-pre-wrap break-words">{f.c}</span>
-}
-
 function formatMs(value: number | null | undefined) {
   if (value === null || value === undefined) return '-'
   if (value < 1000) return `${value}ms`
   return `${(value / 1000).toFixed(1)}s`
 }
-
-function badgeText(raw: string) {
-  const [set, version] = raw.split('/')
-  if (!set) return raw
-  return version ? `${set} ${version}` : set
-}
-
-function BadgeStrip({ rawBadges, badges }: { rawBadges: string[]; badges: Record<string, ChatBadge> }) {
-  const visible = rawBadges.filter(Boolean)
-  if (!visible.length) return null
-  return (
-    <span className="mr-1 inline-flex translate-y-[2px] items-center gap-0.5 align-baseline">
-      {visible.slice(0, 5).map(raw => {
-        const badge = badges[raw]
-        const title = badge?.title || badgeText(raw)
-        const src = badge?.imageUrl1x || badge?.imageUrl2x || badge?.imageUrl4x
-        if (src) {
-          return <img key={raw} src={src} alt={title} title={title} className="h-4 w-4 rounded-sm object-contain" loading="lazy" />
-        }
-        return (
-          <span key={raw} title={title} className="rounded bg-white/10 px-1 py-0.5 text-[9px] font-black uppercase leading-none text-zinc-300">
-            {badgeText(raw).slice(0, 4)}
-          </span>
-        )
-      })}
-    </span>
-  )
-}
-
-function renderMessageFragments(fragments: Fragment[], mentionNames: Set<string>, mentionColor?: string) {
-  const nodes: JSX.Element[] = []
-  let index = 0
-  while (index < fragments.length) {
-    const fragment = fragments[index]
-    if (fragment.t === 'emote' && !fragment.zw) {
-      const overlays: Fragment[] = []
-      let next = index + 1
-      while (next < fragments.length && fragments[next].t === 'emote' && fragments[next].zw) {
-        overlays.push(fragments[next])
-        next++
-      }
-      nodes.push(<EmoteStack key={`stack-${index}-${fragment.c}`} base={fragment} overlays={overlays} />)
-      index = next
-      continue
-    }
-    nodes.push(
-      <Frag
-        key={`frag-${index}-${fragment.c}`}
-        f={fragment}
-        selfMention={fragment.t === 'mention' ? mentionNames.has(normalizeMentionToken(fragment.c)) : false}
-        mentionColor={mentionColor}
-      />,
-    )
-    index++
-  }
-  return nodes
-}
-
-const Row = memo(function Row({ msg, badges, mentionNames }: { msg: Message; badges: Record<string, ChatBadge>; mentionNames: Set<string> }) {
-  const time = Number.isFinite(msg.ts) ? new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
-  const tone = msg.ackState === 'error'
-    ? 'text-red-300'
-    : msg.pending
-      ? 'text-zinc-500'
-      : 'text-zinc-600'
-  return (
-    <div className={`chat-row px-3 py-1 text-sm leading-snug transition hover:bg-white/[0.045] ${msg.pending ? 'opacity-70' : ''}`}>
-      <span className={`mr-2 inline-block w-10 align-baseline text-[11px] font-semibold ${tone}`}>{time}</span>
-      <BadgeStrip rawBadges={msg.badges ?? []} badges={badges} />
-      <span style={{ color: msg.color || '#c4b5fd' }} className="mr-1 font-black">{msg.user || 'viewer'}:</span>
-      <span className="align-baseline">
-        {renderMessageFragments(msg.fragments, mentionNames, msg.color)}
-      </span>
-      {msg.ackState && msg.source === 'local' ? (
-        <span className={`ml-2 align-baseline text-[11px] font-bold ${msg.ackState === 'error' ? 'text-red-300' : msg.ackState === 'live' ? 'text-emerald-300' : 'text-zinc-500'}`}>
-          {msg.ackState === 'live' ? `live ${formatMs(msg.echoLatencyMs)}` : msg.error ?? msg.ackState}
-        </span>
-      ) : null}
-    </div>
-  )
-})
 
 function StatusPill({ label, tone }: { label: string; tone: 'ok' | 'warn' | 'err' | 'idle' }) {
   const classes = {
@@ -279,6 +153,15 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
   const activeBase = completion?.base || token.token
   const suggestions = useMemo(() => emoteMatches(loadedEmotes, activeBase), [loadedEmotes, activeBase])
 
+  const prefillMention = (login: string) => {
+    setDraft(`@${login} `)
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      const cursor = (`@${login} `).length
+      inputRef.current?.setSelectionRange(cursor, cursor)
+    })
+  }
+
   const scrollToBottom = () => {
     const el = scrollRef.current
     if (!el) return
@@ -343,8 +226,8 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
     if (programmaticScrollRef.current) return
     const scrollTop = el.scrollTop
     const distanceFromBottom = el.scrollHeight - scrollTop - el.clientHeight
-    const atBottom = distanceFromBottom < 24
-    const userScrolledUp = scrollTop < lastScrollTopRef.current - 4
+    const atBottom = distanceFromBottom < 32
+    const userScrolledUp = scrollTop < lastScrollTopRef.current - 2
     lastScrollTopRef.current = scrollTop
 
     if (atBottom) {
@@ -353,12 +236,10 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
       return
     }
 
-    if (isPinned && !userScrolledUp) {
-      requestAnimationFrame(scrollToBottom)
-      return
+    // Scrolled away from bottom: pause auto-follow until Jump to bottom.
+    if (isPinned || userScrolledUp || distanceFromBottom > 32) {
+      setIsPinned(false)
     }
-
-    setIsPinned(false)
   }
 
   const submit = (event: FormEvent) => {
@@ -464,7 +345,7 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
         </div>
       ) : null}
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto py-2">
+        <div ref={scrollRef} onScroll={onScroll} className="scrollbar-hidden h-full overflow-y-auto py-2">
           <div ref={contentRef}>
           {messages.length === 0 ? (
             <div className="grid h-full place-items-center px-6 text-center">
@@ -483,7 +364,16 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
               </div>
             </div>
           ) : (
-            messages.map(msg => <Row key={msg.clientMsgId ?? msg.id} msg={msg} badges={badgeCatalog} mentionNames={mentionNames} />)
+            messages.map(msg => (
+              <ChatLogRow
+                key={msg.clientMsgId ?? msg.id}
+                msg={msg}
+                badges={badgeCatalog}
+                mentionNames={mentionNames}
+                canMention={isAuthenticated}
+                onMention={prefillMention}
+              />
+            ))
           )}
           </div>
         </div>
