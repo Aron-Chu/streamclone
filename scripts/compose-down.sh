@@ -16,7 +16,7 @@ for arg in "$@"; do
 done
 
 if [[ "$VOLUMES" == true ]]; then
-  echo "Stopping stacks and removing named volumes (pg-data, minio-data, clipper-data)..."
+  echo "Stopping stacks and removing named volumes (pg-data, minio-data, clipper-data, influx-data, grafana-data)..."
   volume_flag=-v
 else
   echo "Stopping all Streamclone compose stacks..."
@@ -28,9 +28,15 @@ down_stack() {
   docker compose --env-file "${ENV_FILE}" "$@" down --remove-orphans ${volume_flag:+$volume_flag} --timeout 30 || true
 }
 
-down_stack -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml --profile scraper --profile clipper
+# All profiles (core + scraper + clipper + compose pulse stack).
+down_stack -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml \
+  --profile scraper --profile clipper --profile pulse
+down_stack -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml --profile pulse
 down_stack -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml
-down_stack -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml
+# Prod overlay requires APP_DOMAIN even for `down`.
+APP_DOMAIN="${APP_DOMAIN:-streamclone.example.invalid}" \
+  ACME_EMAIL="${ACME_EMAIL:-security@example.invalid}" \
+  down_stack -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml
 down_stack -f deploy/docker-compose.yml
 
 docker rm -f streamclone-chat-tunnel 2>/dev/null || true

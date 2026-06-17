@@ -8,6 +8,16 @@ cd "$ROOT"
 
 echo "=== Nuking Streamclone ==="
 
+if command -v powershell.exe >/dev/null 2>&1; then
+  echo "==> setup-control (Windows)"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/stop-streamclone.ps1 2>/dev/null || true
+fi
+
+if command -v helm >/dev/null 2>&1 && kubectl config current-context >/dev/null 2>&1; then
+  echo "==> Helm port-forwards"
+  HELM_NAMESPACE="${HELM_NAMESPACE:-streamclone}" bash scripts/helm-portforward.sh stop all 2>/dev/null || true
+fi
+
 echo "==> Compose stacks + volumes"
 ENV_FILE="${ENV_FILE}" bash scripts/compose-down.sh --volumes
 

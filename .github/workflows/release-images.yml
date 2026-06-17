@@ -63,10 +63,6 @@ jobs:
             dockerfile: frontend/Dockerfile
             context: frontend
             build_args: ""
-          - image: clipper
-            dockerfile: deploy/Dockerfile.clipper
-            context: .
-            build_args: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -228,7 +224,7 @@ jobs:
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
             -f deploy/docker-compose.release.yml \
-            pull metadata video chat analytics emote frontend clipper
+            pull metadata video chat analytics emote frontend
 
       - name: Start core stack from release images
         env:

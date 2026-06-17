@@ -12,7 +12,7 @@
 - [ ] `make frontend-test` when frontend logic changed
 - [ ] `make test` and `make vet` (or Docker-backed Go fallback) when Go code changed
 - [ ] `make compose-config-check` when compose, env templates, or deploy overlays changed
-- [ ] `make clipper-test` when clipper code changed
+- [ ] `make clipper-test` when ReplayForge / clipper integration changed (sibling `../replayforge`)
 - [ ] Install/benchmark scripts re-run if installer or compose overlays changed
 
 ## Test plan
