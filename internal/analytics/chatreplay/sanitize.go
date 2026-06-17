@@ -48,6 +48,8 @@ type SanitizeConfig struct {
 	// SpamPatterns is a configurable lower-cased substring blocklist; any message
 	// containing one of these is dropped (Requirement 30.5).
 	SpamPatterns []string
+	// PreserveURLs skips URL stripping when ANALYTICS_VOD_CHAT_PRESERVE_URLS=1.
+	PreserveURLs bool
 }
 
 // LoadConfig builds a SanitizeConfig from the environment. It reads:
@@ -88,18 +90,22 @@ func LoadConfig() SanitizeConfig {
 		}
 	}
 
+	cfg.PreserveURLs = strings.TrimSpace(os.Getenv("ANALYTICS_VOD_CHAT_PRESERVE_URLS")) == "1"
+
 	return cfg
 }
 
 // SanitizeText returns a display-safe version of raw suitable for persistence
 // (Requirement 27.2, Property 33). It:
 //   - strips control characters (0x00–0x1F and 0x7F) except newline,
-//   - removes embedded URLs and bare domain references,
+//   - removes embedded URLs and bare domain references (unless preserveURLs),
 //   - collapses runs of spaces introduced by removal and trims the result,
 //   - truncates to maxLen runes (DefaultMaxTextLen when maxLen <= 0).
-//
-// The function is pure and order-independent of any config struct.
 func SanitizeText(raw string, maxLen int) string {
+	return SanitizeTextWithOptions(raw, maxLen, false)
+}
+
+func SanitizeTextWithOptions(raw string, maxLen int, preserveURLs bool) string {
 	if maxLen <= 0 {
 		maxLen = DefaultMaxTextLen
 	}
@@ -121,8 +127,10 @@ func SanitizeText(raw string, maxLen int) string {
 	}
 	text := b.String()
 
-	// 2. Remove URLs / bare domains.
-	text = urlPattern.ReplaceAllString(text, " ")
+	// 2. Remove URLs / bare domains unless preserving for logs fidelity.
+	if !preserveURLs {
+		text = urlPattern.ReplaceAllString(text, " ")
+	}
 
 	// 3. Collapse redundant spaces and trim.
 	text = collapseSpaces(text)
@@ -155,6 +163,7 @@ type RawComment struct {
 	StreamID      string
 	MessageID     string
 	DisplayName   string
+	CommenterLogin string
 	SenderUserID  string
 	Text          string
 	EmoteFrags    []EmoteFrag
@@ -201,21 +210,25 @@ func BuildMessage(raw RawComment, cfg SanitizeConfig) (VODChatMessage, bool) {
 		return VODChatMessage{}, false
 	}
 
-	text := SanitizeText(raw.Text, cfg.MaxTextLen)
+	text := SanitizeTextWithOptions(raw.Text, cfg.MaxTextLen, cfg.PreserveURLs)
 	// Drop messages that have no remaining text and no emotes to render.
 	if text == "" && len(raw.EmoteFrags) == 0 {
 		return VODChatMessage{}, false
 	}
 
 	msg := VODChatMessage{
-		StreamID:      raw.StreamID,
-		MinuteTS:      raw.MinuteTS,
-		MessageID:     raw.MessageID,
-		DisplayName:   raw.DisplayName,
-		SenderHash:    HashSender(raw.SenderUserID, cfg.SenderSalt),
-		Text:          text,
-		EmoteFrags:    raw.EmoteFrags,
-		OffsetSeconds: raw.OffsetSeconds,
+		StreamID:       raw.StreamID,
+		MinuteTS:       raw.MinuteTS,
+		MessageID:      raw.MessageID,
+		DisplayName:    raw.DisplayName,
+		CommenterLogin: strings.ToLower(strings.TrimSpace(raw.CommenterLogin)),
+		SenderHash:     HashSender(raw.SenderUserID, cfg.SenderSalt),
+		Text:           text,
+		EmoteFrags:     raw.EmoteFrags,
+		OffsetSeconds:  raw.OffsetSeconds,
+	}
+	if msg.CommenterLogin == "" {
+		msg.CommenterLogin = strings.ToLower(strings.TrimSpace(raw.DisplayName))
 	}
 	return msg, true
 }

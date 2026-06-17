@@ -13,8 +13,9 @@ import (
 // Handler serves the VOD chat-replay HTTP endpoint backed by a Store. It is
 // registered on the analytics service router (see cmd/analytics).
 type Handler struct {
-	store *Store
-	log   *slog.Logger
+	store         *Store
+	log           *slog.Logger
+	ingestEnabled IngestEnabled
 }
 
 // NewHandler constructs a chat-replay Handler over the given Store.
@@ -31,11 +32,19 @@ func (h *Handler) WithLogger(logger *slog.Logger) *Handler {
 	return h
 }
 
+func (h *Handler) WithIngestEnabled(fn IngestEnabled) *Handler {
+	h.ingestEnabled = fn
+	return h
+}
+
 // Routes registers the chat-replay routes on the provided chi router. The path
 // uses the {streamID} URL parameter to match the analytics service convention.
 func (h *Handler) Routes(r chi.Router) {
 	r.Get("/v1/analytics/streams/{streamID}/chat-replay", h.chatReplay)
 	r.Delete("/v1/analytics/streams/{streamID}/chat-messages", h.purgeChatMessages)
+	r.Get("/v1/analytics/channels/{login}/chat-logs", h.channelChatLogs)
+	r.Get("/v1/analytics/channels/{login}/chat-logs/messages", h.channelChatLogMessages)
+	r.Post("/v1/analytics/chat/ingest", h.ingestLiveChat)
 }
 
 // replayResponse is the JSON envelope returned by the chat-replay endpoint.
@@ -67,6 +76,9 @@ func (h *Handler) chatReplay(w http.ResponseWriter, r *http.Request) {
 		OffsetEnd:   parseIntDefault(q.Get("offsetEnd"), 0),
 		Limit:       parseIntDefault(q.Get("limit"), 0),
 		Cursor:      strings.TrimSpace(q.Get("cursor")),
+		Q:           strings.TrimSpace(q.Get("q")),
+		User:        strings.TrimSpace(q.Get("user")),
+		SenderHash:  strings.TrimSpace(q.Get("senderHash")),
 	}
 
 	result, err := h.store.Query(r.Context(), params)
@@ -121,6 +133,65 @@ func (h *Handler) purgeChatMessages(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("vod chat admin purge", "streamId", streamID, "purged", purged)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type channelChatLogsResponse struct {
+	Streams     []ChannelChatLogStream `json:"streams"`
+	LiveCount   int64                  `json:"liveMessageCount"`
+}
+
+func (h *Handler) channelChatLogs(w http.ResponseWriter, r *http.Request) {
+	login := strings.TrimSpace(chi.URLParam(r, "login"))
+	if login == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_login"})
+		return
+	}
+	streams, err := h.store.ListChannelChatLogs(r.Context(), login)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query_failed"})
+		return
+	}
+	if streams == nil {
+		streams = []ChannelChatLogStream{}
+	}
+	liveCount, _ := h.store.CountLiveByChannel(r.Context(), login)
+	writeJSON(w, http.StatusOK, channelChatLogsResponse{Streams: streams, LiveCount: liveCount})
+}
+
+type unifiedLogsResponse struct {
+	Entries    []UnifiedLogEntry `json:"entries"`
+	NextCursor string            `json:"nextCursor"`
+}
+
+func (h *Handler) channelChatLogMessages(w http.ResponseWriter, r *http.Request) {
+	login := strings.TrimSpace(chi.URLParam(r, "login"))
+	if login == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_login"})
+		return
+	}
+	q := r.URL.Query()
+	result, err := h.store.QueryUnified(r.Context(), UnifiedQueryParams{
+		Channel:    login,
+		StreamID:   strings.TrimSpace(q.Get("streamId")),
+		Q:          strings.TrimSpace(q.Get("q")),
+		User:       strings.TrimSpace(q.Get("user")),
+		SenderHash: strings.TrimSpace(q.Get("senderHash")),
+		Limit:      parseIntDefault(q.Get("limit"), 0),
+		Cursor:     strings.TrimSpace(q.Get("cursor")),
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "invalid cursor") || strings.Contains(err.Error(), "senderHash filter") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_query"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query_failed"})
+		return
+	}
+	entries := result.Entries
+	if entries == nil {
+		entries = []UnifiedLogEntry{}
+	}
+	writeJSON(w, http.StatusOK, unifiedLogsResponse{Entries: entries, NextCursor: result.NextCursor})
 }
 
 // parseIntDefault parses a base-10 integer, returning def for empty or invalid
