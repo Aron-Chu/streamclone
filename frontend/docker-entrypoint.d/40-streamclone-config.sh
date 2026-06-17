@@ -11,9 +11,11 @@ window.__STREAMCLONE_CONFIG__ = {
   chatHttp: "${VITE_CHAT_HTTP:-auto}",
   clipperUrl: "${VITE_CLIPPER_URL:-auto}",
   clipperToken: "${VITE_CLIPPER_TOKEN:-}",
+  replayforgeUiUrl: "${VITE_REPLAYFORGE_UI_URL:-http://localhost:8096}",
   maxRetainedMessages: "${VITE_MAX_RETAINED_MESSAGES:-250}",
   streamcloneProfile: "${STREAMCLONE_PROFILE:-core}",
   setupControlToken: "${SETUP_CONTROL_TOKEN:-}",
+  setupControlWakeEnabled: "${SETUP_CONTROL_WAKE_ENABLED:-false}",
   devTokenImportEnabled: "${TWITCH_DEV_TOKEN_IMPORT_ENABLED:-false}",
   installId: "${STREAMCLONE_INSTALL_ID:-}"
 };

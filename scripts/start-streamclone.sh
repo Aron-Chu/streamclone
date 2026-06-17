@@ -106,6 +106,12 @@ fi
 bash "$ROOT/scripts/validate-env.sh" --profile "$PROFILE" --env-file "$ROOT/.env" || true
 bash "$ROOT/scripts/lib/wait-stack.sh"
 
+if command -v pwsh >/dev/null 2>&1 || command -v powershell.exe >/dev/null 2>&1; then
+  bash "$ROOT/scripts/ensure-setup-control.sh" "$ROOT" -RequireProxy
+fi
+
+bash "$ROOT/scripts/register-setup-control-protocol.sh" "$ROOT" 2>/dev/null || true
+
 echo ""
 echo "Streamclone is running at http://localhost:8090"
 echo "Stop:  scripts/stop-streamclone.sh"

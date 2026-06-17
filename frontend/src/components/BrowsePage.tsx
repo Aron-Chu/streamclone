@@ -153,7 +153,7 @@ export default function BrowsePage() {
   }
 
   return (
-    <DirectoryLayout headerSubtitle="Browse" showBrowseLink>
+    <DirectoryLayout headerSubtitle="Browse" showBrowseLink showNetworkLink>
       {categoryMode ? (
         <DirectorySection
           title={categoryTitle}

@@ -60,6 +60,90 @@ function Get-StreamcloneStartLogTail {
     }
 }
 
+function Convert-StreamcloneHumanBytes {
+    param([string]$Value)
+    $trimmed = if ($null -eq $Value) { '' } else { $Value.Trim() }
+    if (-not $trimmed -or $trimmed -eq '0B') { return 0 }
+    if ($trimmed -match '^([\d.]+)\s*([KMGTP]?i?B)$') {
+        $number = [double]$Matches[1]
+        $unit = $Matches[2].ToUpperInvariant()
+        switch ($unit) {
+            'B' { return [int64][math]::Round($number) }
+            'KB' { return [int64][math]::Round($number * 1000) }
+            'MB' { return [int64][math]::Round($number * 1000 * 1000) }
+            'GB' { return [int64][math]::Round($number * 1000 * 1000 * 1000) }
+            'KIB' { return [int64][math]::Round($number * 1024) }
+            'MIB' { return [int64][math]::Round($number * 1024 * 1024) }
+            'GIB' { return [int64][math]::Round($number * 1024 * 1024 * 1024) }
+            default { return 0 }
+        }
+    }
+    return 0
+}
+
+function Get-StreamcloneNetworkStats {
+    $script:NetworkStatsCache
+    $script:NetworkStatsCacheAt
+    if ($script:NetworkStatsCache -and $script:NetworkStatsCacheAt) {
+        $age = (Get-Date) - $script:NetworkStatsCacheAt
+        if ($age.TotalSeconds -lt 4) {
+            return $script:NetworkStatsCache
+        }
+    }
+
+    $empty = [ordered]@{
+        containers = @()
+        updatedAt  = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    }
+    $docker = Get-EnvDockerExe
+    if (-not $docker) { return $empty }
+
+    $stats = Invoke-EnvDockerCaptured -Arguments @('stats', '--no-stream', '--format', '{{json .}}')
+    if ($stats.ExitCode -ne 0 -or -not $stats.Output) { return $empty }
+
+    $containers = [System.Collections.Generic.List[object]]::new()
+    foreach ($line in $stats.Output) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try {
+            $row = $line | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        $name = [string]$row.Name
+        if ($name -notmatch 'streamclone') { continue }
+
+        $rxHuman = ''
+        $txHuman = ''
+        $rxBytes = 0
+        $txBytes = 0
+        $netIo = [string]$row.NetIO
+        if ($netIo -match '^(.+?)\s*/\s*(.+)$') {
+            $rxHuman = $Matches[1].Trim()
+            $txHuman = $Matches[2].Trim()
+            $rxBytes = Convert-StreamcloneHumanBytes -Value $rxHuman
+            $txBytes = Convert-StreamcloneHumanBytes -Value $txHuman
+        }
+
+        $containers.Add([ordered]@{
+            name     = ($name -replace '^streamclone-', '')
+            cpuPerc  = [string]$row.CPUPerc
+            memUsage = [string]$row.MemUsage
+            rxBytes  = $rxBytes
+            txBytes  = $txBytes
+            rxHuman  = $rxHuman
+            txHuman  = $txHuman
+        })
+    }
+
+    $result = [ordered]@{
+        containers = @($containers)
+        updatedAt  = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    }
+    $script:NetworkStatsCache = $result
+    $script:NetworkStatsCacheAt = Get-Date
+    return $result
+}
+
 function Get-StreamcloneDiagnostics {
     param(
         [string]$Root,
@@ -185,7 +269,7 @@ function Get-StreamcloneDiagnostics {
             break
         }
     }
-    $pulseReady = Test-StreamclonePulseReady
+    $pulseReady = Test-StreamcloneHostPulseReady
 
     $sibling = Get-EnvScraperSiblingPath
     $siblingPresent = (Test-Path (Join-Path $sibling '.git')) -or (Test-Path (Join-Path $sibling 'Dockerfile'))

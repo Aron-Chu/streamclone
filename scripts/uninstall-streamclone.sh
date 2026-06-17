@@ -138,6 +138,23 @@ for name in "Streamclone Start.command" "Streamclone Stop.command" "Streamclone 
   fi
 done
 
+if [ -d "$APPS_DIR/Streamclone URL Handler.app" ]; then
+  rm -rf "$APPS_DIR/Streamclone URL Handler.app"
+  echo "Removed $APPS_DIR/Streamclone URL Handler.app"
+fi
+
+linux_desktop="${HOME}/.local/share/applications/streamclone-url.desktop"
+if [ -f "$linux_desktop" ]; then
+  rm -f "$linux_desktop"
+  echo "Removed $linux_desktop"
+fi
+
+if command -v powershell.exe >/dev/null 2>&1; then
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/unregister-setup-control-protocol.ps1" 2>/dev/null || true
+elif command -v pwsh >/dev/null 2>&1; then
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/unregister-setup-control-protocol.ps1" 2>/dev/null || true
+fi
+
 if [ "$KEEP_INSTALL_DIR" = "1" ]; then
   echo ""
   echo "Uninstall complete (install folder kept): $ROOT"

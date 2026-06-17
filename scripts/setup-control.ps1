@@ -216,6 +216,33 @@ function Get-StreamcloneOptionalComposeTargets {
     return @($Service)
 }
 
+function Invoke-ProfileServiceStop {
+    param(
+        [ValidateSet('scraper', 'clipper', 'pulse')]
+        [string]$Service
+    )
+
+    Set-Location $Root
+    if (-not (Test-Path $envPath)) {
+        throw 'Missing .env - run scripts/setup.ps1 first.'
+    }
+
+    $useWslDocker = Test-StreamcloneUseWslDockerCli -Root $Root
+    $profileForCompose = if ($Service -eq 'pulse' -and (Test-StreamcloneHostPulseReady)) { 'core' } else { $Service }
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profileForCompose -UseImages:(Get-SetupControlUseImages) -RelativePaths:$useWslDocker
+    $targets = Get-StreamcloneOptionalComposeTargets -Service $Service
+    $stopArgs = $composeArgs + @('stop') + $targets
+    $result = Invoke-EnvDockerCaptured -Arguments $stopArgs -Root $Root
+    $output = ($result.Output -join [Environment]::NewLine).Trim()
+    if ($result.ExitCode -ne 0) {
+        throw "docker compose stop failed: $output"
+    }
+    if ($Service -eq 'pulse') {
+        try { [void](Stop-StreamcloneHelmPulsePortForward -Root $Root) } catch { }
+    }
+    return $output
+}
+
 function Invoke-ProfileServiceUp {
     param(
         [ValidateSet('scraper', 'clipper', 'pulse')]
@@ -233,6 +260,9 @@ function Invoke-ProfileServiceUp {
     } elseif ($Service -eq 'pulse') {
         Enable-StreamclonePulseEnv -Root $Root
         $script:envValues = Read-EnvKeyValueFile -Path $envPath
+        if (Test-StreamcloneHostPulseReady) {
+            [void](Start-StreamcloneHelmPulsePortForward -Root $Root)
+        }
     }
 
     $useImages = Get-SetupControlUseImages
@@ -251,6 +281,9 @@ function Invoke-ProfileServiceUp {
     $output = ($result.Output -join [Environment]::NewLine).Trim()
     if ($result.ExitCode -ne 0) {
         throw "docker compose failed: $output"
+    }
+    if ($Service -eq 'pulse' -and (Test-StreamcloneHostPulseReady)) {
+        [void](Start-StreamcloneHelmPulsePortForward -Root $Root)
     }
     return $output
 }
@@ -288,6 +321,9 @@ function Start-ProfileServiceUpAsync {
     } elseif ($Service -eq 'pulse') {
         Enable-StreamclonePulseEnv -Root $Root
         $script:envValues = Read-EnvKeyValueFile -Path $envPath
+        if (Test-StreamcloneHostPulseReady) {
+            [void](Start-StreamcloneHelmPulsePortForward -Root $Root)
+        }
     }
 
     $useImages = Get-SetupControlUseImages
@@ -688,13 +724,18 @@ try {
                     endpoints = @(
                         @{ method = 'GET'; path = '/health'; auth = $false; description = 'Daemon health probe' }
                         @{ method = 'GET'; path = '/diagnostics'; auth = $false; description = 'Host + compose diagnostics for the directory UI' }
+                        @{ method = 'GET'; path = '/diagnostics/network'; auth = $false; description = 'Docker network I/O stats for Streamclone containers' }
                         @{ method = 'GET'; path = '/endpoints'; auth = $false; description = 'This route list' }
                         @{ method = 'GET'; path = '/start/scraper/status'; auth = $false; description = 'Async scraper profile start progress' }
                         @{ method = 'GET'; path = '/start/clipper/status'; auth = $false; description = 'Async clipper profile start progress' }
                         @{ method = 'GET'; path = '/start/pulse/status'; auth = $false; description = 'Async Pulse service start progress' }
                         @{ method = 'POST'; path = '/start/scraper'; auth = $true; description = 'Start analytics scraper compose profile' }
-                        @{ method = 'POST'; path = '/start/clipper'; auth = $true; description = 'Start clipper compose profile' }
+                        # Deprecated: prefer external ReplayForge (../replayforge). POST /start/clipper starts legacy in-repo clipper profile only.
+                        @{ method = 'POST'; path = '/start/clipper'; auth = $true; description = 'Start clipper compose profile (deprecated — use ReplayForge)' }
                         @{ method = 'POST'; path = '/start/pulse'; auth = $true; description = 'Start Pulse Grafana/Influx services' }
+                        @{ method = 'POST'; path = '/stop/scraper'; auth = $true; description = 'Stop analytics scraper compose profile' }
+                        @{ method = 'POST'; path = '/stop/clipper'; auth = $true; description = 'Stop clipper compose profile' }
+                        @{ method = 'POST'; path = '/stop/pulse'; auth = $true; description = 'Stop Pulse Grafana/Influx services' }
                         @{ method = 'POST'; path = '/sync-clipper-auth'; auth = $true; description = 'Merge signed-in Twitch tokens into clipper env' }
                     )
                     scripts = @(
@@ -706,6 +747,12 @@ try {
 
             if ($request.HttpMethod -eq 'GET' -and $path -eq '/diagnostics') {
                 $report = Get-StreamcloneDiagnostics -Root $Root
+                Write-JsonResponse -Response $response -StatusCode 200 -Body $report
+                continue
+            }
+
+            if ($request.HttpMethod -eq 'GET' -and $path -eq '/diagnostics/network') {
+                $report = Get-StreamcloneNetworkStats
                 Write-JsonResponse -Response $response -StatusCode 200 -Body $report
                 continue
             }
@@ -741,6 +788,26 @@ try {
                     message = 'starting'
                     log     = $log
                     warmup  = $warmup
+                }
+                continue
+            }
+
+            if ($request.HttpMethod -eq 'POST' -and $path -match '^/stop/(scraper|clipper|pulse)$') {
+                if (-not (Test-SetupControlAuthorized -Request $request)) {
+                    Write-JsonResponse -Response $response -StatusCode 401 -Body @{ ok = $false; error = 'unauthorized' }
+                    continue
+                }
+                $service = $Matches[1]
+                try {
+                    $log = Invoke-ProfileServiceStop -Service $service
+                    Write-JsonResponse -Response $response -StatusCode 200 -Body @{
+                        ok      = $true
+                        service = $service
+                        message = 'stopped'
+                        log     = $log
+                    }
+                } catch {
+                    Write-JsonResponse -Response $response -StatusCode 500 -Body @{ ok = $false; error = $_.Exception.Message }
                 }
                 continue
             }

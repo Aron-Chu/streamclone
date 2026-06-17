@@ -7,10 +7,12 @@ type RuntimeConfig = {
   chatHttp?: string
   clipperUrl?: string
   clipperToken?: string
+  replayforgeUiUrl?: string
   maxRetainedMessages?: string | number
   streamcloneProfile?: string
   setupControlToken?: string
   setupControlUrl?: string
+  setupControlWakeEnabled?: string | boolean
   devTokenImportEnabled?: string | boolean
   installId?: string
 }
@@ -63,10 +65,17 @@ export const CHAT_WS = resolveWs(runtime.chatWs || (import.meta.env.VITE_CHAT_WS
 export const CHAT_HTTP = resolveHttp(runtime.chatHttp || (import.meta.env.VITE_CHAT_HTTP as string), browserOrigin || 'http://localhost:8083')
 export const CLIPPER = resolveHttp(runtime.clipperUrl || (import.meta.env.VITE_CLIPPER_URL as string), 'http://localhost:8095')
 export const CLIPPER_TOKEN = String(runtime.clipperToken ?? import.meta.env.VITE_CLIPPER_TOKEN ?? '')
+export const REPLAYFORGE_UI = resolveHttp(
+  runtime.replayforgeUiUrl || (import.meta.env.VITE_REPLAYFORGE_UI_URL as string),
+  'http://localhost:8096',
+)
 export const MAX_RETAINED_MESSAGES = Number(runtime.maxRetainedMessages ?? import.meta.env.VITE_MAX_RETAINED_MESSAGES ?? 250)
 export const STREAMCLONE_PROFILE = String(runtime.streamcloneProfile ?? import.meta.env.VITE_STREAMCLONE_PROFILE ?? 'core').toLowerCase()
 export const DEV_TOKEN_IMPORT_ENABLED = String(runtime.devTokenImportEnabled ?? import.meta.env.VITE_TWITCH_DEV_TOKEN_IMPORT_ENABLED ?? 'false') === 'true'
 export const SETUP_CONTROL_TOKEN = String(runtime.setupControlToken ?? import.meta.env.VITE_SETUP_CONTROL_TOKEN ?? '')
+export const SETUP_CONTROL_WAKE_ENABLED = ['true', '1'].includes(
+  String(runtime.setupControlWakeEnabled ?? import.meta.env.VITE_SETUP_CONTROL_WAKE_ENABLED ?? 'false').toLowerCase(),
+)
 export const SETUP_CONTROL_AVAILABLE = Boolean(SETUP_CONTROL_TOKEN)
   && (
     !import.meta.env.DEV

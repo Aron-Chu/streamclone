@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Streamclone URL Handler
+Comment=Wake Streamclone install helper (setup-control)
+Exec=bash "__STREAMCLONE_INSTALL_ROOT__/scripts/streamclone-url-handler.sh"
+Type=Application
+NoDisplay=true
+Terminal=false
+MimeType=x-scheme-handler/streamclone;

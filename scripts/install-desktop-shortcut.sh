@@ -33,5 +33,11 @@ ln -sf "$LAUNCHERS/Start Streamclone.command" "$APPS_DIR/Streamclone Start.comma
 ln -sf "$LAUNCHERS/Stop Streamclone.command" "$APPS_DIR/Streamclone Stop.command"
 ln -sf "$LAUNCHERS/Install Streamclone.command" "$APPS_DIR/Streamclone Install.command" 2>/dev/null || true
 
+register_setup_control_protocol() {
+  bash "$ROOT/scripts/register-setup-control-protocol.sh" "$ROOT"
+}
+
+register_setup_control_protocol
+
 echo "Launchers: $LAUNCHERS"
 echo "macOS shortcuts: $APPS_DIR/Streamclone Start.command"

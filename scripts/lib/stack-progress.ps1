@@ -233,7 +233,10 @@ function Test-StreamcloneHostServiceHealth {
 function Test-StreamcloneHostPulseReady {
     return (
         (Test-StreamcloneHostServiceHealth -Url 'http://localhost:3000/api/health') -and
-        (Test-StreamcloneHostServiceHealth -Url 'http://localhost:18086/health')
+        (
+            (Test-StreamcloneHostServiceHealth -Url 'http://localhost:18086/health') -or
+            (Test-StreamcloneHostServiceHealth -Url 'http://localhost:18087/health')
+        )
     )
 }
 
@@ -277,7 +280,14 @@ function Enable-StreamclonePulseEnv {
     if (Test-StreamcloneHostPulseReady) {
         Set-EnvFileValue -Path $envPath -Key 'TIMESERIES_ENABLED' -Value 'true'
         Set-EnvFileValue -Path $envPath -Key 'TIMESERIES_BACKEND' -Value 'influxdb'
-        Set-EnvFileValue -Path $envPath -Key 'INFLUXDB_URL' -Value 'http://host.docker.internal:18086'
+        $existingInfluxUrl = [string]$current['INFLUXDB_URL']
+        $preserveInfluxUrl = $false
+        if ($existingInfluxUrl -match ':18087' -or $existingInfluxUrl -match '^http://172\.\d+\.\d+\.\d+:1808[67]') {
+            $preserveInfluxUrl = $true
+        }
+        if (-not $preserveInfluxUrl) {
+            Set-EnvFileValue -Path $envPath -Key 'INFLUXDB_URL' -Value 'http://host.docker.internal:18086'
+        }
         foreach ($key in @('INFLUXDB_ORG', 'INFLUXDB_BUCKET', 'TIMESERIES_WRITE_TIMEOUT_MS', 'TIMESERIES_QUEUE_SIZE', 'TIMESERIES_BACKFILL_ON_START')) {
             $value = [string]$current[$key]
             if ([string]::IsNullOrWhiteSpace($value)) { $value = [string]$defaults[$key] }
@@ -334,4 +344,16 @@ function Get-StreamclonePulseComposeUpArgs {
         $args += 'influxdb', 'grafana', 'analytics'
     }
     return $args
+}
+
+function Start-StreamcloneHelmPulsePortForward {
+    param([string]$Root)
+    $wslRoot = Get-StreamcloneWslRootPath -Root $Root
+    if ([string]::IsNullOrWhiteSpace($wslRoot)) { return $false }
+    try {
+        wsl -e bash -lc "cd '$wslRoot' && HELM_NAMESPACE=streamclone PULSE_INFLUX_DOCKER_PORT=18087 bash scripts/helm-portforward.sh start influx" | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
 }
