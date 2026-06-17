@@ -27,6 +27,7 @@ type Store struct {
 type streamMeta struct {
 	login     string
 	title     string
+	category  string
 	startedAt time.Time
 }
 
@@ -109,6 +110,7 @@ func (s *Store) UpsertLiveStream(ctx context.Context, stream LiveStream, profile
 		s.metaCache.Store(stream.ID, streamMeta{
 			login:     normalizeLogin(stream.Login),
 			title:     stream.Title,
+			category:  stream.GameName,
 			startedAt: stream.StartedAt,
 		})
 	}
@@ -927,6 +929,7 @@ func (s *Store) BackfillTimeseries(ctx context.Context, batchSize int) (Timeseri
 			s.login,
 			r.stream_id,
 			COALESCE(s.title, ''),
+			COALESCE(s.category, ''),
 			s.started_at,
 			r.minute_ts,
 			r.viewer_avg,
@@ -968,6 +971,7 @@ func (s *Store) BackfillTimeseries(ctx context.Context, batchSize int) (Timeseri
 			&rollup.ChannelLogin,
 			&rollup.StreamID,
 			&rollup.StreamTitle,
+			&rollup.StreamCategory,
 			&rollup.StreamStartedAt,
 			&rollup.MinuteTS,
 			&rollup.ViewerAvg,
@@ -1021,6 +1025,7 @@ func (s *Store) enqueueRollupTelemetry(ctx context.Context, streamID string, rol
 			ChannelLogin:      meta.login,
 			StreamID:          streamID,
 			StreamTitle:       meta.title,
+			StreamCategory:    meta.category,
 			StreamStartedAt:   meta.startedAt,
 			MinuteTS:          rollup.MinuteTS,
 			ViewerAvg:         rollup.ViewerAvg,
@@ -1040,18 +1045,19 @@ func (s *Store) streamMeta(ctx context.Context, streamID string) (streamMeta, bo
 			return meta, true
 		}
 	}
-	var login, title string
+	var login, title, category string
 	var startedAt time.Time
 	err := s.db.QueryRow(ctx, `
-		SELECT login, COALESCE(title, ''), started_at
+		SELECT login, COALESCE(title, ''), started_at, COALESCE(category, '')
 		FROM analytics_streams
-		WHERE stream_id=$1`, streamID).Scan(&login, &title, &startedAt)
+		WHERE stream_id=$1`, streamID).Scan(&login, &title, &startedAt, &category)
 	if err != nil {
 		return streamMeta{}, false
 	}
 	meta := streamMeta{
 		login:     normalizeLogin(login),
 		title:     title,
+		category:  category,
 		startedAt: startedAt,
 	}
 	if meta.login != "" {

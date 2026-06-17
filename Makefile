@@ -38,7 +38,7 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
 	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp \
 	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
-	frontend-restart frontend-logs compose-config-check check \
+	frontend-restart frontend-refresh frontend-logs compose-config-check check \
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
 	preflight-deps start stop-user ensure-localhost
 
@@ -66,6 +66,8 @@ help:
 	@printf '  make pulse-down      Stop forwards + uninstall k8s release\n\n'
 	@printf 'Quality: make check | test | vet | build | clipper-test | smoke | security-scan\n'
 	@printf '          make frontend-test | frontend-audit | compose-config-check\n'
+	@printf '          make frontend-refresh  Build + migrate + restart frontend/chat/analytics\n'
+	@printf '          make frontend-restart  Rebuild frontend image + restart frontend/proxy only\n'
 
 env:
 	@test -f .env || cp .env.dev .env
@@ -148,16 +150,21 @@ logs: env
 helm-kubeconfig:
 	@bash scripts/helm-preflight.sh
 
-helm-up: helm-kubeconfig
+sync-pulse-chart:
+	@bash scripts/sync-pulse-chart.sh
+
+helm-up: helm-kubeconfig sync-pulse-chart
 	@values="-f $(HELM_CHART)/values.yaml"; \
 	if [ -f "$(HELM_LOCAL_VALUES)" ]; then values="$$values -f $(HELM_LOCAL_VALUES)"; \
 	elif [ -f "$(HELM_EXAMPLE_VALUES)" ]; then values="$$values -f $(HELM_EXAMPLE_VALUES)"; fi; \
 	$(HELM) upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
-		-n $(HELM_NAMESPACE) --create-namespace $$values --wait
+		-n $(HELM_NAMESPACE) --create-namespace $$values --wait --timeout 10m
 	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-pulse-sync-token.sh
 	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh start all
 	@$(MAKE) ensure-localhost PORTS=3000
-	@printf '\nGrafana: http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-24h&to=now (admin / devpulse)\n'
+	@printf '\nGrafana: http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-7d&to=now (admin / devpulse)\n'
+	@printf 'Ops:     http://localhost:3000/d/streamclone-ops/streamclone-ops\n'
+	@printf 'Prometheus: http://localhost:9090\n'
 	@printf 'Persistent on Docker Desktop: LoadBalancer → localhost (no port-forward tunnel).\n'
 
 helm-down:
@@ -185,6 +192,7 @@ helm-influx-stop:
 
 helm-pulse-wire: helm-kubeconfig
 	@ENV_FILE=$(ENV_FILE) HELM_NAMESPACE=$(HELM_NAMESPACE) HELM_RELEASE=$(HELM_RELEASE) \
+		PULSE_INFLUX_DOCKER_PORT=$${PULSE_INFLUX_DOCKER_PORT:-18087} \
 		bash scripts/helm-pulse-wire.sh
 
 helm-pulse-sync-token: helm-kubeconfig
@@ -201,7 +209,9 @@ helm-pulse: helm-up helm-pulse-wire
 helm-pulse-on: helm-kubeconfig
 	@HELM_NAMESPACE=$(HELM_NAMESPACE) bash scripts/helm-portforward.sh start all
 	@$(MAKE) ensure-localhost PORTS=3000,8090
-	@printf '\nGrafana: http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-24h&to=now (admin / devpulse)\n'
+	@printf '\nGrafana: http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-7d&to=now (admin / devpulse)\n'
+	@printf 'Ops:     http://localhost:3000/d/streamclone-ops/streamclone-ops\n'
+	@printf 'Prometheus: http://localhost:9090\n'
 	@printf 'Docker Desktop: LoadBalancer on localhost — no tunnel needed when probe succeeds.\n'
 
 helm-pulse-watch: helm-kubeconfig
@@ -253,8 +263,13 @@ build:
 tidy:
 	$(GO) mod tidy
 
+# Prefers ../replayforge/backend tests when sibling checkout exists; falls back to in-repo clipper/.
 clipper-test:
-	PYTHONPATH=clipper $(CLIPPER_PYTHON) -m unittest discover -s clipper/tests
+	@if [ -d ../replayforge/backend/tests ]; then \
+		cd ../replayforge/backend && PYTHONPATH=. $(CLIPPER_PYTHON) -m unittest discover -s tests; \
+	else \
+		PYTHONPATH=clipper $(CLIPPER_PYTHON) -m unittest discover -s clipper/tests; \
+	fi
 
 codegraph-install:
 	python3 -m venv $(CODEGRAPH_VENV)
@@ -328,6 +343,17 @@ check: security-scan frontend-build frontend-audit frontend-test clipper-test te
 frontend-restart: env
 	$(COMPOSE_CORE) build frontend
 	$(COMPOSE_CORE) up -d --no-deps --force-recreate frontend local-proxy
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-setup-control.ps1
+	@$(MAKE) ensure-localhost PORTS=8090
+
+# Rebuild frontend assets, apply DB migrations, and recreate frontend + chat + analytics
+# (chat logs, mod events, linkify). Use after pulling chat/logs UI changes.
+frontend-refresh: env frontend-build
+	@echo "Applying migrations..."
+	$(COMPOSE_CORE) run --rm migrate
+	@echo "Rebuilding frontend, chat, and analytics..."
+	$(COMPOSE_CORE) build frontend chat analytics
+	$(COMPOSE_CORE) up -d --no-deps --force-recreate frontend chat analytics local-proxy
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-setup-control.ps1
 	@$(MAKE) ensure-localhost PORTS=8090
 

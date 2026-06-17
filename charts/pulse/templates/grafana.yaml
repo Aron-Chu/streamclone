@@ -23,6 +23,13 @@ data:
         secureJsonData:
           token: ${PULSE_INFLUXDB_TOKEN}
       {{- end }}
+      {{- if .Values.prometheus.enabled }}
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        isDefault: false
+        url: http://{{ include "pulse.fullname" . }}-prometheus:9090
+      {{- end }}
   dashboards.yml: |
     apiVersion: 1
     providers:
@@ -43,7 +50,9 @@ metadata:
     {{- include "pulse.labels" . | nindent 4 }}
 data:
   emote-pulse.json: |
-{{ (.Files.Get "dashboards/emote-pulse.json") | replace "__EMOTE_PROXY__" (.Values.grafana.emoteProxyURL | default "http://localhost:8090") | replace "__STREAM_LIST_DAYS__" (toString (.Values.grafana.streamListDays | default 90)) | nindent 4 }}
+{{ (.Files.Get "dashboards/emote-pulse.json") | replace "http://localhost:8090" (.Values.grafana.emoteProxyURL | default "http://localhost:8090") | nindent 4 }}
+  streamclone-ops.json: |
+{{ (.Files.Get "dashboards/streamclone-ops.json") | nindent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -62,6 +71,7 @@ spec:
     metadata:
       annotations:
         checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        checksum/dashboards: {{ (printf "%s-%s" (.Files.Get "dashboards/emote-pulse.json") (.Files.Get "dashboards/streamclone-ops.json")) | sha256sum }}
       labels:
         {{- include "pulse.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: grafana

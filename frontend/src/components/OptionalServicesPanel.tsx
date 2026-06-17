@@ -1,12 +1,43 @@
 import { Link } from 'react-router-dom'
+import type { ReactNode } from 'react'
 import { profileNeedsScraper, SCRAPER_SETUP_DOC_URL } from '../setupProfile'
+import { SETUP_CONTROL_WAKE_ENABLED, REPLAYFORGE_UI } from '../config'
 import { useOptionalServices, type ServiceStartProgress } from '../hooks/useOptionalServices'
+import { PULSE_DASHBOARD_LINKS, PULSE_GRAFANA_HOME_URL } from '../utils/pulseDashboard.ts'
 
 type ServiceStatus = 'ready' | 'offline' | 'checking'
-const PULSE_GRAFANA_URL = 'http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-24h&to=now'
 
+function PulseDashboardLinks({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className={`flex flex-wrap gap-2 ${compact ? 'mt-2' : 'mt-3'}`}>
+      {PULSE_DASHBOARD_LINKS.map(link => (
+        <a
+          key={link.href}
+          href={link.href}
+          target="_blank"
+          rel="noreferrer"
+          className={`inline-flex rounded border border-emerald-400/40 bg-emerald-500/15 font-black text-emerald-100 transition hover:bg-emerald-500/25 ${
+            compact ? 'px-2.5 py-1 text-[10px]' : 'px-3 py-2 text-xs'
+          }`}
+        >
+          {link.label}
+        </a>
+      ))}
+      <a
+        href={PULSE_GRAFANA_HOME_URL}
+        target="_blank"
+        rel="noreferrer"
+        className={`inline-flex rounded border border-white/10 bg-white/[0.06] font-black text-zinc-200 transition hover:bg-white/10 ${
+          compact ? 'px-2.5 py-1 text-[10px]' : 'px-3 py-2 text-xs'
+        }`}
+      >
+        Grafana
+      </a>
+    </div>
+  )
+}
 export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean }) {
-  const { controlReady, isStarting, startService } = useOptionalServices({ probeControl: true })
+  const { isStarting, startService } = useOptionalServices({ probeControl: true })
 
   return (
     <div className={compact ? 'mt-2 text-left' : 'max-w-md'}>
@@ -18,16 +49,14 @@ export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean 
         Per-minute viewer, chat, and emote charts require the optional scraper profile.
       </p>
       <div className={`mt-2 flex flex-wrap items-center gap-2 ${compact ? 'text-[10px]' : 'text-xs'}`}>
-        {controlReady ? (
-          <button
-            type="button"
-            onClick={() => void startService('scraper')}
-            disabled={isStarting('scraper')}
-            className={`rounded border border-violet-400/40 bg-violet-500/15 px-2.5 py-1 font-black text-violet-100 transition hover:bg-violet-500/25 disabled:opacity-50 ${compact ? 'text-[10px]' : 'text-xs'}`}
-          >
-            {isStarting('scraper') ? 'Starting…' : 'Start Analytics'}
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onClick={() => void startService('scraper')}
+          disabled={isStarting('scraper')}
+          className={`rounded border border-violet-400/40 bg-violet-500/15 px-2.5 py-1 font-black text-violet-100 transition hover:bg-violet-500/25 disabled:opacity-50 ${compact ? 'text-[10px]' : 'text-xs'}`}
+        >
+          {isStarting('scraper') ? 'Starting…' : 'Start Analytics'}
+        </button>
         <Link
           to="/"
           className="font-bold text-zinc-300 underline decoration-zinc-500/40 underline-offset-2 transition hover:text-white"
@@ -49,7 +78,7 @@ export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean 
 
 function ServiceStartProgressBar({ progress, compact = false }: { progress: ServiceStartProgress; compact?: boolean }) {
   const width = Math.max(0, Math.min(100, progress.percent))
-  const label = progress.service === 'scraper' ? 'Analytics' : progress.service === 'pulse' ? 'Pulse Dashboards' : 'Clip Studio'
+  const label = progress.service === 'scraper' ? 'Analytics' : progress.service === 'pulse' ? 'Pulse Dashboards' : 'ReplayForge'
   return (
     <div className={`rounded-lg border border-white/10 bg-white/[0.035] ${compact ? 'p-2.5' : 'p-3'}`}>
       <div className={`mb-2 flex items-center justify-between gap-2 font-black uppercase tracking-wide text-zinc-300 ${
@@ -85,6 +114,9 @@ function ServiceCard({
   readyHref,
   readyLabel,
   onReadyOpen,
+  offlineHref,
+  offlineLabel,
+  children,
 }: {
   title: string
   detail: string
@@ -97,8 +129,10 @@ function ServiceCard({
   readyHref?: string
   readyLabel?: string
   onReadyOpen?: () => void
-}) {
-  const good = status === 'ready'
+  offlineHref?: string
+  offlineLabel?: string
+  children?: ReactNode
+}) {  const good = status === 'ready'
   const checking = status === 'checking'
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
@@ -117,7 +151,7 @@ function ServiceCard({
           {error}
         </div>
       ) : null}
-      {actionLabel && onAction && status !== 'ready' ? (
+      {actionLabel && onAction && status !== 'ready' && !offlineHref ? (
         <button
           type="button"
           onClick={onAction}
@@ -126,6 +160,16 @@ function ServiceCard({
         >
           {busy ? 'Starting…' : actionLabel}
         </button>
+      ) : null}
+      {offlineHref && status !== 'ready' ? (
+        <a
+          href={offlineHref}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex rounded border border-violet-400/40 bg-violet-500/15 px-3 py-2 text-xs font-black text-violet-100 transition hover:bg-violet-500/25"
+        >
+          {offlineLabel ?? 'Open'}
+        </a>
       ) : null}
       {readyHref && status === 'ready' ? (
         <a
@@ -138,10 +182,10 @@ function ServiceCard({
           {readyLabel ?? 'Open'}
         </a>
       ) : null}
+      {children}
     </div>
   )
 }
-
 type OptionalServicesPanelProps = {
   variant: 'overlay' | 'banner'
   focus?: 'scraper' | 'clipper' | 'pulse' | 'all'
@@ -165,6 +209,7 @@ export default function OptionalServicesPanel({
     controlReady,
     scraperOffline,
     clipperOffline,
+    clipperReady,
     isStarting,
     startProgressByService,
     actionError,
@@ -174,7 +219,8 @@ export default function OptionalServicesPanel({
 
   const coreStatus: ServiceStatus = statusLoading ? 'checking' : hasServiceSnapshot ? 'ready' : 'offline'
   const scraperStatus: ServiceStatus = statusLoading ? 'checking' : services?.scraper ?? 'offline'
-  const clipperStatus: ServiceStatus = statusLoading ? 'checking' : services?.clipper ?? 'offline'
+  const clipperStatus: ServiceStatus = statusLoading ? 'checking' : clipperReady ? 'ready' : 'offline'
+  const replayforgeUi = REPLAYFORGE_UI.replace(/\/$/, '')
   const pulseStatus: ServiceStatus = statusLoading ? 'checking' : services?.pulse ?? 'offline'
 
   const showScraper = focus === 'all' || focus === 'scraper'
@@ -200,7 +246,7 @@ export default function OptionalServicesPanel({
             isCoreInfo ? 'text-cyan-50/90' : 'text-amber-50/90'
           }`}>
             {clipperBanner && !scraperBanner
-              ? 'Clip Studio is offline — start the clipper service to edit clips.'
+              ? 'ReplayForge is offline — start ReplayForge to edit clips.'
               : isCoreInfo
                 ? 'Viewer charts need Analytics setup — optional charts and VOD chat load from a second profile.'
                 : 'Viewer charts are paused — Analytics is not running.'}
@@ -220,7 +266,7 @@ export default function OptionalServicesPanel({
                 {isCoreInfo ? 'Analytics setup' : 'Setup guide'}
               </a>
             ) : null}
-            {scraperBanner && controlReady ? (
+            {scraperBanner ? (
               <button
                 type="button"
                 onClick={() => void startService('scraper')}
@@ -230,15 +276,25 @@ export default function OptionalServicesPanel({
                 {isStarting('scraper') ? 'Starting…' : 'Start Analytics'}
               </button>
             ) : null}
-            {clipperBanner && controlReady ? (
-              <button
-                type="button"
-                onClick={() => void startService('clipper')}
-                disabled={isStarting('clipper')}
-                className="rounded border border-amber-200/30 bg-amber-300/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-amber-50 transition hover:bg-amber-300/25 disabled:opacity-50"
+            {clipperBanner ? (
+              <a
+                href={replayforgeUi}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded border border-amber-200/30 bg-amber-300/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-amber-50 transition hover:bg-amber-300/25"
               >
-                {isStarting('clipper') ? 'Starting…' : 'Start Clip Studio'}
-              </button>
+                Start ReplayForge
+              </a>
+            ) : null}
+            {clipperReady ? (
+              <a
+                href={replayforgeUi}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded border border-emerald-200/30 bg-emerald-300/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-50 transition hover:bg-emerald-300/25"
+              >
+                Open ReplayForge
+              </a>
             ) : null}
             <Link
               to="/"
@@ -291,9 +347,9 @@ export default function OptionalServicesPanel({
           Profile {profile}
         </span>
         <span className={`rounded px-2.5 py-1 text-[11px] font-black uppercase ${
-          controlReady ? 'bg-emerald-500/15 text-emerald-100' : 'bg-zinc-500/20 text-zinc-400'
+          controlReady ? 'bg-emerald-500/15 text-emerald-100' : SETUP_CONTROL_WAKE_ENABLED ? 'bg-cyan-500/15 text-cyan-100' : 'bg-zinc-500/20 text-zinc-400'
         }`}>
-          {controlReady ? 'One-click start available' : 'Launcher control offline'}
+          {controlReady ? 'One-click start available' : SETUP_CONTROL_WAKE_ENABLED ? 'One-click start (helper wakes on click)' : 'Launcher control offline'}
         </span>
         <button
           type="button"
@@ -343,29 +399,28 @@ export default function OptionalServicesPanel({
         ) : null}
         {showClipper ? (
           <ServiceCard
-            title="Clip Studio (clipper)"
-            detail="Clip Studio jobs and rendered clips."
+            title="ReplayForge (clipper)"
+            detail="Clip Studio jobs and rendered clips. Runs as a separate app on localhost."
             status={clipperStatus}
-            actionLabel="Start Clip Studio"
-            onAction={() => void startService('clipper')}
-            busy={isStarting('clipper')}
-            progress={startProgressByService.clipper ?? null}
+            offlineHref={replayforgeUi}
+            offlineLabel="Start ReplayForge"
+            readyHref={replayforgeUi}
+            readyLabel="Open ReplayForge"
           />
         ) : null}
         {showPrimaryPulseCard ? (
           <ServiceCard
             title="Pulse Dashboards"
-            detail="Optional Grafana dashboard for your local synced stats."
+            detail="Grafana dashboards for emote/chat rollups (Emote Pulse) and service metrics (Ops). Works with Compose pulse profile or Helm (`make pulse`)."
             status={pulseStatus}
             actionLabel="Start Pulse"
             onAction={() => void startService('pulse')}
             busy={isStarting('pulse')}
             progress={startProgressByService.pulse ?? null}
-            readyHref={PULSE_GRAFANA_URL}
-            readyLabel="Open Grafana"
-          />
-        ) : null}
-      </div>
+          >
+            <PulseDashboardLinks />
+          </ServiceCard>
+        ) : null}      </div>
 
       {showDeveloperPulseCard ? (
         <details className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
@@ -380,16 +435,15 @@ export default function OptionalServicesPanel({
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <ServiceCard
               title="Pulse Dashboards"
-              detail="Optional Grafana dashboard for local synced stats and export debugging."
+              detail="Grafana dashboards for emote/chat rollups and service metrics. Helm users: run `make pulse`, then open dashboards below."
               status={pulseStatus}
               actionLabel="Start Pulse"
               onAction={() => void startService('pulse')}
               busy={isStarting('pulse')}
               progress={startProgressByService.pulse ?? null}
-              readyHref={PULSE_GRAFANA_URL}
-              readyLabel="Open Grafana"
-            />
-          </div>
+            >
+              <PulseDashboardLinks compact />
+            </ServiceCard>          </div>
         </details>
       ) : null}
 
