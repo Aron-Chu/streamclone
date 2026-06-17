@@ -86,6 +86,10 @@ function Invoke-ManagerRepair {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root $Root -RequireProxy
     $setupControlExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
     if ($setupControlExitCode -ne 0) { throw 'setup helper is not reachable through the app proxy' }
+    $registerScript = Join-Path $PSScriptRoot 'register-setup-control-protocol.ps1'
+    if (Test-Path $registerScript) {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $registerScript -Root $Root 2>$null
+    }
     Write-Host ''
     Write-Host 'Repair complete.' -ForegroundColor Green
 }
@@ -118,6 +122,10 @@ function Invoke-ManagerUpdate {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root $Root -RequireProxy
     $setupControlExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
     if ($setupControlExitCode -ne 0) { throw 'setup helper is not reachable through the app proxy' }
+    $registerScript = Join-Path $PSScriptRoot 'register-setup-control-protocol.ps1'
+    if (Test-Path $registerScript) {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $registerScript -Root $Root 2>$null
+    }
 }
 
 function Invoke-ManagerUninstall {

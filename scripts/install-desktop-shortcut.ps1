@@ -78,3 +78,8 @@ try {
 }
 
 Write-Host "Launchers: $targetLaunchers"
+
+$registerScript = Join-Path $PSScriptRoot 'register-setup-control-protocol.ps1'
+if (Test-Path $registerScript) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $registerScript -Root $Root
+}

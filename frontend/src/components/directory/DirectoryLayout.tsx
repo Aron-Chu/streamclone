@@ -37,6 +37,7 @@ interface DirectoryLayoutProps {
   onSearchChange?: (value: string) => void
   headerSubtitle?: string
   showBrowseLink?: boolean
+  showNetworkLink?: boolean
 }
 
 export function DirectoryLayout({
@@ -45,6 +46,7 @@ export function DirectoryLayout({
   onSearchChange,
   headerSubtitle = 'Live directory',
   showBrowseLink = false,
+  showNetworkLink = false,
 }: DirectoryLayoutProps) {
   const [mobileRailOpen, setMobileRailOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
@@ -77,6 +79,14 @@ export function DirectoryLayout({
                         className="hidden text-sm font-bold text-zinc-400 transition hover:text-white sm:inline"
                       >
                         Browse
+                      </Link>
+                    ) : null}
+                    {showNetworkLink ? (
+                      <Link
+                        to="/network"
+                        className="hidden text-sm font-bold text-zinc-400 transition hover:text-white sm:inline"
+                      >
+                        Network
                       </Link>
                     ) : null}
                   </div>

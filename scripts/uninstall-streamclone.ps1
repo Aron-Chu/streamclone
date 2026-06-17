@@ -342,6 +342,25 @@ function Invoke-StreamcloneDockerResourceCleanup {
     }
 }
 
+function Remove-StreamcloneUrlHandler {
+    $unregisterScript = Join-Path $PSScriptRoot 'unregister-setup-control-protocol.ps1'
+    if (Test-Path $unregisterScript) {
+        & $unregisterScript
+    }
+
+    $macHandler = Join-Path $env:USERPROFILE 'Applications\Streamclone URL Handler.app'
+    if (Test-Path $macHandler) {
+        Remove-Item -LiteralPath $macHandler -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "Removed $macHandler"
+    }
+
+    $linuxDesktop = Join-Path $env:USERPROFILE '.local\share\applications\streamclone-url.desktop'
+    if (Test-Path $linuxDesktop) {
+        Remove-Item -LiteralPath $linuxDesktop -Force -ErrorAction SilentlyContinue
+        Write-Host "Removed $linuxDesktop"
+    }
+}
+
 function Remove-StreamcloneDesktopShortcuts {
     $desktop = [Environment]::GetFolderPath('Desktop')
     foreach ($name in @(
@@ -518,6 +537,7 @@ try {
         $null = Save-StreamclonePendingDockerUninstall -Root $root -RemoveImages:$removeImages `
             -RemoveBaseImages:$removeBase -KeepVolumes:$KeepVolumes
         Remove-StreamcloneDesktopShortcuts
+        Remove-StreamcloneUrlHandler
         Remove-StreamcloneMacShortcuts
         Install-StreamcloneFinishDockerCleanupShortcut -Root $root
         if (-not $ProgressFile) {
@@ -553,6 +573,7 @@ try {
     Set-UninstallProgress -Title 'Removing local data' -Detail 'Deleting secrets, shortcuts, and config.'
     Remove-StreamcloneConfigFiles -Root $root
     Remove-StreamcloneDesktopShortcuts
+    Remove-StreamcloneUrlHandler
     Remove-StreamcloneMacShortcuts
 
     if ($KeepInstallDir) {

@@ -93,6 +93,15 @@
   .horizontal-scroll-row > * {
     scroll-snap-align: start;
   }
+
+  .scrollbar-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @layer utilities {

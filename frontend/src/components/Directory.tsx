@@ -198,7 +198,7 @@ export default function Directory() {
     <DirectoryLayout
       searchValue={q}
       onSearchChange={handleSearchChange}
-      showBrowseLink
+      showBrowseLink showNetworkLink
     >
       {homeMode ? (
         <>

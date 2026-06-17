@@ -112,6 +112,10 @@ $controlScript = Join-Path $PSScriptRoot 'setup-control.ps1'
 $setupControlExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
 if ($setupControlExitCode -ne 0) { exit $setupControlExitCode }
 
+$registerScript = Join-Path $PSScriptRoot 'register-setup-control-protocol.ps1'
+if (Test-Path $registerScript) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $registerScript -Root $Root 2>$null
+}
 
 Write-Host ''
 Write-Host ("Streamclone is running at {0}" -f (Get-StreamcloneAppUrl)) -ForegroundColor Green
