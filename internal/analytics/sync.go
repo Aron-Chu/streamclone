@@ -23,6 +23,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"streamclone/internal/analytics/chatreplay"
+	"streamclone/internal/analytics/netmeter"
 	"streamclone/internal/chat/enrich"
 	"streamclone/internal/metrics"
 )
@@ -63,6 +64,10 @@ type SyncService struct {
 	trackerPrefetch               trackerPrefetchState
 	syncStatusCache               syncStatusCache
 	syncOwnerID                   string
+	activeSyncMu                  sync.RWMutex
+	activeSyncRegistry            map[string]*activeSyncState
+	syncMeters                    sync.Map
+	syncActivePhase               sync.Map
 	log                           *slog.Logger
 	rdb                           *redis.Client
 
@@ -211,6 +216,7 @@ func NewSyncService(
 		ttDirectHTTPTimeoutMS:         ttDirectHTTPTimeoutMS,
 		trackerPrefetch:               *newTrackerPrefetchState(),
 		syncOwnerID:                   newSyncOwnerID(),
+		activeSyncRegistry:            make(map[string]*activeSyncState),
 		log:                           logger.With("service", "sync"),
 		rdb:                           rdb,
 		chatReplaySink:                chatReplaySink,
@@ -283,8 +289,13 @@ type GQLResponse struct {
 }
 
 func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string, channelOpt string, viewersOnly bool, forceChat bool, hintVodID string) (string, error) {
+	ctx = s.attachSyncNetwork(ctx, streamID, channelOpt)
 	s.log.Info("starting historical stream sync", "stream_id", streamID, "channel_opt", channelOpt, "viewers_only", viewersOnly)
-	s.setSyncPhase(ctx, streamID, SyncPhaseStarting, "Loading stream metadata", nil)
+	s.setSyncPhase(ctx, streamID, SyncPhaseStarting, "Loading stream metadata", func(st *SyncStatus) {
+		if channel := normalizeLogin(channelOpt); channel != "" {
+			st.Channel = channel
+		}
+	})
 
 	var login string
 	var startedAt time.Time
@@ -307,6 +318,13 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 			return "", fmt.Errorf("stream details not found in DB and no channel query parameter provided")
 		}
 		login = normalizeLogin(channelOpt)
+	}
+
+	if login != "" {
+		s.setSyncChannel(streamID, login)
+		s.setSyncPhase(ctx, streamID, SyncPhaseStarting, "Loading stream metadata", func(st *SyncStatus) {
+			st.Channel = login
+		})
 	}
 
 	broadcasterID := ""
@@ -1197,6 +1215,7 @@ func (s *SyncService) scrapeTwitchTrackerDirect(ctx context.Context, pageURL str
 	if err != nil {
 		return "", err
 	}
+	syncNetRecord(ctx, netmeter.OpTracker, int64(len(body)))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("status %d", resp.StatusCode)
 	}
@@ -1272,6 +1291,7 @@ func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string, strea
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		syncNetRecord(ctx, netmeter.OpTracker, int64(len(body)))
 		return "", fmt.Errorf("scraper API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -1290,7 +1310,12 @@ func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string, strea
 		Error string `json:"error"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&fcResp); err != nil {
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	if err != nil {
+		return "", err
+	}
+	syncNetRecord(ctx, netmeter.OpTracker, int64(len(respBody)))
+	if err := json.Unmarshal(respBody, &fcResp); err != nil {
 		return "", err
 	}
 
@@ -2057,6 +2082,7 @@ func (s *SyncService) preloadChannelEmotes(ctx context.Context, login, broadcast
 			s.log.Warn("emote ensure read failed", "login", login, "err", readErr)
 			return
 		}
+		syncNetRecord(ctx, netmeter.OpEmote, int64(len(respBody)))
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			s.log.Warn("emote ensure returned non-success status", "login", login, "status", resp.StatusCode)
 			return
@@ -2347,13 +2373,6 @@ func (s *SyncService) writeChatRollupsOnly(ctx context.Context, streamID, login 
 	return s.store.BulkPatchChatRollups(ctx, streamID, rollups)
 }
 
-func (s *SyncService) gqlHTTPClient() *http.Client {
-	if s.gqlClient != nil {
-		return s.gqlClient
-	}
-	return s.client
-}
-
 func parseRetryAfter(h http.Header) time.Duration {
 	raw := strings.TrimSpace(h.Get("Retry-After"))
 	if raw == "" {
@@ -2406,7 +2425,7 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Client-Id", s.twitchClientID)
 
-		resp, err := s.gqlHTTPClient().Do(req)
+		resp, err := s.gqlHTTPClient(ctx).Do(req)
 		if err != nil {
 			metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
 			return GQLResponse{}, err
@@ -2419,7 +2438,8 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 				count503++
 			}
 			retryAfter := parseRetryAfter(resp.Header)
-			_, _ = io.Copy(io.Discard, resp.Body)
+			discarded, _ := io.Copy(io.Discard, resp.Body)
+			syncNetRecord(ctx, netmeter.OpGQL, discarded)
 			resp.Body.Close()
 			if attempt >= gqlVideoCommentsMaxRetries {
 				if count429 > 0 || count503 > 0 {
@@ -2448,20 +2468,25 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			syncNetRecord(ctx, netmeter.OpGQL, int64(len(body)))
 			resp.Body.Close()
 			metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
 			return GQLResponse{}, fmt.Errorf("gql video comments status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 
-		var respBody []GQLResponse
-		if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-			resp.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024))
+		resp.Body.Close()
+		if err != nil {
 			metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
 			return GQLResponse{}, err
 		}
-		resp.Body.Close()
-		if len(respBody) == 0 {
+		syncNetRecord(ctx, netmeter.OpGQL, int64(len(body)))
+		var respBody []GQLResponse
+		if err := json.Unmarshal(body, &respBody); err != nil {
 			metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
+			return GQLResponse{}, err
+		}
+		if len(respBody) == 0 {
 			return GQLResponse{}, fmt.Errorf("gql video comments response empty")
 		}
 		if count429 > 0 || count503 > 0 {

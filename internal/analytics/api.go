@@ -57,6 +57,8 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Post("/streams/{streamID}/prefetch-tracker", h.prefetchTracker)
 		r.Post("/streams/{streamID}/sync", h.syncStream)
 		r.Get("/streams/{streamID}/sync/status", h.syncStreamStatus)
+		r.Get("/sync/active", h.listActiveSyncs)
+		r.Get("/tracking/snapshot", h.trackingSnapshot)
 		r.Get("/streams/{streamID}/games", h.getStreamGames)
 		r.Get("/streams/{streamID}/replay-heatmap", h.replayHeatmap)
 		r.Delete("/streams/{streamID}/replay-heatmap/cache", h.invalidateHeatmapCache)

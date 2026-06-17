@@ -168,10 +168,14 @@ func main() {
 	handler.WithHeatmapCache(heatmapCache)
 	handler.WithTimeseries(tsWriter)
 	chatReplayStore := chatreplay.NewStore(pool)
-	chatReplayHandler := chatreplay.NewHandler(chatReplayStore).WithLogger(logger)
+	chatReplayHandler := chatreplay.NewHandler(chatReplayStore).WithLogger(logger).WithIngestEnabled(func() bool {
+		return cfg.ChatLogPersistEnabled
+	})
 
 	retentionWorker := chatreplay.NewRetentionWorker(chatReplayStore, cfg.AnalyticsVODChatRetentionDays, logger)
 	retentionWorker.Start(ctx)
+	liveRetentionWorker := chatreplay.NewLiveRetentionWorker(chatReplayStore, cfg.ChatLogRetentionDays, logger)
+	liveRetentionWorker.Start(ctx)
 	srv := httpx.New("analytics", cfg.HTTPAddr, logger, metrics.HTTPMiddleware("analytics"), httpx.CORS, httpx.NewRateLimiter(20, 40).Middleware)
 	srv.AddReady(func(ctx context.Context) error {
 		return store.Ping(ctx)

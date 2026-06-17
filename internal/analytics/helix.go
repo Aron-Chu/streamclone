@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"streamclone/internal/analytics/netmeter"
 )
 
 var ErrHelixDisabled = errors.New("analytics helix: missing client credentials")
@@ -35,6 +38,20 @@ func NewHelixClient(apiURL, tokenURL, clientID, secret, userAgent string) *Helix
 		clientID:  clientID,
 		secret:    secret,
 		userAgent: userAgent,
+	}
+}
+
+func (c *HelixClient) WithHTTPClient(httpClient *http.Client) *HelixClient {
+	if c == nil {
+		return nil
+	}
+	return &HelixClient{
+		http:      httpClient,
+		apiURL:    c.apiURL,
+		tokenURL:  c.tokenURL,
+		clientID:  c.clientID,
+		secret:    c.secret,
+		userAgent: c.userAgent,
 	}
 }
 
@@ -71,6 +88,11 @@ func (c *HelixClient) bearer(ctx context.Context) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	syncNetRecord(ctx, netmeter.OpHelix, int64(len(body)))
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("helix token status %d", resp.StatusCode)
 	}
@@ -78,7 +100,7 @@ func (c *HelixClient) bearer(ctx context.Context) (string, error) {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(body, &out); err != nil {
 		return "", err
 	}
 	if out.AccessToken == "" {
@@ -118,10 +140,15 @@ func (c *HelixClient) get(ctx context.Context, path string, q url.Values, out an
 		return err
 	}
 	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return err
+	}
+	syncNetRecord(ctx, netmeter.OpHelix, int64(len(body)))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("helix %s status %d", path, resp.StatusCode)
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return json.Unmarshal(body, out)
 }
 
 func (c *HelixClient) StreamsByLogin(ctx context.Context, logins []string) (map[string]LiveStream, error) {
@@ -357,4 +384,3 @@ func (c *HelixClient) VideoDurationSeconds(ctx context.Context, videoID string) 
 	}
 	return seconds, nil
 }
-

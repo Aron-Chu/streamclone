@@ -13,6 +13,7 @@ import (
 
 	"streamclone/internal/analytics/chatreplay"
 	"streamclone/internal/chat/enrich"
+	"streamclone/internal/emoteimage"
 	"streamclone/internal/metrics"
 )
 
@@ -759,7 +760,7 @@ func replayEmoteFrags(enricher *enrich.Enricher, login, text string) []chatrepla
 		}
 		url := f.U
 		if url == "" && f.ID != "" {
-			url = "/emotes/" + f.ID + "/1x.webp"
+			url = emoteimage.URL(f.Provider, f.ID, "1x")
 		}
 		out = append(out, chatreplay.EmoteFrag{
 			Name:     f.C,

@@ -255,6 +255,34 @@ func (c *Collector) GetAlwaysTracked() []string {
 	return logins
 }
 
+type TrackingSnapshot struct {
+	TrackedChannels []string `json:"trackedChannels"`
+	AlwaysTracked   []string `json:"alwaysTracked"`
+	Active          int      `json:"active"`
+	Max             int      `json:"max"`
+}
+
+func (c *Collector) TrackingSnapshot() TrackingSnapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tracked := make([]string, 0, len(c.tracked))
+	for login := range c.tracked {
+		tracked = append(tracked, login)
+	}
+	sort.Strings(tracked)
+	always := make([]string, 0, len(c.alwaysTracked))
+	for login := range c.alwaysTracked {
+		always = append(always, login)
+	}
+	sort.Strings(always)
+	return TrackingSnapshot{
+		TrackedChannels: tracked,
+		AlwaysTracked:   always,
+		Active:          len(c.tracked),
+		Max:             c.maxTracked,
+	}
+}
+
 func (c *Collector) ActiveCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
