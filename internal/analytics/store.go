@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"streamclone/internal/emoteimage"
 	"streamclone/internal/metrics"
 	"streamclone/internal/timeseries"
 )
@@ -588,11 +589,7 @@ func splitEmoteKey(key string) (name, id, provider string) {
 }
 
 func emoteImageURL(provider, id string) string {
-	if id == "" {
-		return ""
-	}
-	// Rollup keys store the local emote service id (MinIO path), not the 7TV provider id.
-	return "/emotes/" + id + "/1x.webp"
+	return emoteimage.URL(provider, id, "1x")
 }
 
 func isNoRows(err error) bool {

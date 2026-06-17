@@ -18,21 +18,29 @@ import (
 //
 // **Validates: Requirements 10.3**
 
-// emoteURLPattern matches the expected emote image URL format produced by
-// emoteImageURL: /emotes/{non-empty-id}/1x.webp where the id is the local
-// emote-service UUID (alphanumeric + dashes).
-var emoteURLPattern = regexp.MustCompile(`^/emotes/[a-zA-Z0-9_-]+/1x\.webp$`)
+// emoteURLPattern matches resolved emote image URLs: local proxy paths or provider CDNs.
+var emoteURLPattern = regexp.MustCompile(`^(/emotes/[a-zA-Z0-9_-]+/1x\.webp|https://static-cdn\.jtvnw\.net/emoticons/v2/[^/]+/default/dark/2\.0|https://cdn\.7tv\.app/emote/[^/]+/4x\.webp|https://cdn\.frankerfacez\.com/emoticon/[^/]+/4|https://cdn\.betterttv\.net/emote/[^/]+/3x)$`)
 
-// drawEmoteMap generates an arbitrary non-empty emote map with 1–10 entries.
-// Keys use the "provider:id:name" format with non-empty id components so the
-// resulting ImageURL is always well-formed.
+// Keys use the "provider:id:name" format. Mix Twitch native ids and local UUIDs
+// so ImageURL resolution covers both CDN and local proxy paths.
 func drawEmoteMap(t *rapid.T) map[string]int {
 	n := rapid.IntRange(1, 10).Draw(t, "numEmotes")
 	m := make(map[string]int, n)
 	for i := 0; i < n; i++ {
-		provider := rapid.StringMatching(`[a-z]{2,6}`).Draw(t, "provider")
-		id := rapid.StringMatching(`[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}`).Draw(t, "id")
+		useTwitch := rapid.Bool().Draw(t, "useTwitch")
 		name := rapid.StringMatching(`[A-Za-z][A-Za-z0-9]{1,15}`).Draw(t, "name")
+		var provider, id string
+		if useTwitch {
+			provider = "twitch"
+			if rapid.Bool().Draw(t, "useEmotesV2") {
+				id = "emotesv2_" + rapid.StringMatching(`[a-f0-9]{32}`).Draw(t, "emoteV2")
+			} else {
+				id = rapid.StringMatching(`[0-9]{1,9}`).Draw(t, "twitchId")
+			}
+		} else {
+			provider = rapid.StringMatching(`seventv|ffz|bttv`).Draw(t, "provider")
+			id = rapid.StringMatching(`[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}`).Draw(t, "id")
+		}
 		key := provider + ":" + id + ":" + name
 		count := rapid.IntRange(1, 10000).Draw(t, "count")
 		m[key] = count

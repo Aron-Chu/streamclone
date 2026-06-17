@@ -3,6 +3,8 @@ package heatmap
 import (
 	"sort"
 	"strings"
+
+	"streamclone/internal/emoteimage"
 )
 
 // maxTopEmotes is the upper bound on the number of emotes attached to a scored
@@ -16,8 +18,8 @@ const maxTopEmotes = 3
 //   - 2 parts ("provider:id")      -> provider, id, name=id
 //   - otherwise                    -> name=key, id="", provider=""
 //
-// id is the local emote-service id (the MinIO object path component), not the
-// 7TV provider id, so it is the correct value for the /emotes/{id}/1x.webp URL.
+// id is the emote id stored in the rollup key (local emote-service UUID for synced
+// third-party sets; Twitch native numeric or emotesv2_* ids for Twitch emotes).
 func splitEmoteKey(key string) (provider, id, name string) {
 	parts := strings.SplitN(key, ":", 3)
 	switch len(parts) {
@@ -30,14 +32,9 @@ func splitEmoteKey(key string) (provider, id, name string) {
 	}
 }
 
-// emoteImageURL builds the local emote-service image URL for a window emote.
-// The id is the local emote id stored in the rollup key; an empty id yields an
-// empty URL rather than a malformed "/emotes//1x.webp" path.
-func emoteImageURL(id string) string {
-	if id == "" {
-		return ""
-	}
-	return "/emotes/" + id + "/1x.webp"
+// emoteImageURL resolves a rollup emote id to a loadable image URL.
+func emoteImageURL(provider, id string) string {
+	return emoteimage.URL(provider, id, "1x")
 }
 
 // topEmotes returns the top emotes for a scoring window, ordered by per-window
@@ -48,7 +45,7 @@ func emoteImageURL(id string) string {
 // Ordering is fully deterministic (Requirement 9.6): emotes are sorted by count
 // descending, and ties are broken by the raw rollup key ascending. Each entry's
 // "provider:id:name" key is parsed into ID, Name, and Provider, and ImageURL is
-// set to /emotes/{id}/1x.webp using the local emote id.
+// resolved via emoteimage.URL (Twitch CDN for native ids, local path for synced sets).
 func topEmotes(emotes map[string]int, limit int) []HeatmapEmote {
 	if len(emotes) == 0 || limit <= 0 {
 		return nil
@@ -78,7 +75,7 @@ func topEmotes(emotes map[string]int, limit int) []HeatmapEmote {
 		out = append(out, HeatmapEmote{
 			ID:       id,
 			Name:     name,
-			ImageURL: emoteImageURL(id),
+			ImageURL: emoteImageURL(provider, id),
 			Count:    emotes[key],
 			Provider: provider,
 		})
