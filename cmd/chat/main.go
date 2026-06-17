@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 
 	"github.com/redis/go-redis/v9"
@@ -10,6 +11,7 @@ import (
 	"streamclone/internal/chat/batch"
 	"streamclone/internal/chat/enrich"
 	"streamclone/internal/chat/hub"
+	"streamclone/internal/chat/ingest"
 	"streamclone/internal/chat/ircconn"
 	"streamclone/internal/chat/parse"
 	"streamclone/internal/chat/pubsub"
@@ -41,23 +43,69 @@ func main() {
 	batcher := batch.New(cfg.BatchWindowMS, func(channel string, data []byte) {
 		ps.Publish(context.Background(), channel, data)
 	})
+	eventBatcher := batch.NewEventBatcher(cfg.BatchWindowMS, func(channel string, data []byte) {
+		ps.Publish(context.Background(), channel, data)
+	})
+	archiver := ingest.New(cfg.AnalyticsServiceURL, cfg.ChatLogPersistEnabled)
 
 	var mgr *ircconn.Manager
 
 	handler := func(line string) {
-		msg, ok := parse.ParseLine(line)
-		if !ok {
+		if msg, ok := parse.ParseLine(line); ok {
+			metrics.ChatMessagesIn.Inc()
+			frags := enricher.Tokenize(msg.Channel, msg.Text, msg.Emotes)
+			batcher.Add(msg.Channel, batch.BatchMessage{
+				ID:        msg.ID,
+				User:      msg.User,
+				Login:     msg.Login,
+				Color:     msg.Color,
+				Badges:    msg.Badges,
+				TS:        msg.TS,
+				Fragments: frags,
+			})
+			if archiver.Enabled() {
+				fragsJSON, _ := json.Marshal(frags)
+				archiver.ForwardMessages(ingest.Message{
+					Channel:     msg.Channel,
+					Login:       msg.Login,
+					DisplayName: msg.User,
+					MessageID:   msg.ID,
+					Text:        msg.Text,
+					Fragments:   fragsJSON,
+					TS:          msg.TS,
+				})
+			}
 			return
 		}
-		metrics.ChatMessagesIn.Inc()
-		batcher.Add(msg.Channel, batch.BatchMessage{
-			ID:        msg.ID,
-			User:      msg.User,
-			Color:     msg.Color,
-			Badges:    msg.Badges,
-			TS:        msg.TS,
-			Fragments: enricher.Tokenize(msg.Channel, msg.Text, msg.Emotes),
-		})
+		if ev, ok := parse.ParseEvent(line); ok {
+			summary := ev.SummaryText()
+			eventBatcher.Add(ev.Channel, batch.ChatEvent{
+				Kind:        ev.Kind,
+				TargetLogin: ev.TargetLogin,
+				ActorLogin:  ev.ActorLogin,
+				DurationSec: ev.DurationSec,
+				Reason:      ev.Reason,
+				MessageID:   ev.MessageID,
+				TextPreview: ev.TextPreview,
+				NoticeMsgID: ev.NoticeMsgID,
+				DisplayText: ev.DisplayText,
+				TS:          ev.TS,
+				SummaryText: summary,
+			})
+			if archiver.Enabled() {
+				archiver.ForwardEvents(ingest.Event{
+					Kind:        ev.Kind,
+					Channel:     ev.Channel,
+					ActorLogin:  ev.ActorLogin,
+					TargetLogin: ev.TargetLogin,
+					DurationSec: ev.DurationSec,
+					Reason:      ev.Reason,
+					MessageID:   ev.MessageID,
+					TextPreview: firstNonEmpty(ev.TextPreview, ev.DisplayText, summary),
+					TS:          ev.TS,
+				})
+			}
+		}
 	}
 
 	mgr = ircconn.NewManager(cfg.Upstream.TwitchIRCURL, cfg.MaxChannelsPerSocket, handler, logger)
@@ -91,4 +139,13 @@ func main() {
 		logger.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
