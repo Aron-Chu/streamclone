@@ -61,6 +61,9 @@ type Config struct {
 	AnalyticsPollInterval                  time.Duration `env:"ANALYTICS_POLL_INTERVAL" envDefault:"15s"`
 	AnalyticsRetentionDays                 int           `env:"ANALYTICS_RETENTION_DAYS" envDefault:"30"`
 	AnalyticsVODChatRetentionDays          int           `env:"ANALYTICS_VOD_CHAT_RETENTION_DAYS" envDefault:"90"`
+	ChatLogPersistEnabled                  bool          `env:"CHAT_LOG_PERSIST_ENABLED" envDefault:"false"`
+	ChatLogRetentionDays                   int           `env:"CHAT_LOG_RETENTION_DAYS" envDefault:"14"`
+	AnalyticsServiceURL                    string        `env:"ANALYTICS_SERVICE_URL" envDefault:"http://analytics:8080"`
 	AnalyticsTopEmotesPerMinute            int           `env:"ANALYTICS_TOP_EMOTES_PER_MINUTE" envDefault:"200"`
 	AnalyticsVODGQLPageDelayMS             int           `env:"ANALYTICS_VOD_GQL_PAGE_DELAY_MS" envDefault:"0"`
 	AnalyticsVODGQLConcurrency             int           `env:"ANALYTICS_VOD_GQL_CONCURRENCY" envDefault:"3"`

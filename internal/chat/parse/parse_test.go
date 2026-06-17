@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-var privmsgLine = `@badge-info=;badges=moderator/1;color=#1E90FF;display-name=Viewer;emotes=;id=abc-123;tmi-sent-ts=1730000000000 :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #channel :Hello world`
+var privmsgLine = `@badge-info=;badges=moderator/1;color=#1E90FF;display-name=Viewer;emotes=;id=abc-123;login=viewer;tmi-sent-ts=1730000000000 :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #channel :Hello world`
 
 var pingLine = `PING :tmi.twitch.tv`
 
@@ -21,6 +21,9 @@ func TestPrivmsg(t *testing.T) {
 	}
 	if msg.User != "Viewer" {
 		t.Errorf("user: got %q want %q", msg.User, "Viewer")
+	}
+	if msg.Login != "viewer" {
+		t.Errorf("login: got %q want %q", msg.Login, "viewer")
 	}
 	if msg.Color != "#1E90FF" {
 		t.Errorf("color: got %q want %q", msg.Color, "#1E90FF")

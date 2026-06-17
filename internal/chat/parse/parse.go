@@ -9,6 +9,7 @@ type Message struct {
 	ID      string
 	Channel string
 	User    string
+	Login   string
 	Color   string
 	Badges  []string
 	TS      int64
@@ -84,10 +85,16 @@ func ParseLine(line string) (*Message, bool) {
 		}
 	}
 
+	login := tags["login"]
+	if login == "" && userRaw != "" {
+		login = strings.ToLower(userRaw)
+	}
+
 	return &Message{
 		ID:      tags["id"],
 		Channel: channel,
 		User:    userRaw,
+		Login:   login,
 		Color:   tags["color"],
 		Badges:  badges,
 		TS:      ts,
