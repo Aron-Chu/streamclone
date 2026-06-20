@@ -186,6 +186,9 @@ func TestBronzeBlobKeyLayout(t *testing.T) {
 	if got := VODIndexBlobKey("xqc"); got != "channels/vod_index/xqc.jsonl.gz" {
 		t.Fatalf("vod index key = %q", got)
 	}
+	if got := VODChatBlobKey("319181844960"); got != "vod_chat/stream_id=319181844960/messages.jsonl.gz" {
+		t.Fatalf("vod chat key = %q", got)
+	}
 }
 
 func TestWriterBronzeExports(t *testing.T) {
@@ -218,5 +221,61 @@ func TestWriterBronzeExports(t *testing.T) {
 	}
 	if len(manifest.records) < 3 {
 		t.Fatalf("expected manifest upserts, got %d", len(manifest.records))
+	}
+}
+
+type mockVODChatDB struct {
+	messages []VODChatExportLine
+}
+
+func (m *mockVODChatDB) ExportVODChatMessages(_ context.Context, streamID string) ([]VODChatExportLine, error) {
+	if len(m.messages) == 0 {
+		return []VODChatExportLine{
+			{
+				ID:            1,
+				StreamID:      streamID,
+				MessageID:     "m1",
+				DisplayName:   "viewer",
+				SenderHash:    "hash",
+				Text:          "hello",
+				OffsetSeconds: 10,
+			},
+		}, nil
+	}
+	return m.messages, nil
+}
+
+func TestWriterExportVODChat(t *testing.T) {
+	blob := newMockBlob()
+	manifest := newMockManifest()
+	writer := NewWriter(blob, manifest)
+	chatDB := &mockVODChatDB{}
+	if err := writer.ExportVODChat(context.Background(), "319181844960", chatDB); err != nil {
+		t.Fatal(err)
+	}
+	key := VODChatBlobKey("319181844960")
+	if _, ok := blob.data[key]; !ok {
+		t.Fatalf("expected vod chat blob at %q", key)
+	}
+	if len(manifest.records) != 1 {
+		t.Fatalf("expected 1 manifest upsert, got %d", len(manifest.records))
+	}
+	rec := manifest.records[0]
+	if rec.ArtifactType != ArtifactVODChatMessage {
+		t.Fatalf("artifact type = %q", rec.ArtifactType)
+	}
+	if rec.NaturalKey != "vod_chat:319181844960" {
+		t.Fatalf("natural key = %q", rec.NaturalKey)
+	}
+	if rec.RowCount != 1 {
+		t.Fatalf("row count = %d", rec.RowCount)
+	}
+}
+
+func TestVODChatBlobKeyLayout(t *testing.T) {
+	key := VODChatBlobKey("319181844960")
+	want := "vod_chat/stream_id=319181844960/messages.jsonl.gz"
+	if key != want {
+		t.Fatalf("key = %q, want %q", key, want)
 	}
 }

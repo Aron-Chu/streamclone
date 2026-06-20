@@ -80,5 +80,10 @@ Azure cold storage is optional (`ARCHIVE_ENABLED=true`, `ARCHIVE_STORAGE_PROVIDE
 | `BRONZE_WORKER_INTERVAL` | `5m` | Bronze indexer tick interval |
 | `ANALYTICS_TT_SYNC_TIMEOUT_MS` | `45000` | TT scrape deadline for `SyncHistoricalStream` / silver backfill; set `120000` in `profile-archive.env` to match tracker scrape timeout |
 | `BACKFILL_ENABLED` | `false` | Post-end silver gap-fill worker (`backfill_worker.go`) |
+| `GOLD_BACKFILL_ENABLED` | `false` | Gold GQL chat enqueuer + gold tier worker branch |
+| `GOLD_MIN_PEAK_VIEWERS` | `0` | Min peak viewers for gold rules (0 = disabled) |
+| `GOLD_MIN_DURATION_MINUTES` | `0` | Min stream duration for gold rules (0 = disabled) |
+| `GOLD_ENQUEUER_INTERVAL` | `5m` | Silver-done → gold candidate scan interval |
+| `GOLD_SYNC_TIMEOUT_MS` | `600000` | GQL sync deadline for gold backfill jobs |
 
-Operator CLI: `go run ./cmd/backfill bronze run-once`, `go run ./cmd/archive restore --stream-id <id>`. Profile overlay: `deploy/env/profile-archive.env`. Setup: `docs/azure-archive-setup.md`.
+Operator CLI: `go run ./cmd/backfill bronze run-once`, `go run ./cmd/backfill gold enqueue|eval`, `go run ./cmd/archive restore --stream-id <id>`. Profile overlay: `deploy/env/profile-archive.env`. Setup: `docs/azure-archive-setup.md`.

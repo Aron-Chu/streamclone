@@ -27,12 +27,19 @@ type BackfillJob struct {
 	Error        string
 }
 
+// VODChatExporter uploads persisted VOD chat messages to cold storage.
+type VODChatExporter interface {
+	ExportVODChat(ctx context.Context, streamID string) error
+}
+
 // BackfillWorker processes queued TT gap-fill jobs.
 type BackfillWorker struct {
-	db       *pgxpool.Pool
-	sync     *SyncService
-	exporter SyncArchiveExporter
-	interval time.Duration
+	db              *pgxpool.Pool
+	sync            *SyncService
+	exporter        SyncArchiveExporter
+	vodChatExporter VODChatExporter
+	interval        time.Duration
+	goldSyncTimeout time.Duration
 }
 
 func NewBackfillWorker(db *pgxpool.Pool, sync *SyncService, exporter SyncArchiveExporter, interval time.Duration) *BackfillWorker {
@@ -40,6 +47,34 @@ func NewBackfillWorker(db *pgxpool.Pool, sync *SyncService, exporter SyncArchive
 		interval = 30 * time.Second
 	}
 	return &BackfillWorker{db: db, sync: sync, exporter: exporter, interval: interval}
+}
+
+func (w *BackfillWorker) WithGoldSyncTimeout(timeout time.Duration) *BackfillWorker {
+	if w != nil {
+		w.goldSyncTimeout = timeout
+	}
+	return w
+}
+
+func (w *BackfillWorker) WithVODChatExporter(exporter VODChatExporter) *BackfillWorker {
+	if w != nil {
+		w.vodChatExporter = exporter
+	}
+	return w
+}
+
+func backfillSyncParams(tier string) (viewersOnly, forceChat bool) {
+	if strings.EqualFold(strings.TrimSpace(tier), "gold") {
+		return false, true
+	}
+	return true, false
+}
+
+func backfillExportLabel(tier string) string {
+	if strings.EqualFold(strings.TrimSpace(tier), "gold") {
+		return "backfill gold chat"
+	}
+	return "backfill viewers-only"
 }
 
 func (w *BackfillWorker) RunOnce(ctx context.Context) error {
@@ -50,12 +85,24 @@ func (w *BackfillWorker) RunOnce(ctx context.Context) error {
 	if err != nil || job == nil {
 		return err
 	}
-	_, syncErr := w.sync.SyncHistoricalStream(ctx, job.StreamID, job.Login, true, false, "")
+	viewersOnly, forceChat := backfillSyncParams(job.Tier)
+	syncCtx := ctx
+	if strings.EqualFold(job.Tier, "gold") && w.goldSyncTimeout > 0 {
+		var cancel context.CancelFunc
+		syncCtx, cancel = context.WithTimeout(ctx, w.goldSyncTimeout)
+		defer cancel()
+	}
+	_, syncErr := w.sync.SyncHistoricalStream(syncCtx, job.StreamID, job.Login, viewersOnly, forceChat, "")
 	outcome := resolveBackfillOutcome(*job, syncErr, time.Now())
 	if syncErr == nil && w.exporter != nil {
-		if err := w.exporter.ExportSync(ctx, job.StreamID, job.Login, "backfill viewers-only"); err != nil {
+		if err := w.exporter.ExportSync(ctx, job.StreamID, job.Login, backfillExportLabel(job.Tier)); err != nil {
 			outcome.exportStatus = "failed"
 			outcome.errMsg = err.Error()
+		} else if strings.EqualFold(job.Tier, "gold") && w.vodChatExporter != nil {
+			if err := w.vodChatExporter.ExportVODChat(ctx, job.StreamID); err != nil {
+				outcome.exportStatus = "failed"
+				outcome.errMsg = err.Error()
+			}
 		}
 	}
 	if outcome.requeue {

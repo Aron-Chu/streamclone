@@ -174,6 +174,12 @@ type Config struct {
 
 	BackfillEnabled        bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
 	BackfillWorkerInterval time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`
+
+	GoldBackfillEnabled     bool          `env:"GOLD_BACKFILL_ENABLED" envDefault:"false"`
+	GoldMinPeakViewers      int           `env:"GOLD_MIN_PEAK_VIEWERS" envDefault:"0"`
+	GoldMinDurationMinutes  int           `env:"GOLD_MIN_DURATION_MINUTES" envDefault:"0"`
+	GoldEnqueuerInterval    time.Duration `env:"GOLD_ENQUEUER_INTERVAL" envDefault:"5m"`
+	GoldSyncTimeoutMS       int           `env:"GOLD_SYNC_TIMEOUT_MS" envDefault:"600000"`
 	PostEndWaitMin         time.Duration `env:"POST_END_WAIT_MIN" envDefault:"10m"`
 	PostEndWaitMax         time.Duration `env:"POST_END_WAIT_MAX" envDefault:"30m"`
 	PostEndCoveragePct     float64       `env:"POST_END_COVERAGE_PCT" envDefault:"70"`

@@ -98,12 +98,74 @@ func main() {
 				os.Exit(2)
 			}
 			return
+		case "gold":
+			if len(os.Args) < 3 {
+				fmt.Println("Usage: backfill gold enqueue --stream-id=<id> [--login=] | backfill gold eval --stream-id=<id>")
+				os.Exit(2)
+			}
+			dbAlways, err := store.GetAlwaysTracked(ctx)
+			if err != nil {
+				logger.Error("load always tracked failed", "err", err)
+				os.Exit(1)
+			}
+			allAlways := append(cfg.AlwaysTrackedChannels, dbAlways...)
+			rules := analytics.NewGoldRulesEngine(allAlways, cfg.GoldMinPeakViewers, cfg.GoldMinDurationMinutes)
+			enqueuer := analytics.NewGoldEnqueuer(pool, rules, cfg.GoldEnqueuerInterval)
+			streamID, login := goldArgsFromCLI(os.Args[3:])
+			switch os.Args[2] {
+			case "enqueue":
+				if streamID == "" {
+					fmt.Println("Usage: backfill gold enqueue --stream-id=<id> [--login=]")
+					os.Exit(2)
+				}
+				ok, err := enqueuer.EnqueueForce(ctx, streamID, login)
+				if err != nil {
+					logger.Error("gold enqueue failed", "err", err)
+					os.Exit(1)
+				}
+				if !ok {
+					fmt.Println("gold job already queued, running, or done")
+					return
+				}
+				fmt.Println("gold job enqueued")
+				return
+			case "eval":
+				if streamID == "" {
+					fmt.Println("Usage: backfill gold eval --stream-id=<id>")
+					os.Exit(2)
+				}
+				result, err := enqueuer.EvalRules(ctx, streamID)
+				if err != nil {
+					logger.Error("gold eval failed", "err", err)
+					os.Exit(1)
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(result)
+				return
+			default:
+				fmt.Println("Usage: backfill gold enqueue --stream-id=<id> [--login=] | backfill gold eval --stream-id=<id>")
+				os.Exit(2)
+			}
 		}
 	}
 
 	fmt.Println("backfill worker runs inside analytics when BACKFILL_ENABLED=true")
+	fmt.Println("gold enqueuer runs inside analytics when GOLD_BACKFILL_ENABLED=true")
 	fmt.Println("bronze indexer runs inside analytics when BRONZE_ENABLED=true")
-	fmt.Println("Use: backfill status | backfill bronze status | backfill bronze run-once | backfill sessions cleanup [--login=...]")
+	fmt.Println("Use: backfill status | backfill gold enqueue|eval | backfill bronze status | backfill bronze run-once | backfill sessions cleanup [--login=...]")
+}
+
+func goldArgsFromCLI(args []string) (streamID, login string) {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--stream-id=") {
+			streamID = strings.TrimSpace(strings.TrimPrefix(arg, "--stream-id="))
+		}
+		if strings.HasPrefix(arg, "--login=") {
+			login = strings.TrimSpace(strings.TrimPrefix(arg, "--login="))
+		}
+	}
+	return streamID, login
 }
 
 func sessionCleanupLoginsFromArgs(args []string) []string {

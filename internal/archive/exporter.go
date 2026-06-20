@@ -49,7 +49,27 @@ type AnalyticsDB interface {
 	ExportRollups(ctx context.Context, streamID string) ([]RollupExportLine, error)
 }
 
-// PgxAnalyticsDB implements AnalyticsDB against Postgres.
+// VODChatExportLine is one JSONL row for archived VOD chat messages.
+type VODChatExportLine struct {
+	ID             int64           `json:"id"`
+	StreamID       string          `json:"streamId"`
+	MinuteTS       time.Time       `json:"minuteTs"`
+	MessageID      string          `json:"messageId"`
+	DisplayName    string          `json:"displayName"`
+	CommenterLogin string          `json:"commenterLogin,omitempty"`
+	SenderHash     string          `json:"senderHash"`
+	Text           string          `json:"text"`
+	EmoteFrags     json.RawMessage `json:"emoteFrags,omitempty"`
+	OffsetSeconds  int             `json:"offsetSeconds"`
+	SyncedAt       time.Time       `json:"syncedAt"`
+}
+
+// VODChatDB reads persisted VOD chat messages for export.
+type VODChatDB interface {
+	ExportVODChatMessages(ctx context.Context, streamID string) ([]VODChatExportLine, error)
+}
+
+// PgxAnalyticsDB implements AnalyticsDB and VODChatDB against Postgres.
 type PgxAnalyticsDB struct {
 	db *pgxpool.Pool
 }
@@ -121,14 +141,48 @@ func (d *PgxAnalyticsDB) ExportRollups(ctx context.Context, streamID string) ([]
 	return out, rows.Err()
 }
 
-// SyncExporter implements analytics.SyncArchiveExporter.
+func (d *PgxAnalyticsDB) ExportVODChatMessages(ctx context.Context, streamID string) ([]VODChatExportLine, error) {
+	if d == nil || d.db == nil {
+		return nil, fmt.Errorf("archive export: db unavailable")
+	}
+	rows, err := d.db.Query(ctx, `
+		SELECT id, stream_id, minute_ts, message_id, display_name, COALESCE(commenter_login,''),
+			sender_hash, text, emote_frags, offset_seconds, synced_at
+		FROM analytics_vod_chat_messages
+		WHERE stream_id = $1
+		ORDER BY offset_seconds ASC, id ASC`, streamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []VODChatExportLine
+	for rows.Next() {
+		var line VODChatExportLine
+		if err := rows.Scan(
+			&line.ID, &line.StreamID, &line.MinuteTS, &line.MessageID, &line.DisplayName,
+			&line.CommenterLogin, &line.SenderHash, &line.Text, &line.EmoteFrags,
+			&line.OffsetSeconds, &line.SyncedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, line)
+	}
+	return out, rows.Err()
+}
+
+// SyncExporter implements analytics.SyncArchiveExporter and analytics.VODChatExporter.
 type SyncExporter struct {
 	writer *Writer
 	db     AnalyticsDB
+	chatDB VODChatDB
 }
 
 func NewSyncExporter(writer *Writer, db AnalyticsDB) *SyncExporter {
-	return &SyncExporter{writer: writer, db: db}
+	exp := &SyncExporter{writer: writer, db: db}
+	if chatDB, ok := db.(VODChatDB); ok {
+		exp.chatDB = chatDB
+	}
+	return exp
 }
 
 func (e *SyncExporter) ExportSync(ctx context.Context, streamID, channel, resultMessage string) error {
@@ -140,6 +194,17 @@ func (e *SyncExporter) ExportSync(ctx context.Context, streamID, channel, result
 		return fmt.Errorf("archive export: stream id is required")
 	}
 	return e.writer.ExportStream(ctx, streamID, e.db)
+}
+
+func (e *SyncExporter) ExportVODChat(ctx context.Context, streamID string) error {
+	if e == nil || e.writer == nil || e.chatDB == nil {
+		return fmt.Errorf("archive vod chat exporter is not configured")
+	}
+	streamID = strings.TrimSpace(streamID)
+	if streamID == "" {
+		return fmt.Errorf("archive export: stream id is required")
+	}
+	return e.writer.ExportVODChat(ctx, streamID, e.chatDB)
 }
 
 func (w *Writer) ExportStream(ctx context.Context, streamID string, db AnalyticsDB) error {
@@ -195,6 +260,39 @@ func (w *Writer) ExportStream(ctx context.Context, streamID string, db Analytics
 	rollupRes.RowCount = int64(len(rollups))
 	rollupKey := fmt.Sprintf("rollups:%s", streamID)
 	return w.confirmManifest(ctx, ArtifactAnalyticsRollups, rollupKey, rollupRes)
+}
+
+func (w *Writer) ExportVODChat(ctx context.Context, streamID string, db VODChatDB) error {
+	if w == nil || w.blob == nil {
+		return fmt.Errorf("archive writer is not configured")
+	}
+	if db == nil {
+		return fmt.Errorf("archive export: vod chat db is required")
+	}
+	streamID = strings.TrimSpace(streamID)
+	if streamID == "" {
+		return fmt.Errorf("archive export: stream id is required")
+	}
+	messages, err := db.ExportVODChatMessages(ctx, streamID)
+	if err != nil {
+		return fmt.Errorf("export vod chat messages: %w", err)
+	}
+	var buf strings.Builder
+	for _, line := range messages {
+		b, err := json.Marshal(line)
+		if err != nil {
+			return err
+		}
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	chatRes, err := w.putGzip(ctx, VODChatBlobKey(streamID), []byte(buf.String()))
+	if err != nil {
+		return fmt.Errorf("upload vod chat: %w", err)
+	}
+	chatRes.RowCount = int64(len(messages))
+	naturalKey := fmt.Sprintf("vod_chat:%s", streamID)
+	return w.confirmManifest(ctx, ArtifactVODChatMessage, naturalKey, chatRes)
 }
 
 // ExportTTDetail uploads optional TwitchTracker HTML (gap-fill / debug artifact).

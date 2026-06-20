@@ -307,7 +307,7 @@ Do not let TT overwrite good live samples unless explicitly configured.
 
 # Phase E — Selective VOD chat archive
 
-> **Deferred** — not in the current archive milestone. Blob path convention below uses the same Azure prefix as Phase A when implemented.
+> **In progress (2026-06-20)** — Gold v1 ships rules engine, gold-tier backfill queue, and VOD chat Azure export (`vod_chat/stream_id={id}/messages.jsonl.gz`). Raw-first comment schema, segment checkpoint table, and `.jsonl.zst` encoding remain deferred.
 
 ## Goal
 

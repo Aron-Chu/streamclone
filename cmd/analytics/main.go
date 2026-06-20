@@ -228,8 +228,23 @@ func main() {
 	}
 	if cfg.BackfillEnabled {
 		worker := analytics.NewBackfillWorker(pool, syncService, archiveExporter, cfg.BackfillWorkerInterval)
+		if cfg.GoldBackfillEnabled {
+			worker = worker.WithGoldSyncTimeout(time.Duration(cfg.GoldSyncTimeoutMS) * time.Millisecond)
+			if archiveSyncExporter != nil {
+				worker = worker.WithVODChatExporter(archiveSyncExporter)
+			}
+		}
 		analytics.StartBackfillWorker(ctx, worker, logger)
-		logger.Info("backfill worker started", "interval", cfg.BackfillWorkerInterval.String())
+		logger.Info("backfill worker started",
+			"interval", cfg.BackfillWorkerInterval.String(),
+			"gold_enabled", cfg.GoldBackfillEnabled,
+		)
+	}
+	if cfg.GoldBackfillEnabled {
+		goldRules := analytics.NewGoldRulesEngine(allAlways, cfg.GoldMinPeakViewers, cfg.GoldMinDurationMinutes)
+		goldEnqueuer := analytics.NewGoldEnqueuer(pool, goldRules, cfg.GoldEnqueuerInterval)
+		analytics.StartGoldEnqueuer(ctx, goldEnqueuer, logger)
+		logger.Info("gold enqueuer started", "interval", cfg.GoldEnqueuerInterval.String())
 	}
 	if cfg.BronzeEnabled {
 		if archiveWriter == nil {

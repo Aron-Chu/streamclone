@@ -242,6 +242,11 @@ func VODIndexBlobKey(login string) string {
 	return fmt.Sprintf("channels/vod_index/%s.jsonl.gz", login)
 }
 
+func VODChatBlobKey(streamID string) string {
+	streamID = strings.TrimSpace(streamID)
+	return fmt.Sprintf("vod_chat/stream_id=%s/messages.jsonl.gz", streamID)
+}
+
 func (w *Writer) putGzip(ctx context.Context, key string, raw []byte) (BlobPutResult, error) {
 	gz, err := Gzip(raw)
 	if err != nil {
