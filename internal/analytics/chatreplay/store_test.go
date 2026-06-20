@@ -82,10 +82,10 @@ func TestStoreSinkNilSafe(t *testing.T) {
 	var s *StoreSink
 	// Methods on a nil *StoreSink must be safe (feature disabled).
 	s.Add(VODChatMessage{StreamID: "1", MessageID: "m1"})
-	if err := s.FlushSegment(context.Background(), 0, 10); err != nil {
+	if _, err := s.FlushSegment(context.Background(), 0, 10); err != nil {
 		t.Fatalf("nil FlushSegment error: %v", err)
 	}
-	if err := s.Flush(context.Background()); err != nil {
+	if _, err := s.Flush(context.Background()); err != nil {
 		t.Fatalf("nil Flush error: %v", err)
 	}
 }
@@ -93,10 +93,10 @@ func TestStoreSinkNilSafe(t *testing.T) {
 func TestStoreSinkNilStoreNoop(t *testing.T) {
 	s := NewStoreSink(nil)
 	s.Add(VODChatMessage{StreamID: "1", MessageID: "m1", OffsetSeconds: 30})
-	if err := s.FlushSegment(context.Background(), 0, 1); err != nil {
+	if _, err := s.FlushSegment(context.Background(), 0, 1); err != nil {
 		t.Fatalf("FlushSegment error: %v", err)
 	}
-	if err := s.Flush(context.Background()); err != nil {
+	if _, err := s.Flush(context.Background()); err != nil {
 		t.Fatalf("Flush error: %v", err)
 	}
 }
@@ -104,10 +104,10 @@ func TestStoreSinkNilStoreNoop(t *testing.T) {
 func TestNopSink(t *testing.T) {
 	var sink Sink = NopSink{}
 	sink.Add(VODChatMessage{StreamID: "1", MessageID: "m1"})
-	if err := sink.FlushSegment(context.Background(), 0, 5); err != nil {
+	if _, err := sink.FlushSegment(context.Background(), 0, 5); err != nil {
 		t.Fatalf("NopSink FlushSegment error: %v", err)
 	}
-	if err := sink.Flush(context.Background()); err != nil {
+	if _, err := sink.Flush(context.Background()); err != nil {
 		t.Fatalf("NopSink Flush error: %v", err)
 	}
 }

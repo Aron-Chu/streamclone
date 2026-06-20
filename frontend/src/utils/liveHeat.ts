@@ -24,7 +24,15 @@
 // their own minimal input shapes (mirroring AnalyticsMinuteRollup /
 // AnalyticsTopEmote from api.ts).
 
+import type { ReplayHeatmapPoint } from '../types/heatmap.ts'
 import { resolveEmoteImageUrl } from './emoteImageUrl.ts'
+import { buildMomentScoreModel } from './momentScore.ts'
+import {
+  computeStreamBaselines,
+  detectPickReason,
+  fallbackMomentScore100,
+  type StreamBaselines,
+} from './momentScoring.ts'
 
 /** Refresh cadence for the live heat section (Req 19.1). */
 export const LIVE_HEAT_REFRESH_MS = 30000
@@ -40,6 +48,9 @@ export const LIVE_HEAT_MAX_EMOTES = 3
 
 /** Subtitle copy clarifying the score source (Req 19.1). */
 export const LIVE_HEAT_SUBTITLE = 'based on chat and emote activity'
+
+/** VOD moments list ordering hint. */
+export const LIVE_HEAT_RANKED_SUBTITLE = 'Ranked by reaction score'
 
 /** Section heading copy — honest "Most Reacted", never "Most Replayed" (Req 19.1). */
 export const LIVE_HEAT_TITLE = 'Most Reacted So Far'
@@ -87,6 +98,8 @@ export type LiveHeatReason =
   | 'seventv_spike'
   | 'twitch_emote_spike'
   | 'ffz_spike'
+  | 'viewer_spike'
+  | 'manual'
 
 export interface LiveHeatPoint {
   /** Minute bucket timestamp (ISO 8601) of the rollup. */
@@ -95,6 +108,8 @@ export interface LiveHeatPoint {
   offsetSeconds: number
   /** Reaction score in [0, 100]. */
   score: number
+  /** True when score is estimated from rollups (no backend heatmap point). */
+  estimated: boolean
   reason: LiveHeatReason
   reasonLabel: string
   chatCount: number
@@ -108,6 +123,8 @@ export interface LiveHeatInput {
   state: LiveHeatStreamState
   rollups: LiveHeatRollup[]
   topEmotes?: LiveHeatCatalogEmote[]
+  /** Backend replay heatmap points keyed by minuteTs when available. */
+  heatmapPoints?: ReplayHeatmapPoint[]
   /** When set, offsets are absolute seconds from stream start (VOD seek). */
   streamStartedAt?: string
 }
@@ -125,17 +142,14 @@ export interface LiveHeatResult {
   subtitle: string
 }
 
-interface ScoreBaselines {
-  chat: number
-  emotes: number
-}
-
 const REASON_LABELS: Record<LiveHeatReason, string> = {
   chat_spike: 'Chat spike',
   emote_spike: 'Emote spike',
   seventv_spike: '7TV emote spike',
   twitch_emote_spike: 'Twitch emote spike',
   ffz_spike: 'FFZ emote spike',
+  viewer_spike: 'Viewer spike',
+  manual: 'Moment',
 }
 
 /** Reaction-bearing rollup (not a synthetic gap-fill row). */
@@ -204,41 +218,41 @@ function topEmotesFromRollup(
     })
 }
 
-function computeBaselines(rollups: LiveHeatRollup[]): ScoreBaselines {
-  if (!rollups.length) return { chat: 1, emotes: 1 }
-  const chat = rollups.reduce((sum, r) => sum + Math.max(0, r.chatCount ?? 0), 0) / rollups.length
-  const emotes = rollups.reduce((sum, r) => sum + emoteTotalOf(r), 0) / rollups.length
-  return { chat: chat || 1, emotes: emotes || 1 }
+function liveHeatCatalogAsTopEmotes(catalog: LiveHeatCatalogEmote[]) {
+  return catalog
+    .filter((emote): emote is LiveHeatCatalogEmote & { key: string } => Boolean(emote.key))
+    .map(emote => ({
+      key: emote.key,
+      name: emote.name,
+      id: emote.id,
+      provider: emote.provider,
+      imageUrl: emote.imageUrl,
+      count: emote.count,
+    }))
 }
 
-/**
- * Reaction score in [0, 100] from chat + emote activity relative to the
- * stream's own per-minute baseline (Most_Reacted). Chat is weighted slightly
- * above emotes; both are normalized against twice the baseline so a minute at
- * 2x average activity reaches the top of the scale.
- */
-function reactionScore(r: LiveHeatRollup, baselines: ScoreBaselines): number {
-  const chatNorm = Math.min(1, Math.max(0, r.chatCount ?? 0) / Math.max(baselines.chat * 2, 1))
-  const emoteNorm = Math.min(1, emoteTotalOf(r) / Math.max(baselines.emotes * 2, 1))
-  const weighted = chatNorm * 0.6 + emoteNorm * 0.4
-  return Math.round(Math.min(100, Math.max(0, weighted * 100)))
-}
-
-function detectReason(
+function scoreLiveHeatPoint(
   r: LiveHeatRollup,
-  baselines: ScoreBaselines,
-  topEmotes: LiveHeatEmote[],
-): LiveHeatReason {
-  const chatMult = (r.chatCount ?? 0) / Math.max(baselines.chat, 1)
-  const emoteMult = emoteTotalOf(r) / Math.max(baselines.emotes, 1)
-  if (emoteMult >= 2 && emoteMult >= chatMult) {
-    const provider = topEmotes[0]?.provider
-    if (provider === 'seventv') return 'seventv_spike'
-    if (provider === 'twitch') return 'twitch_emote_spike'
-    if (provider === 'ffz') return 'ffz_spike'
-    return 'emote_spike'
+  baselines: StreamBaselines,
+  completedRollups: LiveHeatRollup[],
+  heatmapPointMap: Map<string, ReplayHeatmapPoint> | null,
+  catalog: LiveHeatCatalogEmote[],
+): { score: number; estimated: boolean; reason: LiveHeatReason; reasonLabel: string } {
+  const fallbackReason = detectPickReason(r, baselines, liveHeatCatalogAsTopEmotes(catalog))
+  const scoreModel = buildMomentScoreModel({
+    heatmapPoint: r.minuteTs ? heatmapPointMap?.get(r.minuteTs) : undefined,
+    fallbackScore100: fallbackMomentScore100(r, baselines, completedRollups),
+    fallbackReason,
+  })
+  const reason = (scoreModel.reason in REASON_LABELS
+    ? scoreModel.reason
+    : fallbackReason) as LiveHeatReason
+  return {
+    score: Math.round(scoreModel.score),
+    estimated: scoreModel.estimated,
+    reason,
+    reasonLabel: scoreModel.reasonLabel,
   }
-  return 'chat_spike'
 }
 
 function parseMinuteMs(minuteTs: string | undefined): number {
@@ -246,17 +260,32 @@ function parseMinuteMs(minuteTs: string | undefined): number {
   return Date.parse(minuteTs)
 }
 
+/** Keep peak-relative moments so obvious spikes surface on flat streams. */
+function filterRankedHeatPoints(points: LiveHeatPoint[]): LiveHeatPoint[] {
+  if (!points.length) return []
+  const maxScore = Math.max(...points.map(point => point.score))
+  if (maxScore <= 0) return []
+  const cutoff = Math.max(1, Math.round(maxScore * 0.25))
+  return points
+    .filter(point => point.score >= cutoff)
+    .sort((a, b) => b.score - a.score || a.offsetSeconds - b.offsetSeconds)
+    .slice(0, LIVE_HEAT_MAX_POINTS)
+}
+
 function buildPoint(
   r: LiveHeatRollup,
-  baselines: ScoreBaselines,
+  baselines: StreamBaselines,
+  completedRollups: LiveHeatRollup[],
+  heatmapPointMap: Map<string, ReplayHeatmapPoint> | null,
   firstMs: number,
   catalog: Map<string, LiveHeatCatalogEmote>,
   byName: Map<string, LiveHeatCatalogEmote>,
+  catalogList: LiveHeatCatalogEmote[],
   collecting: boolean,
   streamStartedMs?: number,
 ): LiveHeatPoint {
   const topEmotes = topEmotesFromRollup(r, catalog, byName)
-  const reason = detectReason(r, baselines, topEmotes)
+  const scored = scoreLiveHeatPoint(r, baselines, completedRollups, heatmapPointMap, catalogList)
   const minuteMs = parseMinuteMs(r.minuteTs)
   const anchorMs = Number.isFinite(streamStartedMs) ? streamStartedMs! : firstMs
   const offsetSeconds =
@@ -266,9 +295,10 @@ function buildPoint(
   return {
     minuteTs: r.minuteTs ?? '',
     offsetSeconds,
-    score: reactionScore(r, baselines),
-    reason,
-    reasonLabel: REASON_LABELS[reason],
+    score: scored.score,
+    estimated: scored.estimated,
+    reason: scored.reason,
+    reasonLabel: scored.reasonLabel,
     chatCount: Math.max(0, Math.round(r.chatCount ?? 0)),
     emoteCount: Math.max(0, Math.round(emoteTotalOf(r))),
     topEmotes,
@@ -309,22 +339,47 @@ export function deriveLiveHeat(input: LiveHeatInput): LiveHeatResult {
     completed = dataRollups.slice(0, -1)
   }
 
-  const baselines = computeBaselines(completed.length ? completed : dataRollups)
+  const baselineRollups = completed.length ? completed : dataRollups
+  const baselines = computeStreamBaselines(baselineRollups)
+  const heatmapPointMap = input.heatmapPoints?.length
+    ? new Map(input.heatmapPoints.map(point => [point.minuteTs, point]))
+    : null
+  const catalogList = input.topEmotes ?? []
   const firstMs = parseMinuteMs(dataRollups[0]?.minuteTs)
   const streamStartedMs = parseMinuteMs(input.streamStartedAt)
 
   const collectingPoint = collectingRollup
-    ? buildPoint(collectingRollup, baselines, firstMs, catalog, byName, true, streamStartedMs)
+    ? buildPoint(
+        collectingRollup,
+        baselines,
+        completed,
+        heatmapPointMap,
+        firstMs,
+        catalog,
+        byName,
+        catalogList,
+        true,
+        streamStartedMs,
+      )
     : null
 
   const visible = completed.length >= LIVE_HEAT_MIN_COMPLETED_ROLLUPS
 
   const points = visible
-    ? completed
-        .map(r => buildPoint(r, baselines, firstMs, catalog, byName, false, streamStartedMs))
-        .filter(p => p.score > 0)
-        .sort((a, b) => b.score - a.score || a.offsetSeconds - b.offsetSeconds)
-        .slice(0, LIVE_HEAT_MAX_POINTS)
+    ? filterRankedHeatPoints(
+        completed.map(r => buildPoint(
+          r,
+          baselines,
+          completed,
+          heatmapPointMap,
+          firstMs,
+          catalog,
+          byName,
+          catalogList,
+          false,
+          streamStartedMs,
+        )),
+      )
     : []
 
   return {

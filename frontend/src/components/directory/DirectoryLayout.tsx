@@ -38,6 +38,9 @@ interface DirectoryLayoutProps {
   headerSubtitle?: string
   showBrowseLink?: boolean
   showNetworkLink?: boolean
+  showPulseWireLink?: boolean
+  browseActive?: boolean
+  pulseWireActive?: boolean
 }
 
 export function DirectoryLayout({
@@ -47,12 +50,15 @@ export function DirectoryLayout({
   headerSubtitle = 'Live directory',
   showBrowseLink = false,
   showNetworkLink = false,
+  showPulseWireLink = false,
+  browseActive = false,
+  pulseWireActive = false,
 }: DirectoryLayoutProps) {
   const [mobileRailOpen, setMobileRailOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#0e0e10] text-zinc-100">
+    <main className="min-h-screen overflow-hidden bg-[#0A0A0D] text-zinc-100">
       <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(135deg,rgba(139,92,246,.08),transparent_28%)]" />
       <div className="relative flex min-h-screen">
         <ChannelRail
@@ -63,7 +69,7 @@ export function DirectoryLayout({
         />
         <div className="min-w-0 flex-1 overflow-hidden">
           <div className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col px-4 py-5 sm:px-6 lg:px-8">
-            <header className="sticky top-0 z-20 -mx-4 border-b border-[#26262c] bg-[#0e0e10]/90 px-4 py-4 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+            <header className="sticky top-0 z-20 -mx-4 border-b border-[#1C1C21] bg-[#0E0E11]/90 px-4 py-4 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
@@ -76,7 +82,9 @@ export function DirectoryLayout({
                     {showBrowseLink ? (
                       <Link
                         to="/browse"
-                        className="hidden text-sm font-bold text-zinc-400 transition hover:text-white sm:inline"
+                        className={`hidden text-sm font-bold transition sm:inline ${
+                          browseActive ? 'text-[#A970FF]' : 'text-zinc-400 hover:text-white'
+                        }`}
                       >
                         Browse
                       </Link>
@@ -87,6 +95,16 @@ export function DirectoryLayout({
                         className="hidden text-sm font-bold text-zinc-400 transition hover:text-white sm:inline"
                       >
                         Network
+                      </Link>
+                    ) : null}
+                    {showPulseWireLink ? (
+                      <Link
+                        to="/pulse-wire"
+                        className={`hidden text-sm font-bold transition sm:inline ${
+                          pulseWireActive ? 'text-[#A970FF]' : 'text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        Pulse Wire
                       </Link>
                     ) : null}
                   </div>

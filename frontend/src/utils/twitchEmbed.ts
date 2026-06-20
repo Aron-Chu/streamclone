@@ -18,14 +18,6 @@ declare global {
   }
 }
 
-export function formatTwitchEmbedTime(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = s % 60
-  return `${h}h${m}m${sec}s`
-}
-
 export function loadTwitchEmbedScript(): Promise<void> {
   if (typeof window === 'undefined') return Promise.reject(new Error('browser required'))
   if (window.Twitch?.Player) return Promise.resolve()
@@ -46,4 +38,28 @@ export function loadTwitchEmbedScript(): Promise<void> {
     document.head.appendChild(script)
   })
   return twitchEmbedScriptPromise
+}
+
+export function formatTwitchEmbedTime(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  return `${h}h${m}m${sec}s`
+}
+
+/** Twitch clip/player iframes require parent=<host> matching the embedding page. */
+export function withTwitchEmbedParent(embedUrl: string): string {
+  if (!embedUrl || typeof window === 'undefined') return embedUrl
+  try {
+    const url = new URL(embedUrl, window.location.origin)
+    if (!url.hostname.includes('twitch.tv')) return embedUrl
+    const parent = window.location.hostname || 'localhost'
+    if (!url.searchParams.getAll('parent').includes(parent)) {
+      url.searchParams.append('parent', parent)
+    }
+    return url.toString()
+  } catch {
+    return embedUrl
+  }
 }

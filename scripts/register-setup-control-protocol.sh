@@ -19,7 +19,7 @@ if [ -f "$ROOT/.env" ]; then
     if [ -f "$ROOT/VERSION" ] || grep -q '^STREAMCLONE_USE_IMAGES=1' "$ROOT/.env" 2>/dev/null; then
       compose_args+=(-f "$ROOT/deploy/docker-compose.release.yml")
     fi
-    read -r -a profiles <<<"$(env_compose_profiles "$profile")"
+    read -r -a profiles <<<"$(env_streamclone_compose_profiles "$profile" "$ROOT/.env")"
     for p in "${profiles[@]}"; do
       [ -n "$p" ] && compose_args+=(--profile "$p")
     done

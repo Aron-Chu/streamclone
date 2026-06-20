@@ -10,7 +10,7 @@ export default defineConfig({
   timeout: 60_000,
   retries: 0,
   use: {
-    baseURL: 'http://localhost:8090',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:8090',
     viewport: { width: 1920, height: 1080 },
     deviceScaleFactor: 1,
     screenshot: 'off',

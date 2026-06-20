@@ -6,6 +6,7 @@ import { useAuth } from '../auth'
 import { useStreamPrewarm } from '../hooks/useStreamPrewarm'
 import { useUiSettings } from '../settings'
 import { formatCategoryViewers } from '../utils/categorySort'
+import BrandLogo from './BrandLogo'
 
 interface ChannelRailProps {
   collapsed: boolean
@@ -201,7 +202,15 @@ function CategoryList({
   )
 }
 
-function RailContent({ collapsed, onCloseMobile, viewerOverrides }: { collapsed: boolean; onCloseMobile?: () => void; viewerOverrides?: Record<string, number | undefined> }) {
+function RailContent({
+  collapsed,
+  onCloseMobile,
+  viewerOverrides,
+}: {
+  collapsed: boolean
+  onCloseMobile?: () => void
+  viewerOverrides?: Record<string, number | undefined>
+}) {
   const settings = useUiSettings(s => s.settings)
   const toggleRailSection = useUiSettings(s => s.toggleRailSection)
   const auth = useAuth()
@@ -236,15 +245,10 @@ function RailContent({ collapsed, onCloseMobile, viewerOverrides }: { collapsed:
 
   return (
     <>
-      <div className={`flex h-16 items-center border-b border-white/10 px-3 ${collapsed ? 'justify-center' : 'justify-between'}`}>
-        {!collapsed ? (
-          <Link to="/" onClick={onCloseMobile} className="flex items-center gap-2">
-            <span className="grid h-8 w-8 place-items-center rounded bg-violet-500 text-sm font-black text-white">7</span>
-            <span className="text-sm font-black">Streamclone</span>
-          </Link>
-        ) : (
-          <Link to="/" onClick={onCloseMobile} className="grid h-9 w-9 place-items-center rounded bg-violet-500 text-sm font-black text-white">7</Link>
-        )}
+      <div className={`flex h-16 items-center border-b border-white/10 px-3 ${collapsed ? 'justify-center' : ''}`}>
+        <Link to="/" onClick={onCloseMobile} className={`flex items-center ${collapsed ? 'justify-center' : ''}`}>
+          <BrandLogo size="sm" showText={!collapsed} />
+        </Link>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
@@ -287,11 +291,20 @@ function RailContent({ collapsed, onCloseMobile, viewerOverrides }: { collapsed:
   )
 }
 
-export default function ChannelRail({ collapsed, mobileOpen, onToggleCollapsed, onCloseMobile, viewerOverrides }: ChannelRailProps) {
+export default function ChannelRail({
+  collapsed,
+  mobileOpen,
+  onToggleCollapsed,
+  onCloseMobile,
+  viewerOverrides,
+}: ChannelRailProps) {
   return (
     <>
-      <aside className={`hidden min-h-screen shrink-0 flex-col border-r border-white/10 bg-[#111117] text-white lg:flex ${collapsed ? 'w-16' : 'w-64'}`}>
-        <RailContent collapsed={collapsed} viewerOverrides={viewerOverrides} />
+      <aside className={`hidden min-h-screen shrink-0 flex-col border-r border-white/10 bg-[#0E0E11] text-white lg:flex ${collapsed ? 'w-16' : 'w-64'}`}>
+        <RailContent
+          collapsed={collapsed}
+          viewerOverrides={viewerOverrides}
+        />
         <button onClick={onToggleCollapsed} className="border-t border-white/10 px-2 py-3 text-xs font-black text-zinc-400 transition hover:bg-white/[0.06] hover:text-white">
           {collapsed ? '>>' : 'Collapse'}
         </button>
@@ -300,8 +313,12 @@ export default function ChannelRail({ collapsed, mobileOpen, onToggleCollapsed, 
       {mobileOpen ? (
         <div className="fixed inset-0 z-50 lg:hidden">
           <button aria-label="Close navigation" onClick={onCloseMobile} className="absolute inset-0 bg-black/70" />
-          <aside className="relative flex h-full w-72 flex-col border-r border-white/10 bg-[#111117] text-white shadow-2xl">
-            <RailContent collapsed={false} onCloseMobile={onCloseMobile} viewerOverrides={viewerOverrides} />
+          <aside className="relative flex h-full w-72 flex-col border-r border-white/10 bg-[#0E0E11] text-white shadow-2xl">
+            <RailContent
+              collapsed={false}
+              onCloseMobile={onCloseMobile}
+              viewerOverrides={viewerOverrides}
+            />
           </aside>
         </div>
       ) : null}

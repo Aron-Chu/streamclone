@@ -44,7 +44,7 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
         <div className="flex flex-wrap gap-1.5">
           <StatusChip label="Core" good={health.coreReady} loading={health.statusLoading} />
           <StatusChip label="Analytics" good={health.analyticsReady} loading={health.statusLoading} />
-          <StatusChip label="Clip Studio" good={health.clipperReady} loading={health.statusLoading} />
+          <StatusChip label="ReplayForge" good={health.clipperReady} loading={health.statusLoading} />
         </div>
       </div>
     )
@@ -68,7 +68,7 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
         <div className="mb-4 flex flex-wrap gap-1.5">
           <StatusChip label="Core" good={health.coreReady} loading={health.metadata.isLoading && !health.metadata.data} />
           <StatusChip label="Analytics" good={health.analyticsReady} loading={health.statusLoading} />
-          <StatusChip label="Clip Studio" good={health.clipperReady} loading={health.statusLoading} />
+          <StatusChip label="ReplayForge" good={health.clipperReady} loading={health.statusLoading} />
           <StatusChip label="Install helper" good={health.installHelperReady} loading={health.control.isLoading} />
           <StatusChip label="Docker" good={health.dockerReady} loading={health.host.isLoading} />
         </div>

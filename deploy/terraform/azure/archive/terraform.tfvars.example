@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars (gitignored) and edit if needed.
+# One command: az login && terraform init && terraform apply
+
+resource_group_name    = "rg-streamclone-archive"
+location               = "eastus"
+storage_account_prefix = "ststreamclone"
+container_name         = "streamclone-archive"
+archive_prefix         = "streamclone"
+cool_tier_after_days   = 90
+enable_versioning      = true
+
+# Post-apply automation (all true by default — one-shot setup)
+write_local_credentials          = true
+credentials_output_dir           = "~/.streamclone"
+env_local_connection_string_path = "C:/Users/Aron/.streamclone/azure-archive-connection-string"
+create_smoke_blob                = true
+grant_deployer_blob_access       = true
+create_budget_alert              = true
+budget_amount_usd                = 5
+# budget_alert_emails            = ["you@example.com"]
+create_tfstate_container         = true

@@ -99,7 +99,7 @@ function Format-StreamcloneStartDetail {
 
 function Start-StreamcloneComposeLockWatcher {
     param(
-        [ValidateSet('scraper', 'clipper', 'pulse')]
+        [ValidateSet('scraper', 'pulse')]
         [string]$Service,
         [int]$ProcessId
     )
@@ -202,7 +202,6 @@ function Get-StreamcloneOptionalServiceLabel {
     param([string]$Service)
     switch ($Service) {
         'scraper' { return 'Analytics' }
-        'clipper' { return 'Clip Studio' }
         'pulse' { return 'Pulse Dashboards' }
         default { return $Service }
     }
@@ -218,7 +217,7 @@ function Get-StreamcloneOptionalComposeTargets {
 
 function Invoke-ProfileServiceStop {
     param(
-        [ValidateSet('scraper', 'clipper', 'pulse')]
+        [ValidateSet('scraper', 'pulse')]
         [string]$Service
     )
 
@@ -245,7 +244,7 @@ function Invoke-ProfileServiceStop {
 
 function Invoke-ProfileServiceUp {
     param(
-        [ValidateSet('scraper', 'clipper', 'pulse')]
+        [ValidateSet('scraper', 'pulse')]
         [string]$Service
     )
 
@@ -290,7 +289,7 @@ function Invoke-ProfileServiceUp {
 
 function Start-ProfileServiceUpAsync {
     param(
-        [ValidateSet('scraper', 'clipper', 'pulse')]
+        [ValidateSet('scraper', 'pulse')]
         [string]$Service
     )
 
@@ -414,7 +413,7 @@ function Start-ScraperCamoufoxWarmupAsync {
 
 function Get-StreamcloneProfileStartStatus {
     param(
-        [ValidateSet('scraper', 'clipper', 'pulse')]
+        [ValidateSet('scraper', 'pulse')]
         [string]$Service
     )
 
@@ -441,8 +440,7 @@ function Get-StreamcloneProfileStartStatus {
             if ($item.service -eq $Service) {
                 $percent = 12
                 $phase = 'Queued'
-                $other = if ($Service -eq 'scraper') { 'Clip Studio' } else { 'Analytics' }
-                if ($Service -eq 'pulse') { $other = 'another optional service' }
+                $other = Get-StreamcloneOptionalServiceLabel -Service $lock.service
                 $detail = "Waiting for $other to finish - $other compose will run first, then this service starts automatically."
                 break
             }
@@ -477,7 +475,7 @@ function Get-StreamcloneProfileStartStatus {
         $detail = Format-StreamcloneStartDetail -Service $Service -Detail $detail -Blob $blob
     }
 
-    $nameFilter = if ($Service -eq 'scraper') { 'streamclone-scraper' } elseif ($Service -eq 'pulse') { 'streamclone-grafana' } else { 'streamclone-clipper' }
+    $nameFilter = if ($Service -eq 'scraper') { 'streamclone-scraper' } else { 'streamclone-grafana' }
     $ps = Invoke-EnvDockerCaptured -Arguments @('ps', '--filter', "name=$nameFilter", '--format', '{{.Status}}')
     if ($ps.ExitCode -eq 0 -and $ps.Output) {
         $status = ($ps.Output | Select-Object -First 1).Trim()
@@ -597,53 +595,6 @@ function Get-StreamcloneProfileStartStatus {
     }
 }
 
-function Invoke-SyncClipperAuth {
-    Set-Location $Root
-    if (-not (Test-Path $envPath)) {
-        throw 'Missing .env - run scripts/setup.ps1 first.'
-    }
-    if (-not (Sync-ClipperAuthFromRuntime -Root $Root -EnvFile $envPath)) {
-        return @{ ok = $true; merged = $false; message = 'no runtime clipper auth file yet' }
-    }
-
-    $script:envValues = Read-EnvKeyValueFile -Path $envPath
-    $useImages = ($envValues['STREAMCLONE_USE_IMAGES'] -eq '1') -or (-not [string]::IsNullOrWhiteSpace($envValues['IMAGE_TAG']))
-    $profile = [string]$envValues['STREAMCLONE_PROFILE']
-    if ([string]::IsNullOrWhiteSpace($profile)) { $profile = 'core' }
-
-    $clipperRunning = $false
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $psResult = Invoke-EnvDockerCaptured -Arguments @('ps', '--filter', 'name=streamclone-clipper', '--format', '{{.Names}}')
-        if ($psResult.ExitCode -eq 0 -and $psResult.Output) {
-            $clipperRunning = $true
-        }
-    } finally {
-        $ErrorActionPreference = $prev
-    }
-
-    $log = ''
-    if ($clipperRunning -or $profile -in @('clipper', 'full')) {
-        $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile -UseImages:$useImages
-        $result = Invoke-EnvDockerCaptured -Arguments ($composeArgs + @('up', '-d', '--no-deps', '--force-recreate', 'clipper'))
-        $log = ($result.Output -join [Environment]::NewLine).Trim()
-        if ($result.ExitCode -ne 0) {
-            throw "clipper recreate failed: $log"
-        }
-    }
-
-    Invoke-EnsureFrontendClipperConfig -EnvFile $envPath | Out-Null
-
-    return @{
-        ok = $true
-        merged = $true
-        recreated = ($clipperRunning -or $profile -in @('clipper', 'full'))
-        message = 'clipper credentials merged from sign-in'
-        log = $log
-    }
-}
-
 Set-Content -Path $PidFile -Value $PID -NoNewline
 
 function Ensure-SetupControlUrlAcl {
@@ -727,16 +678,11 @@ try {
                         @{ method = 'GET'; path = '/diagnostics/network'; auth = $false; description = 'Docker network I/O stats for Streamclone containers' }
                         @{ method = 'GET'; path = '/endpoints'; auth = $false; description = 'This route list' }
                         @{ method = 'GET'; path = '/start/scraper/status'; auth = $false; description = 'Async scraper profile start progress' }
-                        @{ method = 'GET'; path = '/start/clipper/status'; auth = $false; description = 'Async clipper profile start progress' }
                         @{ method = 'GET'; path = '/start/pulse/status'; auth = $false; description = 'Async Pulse service start progress' }
                         @{ method = 'POST'; path = '/start/scraper'; auth = $true; description = 'Start analytics scraper compose profile' }
-                        # Deprecated: prefer external ReplayForge (../replayforge). POST /start/clipper starts legacy in-repo clipper profile only.
-                        @{ method = 'POST'; path = '/start/clipper'; auth = $true; description = 'Start clipper compose profile (deprecated — use ReplayForge)' }
-                        @{ method = 'POST'; path = '/start/pulse'; auth = $true; description = 'Start Pulse Grafana/Influx services' }
+                        @{ method = 'POST'; path = '/start/pulse'; auth = $true; description = 'Start Pulse dashboards (Grafana/Influx services)' }
                         @{ method = 'POST'; path = '/stop/scraper'; auth = $true; description = 'Stop analytics scraper compose profile' }
-                        @{ method = 'POST'; path = '/stop/clipper'; auth = $true; description = 'Stop clipper compose profile' }
                         @{ method = 'POST'; path = '/stop/pulse'; auth = $true; description = 'Stop Pulse Grafana/Influx services' }
-                        @{ method = 'POST'; path = '/sync-clipper-auth'; auth = $true; description = 'Merge signed-in Twitch tokens into clipper env' }
                     )
                     scripts = @(
                         @{ name = 'backup-streamclone.ps1'; path = 'scripts/backup-streamclone.ps1'; description = 'Dump Postgres + MinIO backup instructions' }
@@ -757,7 +703,7 @@ try {
                 continue
             }
 
-            if ($request.HttpMethod -eq 'GET' -and $path -match '^/start/(scraper|clipper|pulse)/status$') {
+            if ($request.HttpMethod -eq 'GET' -and $path -match '^/start/(scraper|pulse)/status$') {
                 $service = $Matches[1]
                 $status = Get-StreamcloneProfileStartStatus -Service $service
                 Write-JsonResponse -Response $response -StatusCode 200 -Body @{
@@ -772,7 +718,7 @@ try {
                 continue
             }
 
-            if ($request.HttpMethod -eq 'POST' -and $path -match '^/start/(scraper|clipper|pulse)$') {
+            if ($request.HttpMethod -eq 'POST' -and $path -match '^/start/(scraper|pulse)$') {
                 if (-not (Test-SetupControlAuthorized -Request $request)) {
                     Write-JsonResponse -Response $response -StatusCode 401 -Body @{ ok = $false; error = 'unauthorized' }
                     continue
@@ -792,7 +738,7 @@ try {
                 continue
             }
 
-            if ($request.HttpMethod -eq 'POST' -and $path -match '^/stop/(scraper|clipper|pulse)$') {
+            if ($request.HttpMethod -eq 'POST' -and $path -match '^/stop/(scraper|pulse)$') {
                 if (-not (Test-SetupControlAuthorized -Request $request)) {
                     Write-JsonResponse -Response $response -StatusCode 401 -Body @{ ok = $false; error = 'unauthorized' }
                     continue
@@ -809,16 +755,6 @@ try {
                 } catch {
                     Write-JsonResponse -Response $response -StatusCode 500 -Body @{ ok = $false; error = $_.Exception.Message }
                 }
-                continue
-            }
-
-            if ($request.HttpMethod -eq 'POST' -and $path -eq '/sync-clipper-auth') {
-                if (-not (Test-SetupControlAuthorized -Request $request)) {
-                    Write-JsonResponse -Response $response -StatusCode 401 -Body @{ ok = $false; error = 'unauthorized' }
-                    continue
-                }
-                $result = Invoke-SyncClipperAuth
-                Write-JsonResponse -Response $response -StatusCode 200 -Body $result
                 continue
             }
 

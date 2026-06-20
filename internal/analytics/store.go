@@ -13,15 +13,18 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"streamclone/internal/archive"
 	"streamclone/internal/emoteimage"
 	"streamclone/internal/metrics"
 	"streamclone/internal/timeseries"
 )
 
 type Store struct {
-	db        *pgxpool.Pool
-	telemetry timeseries.Writer
-	metaCache sync.Map
+	db                      *pgxpool.Pool
+	telemetry               timeseries.Writer
+	metaCache               sync.Map
+	archiveProtectRetention bool
+	postEnd                 *PostEndDetector
 }
 
 type streamMeta struct {
@@ -39,6 +42,11 @@ type TimeseriesBackfillSummary struct {
 	ExportedCount uint64
 }
 
+type RollupWriteOptions struct {
+	RefreshSummary     bool
+	SummaryRefreshMode string
+}
+
 func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
 }
@@ -46,6 +54,20 @@ func NewStore(db *pgxpool.Pool) *Store {
 func (s *Store) WithTelemetry(writer timeseries.Writer) *Store {
 	if s != nil {
 		s.telemetry = writer
+	}
+	return s
+}
+
+func (s *Store) WithArchiveProtectRetention(enabled bool) *Store {
+	if s != nil {
+		s.archiveProtectRetention = enabled
+	}
+	return s
+}
+
+func (s *Store) WithPostEndDetector(detector *PostEndDetector) *Store {
+	if s != nil {
+		s.postEnd = detector
 	}
 	return s
 }
@@ -64,10 +86,33 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.db.Ping(ctx)
 }
 
+const streamSelectColumns = `
+	stream_id, broadcaster_id, login, COALESCE(display_name,''), COALESCE(profile_image_url,''),
+	COALESCE(description,''), COALESCE(title,''), COALESCE(category,''), tags, COALESCE(language,''),
+	COALESCE(thumbnail_url,''), started_at, ended_at, last_seen_at, current_viewers, avg_viewers,
+	peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses,
+	COALESCE(vod_id,''), COALESCE(vod_source,''),
+	COALESCE(NULLIF(canonical_stream_id,''), stream_id), COALESCE(viewer_source,'')`
+
 func (s *Store) UpsertLiveStream(ctx context.Context, stream LiveStream, profile UserProfile, seenAt time.Time) error {
 	if stream.StartedAt.IsZero() {
 		stream.StartedAt = seenAt
 	}
+	resolved, err := s.ResolveOrCreateSession(ctx, SessionResolveInput{
+		Login:          stream.Login,
+		StreamID:       stream.ID,
+		TwitchStreamID: stream.ID,
+		StartedAt:      stream.StartedAt,
+		Title:          stream.Title,
+		Category:       stream.GameName,
+		Source:         ViewerSourceLive,
+	})
+	if err != nil {
+		return err
+	}
+	stream.ID = resolved.CanonicalStreamID
+	viewerSource := mergeViewerSources(resolved.ViewerSource, ViewerSourceLive)
+
 	tags, err := json.Marshal(stream.Tags)
 	if err != nil {
 		return err
@@ -82,12 +127,13 @@ func (s *Store) UpsertLiveStream(ctx context.Context, stream LiveStream, profile
 	}
 	_, err = s.db.Exec(ctx, `
 		INSERT INTO analytics_streams (
-			stream_id, broadcaster_id, login, display_name, profile_image_url, description,
+			stream_id, canonical_stream_id, broadcaster_id, login, display_name, profile_image_url, description,
 			title, category, tags, language, thumbnail_url, started_at, last_seen_at,
-			current_viewers, peak_viewers, viewer_samples
+			current_viewers, peak_viewers, viewer_samples, viewer_source
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$14,1)
+		VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$14,1,$15)
 		ON CONFLICT (stream_id) DO UPDATE SET
+			canonical_stream_id=EXCLUDED.canonical_stream_id,
 			broadcaster_id=EXCLUDED.broadcaster_id,
 			login=EXCLUDED.login,
 			display_name=COALESCE(NULLIF(EXCLUDED.display_name,''), analytics_streams.display_name),
@@ -102,9 +148,11 @@ func (s *Store) UpsertLiveStream(ctx context.Context, stream LiveStream, profile
 			ended_at=NULL,
 			current_viewers=EXCLUDED.current_viewers,
 			peak_viewers=GREATEST(analytics_streams.peak_viewers, EXCLUDED.current_viewers),
+			viewer_source=EXCLUDED.viewer_source,
 			updated_at=now()`,
 		stream.ID, broadcasterID, normalizeLogin(stream.Login), displayName, profile.ProfileImageURL, profile.Description,
 		stream.Title, stream.GameName, string(tags), stream.Language, stream.ThumbnailURL, stream.StartedAt, seenAt, stream.ViewerCount,
+		viewerSource,
 	)
 	if err == nil && stream.ID != "" {
 		s.metaCache.Store(stream.ID, streamMeta{
@@ -121,10 +169,17 @@ func (s *Store) CloseStream(ctx context.Context, streamID string, endedAt time.T
 	if streamID == "" {
 		return nil
 	}
+	var login string
+	_ = s.db.QueryRow(ctx, `SELECT login FROM analytics_streams WHERE stream_id=$1`, streamID).Scan(&login)
 	_, err := s.db.Exec(ctx, `
 		UPDATE analytics_streams
 		SET ended_at=COALESCE(ended_at, $2), updated_at=now()
 		WHERE stream_id=$1`, streamID, endedAt)
+	if err == nil && s.postEnd != nil {
+		go func(id, channel string) {
+			_ = s.postEnd.EnqueueIfNeeded(context.Background(), id, channel)
+		}(streamID, login)
+	}
 	return err
 }
 
@@ -174,7 +229,7 @@ func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup 
 		result = "error"
 		return err
 	}
-	if err := refreshStreamSummary(ctx, tx, streamID); err != nil {
+	if err := refreshStreamSummaryObserved(ctx, tx, streamID, "single"); err != nil {
 		result = "error"
 		return err
 	}
@@ -231,14 +286,62 @@ func refreshStreamSummary(ctx context.Context, tx pgx.Tx, streamID string) error
 	return err
 }
 
+func normalizeRollupWriteOptions(opts RollupWriteOptions) RollupWriteOptions {
+	if strings.TrimSpace(opts.SummaryRefreshMode) == "" {
+		opts.SummaryRefreshMode = "immediate"
+	}
+	return opts
+}
+
+func observeSummaryRefresh(mode string, started time.Time, err error) {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		mode = "immediate"
+	}
+	result := "success"
+	if err != nil {
+		result = "error"
+	}
+	metrics.AnalyticsVODGQLSummaryRefreshTotal.WithLabelValues(mode, result).Inc()
+	metrics.AnalyticsVODGQLSummaryRefreshDuration.WithLabelValues(mode, result).Observe(time.Since(started).Seconds())
+}
+
+func refreshStreamSummaryObserved(ctx context.Context, tx pgx.Tx, streamID, mode string) error {
+	started := time.Now()
+	err := refreshStreamSummary(ctx, tx, streamID)
+	observeSummaryRefresh(mode, started, err)
+	return err
+}
+
+func (s *Store) RefreshStreamSummary(ctx context.Context, streamID string) error {
+	return s.RefreshStreamSummaryWithMode(ctx, streamID, "manual")
+}
+
+func (s *Store) RefreshStreamSummaryWithMode(ctx context.Context, streamID, mode string) error {
+	if s == nil || s.db == nil || strings.TrimSpace(streamID) == "" {
+		return nil
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := refreshStreamSummaryObserved(ctx, tx, streamID, mode); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (s *Store) LatestStreamByLogin(ctx context.Context, login string) (*StreamRecord, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT stream_id, broadcaster_id, login, COALESCE(display_name,''), COALESCE(profile_image_url,''),
 			COALESCE(description,''), COALESCE(title,''), COALESCE(category,''), tags, COALESCE(language,''),
 			COALESCE(thumbnail_url,''), started_at, ended_at, last_seen_at, current_viewers, avg_viewers,
-			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,'')
+			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,''),
+			COALESCE(canonical_stream_id, stream_id), COALESCE(viewer_source,'unknown')
 		FROM analytics_streams
 		WHERE login=$1
+		  AND COALESCE(canonical_stream_id, stream_id) = stream_id
 		ORDER BY ended_at IS NULL DESC, last_seen_at DESC, started_at DESC
 		LIMIT 1`, normalizeLogin(login))
 	if err != nil {
@@ -252,13 +355,18 @@ func (s *Store) LatestStreamByLogin(ctx context.Context, login string) (*StreamR
 }
 
 func (s *Store) StreamByID(ctx context.Context, streamID string) (*StreamRecord, error) {
+	canonicalID, err := s.ResolveCanonicalStreamID(ctx, streamID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Query(ctx, `
 		SELECT stream_id, broadcaster_id, login, COALESCE(display_name,''), COALESCE(profile_image_url,''),
 			COALESCE(description,''), COALESCE(title,''), COALESCE(category,''), tags, COALESCE(language,''),
 			COALESCE(thumbnail_url,''), started_at, ended_at, last_seen_at, current_viewers, avg_viewers,
-			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,'')
+			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,''),
+			COALESCE(canonical_stream_id, stream_id), COALESCE(viewer_source,'unknown')
 		FROM analytics_streams
-		WHERE stream_id=$1`, streamID)
+		WHERE stream_id=$1`, canonicalID)
 	if err != nil {
 		return nil, err
 	}
@@ -286,9 +394,11 @@ func (s *Store) StreamsByLogin(ctx context.Context, login string, limit int) ([]
 		SELECT stream_id, broadcaster_id, login, COALESCE(display_name,''), COALESCE(profile_image_url,''),
 			COALESCE(description,''), COALESCE(title,''), COALESCE(category,''), tags, COALESCE(language,''),
 			COALESCE(thumbnail_url,''), started_at, ended_at, last_seen_at, current_viewers, avg_viewers,
-			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,'')
+			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,''),
+			COALESCE(canonical_stream_id, stream_id), COALESCE(viewer_source,'unknown')
 		FROM analytics_streams
 		WHERE login=$1
+		  AND COALESCE(canonical_stream_id, stream_id) = stream_id
 		ORDER BY ended_at IS NULL DESC, last_seen_at DESC, started_at DESC
 		LIMIT $2`, normalizeLogin(login), limit)
 	if err != nil {
@@ -401,18 +511,53 @@ func (s *Store) UpsertStreamPlaceholder(ctx context.Context, streamID, broadcast
 	if title == "" {
 		title = "Syncing..."
 	}
-	_, err := s.db.Exec(ctx, `
-		INSERT INTO analytics_streams (
-			stream_id, broadcaster_id, login, display_name, title, category, started_at, last_seen_at, tags, peak_viewers
+	resolved, err := s.ResolveOrCreateSession(ctx, SessionResolveInput{
+		Login:         login,
+		StreamID:      streamID,
+		TTStreamID:    streamID,
+		StartedAt:     startedAt,
+		Title:         title,
+		Source:        ViewerSourceUnknown,
+		IsPlaceholder: true,
+	})
+	if err != nil {
+		return err
+	}
+	streamID = resolved.CanonicalStreamID
+	if resolved.MergedFrom != "" {
+		_, err = s.db.Exec(ctx, `
+			UPDATE analytics_streams
+			SET title = COALESCE(NULLIF($2, ''), title),
+			    started_at = LEAST(started_at, $3),
+			    last_seen_at = GREATEST(last_seen_at, $3),
+			    updated_at = now()
+			WHERE stream_id = $1`,
+			streamID, title, startedAt,
 		)
-		VALUES ($1, $2, $3, $3, $4, 'Live', $5, $5, '[]'::jsonb, 0)
+		if err == nil {
+			s.metaCache.Store(streamID, streamMeta{
+				login:     normalizeLogin(login),
+				title:     title,
+				startedAt: startedAt,
+			})
+		}
+		return err
+	}
+	_, err = s.db.Exec(ctx, `
+		INSERT INTO analytics_streams (
+			stream_id, canonical_stream_id, broadcaster_id, login, display_name, title, category,
+			started_at, last_seen_at, tags, peak_viewers, viewer_source
+		)
+		VALUES ($1, $1, $2, $3, $3, $4, 'Live', $5, $5, '[]'::jsonb, 0, $6)
 		ON CONFLICT (stream_id) DO UPDATE SET
+			canonical_stream_id = EXCLUDED.canonical_stream_id,
 			broadcaster_id = CASE
-				WHEN COALESCE(analytics_streams.broadcaster_id, '') = '' THEN EXCLUDED.broadcaster_id
+				WHEN COALESCE(analytics_streams.broadcaster_id, '') IN ('', 'pending') THEN EXCLUDED.broadcaster_id
 				ELSE analytics_streams.broadcaster_id
-		END,
+			END,
+			title = COALESCE(NULLIF(EXCLUDED.title, ''), analytics_streams.title),
 			updated_at = now()`,
-		streamID, broadcasterID, login, title, startedAt,
+		streamID, broadcasterID, login, title, startedAt, resolved.ViewerSource,
 	)
 	if err == nil {
 		s.metaCache.Store(streamID, streamMeta{
@@ -478,6 +623,28 @@ func (s *Store) DeleteSyncCheckpoint(ctx context.Context, streamID, videoID stri
 }
 
 func (s *Store) PurgeOlderThan(ctx context.Context, cutoff time.Time) error {
+	if s.archiveProtectRetention {
+		var missing int64
+		err := s.db.QueryRow(ctx, `
+			SELECT COUNT(*)
+			FROM analytics_streams st
+			WHERE st.started_at < $1
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM archive_exports ae
+				WHERE ae.artifact_type = $2
+				  AND ae.natural_key = st.stream_id
+				  AND ae.export_status = 'confirmed'
+			  )`,
+			cutoff, archive.ArtifactAnalyticsStream,
+		).Scan(&missing)
+		if err != nil {
+			return err
+		}
+		if err := archive.BlockIfMissing(archive.ArtifactAnalyticsStream, missing); err != nil {
+			return err
+		}
+	}
 	_, err := s.db.Exec(ctx, `DELETE FROM analytics_streams WHERE started_at < $1`, cutoff)
 	return err
 }
@@ -529,7 +696,7 @@ func scanStream(row streamScanner) (*StreamRecord, error) {
 		&rec.Description, &rec.Title, &rec.Category, &tagsRaw, &rec.Language, &rec.ThumbnailURL,
 		&rec.StartedAt, &endedAt, &rec.LastSeenAt, &rec.CurrentViewers, &rec.AvgViewers,
 		&rec.PeakViewers, &rec.ViewerSamples, &rec.ChatMessages, &rec.TotalEmoteUses,
-		&rec.SevenTVEmoteUses, &rec.VodID, &rec.VodSource,
+		&rec.SevenTVEmoteUses, &rec.VodID, &rec.VodSource, &rec.CanonicalStreamID, &rec.ViewerSource,
 	); err != nil {
 		return nil, err
 	}
@@ -696,9 +863,13 @@ func (s *Store) GetGameSegments(ctx context.Context, streamID string) ([]GameSeg
 	return segments, rows.Err()
 }
 
-func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, rollups []MinuteRollup) error {
+func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, rollups []MinuteRollup, opts ...RollupWriteOptions) error {
 	if streamID == "" || len(rollups) == 0 {
 		return nil
+	}
+	options := RollupWriteOptions{RefreshSummary: true, SummaryRefreshMode: "immediate"}
+	if len(opts) > 0 {
+		options = normalizeRollupWriteOptions(opts[0])
 	}
 	started := time.Now()
 	result := "success"
@@ -714,6 +885,7 @@ func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, ro
 	defer tx.Rollback(ctx)
 
 	batch := &pgx.Batch{}
+	queued := 0
 	for _, rollup := range rollups {
 		if rollup.Emotes == nil {
 			rollup.Emotes = map[string]int{}
@@ -742,6 +914,10 @@ func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, ro
 			streamID, rollup.MinuteTS, rollup.ViewerAvg, rollup.ViewerMax, rollup.ViewerLatest, rollup.ViewerSamples,
 			rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount, string(emotes),
 		)
+		queued++
+	}
+	if queued == 0 {
+		return nil
 	}
 
 	br := tx.SendBatch(ctx, batch)
@@ -750,22 +926,30 @@ func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, ro
 		return err
 	}
 
-	if err := refreshStreamSummary(ctx, tx, streamID); err != nil {
-		result = "error"
-		return err
+	if options.RefreshSummary {
+		if err := refreshStreamSummaryObserved(ctx, tx, streamID, options.SummaryRefreshMode); err != nil {
+			result = "error"
+			return err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		result = "error"
 		return err
 	}
+	metrics.AnalyticsRollupRowsWrittenTotal.WithLabelValues("bulk_upsert").Add(float64(queued))
+	metrics.AnalyticsRollupWriteBatchSize.WithLabelValues("bulk_upsert").Observe(float64(queued))
 	s.enqueueRollupTelemetry(ctx, streamID, rollups)
 	return nil
 }
 
-func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollups []MinuteRollup) error {
+func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollups []MinuteRollup, opts ...RollupWriteOptions) error {
 	if streamID == "" || len(rollups) == 0 {
 		return nil
+	}
+	options := RollupWriteOptions{RefreshSummary: true, SummaryRefreshMode: "immediate"}
+	if len(opts) > 0 {
+		options = normalizeRollupWriteOptions(opts[0])
 	}
 	started := time.Now()
 	result := "success"
@@ -781,6 +965,7 @@ func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollu
 	defer tx.Rollback(ctx)
 
 	batch := &pgx.Batch{}
+	queued := 0
 	for _, rollup := range rollups {
 		if rollup.Emotes == nil {
 			rollup.Emotes = map[string]int{}
@@ -804,6 +989,10 @@ func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollu
 				updated_at=now()`,
 			streamID, rollup.MinuteTS, rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount, string(emotes),
 		)
+		queued++
+	}
+	if queued == 0 {
+		return nil
 	}
 
 	br := tx.SendBatch(ctx, batch)
@@ -812,22 +1001,30 @@ func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollu
 		return err
 	}
 
-	if err := refreshStreamSummary(ctx, tx, streamID); err != nil {
-		result = "error"
-		return err
+	if options.RefreshSummary {
+		if err := refreshStreamSummaryObserved(ctx, tx, streamID, options.SummaryRefreshMode); err != nil {
+			result = "error"
+			return err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		result = "error"
 		return err
 	}
+	metrics.AnalyticsRollupRowsWrittenTotal.WithLabelValues("bulk_patch_chat").Add(float64(queued))
+	metrics.AnalyticsRollupWriteBatchSize.WithLabelValues("bulk_patch_chat").Observe(float64(queued))
 	s.enqueueRollupTelemetry(ctx, streamID, rollups)
 	return nil
 }
 
-func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rollups []MinuteRollup) error {
+func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rollups []MinuteRollup, opts ...RollupWriteOptions) error {
 	if streamID == "" || len(rollups) == 0 {
 		return nil
+	}
+	options := RollupWriteOptions{RefreshSummary: true, SummaryRefreshMode: "immediate"}
+	if len(opts) > 0 {
+		options = normalizeRollupWriteOptions(opts[0])
 	}
 	started := time.Now()
 	result := "success"
@@ -843,6 +1040,7 @@ func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rol
 	defer tx.Rollback(ctx)
 
 	batch := &pgx.Batch{}
+	queued := 0
 	for _, rollup := range rollups {
 		if rollup.ViewerAvg == 0 && rollup.ViewerMax == 0 && rollup.ViewerLatest == 0 {
 			continue
@@ -854,13 +1052,30 @@ func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rol
 			)
 			VALUES ($1,$2,$3,$4,$5,$6,0,0,0,'{}'::jsonb)
 			ON CONFLICT (stream_id, minute_ts) DO UPDATE SET
-				viewer_avg=CASE WHEN EXCLUDED.viewer_avg > 0 THEN EXCLUDED.viewer_avg ELSE analytics_minute_rollups.viewer_avg END,
-				viewer_max=GREATEST(analytics_minute_rollups.viewer_max, EXCLUDED.viewer_max),
-				viewer_latest=CASE WHEN EXCLUDED.viewer_latest > 0 THEN EXCLUDED.viewer_latest ELSE analytics_minute_rollups.viewer_latest END,
-				viewer_samples=GREATEST(analytics_minute_rollups.viewer_samples, EXCLUDED.viewer_samples),
+				viewer_avg=CASE
+					WHEN analytics_minute_rollups.viewer_samples > EXCLUDED.viewer_samples THEN analytics_minute_rollups.viewer_avg
+					WHEN analytics_minute_rollups.viewer_samples > 0 AND EXCLUDED.viewer_samples <= analytics_minute_rollups.viewer_samples THEN analytics_minute_rollups.viewer_avg
+					WHEN EXCLUDED.viewer_avg > 0 THEN EXCLUDED.viewer_avg
+					ELSE analytics_minute_rollups.viewer_avg END,
+				viewer_max=CASE
+					WHEN analytics_minute_rollups.viewer_samples > EXCLUDED.viewer_samples THEN analytics_minute_rollups.viewer_max
+					WHEN analytics_minute_rollups.viewer_samples > 0 AND EXCLUDED.viewer_samples <= analytics_minute_rollups.viewer_samples THEN analytics_minute_rollups.viewer_max
+					ELSE GREATEST(analytics_minute_rollups.viewer_max, EXCLUDED.viewer_max) END,
+				viewer_latest=CASE
+					WHEN analytics_minute_rollups.viewer_samples > EXCLUDED.viewer_samples THEN analytics_minute_rollups.viewer_latest
+					WHEN analytics_minute_rollups.viewer_samples > 0 AND EXCLUDED.viewer_samples <= analytics_minute_rollups.viewer_samples THEN analytics_minute_rollups.viewer_latest
+					WHEN EXCLUDED.viewer_latest > 0 THEN EXCLUDED.viewer_latest
+					ELSE analytics_minute_rollups.viewer_latest END,
+				viewer_samples=CASE
+					WHEN analytics_minute_rollups.viewer_samples >= EXCLUDED.viewer_samples THEN analytics_minute_rollups.viewer_samples
+					ELSE EXCLUDED.viewer_samples END,
 				updated_at=now()`,
 			streamID, rollup.MinuteTS, rollup.ViewerAvg, rollup.ViewerMax, rollup.ViewerLatest, rollup.ViewerSamples,
 		)
+		queued++
+	}
+	if queued == 0 {
+		return nil
 	}
 
 	br := tx.SendBatch(ctx, batch)
@@ -869,15 +1084,19 @@ func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rol
 		return err
 	}
 
-	if err := refreshStreamSummary(ctx, tx, streamID); err != nil {
-		result = "error"
-		return err
+	if options.RefreshSummary {
+		if err := refreshStreamSummaryObserved(ctx, tx, streamID, options.SummaryRefreshMode); err != nil {
+			result = "error"
+			return err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		result = "error"
 		return err
 	}
+	metrics.AnalyticsRollupRowsWrittenTotal.WithLabelValues("bulk_patch_viewer").Add(float64(queued))
+	metrics.AnalyticsRollupWriteBatchSize.WithLabelValues("bulk_patch_viewer").Observe(float64(queued))
 	s.enqueueRollupTelemetry(ctx, streamID, rollups)
 	return nil
 }

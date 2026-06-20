@@ -37,26 +37,29 @@ If Docker Desktop is not running during uninstall, Streamclone can defer Docker 
 
 ## Optional Features
 
-Core Watch is installed by default. Optional tiers can be started from the app. Analytics and Clip Studio also have setup profiles for scripted installs:
+Core Watch is installed by default. Optional tiers can be started from the app or via setup profiles for scripted installs.
 
 | Tier | Adds | How to start |
 |------|------|--------------|
-| Analytics | minute-level TwitchTracker charts | **Start Analytics** or scraper profile |
-| Clip Studio | `/studio` clip workflow | **Start Clip Studio** or clipper profile |
-| Pulse | Grafana/Influx dashboards | **Start Pulse** from Stack status |
-| Full | Analytics + Clip Studio | full profile |
+| Analytics | minute-level TwitchTracker charts | **Start Analytics** or `scraper` profile |
+| ReplayForge (Clip Studio) | `/studio` clip workflow | Install [ReplayForge](../replayforge) separately — API `:8095`, UI `:8096` |
+| Pulse Wire | streamer news wire at `/pulse-wire` | Core when `PULSE_WIRE_ENABLED=true` (see [options.md](options.md)) |
+| Pulse (Grafana) | Grafana/Influx ops dashboards | **Start Pulse dashboards** from Stack status |
+| Full | Analytics scraper only | `full` profile = scraper; does not include ReplayForge or Pulse |
 
 Details: [options.md](options.md). Scraper details: [scraper-cloudflare-and-proxy.md](scraper-cloudflare-and-proxy.md).
 
+Optional **Analytics** and **Pulse dashboards** can wake the install helper when you click **Start Analytics** or **Start Pulse dashboards** — no need to run **Start Streamclone** first if Docker is already up. ReplayForge is started outside Streamclone. The browser may ask once to open the registered `streamclone://` link; choose allow/remember. If the prompt is blocked, run **Start Streamclone** once from the Desktop shortcut.
+
 ## Twitch Sign-In
 
-Not required for watching. Sign in only for chat send, follows, or Clip Studio.
+Not required for watching. Sign in only for chat send, follows, or Clip Studio exports.
 
 1. Open `http://localhost:8090/`.
 2. Click **Sign in (optional)**.
 3. Approve on Twitch.
 
-Official releases can include bundled OAuth config. Developers can copy `deploy/env/oauth-bundle.env.example` to `deploy/env/oauth-bundle.env`.
+Official releases may include bundled OAuth (`oauth-bundle.env`) for Sign in and optional Twitch clip ingest on Pulse Wire. Without it, **Pulse Wire still works on Reddit** (public/scraper paths when `REDDIT_COMMERCIAL_OK=true`). Self-builders: copy `deploy/env/oauth-bundle.env.example` or run `twitch configure` then setup.
 
 ## macOS / Linux
 
@@ -76,10 +79,26 @@ make up
 
 Run release-style installs from `%USERPROFILE%\streamclone`; run unreleased source changes from this git checkout.
 
+### Docker Compose (developers)
+
+Always pass the repo `.env` when running Compose from a checkout so service env vars resolve consistently:
+
+```powershell
+docker compose --env-file .env -f deploy/docker-compose.yml up -d
+docker compose --env-file .env -f deploy/docker-compose.yml ps
+docker compose --env-file .env -f deploy/docker-compose.yml logs storygraph
+```
+
+```sh
+docker compose --env-file .env -f deploy/docker-compose.yml up -d
+```
+
+`make up` / `make down` wrap the same flags. Without `--env-file .env`, interpolated values like `PULSE_WIRE_ENABLED`, `REDDIT_PROVIDER`, and `SCRAPER_API_URL` may fall back to compose defaults.
+
 ## Troubleshooting
 
 - App up but charts empty: start Analytics.
-- Clip Studio auth errors: sign in on localhost, then restart Clip Studio.
+- Clip Studio auth errors: sign in on localhost (chat OAuth syncs clipper tokens), then restart ReplayForge.
 - `localhost:8090` down: run **Check Streamclone** or `make ps`.
 - Install stale after a release: use manager **Update**.
 - Public or tunnel exposure: read [security.md](security.md) first.

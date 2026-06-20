@@ -350,6 +350,7 @@ func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stre
 		ChatCoveragePct: chatCoverage.CoveragePct,
 		VodDurationSec:  vodDurationSec,
 		ChatCoverage:    &chatCoverage,
+		ViewerSource:    persistedViewerSource(stream, rollups),
 	})
 }
 
@@ -548,16 +549,32 @@ func minuteBucketKey(t time.Time) string {
 }
 
 func mergeMinuteRollups(prev, item MinuteRollup) MinuteRollup {
-	if item.ViewerAvg > prev.ViewerAvg {
+	switch {
+	case item.ViewerSamples > prev.ViewerSamples:
 		prev.ViewerAvg = item.ViewerAvg
-	}
-	if item.ViewerMax > prev.ViewerMax {
 		prev.ViewerMax = item.ViewerMax
-	}
-	if item.ViewerLatest > prev.ViewerLatest {
 		prev.ViewerLatest = item.ViewerLatest
-	}
-	if item.ViewerSamples > prev.ViewerSamples {
+		prev.ViewerSamples = item.ViewerSamples
+	case item.ViewerSamples == prev.ViewerSamples && item.ViewerSamples > 0:
+		if item.ViewerAvg > prev.ViewerAvg {
+			prev.ViewerAvg = item.ViewerAvg
+		}
+		if item.ViewerMax > prev.ViewerMax {
+			prev.ViewerMax = item.ViewerMax
+		}
+		if item.ViewerLatest > prev.ViewerLatest {
+			prev.ViewerLatest = item.ViewerLatest
+		}
+	case prev.ViewerSamples == 0 && item.ViewerSamples > 0:
+		if item.ViewerAvg > 0 {
+			prev.ViewerAvg = item.ViewerAvg
+		}
+		if item.ViewerMax > prev.ViewerMax {
+			prev.ViewerMax = item.ViewerMax
+		}
+		if item.ViewerLatest > 0 {
+			prev.ViewerLatest = item.ViewerLatest
+		}
 		prev.ViewerSamples = item.ViewerSamples
 	}
 	if item.ChatCount > prev.ChatCount {

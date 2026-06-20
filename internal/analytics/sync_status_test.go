@@ -1,88 +1,85 @@
 package analytics
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
 
-func TestSyncPhaseIsTerminal(t *testing.T) {
-	if SyncPhaseFetchingComments.IsTerminal() {
-		t.Fatal("fetching_comments should not be terminal")
+func TestSyncChatProgressJSONRoundTrip(t *testing.T) {
+	progress := SyncChatProgress{
+		Active:              true,
+		VodID:               "123",
+		FetchMode:           "parallel",
+		Concurrency:         4,
+		EffectiveSegmentSec: 300,
+		InitialSegments:     96,
+		SegmentsTotal:       142,
+		SegmentsDone:        139,
+		SegmentsIncomplete:  3,
+		HotSplits:           46,
+		CleanupPhase:        "parallel_cleanup",
+		CommentsFetched:     12000,
+		CommentsSaved:       800,
+		TimelineSec:         28740,
+		VodDurationSec:      28800,
+		GQLPages:            450,
+		Throttled:           false,
+		Message:             "cleanup",
 	}
-	if !SyncPhaseCompleted.IsTerminal() {
-		t.Fatal("completed should be terminal")
+	raw, err := json.Marshal(progress)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
-	if !SyncPhaseFailed.IsTerminal() {
-		t.Fatal("failed should be terminal")
+	var decoded SyncChatProgress
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-}
-
-func TestSyncStatusIsStale(t *testing.T) {
-	now := time.Now().UTC()
-	active := &SyncStatus{
-		Phase:     SyncPhaseFetchingComments,
-		UpdatedAt: now.Add(-30 * time.Second),
-	}
-	if syncStatusIsStale(active) {
-		t.Fatal("recent status should not be stale")
-	}
-	stale := &SyncStatus{
-		Phase:     SyncPhaseResolvingVOD,
-		UpdatedAt: now.Add(-2 * time.Minute),
-	}
-	if !syncStatusIsStale(stale) {
-		t.Fatal("old non-terminal status should be stale")
-	}
-	if syncStatusIsStale(&SyncStatus{Phase: SyncPhaseCompleted, UpdatedAt: now.Add(-2 * time.Minute)}) {
-		t.Fatal("completed should not be stale")
-	}
-}
-
-func TestSyncStatusShouldReportStaleDependsOnCurrentOwner(t *testing.T) {
-	status := &SyncStatus{
-		Phase:     SyncPhaseFetchingComments,
-		UpdatedAt: time.Now().UTC().Add(-2 * time.Minute),
-	}
-	if !syncStatusShouldReportStale(status, false) {
-		t.Fatal("stale status without a current owner should be reported stale")
-	}
-	if syncStatusShouldReportStale(status, true) {
-		t.Fatal("stale status owned by this process should stay active")
+	if decoded.InitialSegments != 96 || decoded.HotSplits != 46 || decoded.SegmentsIncomplete != 3 || decoded.CleanupPhase != "parallel_cleanup" || decoded.CommentsSaved != 800 {
+		t.Fatalf("unexpected decoded progress: %+v", decoded)
 	}
 }
 
-func TestSyncLockOwnedBy(t *testing.T) {
-	if !syncLockOwnedBy("owner-a", "owner-a") {
-		t.Fatal("matching owner should own lock")
+func TestHasLiveCollectorViewerCoverage(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Minute)
+	rollups := make([]MinuteRollup, 20)
+	for i := range rollups {
+		val := 100 + i*10
+		if i >= 15 {
+			val = 250
+		}
+		rollups[i] = MinuteRollup{
+			MinuteTS:      now.Add(time.Duration(i) * time.Minute),
+			ViewerAvg:     val,
+			ViewerSamples: 1,
+		}
 	}
-	if syncLockOwnedBy("owner-a", "owner-b") {
-		t.Fatal("different owner should not own lock")
+	stream := &StreamRecord{
+		ViewerSamples: 20,
+		StartedAt:     now,
+		EndedAt:       ptrTime(now.Add(20 * time.Minute)),
+		LastSeenAt:    now.Add(10 * time.Minute),
 	}
-	if syncLockOwnedBy("", "owner-a") {
-		t.Fatal("empty lock value should not be owned")
+	if !hasLiveCollectorViewerCoverage(stream, rollups) {
+		t.Fatal("expected live collector coverage")
+	}
+
+	stale := *stream
+	stale.LastSeenAt = now.Add(-72 * time.Hour)
+	if hasLiveCollectorViewerCoverage(&stale, rollups) {
+		t.Fatal("expected stale last_seen to fail live collector coverage")
 	}
 }
 
-func TestSyncStatusCacheThrottlesFlush(t *testing.T) {
-	cache := &syncStatusCache{}
-	cache.put(SyncStatus{StreamID: "1"})
-	if !cache.shouldFlush("1", false) {
-		t.Fatal("first flush should be allowed")
-	}
-	cache.markFlushed("1")
-	if cache.shouldFlush("1", false) {
-		t.Fatal("immediate second flush should be throttled")
-	}
-	if !cache.shouldFlush("1", true) {
-		t.Fatal("forced flush should always run")
-	}
-}
-
-func TestSyncStatusKeys(t *testing.T) {
-	if got := syncStatusKey("123"); got != "analytics:sync:123" {
-		t.Fatalf("syncStatusKey = %q", got)
-	}
-	if got := syncLockKey("123"); got != "analytics:sync-lock:123" {
-		t.Fatalf("syncLockKey = %q", got)
+func TestInferViewerSource(t *testing.T) {
+	now := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
+	rollups := []MinuteRollup{{
+		MinuteTS:      now,
+		ViewerAvg:     500,
+		ViewerSamples: 1,
+	}}
+	stream := &StreamRecord{ViewerSamples: 5, LastSeenAt: now, StartedAt: now, EndedAt: ptrTime(now.Add(time.Hour))}
+	if got := inferViewerSource(stream, rollups); got != "partial" {
+		t.Fatalf("expected partial viewer source, got %q", got)
 	}
 }

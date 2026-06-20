@@ -127,3 +127,52 @@
     transform: translateY(0);
   }
 }
+
+@keyframes pulse-wire-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-wire-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.pulse-wire-detail-enter {
+  animation: pulse-wire-expand 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pulse-wire-card-enter {
+  animation: pulse-wire-rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pulse-wire-stagger > * {
+  animation: pulse-wire-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pulse-wire-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.pulse-wire-stagger > *:nth-child(2) { animation-delay: 40ms; }
+.pulse-wire-stagger > *:nth-child(3) { animation-delay: 80ms; }
+.pulse-wire-stagger > *:nth-child(4) { animation-delay: 120ms; }
+.pulse-wire-stagger > *:nth-child(5) { animation-delay: 160ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-wire-detail-enter,
+  .pulse-wire-card-enter,
+  .pulse-wire-stagger > * {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -98,3 +98,100 @@ it('exposes a 30s refresh cadence and HH:MM:SS offset formatter', () => {
   assert.equal(formatHeatOffset(65), '00:01:05')
   assert.equal(formatHeatOffset(3661), '01:01:01')
 })
+
+it('spreads fallback scores instead of capping many peaks at 100', () => {
+  const rollups = makeRollups(25, i => ({
+    chatCount: 180 + i * 45,
+    totalEmoteCount: 80 + i * 18,
+  }))
+  const heat = deriveLiveHeat({ state: 'live', rollups })
+  const scores = heat.points.map(point => point.score)
+  assert.ok(scores.length > 1)
+  assert.ok(new Set(scores).size > 1, 'scores should differentiate across minutes')
+  assert.ok(scores.some(score => score < 100), 'not every peak should hit the ceiling')
+})
+
+it('uses backend heatmap score when a point is available', () => {
+  const rollups = makeRollups(10)
+  const targetMinute = rollups[3].minuteTs as string
+  const heatmapPoints = [{
+    minuteTs: targetMinute,
+    offsetSeconds: 180,
+    durationSeconds: 60,
+    score: 87,
+    confidence: 0.91,
+    reason: 'chat_spike',
+    topEmotes: [],
+    vodId: '123',
+    streamId: 'stream-1',
+  }]
+  const heat = deriveLiveHeat({ state: 'historical', rollups, heatmapPoints })
+  const match = heat.points.find(point => point.minuteTs === targetMinute)
+  assert.ok(match)
+  assert.equal(match?.score, 87)
+  assert.equal(match?.estimated, false)
+})
+
+it('keeps the collecting minute out of ranked points while live', () => {
+  const rollups = makeRollups(12, i => ({
+    chatCount: 20 + i * 30,
+    totalEmoteCount: 5 + i,
+  }))
+  const heat = deriveLiveHeat({ state: 'live', rollups })
+  assert.equal(heat.completedRollupCount, 11)
+  assert.ok(heat.collectingPoint)
+  assert.equal(heat.collectingPoint?.collecting, true)
+  assert.ok(
+    heat.points.every(point => point.minuteTs !== heat.collectingPoint?.minuteTs),
+    'collecting minute must not appear in ranked list',
+  )
+})
+
+it('spreads scores instead of saturating every minute at 100', () => {
+  const rollups = makeRollups(12, i => ({
+    chatCount: 10 + i * 3,
+    totalEmoteCount: 2 + i,
+  }))
+  const heat = deriveLiveHeat({ state: 'historical', rollups })
+  const scores = heat.points.map(point => point.score)
+  assert.ok(scores.length >= 2)
+  assert.ok(new Set(scores).size > 1, 'scores should not all be identical')
+  assert.ok(scores.every(score => score <= 100))
+  assert.ok(scores.some(score => score < 100), 'not every minute should hit 100')
+})
+
+it('uses backend heatmap scores when heatmap points are provided', () => {
+  const rollups = makeRollups(8)
+  const minuteTs = rollups[3].minuteTs as string
+  const heat = deriveLiveHeat({
+    state: 'historical',
+    rollups,
+    heatmapPoints: [{
+      offsetSeconds: 180,
+      durationSeconds: 60,
+      score: 42,
+      confidence: 0.9,
+      reason: 'chat_spike',
+      topEmotes: [],
+      vodId: null,
+      streamId: 'stream-1',
+      minuteTs,
+    }],
+  })
+  const matched = heat.points.find(point => point.minuteTs === minuteTs)
+  assert.ok(matched)
+  assert.equal(matched?.score, 42)
+  assert.equal(matched?.estimated, false)
+})
+
+it('still excludes the collecting minute from ranked points while live', () => {
+  const rollups = makeRollups(8, i => ({
+    chatCount: 20 + i * 5,
+    totalEmoteCount: 4 + i,
+  }))
+  const heat = deriveLiveHeat({ state: 'live', rollups })
+  assert.equal(heat.completedRollupCount, 7)
+  assert.ok(heat.collectingPoint)
+  assert.equal(heat.collectingPoint?.collecting, true)
+  assert.ok(!heat.points.some(point => point.minuteTs === heat.collectingPoint?.minuteTs))
+})

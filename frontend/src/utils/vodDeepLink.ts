@@ -10,6 +10,44 @@ import { normalizeVodId } from './vodId.ts'
 // request + seek), so the smoke test guards the real code paths.
 
 /**
+ * Builds an analytics route for reviewing a moment on the chart / VOD tools.
+ * When `analyticsStreamId` is set, lands on the stream-scoped analytics page.
+ */
+export function buildAnalyticsMomentLink(
+  login: string,
+  offsetSeconds: number,
+  analyticsStreamId?: string,
+): string {
+  const safeOffset = Number.isFinite(offsetSeconds)
+    ? Math.max(0, Math.trunc(offsetSeconds))
+    : 0
+  const params = new URLSearchParams()
+  if (safeOffset > 0) params.set('offset', String(safeOffset))
+  const suffix = params.toString()
+  const query = suffix ? `?${suffix}` : ''
+  const streamId = analyticsStreamId?.trim()
+  if (streamId) {
+    return `/analytics/${encodeURIComponent(login)}/${encodeURIComponent(streamId)}${query}`
+  }
+  return `/analytics/${encodeURIComponent(login)}${query}`
+}
+
+/**
+ * Prefer in-app VOD playback when a VOD id is known; otherwise open analytics.
+ */
+export function buildMomentJumpLink(
+  login: string,
+  offsetSeconds: number,
+  options?: { vodId?: string; analyticsStreamId?: string },
+): string {
+  const vodId = options?.vodId?.trim()
+  if (vodId) {
+    return buildVodDeepLink(login, vodId, offsetSeconds, options?.analyticsStreamId)
+  }
+  return buildAnalyticsMomentLink(login, offsetSeconds, options?.analyticsStreamId)
+}
+
+/**
  * Builds the canonical VOD deep link `/c/{login}?vod={vodId}&offset={offset}`.
  *
  * Used by the channel VODs-tab "Play VOD" link. `login` and `vodId` are URL-encoded;
@@ -115,15 +153,15 @@ export interface VodAnalyticsContext {
  * Re-sync actions (Req 20.5, 34.3).
  */
 /**
- * Analytics VOD review uses the Streamclone HLS relay plus synced rollups (heatmap + Pulse tab).
- * Twitch embed is reserved for explicit relay fallback only.
+ * Analytics VOD review with a synced stream id prefers the Twitch embed player
+ * (heatmap + Pulse tab stay in sync). Relay remains the fallback when embed fails.
  */
 export function preferTwitchEmbedReview(
-  _isVodPlayback: boolean,
-  _fromAnalytics: boolean,
-  _streamId: string,
+  isVodPlayback: boolean,
+  fromAnalytics: boolean,
+  streamId: string,
 ): boolean {
-  return false
+  return isVodPlayback && fromAnalytics && streamId.trim().length > 0
 }
 
 export function parseVodAnalyticsContext(

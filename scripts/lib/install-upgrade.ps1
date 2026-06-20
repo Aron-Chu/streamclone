@@ -5,7 +5,7 @@
 . (Join-Path $PSScriptRoot 'stack-progress.ps1')
 
 $Script:StreamcloneCoreImageRepos = @(
-    'metadata', 'video', 'chat', 'analytics', 'emote', 'frontend'
+    'metadata', 'video', 'chat', 'analytics', 'emote', 'storygraph', 'frontend'
 )
 
 $Script:StreamcloneGhcrPrefix = 'ghcr.io/aron-chu/streamclone'
@@ -491,6 +491,10 @@ function Invoke-StreamcloneUpgrade {
     }
 
     Sync-StreamcloneImageTag -Root $Root -Tag $TargetTag
+    $envPath = Join-Path $Root '.env'
+    if (Test-Path $envPath) {
+        Invoke-EnvApplyReleaseDefaults -EnvFile $envPath | Out-Null
+    }
     Set-Location $Root
 
     $profile = Get-StreamcloneProfileFromRoot -Root $Root

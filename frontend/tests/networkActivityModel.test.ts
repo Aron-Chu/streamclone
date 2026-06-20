@@ -152,6 +152,23 @@ test('summarizeActivityNodes counts analytics syncs and tracking', () => {
   const summary = summarizeActivityNodes(nodes)
   assert.equal(summary.analyticsSyncs, 1)
   assert.equal(summary.trackedChannels, 2)
+  assert.ok(summary.stoppable >= 2)
+})
+
+test('tracking nodes expose untrack action', () => {
+  const nodes = buildNetworkActivityNodes({
+    activeStreams: [],
+    trackingSnapshot: { tracked: ['xqc'] },
+    pulseReady: false,
+    containers: [],
+    pageMonitoringPaused: false,
+    clientProbeMbps: null,
+    setupControlAvailable: false,
+  })
+  const tracking = nodes.find(node => node.id === 'tracking-xqc')
+  assert.equal(tracking?.canDisable, true)
+  assert.equal(tracking?.disableLabel, 'Untrack')
+  assert.deepEqual(tracking?.disableAction, { kind: 'untrack-channel', channel: 'xqc' })
 })
 
 test('formatBytes and formatRate render human units', () => {

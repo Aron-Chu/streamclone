@@ -5,6 +5,7 @@ import {
   ACTIVITY_WAVEFORM_LAYER_ORDER,
   ACTIVITY_WAVEFORM_MAX_PEAKS,
   ACTIVITY_WAVEFORM_PEAK_MIN_SCORE,
+  activityWaveformOffsetToX,
   defaultLayerVisibility,
   deriveActivityWaveform,
   detectActivityPeaks,
@@ -126,4 +127,12 @@ it('detectActivityPeaks returns empty for very short series', () => {
   const rollups = makeRollups(2)
   const result = deriveActivityWaveform(rollups)
   assert.deepEqual(detectActivityPeaks(result.points), [])
+})
+
+it('maps VOD offsets to waveform x coordinates for playhead markers', () => {
+  assert.equal(activityWaveformOffsetToX(0, 3600, 400), 0)
+  assert.equal(activityWaveformOffsetToX(1800, 3600, 400), 200)
+  assert.equal(activityWaveformOffsetToX(3600, 3600, 400), 400)
+  assert.equal(activityWaveformOffsetToX(5000, 3600, 400), 400)
+  assert.equal(activityWaveformOffsetToX(-10, 3600, 400), 0)
 })

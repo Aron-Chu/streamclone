@@ -1,13 +1,15 @@
 # Clip Studio Steering
 
-Clip Studio is optional local automation for Twitch clips, VOD exports, captions, templates, and vertical renders. It must not become a dependency of Core Watch.
+**Active Clip Studio lives in [ReplayForge](../replayforge)** (sibling repo). The in-repo `clipper/` stub and compose profile are **deprecated** — Streamclone proxies to `host.docker.internal:8095` when ReplayForge is running.
+
+See [docs/agents-streamclone-and-replayforge.md](../../docs/agents-streamclone-and-replayforge.md) for install and integration.
 
 ## Boundaries
 
-- Worker/API: `clipper/liveclipper/`
-- UI: `frontend/src/components/ClipStudio.tsx` and `frontend/src/components/clipStudio/`
-- Same-origin proxy: `/v1/clipper/*`
-- State: clipper SQLite and local files by default
+- Worker/API: ReplayForge backend (legacy reference: `clipper/liveclipper/`)
+- UI: ReplayForge frontend at `:8096`; Streamclone routes `/studio` and links out
+- Same-origin proxy: `/v1/clipper/*` → host ReplayForge API
+- State: ReplayForge SQLite and local files
 
 Do not move Helix writes, transcription, or FFmpeg rendering into Go viewer services.
 
@@ -31,13 +33,14 @@ Do not move Helix writes, transcription, or FFmpeg rendering into Go viewer serv
 - `get_ast_chunk("ClipStudio")`
 - `get_ast_chunk("VideoStage")`
 - `get_ast_chunk("CaptionOverlayEditor")`
-- `get_ast_chunk("_process")`
-- `get_ast_chunk("prepare_emote_assets")`
+- ReplayForge: `_process` in ReplayForge backend
 
 ## Checks
 
 ```sh
-make clipper-test
+# ReplayForge (when checked out as ../replayforge)
+cd ../replayforge && make test
+
 cd frontend && npm run build
 make security-scan
 ```

@@ -44,6 +44,8 @@ export function DirectoryStreamCard({ stream, index = 0 }: DirectoryStreamCardPr
             <img
               src={thumb(stream.thumbnailUrl || previewUrl)}
               alt={title}
+              loading="lazy"
+              decoding="async"
               className="h-full w-full object-cover transition duration-300 group-hover:brightness-110"
             />
           ) : (
@@ -51,6 +53,8 @@ export function DirectoryStreamCard({ stream, index = 0 }: DirectoryStreamCardPr
               <img
                 src={thumb(stream.profileImageUrl, 140, 140)}
                 alt={stream.displayName || stream.login}
+                loading="lazy"
+                decoding="async"
                 className="h-20 w-20 rounded-full object-cover"
               />
             </div>
@@ -77,6 +81,8 @@ export function DirectoryStreamCard({ stream, index = 0 }: DirectoryStreamCardPr
             <img
               src={thumb(avatarUrl, 72, 72)}
               alt={stream.displayName || stream.login}
+              loading="lazy"
+              decoding="async"
               className="h-full w-full object-cover"
             />
           ) : (

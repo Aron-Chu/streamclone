@@ -1,6 +1,6 @@
 import type { ReplayHeatmapPoint } from '../types/heatmap'
-import type { ClipperMomentContext } from '../api'
-import { REPLAYFORGE_UI } from '../config'
+import type { ClipperMomentContext } from '../api.ts'
+import { REPLAYFORGE_UI } from '../config.ts'
 
 export interface ClipRequest {
   channel: string

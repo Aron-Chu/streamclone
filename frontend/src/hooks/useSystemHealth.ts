@@ -50,7 +50,7 @@ export function useSystemHealth(options: { probeHost?: boolean; probeControl?: b
 
   const coreReady = metadata.data?.healthy ?? Boolean(optional.hasServiceSnapshot && !optional.statusLoading)
   const analyticsReady = optional.services?.scraper === 'ready'
-  const clipperReady = optional.services?.clipper === 'ready'
+  const clipperReady = optional.clipperReady
   const installHelperReady = optional.controlReady
   const dockerReady = host.data?.docker === 'running'
 

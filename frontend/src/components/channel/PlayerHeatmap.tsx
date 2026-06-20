@@ -8,6 +8,8 @@ export interface PlayerHeatmapProps {
   totalDurationSec: number
   isLoading?: boolean
   isError?: boolean
+  currentOffsetSec?: number | null
+  highlightOffsetSec?: number | null
   onSeek?: (offsetSeconds: number) => void
   className?: string
 }
@@ -24,6 +26,8 @@ export function PlayerHeatmap({
   totalDurationSec,
   isLoading,
   isError,
+  currentOffsetSec,
+  highlightOffsetSec,
   onSeek,
   className,
 }: PlayerHeatmapProps) {
@@ -53,6 +57,8 @@ export function PlayerHeatmap({
       totalDurationSec={totalDurationSec}
       variant="player"
       showLayerToggles={false}
+      currentOffsetSec={currentOffsetSec}
+      highlightOffsetSec={highlightOffsetSec}
       onSeek={onSeek}
       className={className}
     />

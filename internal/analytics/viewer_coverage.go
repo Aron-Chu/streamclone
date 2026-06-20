@@ -1,6 +1,11 @@
 package analytics
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+const liveCollectorRecentWindow = 48 * time.Hour
 
 // hasGoodViewerCoverageFromRollups mirrors frontend analyzeViewerCoverage heuristics
 // using persisted minute rollups. Returns true when viewer data looks complete enough
@@ -140,4 +145,66 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// hasAnyViewerRollups returns true when persisted rollups include viewer minute data.
+func hasAnyViewerRollups(rollups []MinuteRollup) bool {
+	for _, rollup := range rollups {
+		if rollup.Missing {
+			continue
+		}
+		if rollup.ViewerSamples > 0 || rollup.ViewerAvg > 0 || rollup.ViewerMax > 0 || rollup.ViewerLatest > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLiveCollectorViewerCoverage is true when the IRC/Helix live collector already
+// produced a usable viewer timeline (recent session with enough samples).
+func hasLiveCollectorViewerCoverage(stream *StreamRecord, rollups []MinuteRollup) bool {
+	if stream == nil || stream.ViewerSamples < 3 {
+		return false
+	}
+	if !stream.LastSeenAt.IsZero() && time.Since(stream.LastSeenAt) > liveCollectorRecentWindow {
+		return false
+	}
+	return hasGoodViewerCoverageFromRollups(rollups, stream)
+}
+
+// inferViewerSource reports a lightweight hint for stream detail.
+func inferViewerSource(stream *StreamRecord, rollups []MinuteRollup) string {
+	if stream != nil {
+		if source := normalizeViewerSource(stream.ViewerSource); source != ViewerSourceUnknown {
+			return source
+		}
+	}
+	liveMinutes, ttMinutes := countViewerSourceMinutes(rollups)
+	hasLive := liveMinutes > 0 || hasLiveCollectorViewerCoverage(stream, rollups)
+	hasTT := ttMinutes > 0 || hasGoodViewerCoverageFromRollups(rollups, stream)
+	if hasLive && hasTT && liveMinutes > 0 && ttMinutes > 0 {
+		return "merged"
+	}
+	if hasLiveCollectorViewerCoverage(stream, rollups) {
+		return "live"
+	}
+	if hasGoodViewerCoverageFromRollups(rollups, stream) {
+		return "tt"
+	}
+	if hasAnyViewerRollups(rollups) {
+		return "partial"
+	}
+	if stream != nil && strings.TrimSpace(stream.VodSource) != "" {
+		return "partial"
+	}
+	return ""
+}
+
+func persistedViewerSource(stream *StreamRecord, rollups []MinuteRollup) string {
+	if stream != nil {
+		if source := normalizeViewerSource(stream.ViewerSource); source != ViewerSourceUnknown {
+			return source
+		}
+	}
+	return inferViewerSource(stream, rollups)
 }

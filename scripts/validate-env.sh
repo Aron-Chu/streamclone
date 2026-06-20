@@ -85,6 +85,10 @@ require_not_placeholder() {
 
 echo "validate-env: profile=$PROFILE file=$ENV_FILE"
 
+if [ "$PROFILE" = "clipper" ]; then
+  warn "Profile clipper is deprecated — compose uses core only; install ReplayForge separately" "See docs/agents-streamclone-and-replayforge.md"
+fi
+
 require_nonempty DATABASE_URL "Run make setup to synthesize .env from .env.dev"
 require_nonempty REDIS_URL "Run make setup to synthesize .env from .env.dev"
 require_not_placeholder CURATOR_API_TOKEN change-me "Run make setup or scripts/validate-env.sh --fix"
@@ -135,14 +139,42 @@ fi
 oauth_id="$(env_read_value "$ENV_FILE" TWITCH_OAUTH_CLIENT_ID || true)"
 oauth_secret="$(env_read_value "$ENV_FILE" TWITCH_OAUTH_CLIENT_SECRET || true)"
 if [ -z "$oauth_id" ] || [ -z "$oauth_secret" ]; then
-  case "$PROFILE" in
-    scraper|full|clipper)
-      warn "TWITCH_OAUTH_CLIENT_ID/SECRET missing from $ENV_FILE" "Streamclone can still start; Helix VOD lookup/token refresh may be limited until you run twitch configure then make twitch-sync"
-      ;;
-    *)
-      warn "TWITCH_OAUTH_CLIENT_ID/SECRET missing from $ENV_FILE" "Optional Helix enrichment and token refresh are limited until you run: make twitch-sync"
-      ;;
-  esac
+  if [ "$dev_import" = "true" ]; then
+    warn "Sign in (optional) requires TWITCH_OAUTH_CLIENT_ID/SECRET" "Run twitch configure then make twitch-sync, or copy deploy/env/oauth-bundle.env.example to deploy/env/oauth-bundle.env and re-run setup"
+  else
+    case "$PROFILE" in
+      scraper|full)
+        warn "TWITCH_OAUTH_CLIENT_ID/SECRET missing from $ENV_FILE" "Streamclone can still start; Helix VOD lookup/token refresh may be limited until you run twitch configure then make twitch-sync"
+        ;;
+      *)
+        warn "TWITCH_OAUTH_CLIENT_ID/SECRET missing from $ENV_FILE" "Optional Helix enrichment and token refresh are limited until you run: make twitch-sync"
+        ;;
+    esac
+  fi
+fi
+
+pulse_wire="$(env_read_value "$ENV_FILE" PULSE_WIRE_ENABLED || true)"
+reddit_ok="$(env_read_value "$ENV_FILE" REDDIT_COMMERCIAL_OK || true)"
+if [ "$pulse_wire" = "true" ] && [ "$reddit_ok" != "true" ]; then
+  warn "PULSE_WIRE_ENABLED=true but REDDIT_COMMERCIAL_OK is not true" "Reddit ingest stays disabled until you accept commercial API terms (set REDDIT_COMMERCIAL_OK=true in .env.local)"
+fi
+
+streamerbans_enabled="$(env_read_value "$ENV_FILE" STREAMERBANS_INGEST_ENABLED || true)"
+x_unofficial_ok="$(env_read_value "$ENV_FILE" X_UNOFFICIAL_OK || true)"
+x_auth_token="$(env_read_value "$ENV_FILE" X_AUTH_TOKEN || true)"
+emusks_x_auth_token="$(env_read_value "$ENV_FILE" EMUSKS_X_AUTH_TOKEN || true)"
+has_x_token=false
+if [ -n "$x_auth_token" ] || [ -n "$emusks_x_auth_token" ]; then
+  has_x_token=true
+fi
+if [ "$x_unofficial_ok" = "true" ] && [ "$has_x_token" != true ]; then
+  warn "X_UNOFFICIAL_OK=true but no X_AUTH_TOKEN or EMUSKS_X_AUTH_TOKEN is set" "StreamerBans tier 2 is credential-gated; leave tier 2 unset for HTML fallback, or keep the token in .env.local"
+fi
+if [ "$has_x_token" = true ] && [ "$x_unofficial_ok" != "true" ]; then
+  warn "X_AUTH_TOKEN/EMUSKS_X_AUTH_TOKEN is set but X_UNOFFICIAL_OK is not true" "Set X_UNOFFICIAL_OK=true only if you accept the unofficial emusks/X path; otherwise remove the token"
+fi
+if { [ "$x_unofficial_ok" = "true" ] || [ "$has_x_token" = true ]; } && [ "$streamerbans_enabled" != "true" ]; then
+  warn "StreamerBans tier-2 variables are set but STREAMERBANS_INGEST_ENABLED is not true" "Tier 2 only augments StreamerBans ingest; set STREAMERBANS_INGEST_ENABLED=true or remove the tier-2 variables"
 fi
 
 case "$PROFILE" in
@@ -159,27 +191,12 @@ case "$PROFILE" in
     ;;
 esac
 
-case "$PROFILE" in
-  clipper|full)
-    webhook="$(env_read_value "$ENV_FILE" CLIPPER_WEBHOOK_TOKEN || true)"
-    vite="$(env_read_value "$ENV_FILE" VITE_CLIPPER_TOKEN || true)"
-    if [ -z "$webhook" ]; then
-      fail "CLIPPER_WEBHOOK_TOKEN is empty" "Run make setup or scripts/validate-env.sh --fix"
-    fi
-    if [ -z "$vite" ] || [ "$vite" != "$webhook" ]; then
-      warn "VITE_CLIPPER_TOKEN should match CLIPPER_WEBHOOK_TOKEN" "Run make setup or scripts/validate-env.sh --fix"
-    fi
-    token="$(env_read_value "$ENV_FILE" CLIPPER_TWITCH_USER_ACCESS_TOKEN || true)"
-    if [ -z "$token" ]; then
-      warn "CLIPPER_TWITCH_USER_ACCESS_TOKEN is empty" "Click Sign in (optional) at http://localhost:8090, or run make twitch-local-auth with Twitch CLI"
-    fi
-    client="$(env_read_value "$ENV_FILE" CLIPPER_TWITCH_CLIENT_ID || true)"
-    oauth="$(env_read_value "$ENV_FILE" TWITCH_OAUTH_CLIENT_ID || true)"
-    if [ -z "$client" ] && [ -z "$oauth" ]; then
-      warn "No Twitch OAuth client id for clipper" "Run twitch configure then make twitch-sync"
-    fi
-    ;;
-esac
+clipper_token="$(env_read_value "$ENV_FILE" CLIPPER_TWITCH_USER_ACCESS_TOKEN || true)"
+if [ -n "$clipper_token" ]; then
+  if ! curl -fsS --max-time 3 http://127.0.0.1:8095/healthz >/dev/null 2>&1; then
+    warn "CLIPPER_TWITCH_USER_ACCESS_TOKEN is set but ReplayForge is not reachable at http://127.0.0.1:8095/healthz" "Install and start ReplayForge separately — see docs/agents-streamclone-and-replayforge.md"
+  fi
+fi
 
 echo ""
 if [ "$errors" -gt 0 ]; then

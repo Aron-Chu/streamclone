@@ -169,7 +169,7 @@ func TestPostGQLVideoCommentsRetries429(t *testing.T) {
 		log:            slog.Default(),
 	}
 	req := buildVideoCommentsGQLRequest("123", "hash", false, 0, "")
-	resp, err := svc.postGQLVideoComments(context.Background(), req, nil)
+	resp, err := svc.postGQLVideoComments(context.Background(), req, nil, nil)
 	if err != nil {
 		t.Fatalf("postGQLVideoComments: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestPostGQLVideoCommentsRejectsNonRetryableStatus(t *testing.T) {
 		gqlClient:      srv.Client(),
 		log:            slog.Default(),
 	}
-	_, err := svc.postGQLVideoComments(context.Background(), buildVideoCommentsGQLRequest("123", "hash", false, 0, ""), nil)
+	_, err := svc.postGQLVideoComments(context.Background(), buildVideoCommentsGQLRequest("123", "hash", false, 0, ""), nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "400") {
 		t.Fatalf("expected status 400 error, got %v", err)
 	}

@@ -137,7 +137,7 @@ func (c *gqlRateCoordinator) Wait(ctx context.Context) error {
 	}
 }
 
-func (c *gqlRateCoordinator) Throttle(retryAfter time.Duration, attempt int) {
+func (c *gqlRateCoordinator) Throttle(_ int, retryAfter time.Duration, attempt int) {
 	delay := gqlBackoffDelay(attempt, retryAfter)
 	c.mu.Lock()
 	newUntil := time.Now().Add(delay)
@@ -184,6 +184,34 @@ type gqlFetchScheduleHints struct {
 type gqlPageSample struct {
 	offsetAdvance int
 	commentCount  int
+}
+
+type gqlRequestStats struct {
+	throttle429   atomic.Int64
+	throttle503   atomic.Int64
+	backoffMillis atomic.Int64
+}
+
+func (s *gqlRequestStats) recordThrottle(status int, delay time.Duration) {
+	if s == nil {
+		return
+	}
+	switch status {
+	case 429:
+		s.throttle429.Add(1)
+	case 503:
+		s.throttle503.Add(1)
+	}
+	if delay > 0 {
+		s.backoffMillis.Add(delay.Milliseconds())
+	}
+}
+
+func (s *gqlRequestStats) snapshot() (count429, count503 int64, backoffSeconds float64) {
+	if s == nil {
+		return 0, 0, 0
+	}
+	return s.throttle429.Load(), s.throttle503.Load(), float64(s.backoffMillis.Load()) / 1000
 }
 
 type gqlSegmentWorkItem struct {
@@ -414,12 +442,12 @@ func buildGQLMomentWindowsFromViewerPoints(points []parsedViewerPoint) []gqlTime
 	return mergeOverlappingGQLRanges(windows)
 }
 
-func shouldSplitHotSegment(pageCount, pageThreshold int, recent []gqlPageSample, slowAdvanceSec, slowAdvancePages, commentsPerPage int) bool {
+func hotSegmentSplitReason(pageCount, pageThreshold int, recent []gqlPageSample, slowAdvanceSec, slowAdvancePages, commentsPerPage int) string {
 	if pageThreshold > 0 && pageCount >= pageThreshold {
-		return true
+		return "page_threshold"
 	}
 	if slowAdvancePages <= 0 || len(recent) < slowAdvancePages {
-		return false
+		return ""
 	}
 	window := recent[len(recent)-slowAdvancePages:]
 	totalAdvance := 0
@@ -429,12 +457,19 @@ func shouldSplitHotSegment(pageCount, pageThreshold int, recent []gqlPageSample,
 		totalComments += sample.commentCount
 	}
 	if slowAdvanceSec > 0 && totalAdvance/slowAdvancePages < slowAdvanceSec {
-		return true
+		return "slow_advance"
 	}
 	if commentsPerPage > 0 && totalComments/slowAdvancePages >= commentsPerPage {
-		return true
+		return "comments_per_page"
 	}
-	return false
+	return ""
+}
+
+func impliedAvgSegmentSecFromSegments(vodDurationSec, effectiveSegmentSec, segmentCount int) float64 {
+	if vodDurationSec > 0 && segmentCount > 0 {
+		return float64(vodDurationSec) / float64(segmentCount)
+	}
+	return float64(effectiveSegmentSec)
 }
 
 func vodChatAlignSeconds(streamStart, vodCreated time.Time) int {
@@ -468,20 +503,42 @@ type vodCommentsFetchState struct {
 	coord               *gqlRateCoordinator
 	pages               *atomic.Int64
 	rollupStartFn       func() time.Time
+	rollupCache         *chatRollupCache
 	onSegmentDone       func(seg gqlSegmentProgress)
 	report              func(force bool)
 	saveParallel        func(force bool)
+	flushRollups        func(force bool)
 	hotPageThreshold    int
 	hotSlowAdvanceSec   int
 	hotSlowAdvancePages int
 	hotCommentsPerPage  int
+	initialSegmentCount int
+	effectiveSegmentSec int
+	estimatedComments   int64
 	scheduleHints       gqlFetchScheduleHints
 	workQueue           *gqlSegmentWorkQueue
+	requestStats        *gqlRequestStats
+	rollupFlushSegments int
+	rollupFlushInterval time.Duration
 
 	sink          chatreplay.Sink
 	sanitizeCfg   chatreplay.SanitizeConfig
 	enricher      *enrich.Enricher
 	replayEnabled bool
+
+	cleanupPhaseMu      sync.Mutex
+	cleanupPhase        string
+	commentsSaved       atomic.Int64
+	hotSplitsTotal      atomic.Int64
+	hotSplitsByReasonMu sync.Mutex
+	hotSplitsByReason   map[string]int
+	lastHotSplitReason  string
+	autoClosedTotal     atomic.Int64
+	workerPagesMu       sync.Mutex
+	workerPages         map[string]int
+	pendingRollupMu     sync.Mutex
+	pendingRollupSegs   []gqlSegmentProgress
+	lastPendingRollupAt time.Time
 }
 
 func gqlSegmentPointers(segs []gqlSegmentProgress) []*gqlSegmentProgress {
@@ -529,14 +586,130 @@ func (st *vodCommentsFetchState) snapshotSegments() []gqlSegmentProgress {
 	return out
 }
 
+func (st *vodCommentsFetchState) recordHotSplit(reason string) {
+	if st == nil || strings.TrimSpace(reason) == "" {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	st.hotSplitsTotal.Add(1)
+	st.hotSplitsByReasonMu.Lock()
+	if st.hotSplitsByReason == nil {
+		st.hotSplitsByReason = make(map[string]int)
+	}
+	st.hotSplitsByReason[reason]++
+	st.lastHotSplitReason = reason
+	st.hotSplitsByReasonMu.Unlock()
+}
+
+func (st *vodCommentsFetchState) snapshotHotSplitsByReason() map[string]int {
+	if st == nil {
+		return nil
+	}
+	st.hotSplitsByReasonMu.Lock()
+	defer st.hotSplitsByReasonMu.Unlock()
+	if len(st.hotSplitsByReason) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(st.hotSplitsByReason))
+	for reason, count := range st.hotSplitsByReason {
+		out[reason] = count
+	}
+	return out
+}
+
+func (st *vodCommentsFetchState) latestHotSplitReason() string {
+	if st == nil {
+		return ""
+	}
+	st.hotSplitsByReasonMu.Lock()
+	defer st.hotSplitsByReasonMu.Unlock()
+	return st.lastHotSplitReason
+}
+
+func (st *vodCommentsFetchState) recordAutoClose(_ string) {
+	if st == nil {
+		return
+	}
+	st.autoClosedTotal.Add(1)
+}
+
+func (st *vodCommentsFetchState) recordWorkerPage(worker string) {
+	if st == nil || strings.TrimSpace(worker) == "" {
+		return
+	}
+	st.workerPagesMu.Lock()
+	if st.workerPages == nil {
+		st.workerPages = make(map[string]int)
+	}
+	st.workerPages[worker]++
+	st.workerPagesMu.Unlock()
+}
+
+func (st *vodCommentsFetchState) snapshotWorkerPages() map[string]int {
+	if st == nil {
+		return nil
+	}
+	st.workerPagesMu.Lock()
+	defer st.workerPagesMu.Unlock()
+	if len(st.workerPages) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(st.workerPages))
+	for worker, count := range st.workerPages {
+		out[worker] = count
+	}
+	return out
+}
+
+func (st *vodCommentsFetchState) queueRollupSegment(seg gqlSegmentProgress) {
+	if st == nil {
+		return
+	}
+	st.pendingRollupMu.Lock()
+	if len(st.pendingRollupSegs) == 0 {
+		st.lastPendingRollupAt = time.Now()
+	}
+	st.pendingRollupSegs = append(st.pendingRollupSegs, seg)
+	st.pendingRollupMu.Unlock()
+}
+
+func (st *vodCommentsFetchState) drainPendingRollupSegments(force bool) []gqlSegmentProgress {
+	if st == nil {
+		return nil
+	}
+	st.pendingRollupMu.Lock()
+	defer st.pendingRollupMu.Unlock()
+	if len(st.pendingRollupSegs) == 0 {
+		return nil
+	}
+	if !force {
+		if st.rollupFlushSegments > 0 && len(st.pendingRollupSegs) >= st.rollupFlushSegments {
+			// flush now
+		} else if st.rollupFlushInterval > 0 && time.Since(st.lastPendingRollupAt) >= st.rollupFlushInterval {
+			// flush now
+		} else {
+			return nil
+		}
+	}
+	out := append([]gqlSegmentProgress(nil), st.pendingRollupSegs...)
+	st.pendingRollupSegs = nil
+	st.lastPendingRollupAt = time.Now()
+	return out
+}
+
 func (st *vodCommentsFetchState) enqueueIncompleteSegments() int {
 	if st == nil || st.workQueue == nil {
 		return 0
 	}
 	var items []gqlSegmentWorkItem
 	st.segmentsMu.Lock()
-	for i, seg := range *st.segments {
+	segments := append([]*gqlSegmentProgress(nil), (*st.segments)...)
+	st.segmentsMu.Unlock()
+	for i, seg := range segments {
 		if seg == nil || seg.Done {
+			continue
+		}
+		if tryAutoCloseSegment(st, seg) {
 			continue
 		}
 		items = append(items, gqlSegmentWorkItem{
@@ -544,7 +717,6 @@ func (st *vodCommentsFetchState) enqueueIncompleteSegments() int {
 			priority: segmentSchedulePriority(*seg, st.scheduleHints),
 		})
 	}
-	st.segmentsMu.Unlock()
 	for _, item := range items {
 		st.workQueue.push(item.idx, item.priority)
 	}
@@ -578,8 +750,48 @@ func segmentAlignedMinuteBounds(seg gqlSegmentProgress, chatAlignSec int) (start
 	return startMinute, endMinute
 }
 
+func tryAutoCloseSegment(state *vodCommentsFetchState, seg *gqlSegmentProgress) bool {
+	if state == nil || seg == nil || seg.Done {
+		return false
+	}
+	offset := seg.OffsetSec
+	if offset < seg.StartSec {
+		offset = seg.StartSec
+	}
+	autoClose := false
+	reason := ""
+	switch {
+	case seg.EndSec <= seg.StartSec:
+		autoClose = true
+		reason = "empty_segment"
+	case state.vodDurationSec > 0 && seg.EndSec >= state.vodDurationSec:
+		autoClose = offset > seg.EndSec
+		reason = "tail_past_end"
+	default:
+		autoClose = offset >= seg.EndSec
+		reason = "segment_boundary"
+	}
+	if !autoClose {
+		return false
+	}
+	metrics.AnalyticsVODGQLSegments.WithLabelValues("auto_closed").Inc()
+	metrics.AnalyticsVODGQLAutoCloseTotal.WithLabelValues(reason).Inc()
+	state.recordAutoClose(reason)
+	state.finishSegment(seg, maxInt(offset, seg.EndSec))
+	return true
+}
+
 func (st *vodCommentsFetchState) finishSegment(seg *gqlSegmentProgress, offset int) {
 	wasDone := seg.Done
+	if offset < seg.StartSec {
+		offset = seg.StartSec
+	}
+	if seg.EndSec > seg.StartSec && offset > seg.EndSec {
+		offset = seg.EndSec
+	}
+	if st != nil && st.vodDurationSec > 0 && offset > st.vodDurationSec {
+		offset = st.vodDurationSec
+	}
 	seg.Done = true
 	seg.OffsetSec = offset
 	if !wasDone {
@@ -620,17 +832,34 @@ func (st *vodCommentsFetchState) publishProgress(force bool) {
 	st.report(force)
 }
 
+func (s *SyncService) flushPendingRollupSegments(ctx context.Context, state *vodCommentsFetchState, force bool) {
+	if s == nil || state == nil || !s.vodGQLIncrementalDB {
+		return
+	}
+	segs := state.drainPendingRollupSegments(force)
+	if len(segs) == 0 {
+		return
+	}
+	if err := s.patchChatRollupsForSegments(ctx, state.streamID, state.login, state.rollupStartFn, state.commentsMap, segs, state.chatAlignSec, state.rollupCache); err != nil {
+		s.log.Warn("incremental chat rollup flush failed",
+			"stream_id", state.streamID,
+			"segments", len(segs),
+			"err", err,
+		)
+	}
+}
+
 const vodCommentsCheckpointMinGap = 2 * time.Second
 
-func effectiveGQLSegmentSeconds(configured, denseSec, vodDurationSec int, estimatedComments int64) int {
+func effectiveGQLSegmentSeconds(configured, denseSec, quietSec, vodDurationSec int, estimatedComments int64) int {
 	if configured <= 0 {
 		configured = 600
 	}
 	if denseSec <= 0 {
 		denseSec = vodGQLSegmentDenseVOD
 	}
-	if vodDurationSec >= vodGQLLargeVODDurationSec {
-		return minInt(configured, vodGQLSegmentLargeVOD)
+	if quietSec <= 0 {
+		quietSec = 900
 	}
 	if estimatedComments >= int64(vodCommentsMaxCount*9/10) {
 		return minInt(configured, denseSec)
@@ -649,12 +878,23 @@ func effectiveGQLSegmentSeconds(configured, denseSec, vodDurationSec int, estima
 		if perHour >= vodGQLCommentsPerHourDense {
 			return minInt(configured, denseSec)
 		}
+		return quietSec
+	}
+	if vodDurationSec >= vodGQLLargeVODDurationSec {
+		return quietSec
 	}
 	return configured
 }
 
 func minInt(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
 		return a
 	}
 	return b
@@ -801,12 +1041,12 @@ func (s *SyncService) fetchVODComments(ctx context.Context, streamID, login, vid
 	fetchMode := "serial"
 	concurrency := 1
 	segmentsTotal := 1
-	segmentSec := effectiveGQLSegmentSeconds(s.vodGQLSegmentSeconds, s.vodGQLDenseSegmentSeconds, vodDurationSec, estimatedComments)
+	segmentSec := effectiveGQLSegmentSeconds(s.vodGQLSegmentSeconds, s.vodGQLDenseSegmentSeconds, s.vodGQLQuietSegmentSeconds, vodDurationSec, estimatedComments)
 	if s.vodGQLConcurrency > 1 {
 		if vodDurationSec <= 0 && s.helix != nil && s.helix.Enabled() {
 			if d, err := s.helix.VideoDurationSeconds(ctx, videoID); err == nil && d > 0 {
 				vodDurationSec = d
-				segmentSec = effectiveGQLSegmentSeconds(s.vodGQLSegmentSeconds, s.vodGQLDenseSegmentSeconds, vodDurationSec, estimatedComments)
+				segmentSec = effectiveGQLSegmentSeconds(s.vodGQLSegmentSeconds, s.vodGQLDenseSegmentSeconds, s.vodGQLQuietSegmentSeconds, vodDurationSec, estimatedComments)
 			}
 		}
 		if vodDurationSec > 0 {
@@ -821,8 +1061,14 @@ func (s *SyncService) fetchVODComments(ctx context.Context, streamID, login, vid
 		cp.VodID = videoID
 		cp.FetchMode = fetchMode
 		cp.Concurrency = concurrency
+		cp.EffectiveSegmentSec = segmentSec
+		cp.InitialSegments = segmentsTotal
+		cp.HotSplits = 0
+		cp.HotSegmentSplitReason = ""
+		cp.AutoClosedSegments = 0
 		cp.VodDurationSec = vodDurationSec
 		cp.SegmentsTotal = segmentsTotal
+		cp.SummaryRefreshDeferred = s.vodGQLIncrementalDB && s.vodGQLDeferSummaryRefresh
 		cp.Message = fmt.Sprintf("Loading VOD %s chat via Twitch GQL (%s)", videoID, fetchMode)
 	}, true)
 	defer s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
@@ -844,9 +1090,13 @@ func (s *SyncService) fetchVODCommentsSerial(ctx context.Context, streamID, logi
 	nextCursor := ""
 	contentOffsetSeconds := 0
 	commentsCount := 0
+	commentsSaved := 0
 	lastOffset := 0
 	gqlPages := 0
 	seenCommentIDs := make(map[string]struct{})
+
+	estimatedComments := s.estimatedStreamComments(ctx, streamID)
+	segmentSec := effectiveGQLSegmentSeconds(s.vodGQLSegmentSeconds, s.vodGQLDenseSegmentSeconds, s.vodGQLQuietSegmentSeconds, vodDurationSec, estimatedComments)
 
 	if cp, err := s.store.GetSyncCheckpoint(ctx, streamID, videoID); err != nil {
 		s.log.Warn("failed to load sync checkpoint", "stream_id", streamID, "video_id", videoID, "err", err)
@@ -879,11 +1129,18 @@ func (s *SyncService) fetchVODCommentsSerial(ctx context.Context, streamID, logi
 			cp.VodID = videoID
 			cp.FetchMode = "serial"
 			cp.Concurrency = 1
+			cp.EffectiveSegmentSec = segmentSec
+			cp.InitialSegments = 1
+			cp.HotSplits = 0
+			cp.HotSegmentSplitReason = ""
+			cp.AutoClosedSegments = 0
 			cp.SegmentsTotal = 1
 			cp.SegmentsDone = 0
 			cp.CommentsFetched = count
+			cp.CommentsSaved = commentsSaved
 			cp.TimelineSec = timeline
 			cp.VodDurationSec = vodDurationSec
+			cp.SummaryRefreshDeferred = false
 			cp.GQLPages = pages
 			cp.Throttled = false
 			cp.Message = fmt.Sprintf("VOD %s · serial · %s", videoID, formatChatTimelineMessage(timeline, vodDurationSec, count, pages, 0, 1))
@@ -909,15 +1166,18 @@ func (s *SyncService) fetchVODCommentsSerial(ctx context.Context, streamID, logi
 			s.log.Warn("failed to save sync checkpoint", "stream_id", streamID, "err", err)
 		}
 		if s.chatReplayEnabled && s.chatReplaySink != nil {
-			if err := s.chatReplaySink.Flush(ctx); err != nil {
+			inserted, err := s.chatReplaySink.Flush(ctx)
+			if err != nil {
 				s.log.Warn("chat replay flush failed at checkpoint", "stream_id", streamID, "err", err)
+			} else {
+				commentsSaved += inserted
 			}
 		}
 	}
 
 	for {
 		reqBody := buildVideoCommentsGQLRequest(videoID, gqlVideoCommentsSHA256, useCursor, contentOffsetSeconds, nextCursor)
-		gqlResp, err := s.postGQLVideoComments(ctx, reqBody, nil)
+		gqlResp, err := s.postGQLVideoComments(ctx, reqBody, nil, nil)
 		gqlPages++
 		if err != nil {
 			saveCheckpoint()
@@ -1006,10 +1266,14 @@ func (s *SyncService) fetchVODCommentsSerial(ctx context.Context, streamID, logi
 
 	reportProgress(true)
 	if s.chatReplayEnabled && s.chatReplaySink != nil {
-		if err := s.chatReplaySink.Flush(ctx); err != nil {
+		inserted, err := s.chatReplaySink.Flush(ctx)
+		if err != nil {
 			s.log.Warn("chat replay final flush failed", "stream_id", streamID, "mode", "serial", "err", err)
+		} else {
+			commentsSaved += inserted
 		}
 	}
+	reportProgress(true)
 	if err := s.store.DeleteSyncCheckpoint(ctx, streamID, videoID); err != nil {
 		s.log.Warn("failed to clear sync checkpoint", "stream_id", streamID, "err", err)
 	}
@@ -1080,7 +1344,7 @@ func formatIntComma(n int) string {
 
 func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, login, videoID string, commentsMap map[int][]string, vodDurationSec, chatAlignSec int, rollupStartFn func() time.Time, chatCache *chatRollupCache, scheduleHints gqlFetchScheduleHints) error {
 	estimatedComments := s.estimatedStreamComments(ctx, streamID)
-	segmentSec := effectiveGQLSegmentSeconds(s.vodGQLSegmentSeconds, s.vodGQLDenseSegmentSeconds, vodDurationSec, estimatedComments)
+	segmentSec := effectiveGQLSegmentSeconds(s.vodGQLSegmentSeconds, s.vodGQLDenseSegmentSeconds, s.vodGQLQuietSegmentSeconds, vodDurationSec, estimatedComments)
 	segments := gqlSegmentPointers(buildGQLSegments(vodDurationSec, segmentSec))
 	var commentsCount atomic.Int64
 	hotThreshold := s.vodGQLHotSegmentPageThreshold
@@ -1127,6 +1391,15 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 
 	coord := newGQLRateCoordinator(s.vodGQLConcurrencyMin, s.vodGQLConcurrencyMax, s.vodGQLConcurrency)
 	var gqlPageCount atomic.Int64
+	requestStats := &gqlRequestStats{}
+	initialSegments := len(segments)
+	s.log.Info("starting parallel VOD comments fetch",
+		"stream_id", streamID,
+		"video_id", videoID,
+		"initial_segments", initialSegments,
+		"effective_segment_sec", segmentSec,
+		"estimated_comments", estimatedComments,
+	)
 
 	saveParallelCheckpoint := func(segs []gqlSegmentProgress) {
 		payload, err := json.Marshal(gqlParallelCheckpoint{
@@ -1150,21 +1423,6 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 	}
 
 	var onSegmentDone func(gqlSegmentProgress)
-	if s.vodGQLIncrementalDB || s.chatReplayEnabled {
-		onSegmentDone = func(seg gqlSegmentProgress) {
-			if s.chatReplayEnabled && s.chatReplaySink != nil {
-				startMinute, endMinute := segmentAlignedMinuteBounds(seg, chatAlignSec)
-				if err := s.chatReplaySink.FlushSegment(ctx, startMinute, endMinute); err != nil {
-					s.log.Warn("chat replay segment flush failed", "stream_id", streamID, "segment_start", seg.StartSec, "err", err)
-				}
-			}
-			if s.vodGQLIncrementalDB {
-				if err := s.patchChatRollupsForSegment(ctx, streamID, login, rollupStartFn, commentsMap, seg, chatAlignSec, chatCache); err != nil {
-					s.log.Warn("incremental chat rollup patch failed", "stream_id", streamID, "segment_start", seg.StartSec, "err", err)
-				}
-			}
-		}
-	}
 	workQueue := newGQLSegmentWorkQueue()
 	state := &vodCommentsFetchState{
 		streamID:            streamID,
@@ -1180,17 +1438,41 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 		coord:               coord,
 		pages:               &gqlPageCount,
 		rollupStartFn:       rollupStartFn,
-		onSegmentDone:       onSegmentDone,
+		rollupCache:         chatCache,
+		initialSegmentCount: initialSegments,
+		effectiveSegmentSec: segmentSec,
+		estimatedComments:   estimatedComments,
 		hotPageThreshold:    hotThreshold,
 		hotSlowAdvanceSec:   slowAdvanceSec,
 		hotSlowAdvancePages: slowAdvancePages,
 		hotCommentsPerPage:  hotCommentsPerPage,
 		scheduleHints:       scheduleHints,
 		workQueue:           workQueue,
+		requestStats:        requestStats,
+		rollupFlushSegments: s.vodGQLRollupFlushSegments,
+		rollupFlushInterval: s.vodGQLRollupFlushInterval,
 		sink:                s.chatReplaySink,
 		sanitizeCfg:         s.chatReplayCfg,
 		enricher:            s.enricher,
 		replayEnabled:       s.chatReplayEnabled,
+	}
+	if s.vodGQLIncrementalDB || s.chatReplayEnabled {
+		onSegmentDone = func(seg gqlSegmentProgress) {
+			if s.chatReplayEnabled && s.chatReplaySink != nil {
+				startMinute, endMinute := segmentAlignedMinuteBounds(seg, chatAlignSec)
+				inserted, err := s.chatReplaySink.FlushSegment(ctx, startMinute, endMinute)
+				if err != nil {
+					s.log.Warn("chat replay segment flush failed", "stream_id", streamID, "segment_start", seg.StartSec, "err", err)
+				} else {
+					state.commentsSaved.Add(int64(inserted))
+				}
+			}
+			if s.vodGQLIncrementalDB {
+				state.queueRollupSegment(seg)
+				s.flushPendingRollupSegments(ctx, state, false)
+			}
+		}
+		state.onSegmentDone = onSegmentDone
 	}
 	state.report = func(force bool) {
 		count := int(commentsCount.Load())
@@ -1202,17 +1484,29 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 		pageCount := int(gqlPageCount.Load())
 		throttled := coord.Paused()
 		workers := coord.ActiveConcurrency()
+		state.cleanupPhaseMu.Lock()
+		cleanupPhase := state.cleanupPhase
+		state.cleanupPhaseMu.Unlock()
 		s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
 			cp.Active = true
 			cp.IndexPhase = "fetching"
 			cp.VodID = videoID
 			cp.FetchMode = "parallel"
 			cp.Concurrency = workers
+			cp.EffectiveSegmentSec = state.effectiveSegmentSec
+			cp.InitialSegments = state.initialSegmentCount
 			cp.SegmentsTotal = len(segs)
 			cp.SegmentsDone = segmentsDone
+			cp.SegmentsIncomplete = state.incompleteSegmentCount()
+			cp.HotSplits = int(state.hotSplitsTotal.Load())
+			cp.HotSegmentSplitReason = state.latestHotSplitReason()
+			cp.AutoClosedSegments = int(state.autoClosedTotal.Load())
+			cp.CleanupPhase = cleanupPhase
 			cp.CommentsFetched = count
+			cp.CommentsSaved = int(state.commentsSaved.Load())
 			cp.TimelineSec = timelineSec
 			cp.VodDurationSec = vodDurationSec
+			cp.SummaryRefreshDeferred = s.vodGQLIncrementalDB && s.vodGQLDeferSummaryRefresh
 			cp.GQLPages = pageCount
 			cp.Throttled = throttled
 			cp.Message = fmt.Sprintf(
@@ -1249,6 +1543,10 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 	var integrityFails atomic.Int32
 	started := time.Now()
 
+	state.cleanupPhaseMu.Lock()
+	state.cleanupPhase = "initial"
+	state.cleanupPhaseMu.Unlock()
+
 	maxWorkers := s.vodGQLConcurrencyMax
 	if maxWorkers <= 0 {
 		maxWorkers = s.vodGQLConcurrency
@@ -1264,7 +1562,12 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 			"segments", parallelRetries,
 			"workers", coord.ActiveConcurrency(),
 		)
+		state.cleanupPhaseMu.Lock()
+		state.cleanupPhase = "parallel_cleanup"
+		state.cleanupPhaseMu.Unlock()
 		s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
+			cp.CleanupPhase = "parallel_cleanup"
+			cp.SegmentsIncomplete = parallelRetries
 			cp.Message = fmt.Sprintf("VOD %s · parallel cleanup · %d unfinished segments", videoID, parallelRetries)
 		}, true)
 		s.runGQLSegmentWorkerPass(ctx, streamID, videoID, state, coord, &integrityFails, &gqlPageCount, maxWorkers, "parallel cleanup")
@@ -1273,6 +1576,9 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 	var serialRetries int
 	for i, seg := range segments {
 		if seg == nil || seg.Done {
+			continue
+		}
+		if tryAutoCloseSegment(state, seg) {
 			continue
 		}
 		serialRetries++
@@ -1284,10 +1590,15 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 			"start_sec", seg.StartSec,
 			"end_sec", seg.EndSec,
 		)
+		state.cleanupPhaseMu.Lock()
+		state.cleanupPhase = "serial_retry"
+		state.cleanupPhaseMu.Unlock()
 		s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
+			cp.CleanupPhase = "serial_retry"
+			cp.SegmentsIncomplete = state.incompleteSegmentCount()
 			cp.Message = fmt.Sprintf("VOD %s · serial retry segment %d/%d", videoID, i+1, len(segments))
 		}, true)
-		if err := s.fetchGQLSegmentSerial(ctx, videoID, seg, state, coord, &gqlPageCount); err != nil {
+		if err := s.fetchGQLSegmentSerial(ctx, videoID, seg, state, coord, &gqlPageCount, "serial"); err != nil {
 			s.log.Warn("segment serial retry failed",
 				"stream_id", streamID,
 				"segment", i,
@@ -1305,14 +1616,34 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 	state.commentsMapMu.Lock()
 	state.shardedComments.mergeInto(commentsMap)
 	state.commentsMapMu.Unlock()
-
-	if s.chatReplayEnabled && s.chatReplaySink != nil {
-		if err := s.chatReplaySink.Flush(ctx); err != nil {
-			s.log.Warn("chat replay final flush failed", "stream_id", streamID, "mode", "parallel", "err", err)
+	state.report(true)
+	s.flushPendingRollupSegments(ctx, state, true)
+	if s.vodGQLIncrementalDB && s.vodGQLDeferSummaryRefresh {
+		s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
+			cp.Active = true
+			cp.IndexPhase = "finalizing"
+			cp.SummaryRefreshDeferred = true
+			cp.Message = "Finalizing chat index"
+		}, true)
+		metrics.AnalyticsVODGQLFinalizingJobs.Inc()
+		defer metrics.AnalyticsVODGQLFinalizingJobs.Dec()
+		if err := s.store.RefreshStreamSummaryWithMode(ctx, streamID, "deferred_finalize"); err != nil {
+			return fmt.Errorf("refresh stream summary after parallel gql sync: %w", err)
 		}
 	}
 
-	state.report(true)
+	if s.chatReplayEnabled && s.chatReplaySink != nil {
+		inserted, err := s.chatReplaySink.Flush(ctx)
+		if err != nil {
+			s.log.Warn("chat replay final flush failed", "stream_id", streamID, "mode", "parallel", "err", err)
+		} else {
+			state.commentsSaved.Add(int64(inserted))
+			s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
+				cp.CommentsSaved = int(state.commentsSaved.Load())
+			}, true)
+		}
+	}
+
 	if err := s.store.DeleteSyncCheckpoint(ctx, streamID, videoID); err != nil {
 		s.log.Warn("failed to clear sync checkpoint", "stream_id", streamID, "err", err)
 	}
@@ -1322,13 +1653,24 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 	if elapsed > 0 {
 		pagesPerSec = float64(pageCount) / elapsed
 	}
+	finalSegments := state.snapshotSegments()
+	impliedAvgSegmentSec := impliedAvgSegmentSecFromSegments(vodDurationSec, state.effectiveSegmentSec, len(finalSegments))
+	throttle429, throttle503, backoffSeconds := requestStats.snapshot()
 	s.log.Info("finished VOD comments paging",
 		"total_comments", commentsCount.Load(),
 		"mode", "parallel",
 		"workers", coord.ActiveConcurrency(),
-		"segments", len(state.snapshotSegments()),
+		"segments", len(finalSegments),
+		"initial_segments", state.initialSegmentCount,
+		"hot_splits", state.hotSplitsTotal.Load(),
+		"hot_splits_by_reason", state.snapshotHotSplitsByReason(),
+		"implied_avg_segment_sec", impliedAvgSegmentSec,
 		"pages", pageCount,
 		"pages_per_sec", pagesPerSec,
+		"gql_429", throttle429,
+		"gql_503", throttle503,
+		"gql_backoff_sec", backoffSeconds,
+		"worker_pages", state.snapshotWorkerPages(),
 	)
 	return nil
 }
@@ -1374,7 +1716,8 @@ func (s *SyncService) runGQLSegmentWorkerPass(
 					state.workQueue.release()
 					continue
 				}
-				if err := s.fetchGQLSegment(ctx, videoID, seg, state, coord, integrityFails, pages); err != nil {
+				workerLabel := fmt.Sprintf("%d", workerID)
+				if err := s.fetchGQLSegment(ctx, videoID, seg, state, coord, integrityFails, pages, workerLabel); err != nil {
 					s.log.Warn("segment fetch failed",
 						"stream_id", streamID,
 						"segment", segIdx,
@@ -1398,6 +1741,7 @@ func (s *SyncService) fetchGQLSegment(
 	coord *gqlRateCoordinator,
 	integrityFails *atomic.Int32,
 	pages *atomic.Int64,
+	workerLabel string,
 ) error {
 	offset := seg.OffsetSec
 	if offset < seg.StartSec {
@@ -1428,8 +1772,10 @@ func (s *SyncService) fetchGQLSegment(
 
 		pageStartOffset := offset
 		reqBody := buildVideoCommentsGQLRequest(videoID, gqlVideoCommentsSHA256, useCursor, offset, nextCursor)
-		gqlResp, err := s.postGQLVideoComments(ctx, reqBody, coord)
+		gqlResp, err := s.postGQLVideoComments(ctx, reqBody, coord, state.requestStats)
 		pages.Add(1)
+		metrics.AnalyticsVODGQLWorkerPagesTotal.WithLabelValues(workerLabel).Inc()
+		state.recordWorkerPage(workerLabel)
 		pageCount++
 		if err != nil {
 			seg.OffsetSec = offset
@@ -1498,14 +1844,15 @@ func (s *SyncService) fetchGQLSegment(
 			return nil
 		}
 
-		if shouldSplitHotSegment(
+		reason := hotSegmentSplitReason(
 			pageCount,
 			state.hotPageThreshold,
 			pageSamples,
 			state.hotSlowAdvanceSec,
 			state.hotSlowAdvancePages,
 			state.hotCommentsPerPage,
-		) && lastOffset < seg.EndSec-60 {
+		)
+		if reason != "" && lastOffset < seg.EndSec-60 {
 			splitAt := lastOffset + 1
 			tail := gqlSegmentProgress{
 				StartSec:  splitAt,
@@ -1513,6 +1860,8 @@ func (s *SyncService) fetchGQLSegment(
 				OffsetSec: splitAt,
 			}
 			seg.EndSec = splitAt - 1
+			state.recordHotSplit(reason)
+			metrics.AnalyticsVODGQLHotSplitsTotal.WithLabelValues(reason).Inc()
 			tailIdx := state.appendSegment(tail)
 			if state.workQueue != nil {
 				state.workQueue.push(tailIdx, segmentSchedulePriority(tail, state.scheduleHints))
@@ -1546,6 +1895,7 @@ func (s *SyncService) fetchGQLSegmentSerial(
 	state *vodCommentsFetchState,
 	coord *gqlRateCoordinator,
 	pages *atomic.Int64,
+	workerLabel string,
 ) error {
 	offset := seg.OffsetSec
 	if offset < seg.StartSec {
@@ -1571,8 +1921,10 @@ func (s *SyncService) fetchGQLSegmentSerial(
 		}
 
 		reqBody := buildVideoCommentsGQLRequest(videoID, gqlVideoCommentsSHA256, useCursor, offset, nextCursor)
-		gqlResp, err := s.postGQLVideoComments(ctx, reqBody, coord)
+		gqlResp, err := s.postGQLVideoComments(ctx, reqBody, coord, state.requestStats)
 		pages.Add(1)
+		metrics.AnalyticsVODGQLWorkerPagesTotal.WithLabelValues(workerLabel).Inc()
+		state.recordWorkerPage(workerLabel)
 		if err != nil {
 			seg.OffsetSec = offset
 			state.saveParallel(true)

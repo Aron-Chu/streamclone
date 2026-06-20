@@ -145,18 +145,20 @@ func (c *Client) do(ctx context.Context, body []byte) (*http.Response, error) {
 	return resp, nil
 }
 
+type streamBroadcaster struct {
+	Login       string
+	DisplayName string
+}
+
 type streamNode struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	ViewersCount int    `json:"viewersCount"`
-	PreviewURL   string `json:"previewImageURL"`
-	Broadcaster  *struct {
-		Login       string `json:"login"`
-		DisplayName string `json:"displayName"`
-	} `json:"broadcaster"`
-	Game *struct {
-		Name string `json:"name"`
-	} `json:"game"`
+	ID           string
+	Title        string
+	ViewersCount int
+	PreviewURL   string
+	Broadcaster  *streamBroadcaster
+	Game         *struct {
+		Name string
+	}
 }
 
 func (n streamNode) toStream() Stream {
@@ -174,6 +176,81 @@ func (n streamNode) toStream() Stream {
 		s.Category = n.Game.Name
 	}
 	return s
+}
+
+// parseStreamNode tolerates null/missing optional fields seen on live Twitch GQL page-2+.
+func parseStreamNode(raw json.RawMessage) (streamNode, bool) {
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return streamNode{}, false
+	}
+	var flex struct {
+		ID           *string         `json:"id"`
+		Title        *string         `json:"title"`
+		ViewersCount *int            `json:"viewersCount"`
+		PreviewURL   *string         `json:"previewImageURL"`
+		Broadcaster  json.RawMessage `json:"broadcaster"`
+		Game         json.RawMessage `json:"game"`
+	}
+	if err := json.Unmarshal(raw, &flex); err != nil {
+		return streamNode{}, false
+	}
+	if flex.ID == nil || strings.TrimSpace(*flex.ID) == "" {
+		return streamNode{}, false
+	}
+	var bc *struct {
+		Login       string `json:"login"`
+		DisplayName string `json:"displayName"`
+	}
+	if len(flex.Broadcaster) > 0 && !bytes.Equal(flex.Broadcaster, []byte("null")) {
+		if err := json.Unmarshal(flex.Broadcaster, &bc); err != nil || bc == nil || strings.TrimSpace(bc.Login) == "" {
+			return streamNode{}, false
+		}
+	} else {
+		return streamNode{}, false
+	}
+	n := streamNode{
+		ID: *flex.ID,
+		Broadcaster: &streamBroadcaster{
+			Login:       bc.Login,
+			DisplayName: bc.DisplayName,
+		},
+	}
+	if flex.Title != nil {
+		n.Title = *flex.Title
+	}
+	if flex.ViewersCount != nil {
+		n.ViewersCount = *flex.ViewersCount
+	}
+	if flex.PreviewURL != nil {
+		n.PreviewURL = *flex.PreviewURL
+	}
+	if len(flex.Game) > 0 && !bytes.Equal(flex.Game, []byte("null")) {
+		var game struct {
+			Name *string `json:"name"`
+		}
+		if err := json.Unmarshal(flex.Game, &game); err == nil && game.Name != nil {
+			n.Game = &struct{ Name string }{Name: *game.Name}
+		}
+	}
+	return n, true
+}
+
+type streamEdge struct {
+	Cursor string          `json:"cursor"`
+	Node   json.RawMessage `json:"node"`
+}
+
+func appendStreamEdges(page *Page[Stream], edges []streamEdge) {
+	for _, e := range edges {
+		if e.Cursor != "" {
+			page.Cursor = e.Cursor
+		}
+		node, ok := parseStreamNode(e.Node)
+		if !ok {
+			continue
+		}
+		page.Items = append(page.Items, node.toStream())
+	}
 }
 
 const queryTopStreams = upstream.MetadataTopStreamsOperation
@@ -195,10 +272,7 @@ func (c *Client) TopStreams(ctx context.Context, limit int, cursor string) (Page
 	var r struct {
 		Data struct {
 			Streams *struct {
-				Edges []struct {
-					Cursor string     `json:"cursor"`
-					Node   streamNode `json:"node"`
-				} `json:"edges"`
+				Edges []streamEdge `json:"edges"`
 			} `json:"streams"`
 		} `json:"data"`
 	}
@@ -209,13 +283,7 @@ func (c *Client) TopStreams(ctx context.Context, limit int, cursor string) (Page
 		return Page[Stream]{}, upstream.ErrUpstreamSchema
 	}
 	var page Page[Stream]
-	for _, e := range r.Data.Streams.Edges {
-		if e.Node.Broadcaster == nil {
-			continue
-		}
-		page.Items = append(page.Items, e.Node.toStream())
-		page.Cursor = e.Cursor
-	}
+	appendStreamEdges(&page, r.Data.Streams.Edges)
 	return page, nil
 }
 
@@ -284,10 +352,7 @@ func (c *Client) CategoryStreams(ctx context.Context, categoryID string, limit i
 		Data struct {
 			Game *struct {
 				Streams *struct {
-					Edges []struct {
-						Cursor string     `json:"cursor"`
-						Node   streamNode `json:"node"`
-					} `json:"edges"`
+					Edges []streamEdge `json:"edges"`
 				} `json:"streams"`
 			} `json:"game"`
 		} `json:"data"`
@@ -299,13 +364,7 @@ func (c *Client) CategoryStreams(ctx context.Context, categoryID string, limit i
 		return Page[Stream]{}, upstream.ErrUpstreamSchema
 	}
 	var page Page[Stream]
-	for _, e := range r.Data.Game.Streams.Edges {
-		if e.Node.Broadcaster == nil {
-			continue
-		}
-		page.Items = append(page.Items, e.Node.toStream())
-		page.Cursor = e.Cursor
-	}
+	appendStreamEdges(&page, r.Data.Game.Streams.Edges)
 	return page, nil
 }
 

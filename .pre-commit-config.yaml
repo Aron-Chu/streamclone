@@ -37,3 +37,10 @@ repos:
         language: system
         files: ^frontend/(src|e2e)/
         pass_filenames: false
+
+      - id: check-quick-light
+        name: optional lightweight agent checks (manual)
+        entry: bash scripts/pre-commit-check-quick.sh
+        language: system
+        pass_filenames: false
+        stages: [manual]

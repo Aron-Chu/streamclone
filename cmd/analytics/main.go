@@ -11,6 +11,7 @@ import (
 	"streamclone/internal/analytics"
 	"streamclone/internal/analytics/chatreplay"
 	"streamclone/internal/analytics/heatmap"
+	"streamclone/internal/archive"
 	"streamclone/internal/chat/enrich"
 	"streamclone/internal/chat/ircconn"
 	"streamclone/internal/config"
@@ -62,7 +63,14 @@ func main() {
 		}
 	}()
 
-	store := analytics.NewStore(pool).WithTelemetry(tsWriter)
+	store := analytics.NewStore(pool).
+		WithTelemetry(tsWriter).
+		WithArchiveProtectRetention(cfg.ArchiveProtectRetention)
+	if cfg.BackfillEnabled {
+		store = store.WithPostEndDetector(analytics.NewPostEndDetector(
+			pool, cfg.PostEndWaitMin, cfg.PostEndWaitMax, cfg.PostEndCoveragePct,
+		))
+	}
 	if cfg.TimeseriesEnabled && cfg.TimeseriesBackfillOnStart {
 		status := tsWriter.Status()
 		if status.Configured {
@@ -109,6 +117,14 @@ func main() {
 		logger.Error("failed to load always tracked from db", "err", err)
 	}
 	allAlways := append(cfg.AlwaysTrackedChannels, dbAlways...)
+	if report, err := store.CleanupSessionStubs(ctx, allAlways); err != nil {
+		logger.Warn("prefetch stub cleanup failed", "err", err)
+	} else if report.StubSessionsMerged > 0 || len(report.OrphanAliasesMerged) > 0 {
+		logger.Info("prefetch stub cleanup completed",
+			"stubs_merged", report.StubSessionsMerged,
+			"orphan_aliases", len(report.OrphanAliasesMerged),
+		)
+	}
 
 	var collector *analytics.Collector
 	irc := ircconn.NewManager(cfg.Upstream.TwitchIRCURL, cfg.MaxChannelsPerSocket, func(line string) {
@@ -130,6 +146,29 @@ func main() {
 	collector.Start(ctx)
 	defer collector.Stop()
 
+	var archiveExporter analytics.SyncArchiveExporter
+	var archiveSyncExporter *archive.SyncExporter
+	var archiveWriter *archive.Writer
+	if cfg.ArchiveEnabled && cfg.ArchiveStorageProvider == "azure" {
+		blob, blobErr := archive.NewAzureBlobStore(archive.AzureConfig{
+			StorageAccount:       cfg.ArchiveAzureStorageAccount,
+			Container:            cfg.ArchiveAzureContainer,
+			Prefix:               cfg.ArchiveAzurePrefix,
+			ConnectionStringFile: cfg.ArchiveAzureConnectionStringFile,
+		})
+		if blobErr != nil {
+			logger.Error("archive blob init failed", "err", blobErr)
+			os.Exit(1)
+		}
+		manifest := archive.NewManifestStore(pool)
+		archiveWriter = archive.NewWriter(blob, manifest)
+		archiveSyncExporter = archive.NewSyncExporter(archiveWriter, archive.NewPgxAnalyticsDB(pool))
+		archiveExporter = archiveSyncExporter
+		logger.Info("archive export enabled", "account", cfg.ArchiveAzureStorageAccount, "container", cfg.ArchiveAzureContainer)
+	} else if cfg.ArchiveExportOnSync {
+		logger.Warn("ARCHIVE_EXPORT_ON_SYNC is enabled but ARCHIVE_ENABLED is false; sync will stop at export_pending")
+	}
+
 	syncService := analytics.NewSyncService(
 		store,
 		enricher,
@@ -148,13 +187,19 @@ func main() {
 		cfg.AnalyticsVODGQLConcurrencyMax,
 		cfg.AnalyticsVODGQLSegmentSeconds,
 		cfg.AnalyticsVODGQLDenseSegmentSeconds,
+		cfg.AnalyticsVODGQLQuietSegmentSeconds,
 		cfg.AnalyticsVODGQLHotSegmentPageThreshold,
 		cfg.AnalyticsVODGQLHotSlowAdvanceSec,
 		cfg.AnalyticsVODGQLHotSlowAdvancePages,
 		cfg.AnalyticsVODGQLHotCommentsPerPage,
 		cfg.AnalyticsVODGQLPriorityEdgeSeconds,
 		cfg.AnalyticsVODGQLIncrementalDB,
+		cfg.AnalyticsVODGQLDeferSummaryRefresh,
+		cfg.AnalyticsVODGQLRollupFlushSegments,
+		time.Duration(cfg.AnalyticsVODGQLRollupFlushMS)*time.Millisecond,
 		cfg.AnalyticsTrackerScrapeMS,
+		cfg.AnalyticsTTSyncTimeoutMS,
+		cfg.AnalyticsTTBackgroundRetryEnabled,
 		cfg.AnalyticsPassTTMaxAge,
 		cfg.AnalyticsTTMaxAgeMS,
 		cfg.AnalyticsTTStaleMaxAgeMS,
@@ -162,12 +207,60 @@ func main() {
 		cfg.AnalyticsTTDirectHTTPEnabled,
 		cfg.AnalyticsTTDirectHTTPStaleOnly,
 		cfg.AnalyticsTTDirectHTTPTimeoutMS,
-	)
+		cfg.AnalyticsTTViewerSmoothWindow,
+	).WithArchiveExportOnSync(cfg.ArchiveExportOnSync, archiveExporter)
+
+	startArchiveWorkers(ctx, cfg, pool, syncService, archiveSyncExporter, archiveWriter, logger)
+
+	if cfg.Tier0Enabled {
+		roster := analytics.NewRosterSyncer(pool, cfg.MetadataServiceURL, cfg.Tier0RosterTopN, allAlways)
+		if archiveWriter != nil {
+			roster = roster.WithArchiveExporter(archiveWriter)
+		}
+		analytics.StartRosterWorker(ctx, roster, cfg.Tier0RosterInterval, logger)
+		sampler := analytics.NewViewerSampler(store, helix, roster, cfg.Tier0SampleInterval, logger)
+		analytics.StartViewerSampler(ctx, sampler)
+		logger.Info("tier-0 roster and viewer sampler started",
+			"roster_interval", cfg.Tier0RosterInterval.String(),
+			"sample_interval", cfg.Tier0SampleInterval.String(),
+			"top_n", cfg.Tier0RosterTopN,
+		)
+	}
+	if cfg.BackfillEnabled {
+		worker := analytics.NewBackfillWorker(pool, syncService, archiveExporter, cfg.BackfillWorkerInterval)
+		analytics.StartBackfillWorker(ctx, worker, logger)
+		logger.Info("backfill worker started", "interval", cfg.BackfillWorkerInterval.String())
+	}
+	if cfg.BronzeEnabled {
+		if archiveWriter == nil {
+			logger.Warn("BRONZE_ENABLED is true but archive writer is not configured; bronze indexer disabled")
+		} else {
+			indexer := analytics.NewBronzeIndexer(
+				pool,
+				helix,
+				cfg.MetadataServiceURL,
+				cfg.TwitchTrackerAPIURL,
+				cfg.Upstream.UserAgent,
+				cfg.BronzeTopN,
+				allAlways,
+				cfg.BronzeHelixConcurrency,
+				cfg.BronzeTTSummaryConcurrency,
+			).WithWriter(archiveWriter)
+			analytics.StartBronzeWorker(ctx, indexer, cfg.BronzeWorkerInterval, logger)
+			logger.Info("bronze indexer started",
+				"interval", cfg.BronzeWorkerInterval.String(),
+				"top_n", cfg.BronzeTopN,
+				"helix_concurrency", cfg.BronzeHelixConcurrency,
+				"tt_concurrency", cfg.BronzeTTSummaryConcurrency,
+			)
+		}
+	}
+
 	handler := analytics.NewHandler(store, collector, helix, syncService)
 	heatmapCache := heatmap.NewCache(rdb, logger)
 	handler.WithHeatmapCache(heatmapCache)
 	handler.WithTimeseries(tsWriter)
-	chatReplayStore := chatreplay.NewStore(pool)
+	chatReplayStore := chatreplay.NewStore(pool).WithArchiveProtectRetention(cfg.ArchiveProtectRetention)
 	chatReplayHandler := chatreplay.NewHandler(chatReplayStore).WithLogger(logger).WithIngestEnabled(func() bool {
 		return cfg.ChatLogPersistEnabled
 	})

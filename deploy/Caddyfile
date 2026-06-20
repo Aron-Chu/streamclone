@@ -35,6 +35,11 @@
 		}
 	}
 
+	@storygraph {
+		path /v1/pulse-wire /v1/pulse-wire/* /v1/channels/*/spread /v1/channels/*/spread/*
+	}
+	reverse_proxy @storygraph storygraph:8080
+
 	@hls {
 		path /live/*
 	}
@@ -61,7 +66,7 @@
 	}
 	route @clipper {
 		uri replace /v1/clipper /v1
-		reverse_proxy clipper:8095
+		reverse_proxy host.docker.internal:8095
 	}
 
 	@metadata {

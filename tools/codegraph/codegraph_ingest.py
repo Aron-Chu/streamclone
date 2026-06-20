@@ -15,7 +15,7 @@ from typing import Iterable
 
 import kuzu
 from tree_sitter import Node, Parser, Query, QueryCursor
-from tree_sitter_language_pack import get_language
+from tree_sitter_language_pack import PackConfig, configure, get_language
 
 
 EXTENSION_LANGUAGES = {
@@ -36,6 +36,8 @@ SKIP_DIRS = {
     ".codegraph",
     ".git",
     ".tmp",
+    ".uv-cache",
+    ".uv-python",
     ".venv",
     ".gocache",
     ".gomodcache",
@@ -48,6 +50,12 @@ SKIP_DIRS = {
     "node_modules",
     "vendor",
 }
+
+
+def configure_tree_sitter_cache(repo: Path) -> None:
+    cache = Path(os.environ.get("TREE_SITTER_LANGUAGE_PACK_CACHE_DIR", repo / ".codegraph" / "tree-sitter-cache"))
+    cache.mkdir(parents=True, exist_ok=True)
+    configure(PackConfig(cache_dir=str(cache)))
 
 QUERY_BY_LANGUAGE = {
     "go": {
@@ -934,6 +942,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    configure_tree_sitter_cache(args.repo.resolve())
     builder = CodeGraphBuilder(args.repo, args.db)
     summary = builder.build()
     if args.json:

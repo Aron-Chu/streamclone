@@ -1,0 +1,72 @@
+# Terraform plan for Streamclone Azure blob archive infra.
+# Apply is manual (workflow_dispatch) until GitHub OIDC → Azure is configured.
+# See docs/azure-archive-cicd.md
+
+name: azure-archive-terraform
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/terraform/azure/**'
+      - '.github/workflows/azure-archive-terraform.yml'
+      - 'docs/azure-archive-*.md'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action'
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+
+permissions:
+  contents: read
+  id-token: write
+
+defaults:
+  run:
+    working-directory: deploy/terraform/azure/archive
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    # Uncomment after OIDC is configured (docs/azure-archive-cicd.md):
+    # environment: production-azure
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        if: github.event_name == 'pull_request' || github.event.inputs.action == 'plan' || github.event.inputs.action == ''
+        env:
+          TF_VAR_resource_group_name: ${{ vars.STREAMCLONE_AZURE_RG }}
+          TF_VAR_location: ${{ vars.STREAMCLONE_AZURE_LOCATION }}
+        run: |
+          if [ -z "$TF_VAR_resource_group_name" ]; then
+            export TF_VAR_resource_group_name=rg-streamclone-archive-ci
+          fi
+          if [ -z "$TF_VAR_location" ]; then
+            export TF_VAR_location=eastus
+          fi
+          terraform plan -input=false
+
+      - name: Terraform apply (manual only)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+        run: |
+          echo "::warning::Configure GitHub OIDC → Azure before enabling apply."
+          echo "See docs/azure-archive-cicd.md"
+          exit 1

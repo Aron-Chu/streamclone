@@ -4,7 +4,7 @@
 
 # Streamclone
 
-Self-hosted Twitch-style directory with live HLS playback, chat, 7TV emotes, Analytics with chat and emote spike views, optional Clip Studio, and Pulse dashboards. Apache-2.0. Not affiliated with Twitch or 7TV.
+Self-hosted Twitch-style directory with live HLS playback, chat, 7TV emotes, Analytics with chat and emote spike views, optional Clip Studio (ReplayForge), optional Pulse Wire streamer news (Analytics-adjacent), and optional Pulse Grafana dashboards. Apache-2.0. Not affiliated with Twitch or 7TV.
 
 ## Start Here
 
@@ -28,9 +28,11 @@ make setup
 
 - [Install and lifecycle](docs/install-desktop.md)
 - [Optional features](docs/options.md)
+- [Pulse Wire operator notes](docs/pulse-wire.md)
+- [Agents: Streamclone + ReplayForge](docs/agents-streamclone-and-replayforge.md)
+- [For AI agents](AGENTS.md) — task router, MCP, testing, safe commands
 - [Security](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
-- [Roadmap](docs/product-roadmap.md)
 
 ## Preview
 
@@ -46,7 +48,7 @@ Regenerate preview media with `powershell -File scripts\capture-showcase-media.p
 
 ## Stack
 
-Browser `:8090` -> Caddy -> Go services, MediaMTX, MinIO, PostgreSQL, and Redis. Optional services add the scraper, Clip Studio, and Pulse dashboards; Pulse is started from Stack status.
+Browser `:8090` -> Caddy -> Go services, MediaMTX, MinIO, PostgreSQL, and Redis. Optional tiers add the scraper (Analytics), ReplayForge (Clip Studio), Pulse Wire (Story Graph, off by default), and Pulse Grafana dashboards.
 
 ## License
 

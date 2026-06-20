@@ -5,6 +5,7 @@ import { normalizeBrowserOriginUrl } from '../../config'
 import { tokenizeEmoteText } from '../../emoteText'
 import { resolveEmoteImageUrl } from '../../utils/emoteImageUrl'
 import { linkifyText } from '../../utils/linkifyText'
+import { ChatEmoteImage, ChatEmoteStack } from './ChatEmoteTooltipLayer'
 
 export type LogEmoteFrag = {
   name: string
@@ -16,34 +17,27 @@ export type LogEmoteFrag = {
 export function EmoteStack({
   baseName,
   baseUrl,
+  baseProvider,
+  baseId,
   overlays,
 }: {
   baseName: string
   baseUrl: string
-  overlays: Array<{ name: string; url: string }>
+  baseProvider?: string
+  baseId?: string
+  overlays: Array<{ name: string; url: string; provider?: string; id?: string }>
 }) {
-  const title = [baseName, ...overlays.map(overlay => overlay.name)].join(' ')
   return (
-    <span className="relative inline-block align-middle" style={{ height: '1.65em', lineHeight: 0 }} title={title}>
-      <img
-        src={normalizeBrowserOriginUrl(baseUrl, ['/emotes/'])}
-        alt={baseName}
-        className="inline-block h-full w-auto max-w-none align-middle drop-shadow"
-        decoding="async"
-        loading="lazy"
-      />
-      {overlays.map((overlay, index) => (
-        <img
-          key={`${overlay.name}-${index}`}
-          src={normalizeBrowserOriginUrl(overlay.url, ['/emotes/'])}
-          alt={overlay.name}
-          title={overlay.name}
-          className="pointer-events-none absolute inset-0 z-10 h-full w-full object-contain drop-shadow"
-          decoding="async"
-          loading="lazy"
-        />
-      ))}
-    </span>
+    <ChatEmoteStack
+      baseName={baseName}
+      baseUrl={normalizeBrowserOriginUrl(baseUrl, ['/emotes/'])}
+      baseProvider={baseProvider}
+      baseId={baseId}
+      overlays={overlays.map(overlay => ({
+        ...overlay,
+        url: normalizeBrowserOriginUrl(overlay.url, ['/emotes/']),
+      }))}
+    />
   )
 }
 
@@ -95,21 +89,33 @@ function renderEmoteSegments(segments: ReturnType<typeof tokenizeEmoteText>, fra
     }
 
     if (overlays.length) {
+      const baseFrag = fragByName.get(segment.name)
       nodes.push(
         <EmoteStack
           key={`${keyPrefix}-e-${index}`}
           baseName={segment.name}
           baseUrl={baseUrl}
-          overlays={overlays}
+          baseProvider={baseFrag?.provider ?? segment.emote.provider}
+          baseId={baseFrag?.id ?? segment.emote.emote_id}
+          overlays={overlays.map(overlay => {
+            const overlayFrag = fragByName.get(overlay.name)
+            return {
+              ...overlay,
+              provider: overlayFrag?.provider,
+              id: overlayFrag?.id,
+            }
+          })}
         />,
       )
     } else {
+      const frag = fragByName.get(segment.name)
       nodes.push(
-        <img
+        <ChatEmoteImage
           key={`${keyPrefix}-e-${index}`}
           src={normalizeBrowserOriginUrl(baseUrl, ['/emotes/'])}
-          alt={segment.name}
-          title={segment.name}
+          name={segment.name}
+          provider={frag?.provider ?? segment.emote.provider}
+          fallbackId={frag?.id ?? segment.emote.emote_id}
           className="inline-block align-middle drop-shadow"
           style={{ height: '1.65em' }}
           decoding="async"

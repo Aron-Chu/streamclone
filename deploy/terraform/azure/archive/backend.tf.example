@@ -1,0 +1,16 @@
+# Optional remote state — run AFTER first successful local-state apply:
+#
+#   cd deploy/terraform/azure/archive
+#   cp backend.tf.example backend.tf
+#   terraform init -migrate-state
+#
+# Requires tfstate container (create_tfstate_container=true by default).
+
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "rg-streamclone-archive"
+    storage_account_name = "REPLACE_AFTER_FIRST_APPLY"
+    container_name       = "tfstate"
+    key                  = "archive.tfstate"
+  }
+}

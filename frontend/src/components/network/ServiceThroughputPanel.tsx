@@ -50,7 +50,7 @@ export default function ServiceThroughputPanel({
       </div>
       {!pulseReady ? (
         <div className="mb-4 rounded-lg border border-amber-300/20 bg-amber-500/10 p-3 text-sm font-semibold text-amber-50">
-          Start Pulse for historical rates and Grafana ops dashboards.
+          Start Pulse dashboards for historical rates and Grafana ops dashboards.
           {onStartPulse ? (
             <button
               type="button"
@@ -58,7 +58,7 @@ export default function ServiceThroughputPanel({
               disabled={startingPulse}
               className="ml-2 rounded border border-violet-400/40 bg-violet-500/15 px-2 py-1 text-[11px] font-black uppercase text-violet-100 transition hover:bg-violet-500/25 disabled:opacity-50"
             >
-              {startingPulse ? 'Starting…' : 'Start Pulse'}
+              {startingPulse ? 'Starting…' : 'Start Pulse dashboards'}
             </button>
           ) : null}
         </div>

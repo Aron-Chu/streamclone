@@ -54,6 +54,14 @@ if [ -z "$PROFILE" ] && [ -f "$ROOT/.streamclone-profile" ]; then
 fi
 PROFILE="${PROFILE:-core}"
 
+if [ "$PROFILE" = "clipper" ]; then
+  if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-replayforge-hint.ps1" || true
+  elif command -v pwsh >/dev/null 2>&1; then
+    pwsh -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-replayforge-hint.ps1" || true
+  fi
+fi
+
 if [ "$USE_IMAGES_SET" = false ] && streamclone_use_images_default; then
   USE_IMAGES=true
 fi
@@ -73,9 +81,15 @@ else
   if [ "$USE_IMAGES" = true ]; then
     echo "Using pre-built GHCR images (release bundle or STREAMCLONE_USE_IMAGES=1)."
   fi
+  env_apply_release_defaults "$ROOT/.env" || true
+  if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-oauth-env.ps1" -EnvFile "$ROOT/.env" || true
+  elif command -v pwsh >/dev/null 2>&1; then
+    pwsh -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-oauth-env.ps1" -EnvFile "$ROOT/.env" || true
+  fi
   compose_args=(--env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml)
   [ "$USE_IMAGES" = true ] && compose_args+=(-f deploy/docker-compose.release.yml)
-  read -r -a profiles <<<"$(env_compose_profiles "$PROFILE")"
+  read -r -a profiles <<<"$(env_streamclone_compose_profiles "$PROFILE" "$ROOT/.env")"
   for p in "${profiles[@]}"; do
     [ -n "$p" ] && compose_args+=(--profile "$p")
   done
@@ -92,15 +106,6 @@ else
   elif command -v pwsh >/dev/null 2>&1; then
     pwsh -ExecutionPolicy Bypass -File "$ROOT/scripts/reload-env-if-stale.ps1" -EnvFile "$ROOT/.env" || true
   fi
-  case "$PROFILE" in
-    clipper|full)
-      if command -v powershell.exe >/dev/null 2>&1; then
-        powershell.exe -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-clipper-auth.ps1" -EnvFile "$ROOT/.env" || true
-      elif command -v pwsh >/dev/null 2>&1; then
-        pwsh -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-clipper-auth.ps1" -EnvFile "$ROOT/.env" || true
-      fi
-      ;;
-  esac
 fi
 
 bash "$ROOT/scripts/validate-env.sh" --profile "$PROFILE" --env-file "$ROOT/.env" || true
@@ -115,11 +120,6 @@ bash "$ROOT/scripts/register-setup-control-protocol.sh" "$ROOT" 2>/dev/null || t
 echo ""
 echo "Streamclone is running at http://localhost:8090"
 echo "Stop:  scripts/stop-streamclone.sh"
-case "$PROFILE" in
-  clipper|full)
-    echo "Clips: make twitch-local-auth  (one-time Twitch login)"
-    ;;
-esac
 
 if [ "$NO_BROWSER" = false ]; then
   if command -v xdg-open >/dev/null 2>&1; then

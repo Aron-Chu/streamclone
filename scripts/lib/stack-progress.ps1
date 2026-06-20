@@ -124,7 +124,8 @@ function Get-StreamcloneComposeArgs {
             $args += '-f', (Join-Path $Root 'deploy\docker-compose.scraper-source.yml')
         }
     }
-    foreach ($p in (Get-EnvComposeProfiles -Profile $Profile)) {
+    $envFile = Join-Path $Root '.env'
+    foreach ($p in (Get-StreamcloneComposeProfiles -Profile $Profile -EnvFile $envFile)) {
         $args += '--profile', $p
     }
     return $args

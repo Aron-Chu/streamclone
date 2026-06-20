@@ -40,24 +40,28 @@ func TestBuildGQLSegmentsDefaults(t *testing.T) {
 }
 
 func TestEffectiveGQLSegmentSeconds(t *testing.T) {
-	if got := effectiveGQLSegmentSeconds(600, 120, 3600, 0); got != 600 {
+	if got := effectiveGQLSegmentSeconds(600, 120, 900, 3600, 0); got != 600 {
 		t.Fatalf("expected 600 for 1h VOD, got %d", got)
 	}
-	if got := effectiveGQLSegmentSeconds(600, 120, vodGQLLargeVODDurationSec, 0); got != vodGQLSegmentLargeVOD {
-		t.Fatalf("expected %d for long VOD, got %d", vodGQLSegmentLargeVOD, got)
+	if got := effectiveGQLSegmentSeconds(600, 120, 900, vodGQLLargeVODDurationSec, 0); got != 900 {
+		t.Fatalf("expected 900 for quiet long VOD, got %d", got)
 	}
-	if got := effectiveGQLSegmentSeconds(600, 120, 7200, 60_000); got != vodGQLSegmentDenseVOD {
+	if got := effectiveGQLSegmentSeconds(600, 120, 900, 7200, 60_000); got != vodGQLSegmentDenseVOD {
 		t.Fatalf("expected %d for 60k comments, got %d", vodGQLSegmentDenseVOD, got)
 	}
-	if got := effectiveGQLSegmentSeconds(600, 120, 7200, 300_000); got != vodGQLSegmentDenseVOD {
+	if got := effectiveGQLSegmentSeconds(600, 120, 900, 7200, 300_000); got != vodGQLSegmentDenseVOD {
 		t.Fatalf("expected %d for 300k comments, got %d", vodGQLSegmentDenseVOD, got)
 	}
 }
 
 func TestEffectiveGQLSegmentSecondsCommentDensityPerHour(t *testing.T) {
-	// 2h VOD with 40k comments => 20k/hour => 5-minute segments
-	if got := effectiveGQLSegmentSeconds(600, 120, 7200, 40_000); got != vodGQLSegmentDenseVOD {
+	// 2h VOD with 40k comments => 20k/hour => 2-minute segments
+	if got := effectiveGQLSegmentSeconds(600, 120, 900, 7200, 40_000); got != vodGQLSegmentDenseVOD {
 		t.Fatalf("expected %d for high per-hour density, got %d", vodGQLSegmentDenseVOD, got)
+	}
+	// Quiet 8h VOD with low comment volume => 15-minute segments
+	if got := effectiveGQLSegmentSeconds(600, 120, 900, 8*3600, 500); got != 900 {
+		t.Fatalf("expected 900 for quiet long VOD, got %d", got)
 	}
 }
 
@@ -70,7 +74,7 @@ func TestBuildGQLSegmentsLongVODUsesFiveMinuteChunks(t *testing.T) {
 
 func TestGQLRateCoordinatorThrottle(t *testing.T) {
 	coord := &gqlRateCoordinator{}
-	coord.Throttle(0, 0)
+	coord.Throttle(429, 0, 0)
 	coord.mu.Lock()
 	until := coord.pauseUntil
 	coord.mu.Unlock()
@@ -81,7 +85,7 @@ func TestGQLRateCoordinatorThrottle(t *testing.T) {
 
 func TestGQLRateCoordinatorWaitRespectsPause(t *testing.T) {
 	coord := &gqlRateCoordinator{}
-	coord.Throttle(50*time.Millisecond, 0)
+	coord.Throttle(429, 50*time.Millisecond, 0)
 	start := time.Now()
 	if err := coord.Wait(context.Background()); err != nil {
 		t.Fatalf("wait: %v", err)
@@ -247,7 +251,7 @@ func TestSegmentSchedulePriority(t *testing.T) {
 	}
 }
 
-func TestShouldSplitHotSegmentAdaptiveTriggers(t *testing.T) {
+func TestHotSegmentSplitReasonAdaptiveTriggers(t *testing.T) {
 	recent := []gqlPageSample{
 		{offsetAdvance: 5, commentCount: 20},
 		{offsetAdvance: 4, commentCount: 18},
@@ -255,11 +259,11 @@ func TestShouldSplitHotSegmentAdaptiveTriggers(t *testing.T) {
 		{offsetAdvance: 2, commentCount: 19},
 		{offsetAdvance: 1, commentCount: 21},
 	}
-	if !shouldSplitHotSegment(10, 10, recent, 30, 5, 80) {
-		t.Fatal("expected page threshold split")
+	if got := hotSegmentSplitReason(10, 10, recent, 30, 5, 80); got != "page_threshold" {
+		t.Fatalf("expected page_threshold split, got %q", got)
 	}
-	if !shouldSplitHotSegment(3, 10, recent, 30, 5, 80) {
-		t.Fatal("expected slow advance split")
+	if got := hotSegmentSplitReason(3, 10, recent, 30, 5, 80); got != "slow_advance" {
+		t.Fatalf("expected slow_advance split, got %q", got)
 	}
 	dense := []gqlPageSample{
 		{offsetAdvance: 120, commentCount: 90},
@@ -268,11 +272,62 @@ func TestShouldSplitHotSegmentAdaptiveTriggers(t *testing.T) {
 		{offsetAdvance: 90, commentCount: 88},
 		{offsetAdvance: 80, commentCount: 92},
 	}
-	if !shouldSplitHotSegment(3, 10, dense, 30, 5, 80) {
-		t.Fatal("expected comments/page split")
+	if got := hotSegmentSplitReason(3, 10, dense, 30, 5, 80); got != "comments_per_page" {
+		t.Fatalf("expected comments_per_page split, got %q", got)
 	}
-	if shouldSplitHotSegment(3, 10, dense, 30, 5, 200) {
-		t.Fatal("did not expect split when density threshold disabled")
+	if got := hotSegmentSplitReason(3, 10, dense, 30, 5, 200); got != "" {
+		t.Fatalf("did not expect split when density threshold disabled, got %q", got)
+	}
+
+	state := &vodCommentsFetchState{}
+	state.recordHotSplit("page_threshold")
+	state.recordHotSplit("slow_advance")
+	if got := state.latestHotSplitReason(); got != "slow_advance" {
+		t.Fatalf("expected latest split reason slow_advance, got %q", got)
+	}
+}
+
+func TestImpliedAvgSegmentSec(t *testing.T) {
+	if got := impliedAvgSegmentSecFromSegments(3600, 300, 12); got != 300 {
+		t.Fatalf("expected vod/segments=300, got %v", got)
+	}
+	if got := impliedAvgSegmentSecFromSegments(0, 300, 12); got != 300 {
+		t.Fatalf("expected effectiveSegmentSec fallback, got %v", got)
+	}
+	if got := impliedAvgSegmentSecFromSegments(3600, 300, 0); got != 300 {
+		t.Fatalf("expected effectiveSegmentSec when no segments, got %v", got)
+	}
+}
+
+func TestTryAutoCloseSegment(t *testing.T) {
+	state := &vodCommentsFetchState{vodDurationSec: 3600}
+	seg := &gqlSegmentProgress{StartSec: 600, EndSec: 720, OffsetSec: 720}
+	if !tryAutoCloseSegment(state, seg) {
+		t.Fatal("expected non-final segment at end boundary to auto-close")
+	}
+	if !seg.Done {
+		t.Fatal("expected segment to be marked done")
+	}
+	if got := seg.OffsetSec; got != 720 {
+		t.Fatalf("expected offset capped at segment end 720, got %d", got)
+	}
+	if got := state.autoClosedTotal.Load(); got != 1 {
+		t.Fatalf("expected auto-closed counter 1, got %d", got)
+	}
+
+	finalState := &vodCommentsFetchState{vodDurationSec: 3600}
+	finalSeg := &gqlSegmentProgress{StartSec: 3300, EndSec: 3600, OffsetSec: 3600}
+	if tryAutoCloseSegment(finalState, finalSeg) {
+		t.Fatal("did not expect final segment at vod boundary to auto-close")
+	}
+
+	tailState := &vodCommentsFetchState{vodDurationSec: 3600}
+	tailSeg := &gqlSegmentProgress{StartSec: 3300, EndSec: 3600, OffsetSec: 3601}
+	if !tryAutoCloseSegment(tailState, tailSeg) {
+		t.Fatal("expected final segment past vod boundary to auto-close")
+	}
+	if got := tailSeg.OffsetSec; got != 3600 {
+		t.Fatalf("expected final segment offset capped at vod end 3600, got %d", got)
 	}
 }
 

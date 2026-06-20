@@ -20,6 +20,13 @@ clipper-data/
 **/__pycache__/
 *.py[cod]
 benchmark-*.json
+benchmark-*.log
+.docker-cli-config/
+feed.json
+frontend/debug.log
+docs/benchmarks/
+docs/media/*
+!docs/media/.gitkeep
 .vscode/
 .DS_Store
 .codegraph/
@@ -101,3 +108,13 @@ Thumbs.db
 
 .gocache/
 .gomodcache/
+
+# Azure archive Terraform + secrets (see docs/azure-archive-setup.md)
+deploy/terraform/**/terraform.tfvars
+deploy/terraform/**/*.tfstate
+deploy/terraform/**/*.tfstate.*
+deploy/terraform/**/.terraform/
+**/*-archive-writer.json
+**/*service-account*.json
+**/*azure-archive-connection-string*
+**/*archive.env.local.snippet

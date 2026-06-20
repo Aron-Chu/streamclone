@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { stopSetupService, stopStream } from '../../api'
+import { useQueryClient } from '@tanstack/react-query'
+import { setAlwaysTracked, stopSetupService, stopStream } from '../../api'
 import {
   filterNodesByTab,
   formatBytes,
@@ -40,6 +41,7 @@ export default function NetworkActivityTable({
   const [pending, setPending] = useState<NetworkActivityNode | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
   const summary = useMemo(() => summarizeActivityNodes(nodes), [nodes])
 
@@ -73,6 +75,10 @@ export default function NetworkActivityTable({
     try {
       if (action.kind === 'stop-relay') {
         await stopStream(action.channel)
+      } else if (action.kind === 'untrack-channel') {
+        await setAlwaysTracked(action.channel, false)
+        void queryClient.invalidateQueries({ queryKey: ['always-tracked'] })
+        void queryClient.invalidateQueries({ queryKey: ['analytics-always-tracked'] })
       } else if (action.kind === 'stop-optional') {
         await stopSetupService(action.service)
       } else if (action.kind === 'pause-page-monitoring') {

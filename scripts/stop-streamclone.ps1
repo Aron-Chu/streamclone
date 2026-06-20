@@ -31,7 +31,7 @@ try {
         'compose', '--env-file', '.env',
         '-f', 'deploy/docker-compose.yml',
         '-f', 'deploy/docker-compose.local-tunnel.yml',
-        '--profile', 'scraper', '--profile', 'clipper', '--profile', 'pulse',
+        '--profile', 'scraper', '--profile', 'pulse',
         'down', '--remove-orphans', '--timeout', '30'
     )
     $result = Invoke-EnvDockerCaptured -Arguments $withProfiles

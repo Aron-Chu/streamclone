@@ -5,6 +5,7 @@ import { formatDuration } from '../../utils/durationFormat'
 import {
   ACTIVITY_WAVEFORM_LAYERS,
   ACTIVITY_WAVEFORM_LAYER_ORDER,
+  activityWaveformOffsetToX,
   bucketActivityPointsForDraw,
   deriveActivityWaveform,
   loadLayerPrefs,
@@ -21,6 +22,8 @@ export interface ActivityWaveformProps {
   totalDurationSec?: number
   className?: string
   variant?: 'analytics' | 'player'
+  currentOffsetSec?: number | null
+  highlightOffsetSec?: number | null
   onSeek?: (offsetSeconds: number) => void
   onSelectPoint?: (point: ActivityWaveformPoint) => void
   onPeakSelect?: (peak: ActivityWaveformPeak) => void
@@ -95,6 +98,8 @@ function ActivityWaveformInner({
   totalDurationSec,
   className,
   variant = 'analytics',
+  currentOffsetSec,
+  highlightOffsetSec,
   onSeek,
   onSelectPoint,
   onPeakSelect,
@@ -202,7 +207,32 @@ function ActivityWaveformInner({
       ctx.fillStyle = hexToRgba(layerMeta.color, variant === 'player' ? 0.45 : 0.38)
       ctx.fill()
     }
-  }, [containerWidth, laneHeight, layerVisibility, reducedMotion, variant, waveform])
+
+    if (highlightOffsetSec != null && Number.isFinite(highlightOffsetSec)) {
+      const originX = activityWaveformOffsetToX(highlightOffsetSec, durationSec, containerWidth)
+      ctx.strokeStyle = variant === 'player'
+        ? 'rgba(167, 139, 250, 0.85)'
+        : 'rgba(167, 139, 250, 0.7)'
+      ctx.lineWidth = variant === 'player' ? 1 : 1
+      ctx.setLineDash(variant === 'player' ? [2, 2] : [3, 3])
+      ctx.beginPath()
+      ctx.moveTo(originX, 0)
+      ctx.lineTo(originX, laneHeight)
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
+    if (currentOffsetSec != null && Number.isFinite(currentOffsetSec)) {
+      const playheadX = activityWaveformOffsetToX(currentOffsetSec, durationSec, containerWidth)
+      ctx.strokeStyle = variant === 'player'
+        ? 'rgba(255, 255, 255, 0.92)'
+        : 'rgba(255, 255, 255, 0.85)'
+      ctx.lineWidth = variant === 'player' ? 2 : 2
+      ctx.beginPath()
+      ctx.moveTo(playheadX, 0)
+      ctx.lineTo(playheadX, laneHeight)
+      ctx.stroke()
+    }
+  }, [containerWidth, currentOffsetSec, durationSec, highlightOffsetSec, laneHeight, layerVisibility, reducedMotion, variant, waveform])
 
   useLayoutEffect(() => {
     drawCanvas()
@@ -377,7 +407,7 @@ function ActivityWaveformInner({
       {layerToggleRow}
       <div
         ref={containerRef}
-        className={`relative w-full select-none ${variant === 'player' ? 'cursor-pointer' : 'cursor-crosshair'}`}
+        className={`relative w-full select-none ${variant === 'player' || onSeek ? 'cursor-pointer' : 'cursor-crosshair'}`}
         style={{ height: laneHeight }}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
@@ -386,7 +416,7 @@ function ActivityWaveformInner({
         aria-label="Activity waveform across the stream timeline"
         aria-valuemin={variant === 'player' ? 0 : undefined}
         aria-valuemax={variant === 'player' ? durationSec : undefined}
-        aria-valuenow={variant === 'player' ? (tooltip?.point.offsetSeconds ?? 0) : undefined}
+        aria-valuenow={variant === 'player' ? (currentOffsetSec ?? tooltip?.point.offsetSeconds ?? 0) : undefined}
         tabIndex={variant === 'player' ? 0 : undefined}
       >
         <canvas

@@ -37,13 +37,35 @@ env_compose_profiles() {
   case "$profile" in
     core) printf '%s' "" ;;
     scraper) printf '%s' "scraper" ;;
-    clipper) printf '%s' "clipper" ;;
-    full) printf '%s' "scraper clipper" ;;
+    clipper)
+      echo "env_compose_profiles: clipper profile deprecated (ReplayForge outside compose); using core" >&2
+      printf '%s' ""
+      ;;
+    full) printf '%s' "scraper" ;;
+    pulse) printf '%s' "pulse" ;;
     *)
       echo "env_compose_profiles: unknown profile '$profile'" >&2
       return 1
       ;;
   esac
+}
+
+env_feature_compose_profiles() {
+  local file="${1:-$ENV_REPO_ROOT/.env}"
+  local pulse pulse_sem scraper_key
+  pulse="$(env_read_value "$file" PULSE_WIRE_ENABLED 2>/dev/null || true)"
+  pulse_sem="$(env_read_value "$file" PULSE_WIRE_SEMANTIC 2>/dev/null || true)"
+  scraper_key="$(env_read_value "$file" SCRAPER_API_KEY 2>/dev/null || true)"
+  [ "$pulse" = "true" ] && printf '%s ' pulse-wire
+  [ "$pulse_sem" = "true" ] && printf '%s ' pulse-wire-semantic
+  [ -n "$scraper_key" ] && printf '%s ' scraper
+}
+
+env_streamclone_compose_profiles() {
+  local profile="${1:-core}"
+  local file="${2:-$ENV_REPO_ROOT/.env}"
+  env_compose_profiles "$profile"
+  env_feature_compose_profiles "$file"
 }
 
 # Parse KEY=VALUE lines into associative array name passed by reference (bash 4+).
@@ -211,6 +233,38 @@ env_apply_release_image_tag() {
   env_set_key "$outfile" STREAMCLONE_USE_IMAGES 1
 }
 
+env_apply_release_defaults() {
+  local outfile="${1:-$ENV_REPO_ROOT/.env}"
+  local bundle_file="$ENV_REPO_ROOT/deploy/env/release-bundle.env"
+  [ -f "$bundle_file" ] || return 1
+  [ -f "$outfile" ] || return 1
+
+  declare -A existing=()
+  env_load_into existing "$outfile"
+  declare -A bundle_vals=()
+  env_load_into bundle_vals "$bundle_file"
+
+  local key target_tag current
+  for key in "${!bundle_vals[@]}"; do
+    [ "$key" = IMAGE_TAG ] && continue
+    if [ -z "${existing[$key]:-}" ]; then
+      env_set_key "$outfile" "$key" "${bundle_vals[$key]}"
+    fi
+  done
+
+  target_tag="${bundle_vals[IMAGE_TAG]:-}"
+  if [ -z "$target_tag" ]; then
+    target_tag="$(env_release_version_tag || true)"
+  fi
+  if [ -n "$target_tag" ]; then
+    current="$(env_read_value "$outfile" IMAGE_TAG 2>/dev/null || true)"
+    if [ "$current" != "$target_tag" ]; then
+      env_set_key "$outfile" IMAGE_TAG "$target_tag"
+    fi
+    env_set_key "$outfile" STREAMCLONE_USE_IMAGES 1
+  fi
+}
+
 env_synthesize() {
   local profile="${1:-core}"
   local outfile="${2:-$ENV_REPO_ROOT/.env}"
@@ -233,6 +287,7 @@ env_synthesize() {
   env_generate_secrets "$outfile"
   env_apply_release_image_tag "$outfile"
   ensure_localhost_dev_token_import "$outfile" || true
+  env_try_sync_twitch_oauth "$outfile" || true
 }
 
 env_loopback_public_origin() {
@@ -253,9 +308,10 @@ env_loopback_public_origin() {
 ensure_localhost_dev_token_import() {
   local file="${1:-$ENV_REPO_ROOT/.env}"
   [ -f "$file" ] || return 1
-  env_loopback_public_origin "$file" || return 1
   local before
   before="$(env_read_value "$file" TWITCH_DEV_TOKEN_IMPORT_ENABLED 2>/dev/null || true)"
+  [ "$before" = "false" ] && return 1
+  env_loopback_public_origin "$file" || return 1
   [ "$before" = "true" ] && return 1
   env_set_key "$file" TWITCH_DEV_TOKEN_IMPORT_ENABLED true
   return 0
@@ -266,6 +322,7 @@ env_read_value() {
   local key="$2"
   [ -f "$file" ] || return 1
   while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
     if [[ "$line" == "$key="* ]]; then
       printf '%s' "${line#*=}"
       return 0
@@ -317,4 +374,14 @@ env_sync_twitch_cli() {
   fi
   env_set_key "$env_file" TWITCH_OAUTH_CLIENT_ID "$client_id"
   env_set_key "$env_file" TWITCH_OAUTH_CLIENT_SECRET "$client_secret"
+}
+
+env_try_sync_twitch_oauth() {
+  local env_file="${1:-$ENV_REPO_ROOT/.env}"
+  [ -f "$env_file" ] || return 1
+  local oauth_id oauth_secret
+  oauth_id="$(env_read_value "$env_file" TWITCH_OAUTH_CLIENT_ID 2>/dev/null || true)"
+  oauth_secret="$(env_read_value "$env_file" TWITCH_OAUTH_CLIENT_SECRET 2>/dev/null || true)"
+  [ -n "$oauth_id" ] && [ -n "$oauth_secret" ] && return 1
+  env_sync_twitch_cli "$env_file" 2>/dev/null || return 1
 }

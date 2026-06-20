@@ -146,6 +146,7 @@ type RedditPost struct {
 	Subreddit    string   `json:"subreddit,omitempty"`
 	FlairText    string   `json:"flairText,omitempty"`
 	StreamerTags []string `json:"streamerTags"`
+	Provider     string   `json:"provider,omitempty"`
 }
 
 type YouTubeVideo struct {

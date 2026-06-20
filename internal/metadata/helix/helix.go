@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"streamclone/internal/metadata/gql"
 	"streamclone/internal/metadata/model"
 )
 
@@ -149,6 +150,92 @@ func normalizeThumbnail(u string) string {
 	u = strings.ReplaceAll(u, "%{width}", "{width}")
 	u = strings.ReplaceAll(u, "%{height}", "{height}")
 	return u
+}
+
+// TopLiveStreams lists live streams sorted by viewer count via paginated GET /streams.
+func (c *Client) TopLiveStreams(ctx context.Context, limit int, after string) (gql.Page[gql.Stream], error) {
+	if !c.Enabled() {
+		return gql.Page[gql.Stream]{}, ErrDisabled
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	out := gql.Page[gql.Stream]{Items: make([]gql.Stream, 0, min(limit, 100))}
+	cursor := after
+	seen := map[string]struct{}{}
+	for len(out.Items) < limit {
+		pageSize := 100
+		if remaining := limit - len(out.Items); remaining < pageSize {
+			pageSize = remaining
+		}
+		q := url.Values{}
+		q.Set("first", fmt.Sprintf("%d", pageSize))
+		if cursor != "" {
+			q.Set("after", cursor)
+		}
+		var resp struct {
+			Data []struct {
+				ID           string `json:"id"`
+				UserLogin    string `json:"user_login"`
+				UserName     string `json:"user_name"`
+				GameName     string `json:"game_name"`
+				Title        string `json:"title"`
+				ViewerCount  int    `json:"viewer_count"`
+				ThumbnailURL string `json:"thumbnail_url"`
+			} `json:"data"`
+			Pagination struct {
+				Cursor string `json:"cursor"`
+			} `json:"pagination"`
+		}
+		if err := c.get(ctx, "/streams", q, &resp); err != nil {
+			if len(out.Items) > 0 {
+				return out, nil
+			}
+			return gql.Page[gql.Stream]{}, err
+		}
+		for _, item := range resp.Data {
+			login := strings.ToLower(strings.TrimSpace(item.UserLogin))
+			key := login
+			if key == "" {
+				key = item.ID
+			}
+			if key == "" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			out.Items = append(out.Items, gql.Stream{
+				ID:           item.ID,
+				Title:        item.Title,
+				ViewersCount: item.ViewerCount,
+				ThumbnailURL: normalizeThumbnail(item.ThumbnailURL),
+				Category:     item.GameName,
+				Login:        login,
+				DisplayName:  item.UserName,
+				IsLive:       true,
+			})
+			if len(out.Items) >= limit {
+				break
+			}
+		}
+		nextCursor := resp.Pagination.Cursor
+		out.Cursor = nextCursor
+		if nextCursor == "" || nextCursor == cursor || len(resp.Data) == 0 {
+			break
+		}
+		cursor = nextCursor
+	}
+	return out, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (c *Client) ChannelDetails(ctx context.Context, login string) (model.ChannelDetails, error) {

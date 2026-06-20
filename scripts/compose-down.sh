@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tear down every Streamclone compose overlay (core, scraper, clipper, prod, base).
+# Tear down every Streamclone compose overlay (core, scraper, pulse, prod, base).
 set -euo pipefail
 
 ENV_FILE="${ENV_FILE:-.env}"
@@ -16,7 +16,7 @@ for arg in "$@"; do
 done
 
 if [[ "$VOLUMES" == true ]]; then
-  echo "Stopping stacks and removing named volumes (pg-data, minio-data, clipper-data, influx-data, grafana-data)..."
+  echo "Stopping stacks and removing named volumes (pg-data, minio-data, influx-data, grafana-data)..."
   volume_flag=-v
 else
   echo "Stopping all Streamclone compose stacks..."
@@ -28,9 +28,9 @@ down_stack() {
   docker compose --env-file "${ENV_FILE}" "$@" down --remove-orphans ${volume_flag:+$volume_flag} --timeout 30 || true
 }
 
-# All profiles (core + scraper + clipper + compose pulse stack).
+# Core + scraper + compose pulse stack.
 down_stack -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml \
-  --profile scraper --profile clipper --profile pulse
+  --profile scraper --profile pulse
 down_stack -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml --profile pulse
 down_stack -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml
 # Prod overlay requires APP_DOMAIN even for `down`.

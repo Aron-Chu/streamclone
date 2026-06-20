@@ -46,6 +46,10 @@ $envValues = Read-EnvKeyValueFile -Path $EnvFile
 
 Write-Host "validate-env: profile=$Profile file=$EnvFile"
 
+if ($Profile -eq 'clipper') {
+    Write-Warning 'Profile clipper is deprecated — compose uses core only; install ReplayForge separately (see docs/agents-streamclone-and-replayforge.md).'
+}
+
 function Test-Required {
     param([string]$Key, [string]$Fix)
     if ([string]::IsNullOrWhiteSpace($envValues[$Key])) {
@@ -101,11 +105,34 @@ if ($nonLoopbackOrigin) {
 $oauthId = $envValues['TWITCH_OAUTH_CLIENT_ID']
 $oauthSecret = $envValues['TWITCH_OAUTH_CLIENT_SECRET']
 if ([string]::IsNullOrWhiteSpace($oauthId) -or [string]::IsNullOrWhiteSpace($oauthSecret)) {
-    if ($Profile -in @('scraper', 'full', 'clipper')) {
+    if ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -eq 'true') {
+        Add-ValidateWarning -Message 'Sign in (optional) requires TWITCH_OAUTH_CLIENT_ID/SECRET' -Hint 'Run twitch configure then make twitch-sync, or copy deploy/env/oauth-bundle.env.example to deploy/env/oauth-bundle.env and re-run setup'
+    } elseif ($Profile -in @('scraper', 'full')) {
         Add-ValidateWarning -Message 'TWITCH_OAUTH_CLIENT_ID/SECRET missing from .env' -Hint 'Streamclone can still start; Helix VOD lookup/token refresh may be limited until you run twitch configure then make twitch-sync'
     } else {
         Add-ValidateWarning -Message 'TWITCH_OAUTH_CLIENT_ID/SECRET missing from .env' -Hint 'Optional Helix enrichment and token refresh are limited until you run: make twitch-sync'
     }
+}
+
+if ($envValues['PULSE_WIRE_ENABLED'] -eq 'true') {
+    if ($envValues['REDDIT_COMMERCIAL_OK'] -ne 'true') {
+        Add-ValidateWarning -Message 'PULSE_WIRE_ENABLED=true but REDDIT_COMMERCIAL_OK is not true' -Hint 'Reddit ingest stays disabled until you accept commercial API terms (set REDDIT_COMMERCIAL_OK=true in .env.local)'
+    }
+}
+
+$streamerbansEnabled = ($envValues['STREAMERBANS_INGEST_ENABLED'] -eq 'true')
+$xUnofficialOK = ($envValues['X_UNOFFICIAL_OK'] -eq 'true')
+$xAuthToken = [string]$envValues['X_AUTH_TOKEN']
+$emusksXAuthToken = [string]$envValues['EMUSKS_X_AUTH_TOKEN']
+$hasXToken = (-not [string]::IsNullOrWhiteSpace($xAuthToken)) -or (-not [string]::IsNullOrWhiteSpace($emusksXAuthToken))
+if ($xUnofficialOK -and -not $hasXToken) {
+    Add-ValidateWarning -Message 'X_UNOFFICIAL_OK=true but no X_AUTH_TOKEN or EMUSKS_X_AUTH_TOKEN is set' -Hint 'StreamerBans tier 2 is credential-gated; leave tier 2 unset for HTML fallback, or keep the token in .env.local'
+}
+if ($hasXToken -and -not $xUnofficialOK) {
+    Add-ValidateWarning -Message 'X_AUTH_TOKEN/EMUSKS_X_AUTH_TOKEN is set but X_UNOFFICIAL_OK is not true' -Hint 'Set X_UNOFFICIAL_OK=true only if you accept the unofficial emusks/X path; otherwise remove the token'
+}
+if (($xUnofficialOK -or $hasXToken) -and -not $streamerbansEnabled) {
+    Add-ValidateWarning -Message 'StreamerBans tier-2 variables are set but STREAMERBANS_INGEST_ENABLED is not true' -Hint 'Tier 2 only augments StreamerBans ingest; set STREAMERBANS_INGEST_ENABLED=true or remove the tier-2 variables'
 }
 
 if ($Profile -in @('scraper', 'full')) {
@@ -120,18 +147,14 @@ if ($Profile -in @('scraper', 'full')) {
     }
 }
 
-if ($Profile -in @('clipper', 'full')) {
-    if ([string]::IsNullOrWhiteSpace($envValues['CLIPPER_WEBHOOK_TOKEN'])) {
-        Add-ValidateError -Message 'CLIPPER_WEBHOOK_TOKEN is empty' -Fix 'Run make setup or scripts/validate-env.ps1 -Fix'
-    }
-    if ([string]::IsNullOrWhiteSpace($envValues['VITE_CLIPPER_TOKEN']) -or $envValues['VITE_CLIPPER_TOKEN'] -ne $envValues['CLIPPER_WEBHOOK_TOKEN']) {
-        Add-ValidateWarning -Message 'VITE_CLIPPER_TOKEN should match CLIPPER_WEBHOOK_TOKEN' -Hint 'Run make setup or scripts/validate-env.ps1 -Fix'
-    }
-    if ([string]::IsNullOrWhiteSpace($envValues['CLIPPER_TWITCH_USER_ACCESS_TOKEN'])) {
-        Add-ValidateWarning -Message 'CLIPPER_TWITCH_USER_ACCESS_TOKEN is empty' -Hint 'Click Sign in (optional) at http://localhost:8090, or run make twitch-local-auth with Twitch CLI'
-    }
-    if ([string]::IsNullOrWhiteSpace($envValues['CLIPPER_TWITCH_CLIENT_ID']) -and [string]::IsNullOrWhiteSpace($envValues['TWITCH_OAUTH_CLIENT_ID'])) {
-        Add-ValidateWarning -Message 'No Twitch OAuth client id for clipper' -Hint 'Run twitch configure then make twitch-sync'
+if (-not [string]::IsNullOrWhiteSpace($envValues['CLIPPER_TWITCH_USER_ACCESS_TOKEN'])) {
+    $replayForgeOk = $false
+    try {
+        $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:8095/healthz' -UseBasicParsing -TimeoutSec 3
+        if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) { $replayForgeOk = $true }
+    } catch { }
+    if (-not $replayForgeOk) {
+        Add-ValidateWarning -Message 'CLIPPER_TWITCH_USER_ACCESS_TOKEN is set but ReplayForge is not reachable at http://127.0.0.1:8095/healthz' -Hint 'Install and start ReplayForge separately — see docs/agents-streamclone-and-replayforge.md'
     }
 }
 

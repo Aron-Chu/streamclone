@@ -318,6 +318,13 @@ export function buildNetworkActivityNodes(input: BuildNetworkActivityNodesInput)
       impact: 'medium',
       detail: 'IRC ingest and minute rollups for analytics.',
       throughputHint: 'Chat ingest + rollups',
+      canDisable: true,
+      disableLabel: 'Untrack',
+      disableWarning:
+        `Remove ${channel} from analytics tracking. Offline channels stop Helix polling immediately. `
+        + 'If they are live right now, chat collection continues until the broadcast ends. '
+        + 'Channels in ALWAYS_TRACKED_CHANNELS (.env) may reappear after an analytics restart.',
+      disableAction: { kind: 'untrack-channel', channel },
     })
   }
 

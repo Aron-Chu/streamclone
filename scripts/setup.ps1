@@ -29,20 +29,22 @@ if (-not $NonInteractive) {
 
 [1] Core only          - watch + chat + emotes (no Twitch login required)
 [2] + Analytics charts - uses scraper image or streamclone-scraper sibling repo
-[3] + Clip Studio      - needs Twitch device-code login
-[4] Full stack         - scraper + clipper
+[3] Full stack         - core + Analytics scraper
 
 '@
-    $choice = Read-Host 'Choose profile [1-4, default 1]'
+    $choice = Read-Host 'Choose profile [1-3, default 1]'
     switch ($choice) {
         '2' { $Profile = 'scraper' }
-        '3' { $Profile = 'clipper' }
-        '4' { $Profile = 'full' }
+        '3' { $Profile = 'full' }
         default { $Profile = 'core' }
     }
 }
 
 Write-Host "Profile: $Profile"
+
+if ($Profile -in @('clipper', 'full')) {
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-replayforge-hint.ps1')
+}
 
 if (-not $SkipPreflight) {
     try {
@@ -63,6 +65,14 @@ Set-Content -Path (Join-Path (Get-Location) '.streamclone-profile') -Value $Prof
 $varCount = (Get-Content $envFile | Where-Object { $_ -match '^[A-Z]' }).Count
 Write-Host ".env: synthesized ($varCount keys, secrets generated)"
 
+$oauthAfterSynth = Read-EnvKeyValueFile -Path $envFile
+if ([string]::IsNullOrWhiteSpace($oauthAfterSynth['TWITCH_OAUTH_CLIENT_ID']) -or
+    [string]::IsNullOrWhiteSpace($oauthAfterSynth['TWITCH_OAUTH_CLIENT_SECRET'])) {
+    Write-Host 'Note: Twitch OAuth app creds not set — optional Sign in and Helix features need them; Reddit-only Pulse Wire still works.' -ForegroundColor Cyan
+}
+
+& powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-oauth-env.ps1') -EnvFile $envFile 2>$null | Out-Host
+
 if (-not $SkipTwitch) {
     $twitch = Get-Command twitch -ErrorAction SilentlyContinue
     if ($twitch) {
@@ -75,21 +85,29 @@ if (-not $SkipTwitch) {
                 $sync = ($ans -eq '' -or $ans -match '^[yY]')
             }
             if ($sync) {
-                Sync-TwitchCliToEnv -EnvFile $envFile
-                Write-Host '  synced TWITCH_OAUTH_CLIENT_ID/SECRET'
+                try {
+                    Sync-TwitchCliToEnv -EnvFile $envFile
+                    Write-Host '  synced TWITCH_OAUTH_CLIENT_ID/SECRET'
+                } catch {
+                    Write-Host "  OAuth sync skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+                }
             }
         } else {
             Write-Host '  twitch configure not run yet - skip or run: twitch configure'
-            if (-not $NonInteractive -and ($Profile -eq 'clipper' -or $Profile -eq 'full')) {
-                $cfg = Read-Host 'Run twitch configure now? [y/N]'
-                if ($cfg -match '^[yY]') { & twitch configure }
-            }
         }
     } else {
         Write-Host 'Twitch CLI: not found (optional for Clip Studio)'
-        Write-Host '  Use Sign in (optional) at http://localhost:8090 after the stack starts - no CLI required.'
+        Write-Host '  Sign in (optional) still needs TWITCH_OAUTH_CLIENT_ID/SECRET in .env.'
+        Write-Host '  Copy deploy/env/oauth-bundle.env.example to oauth-bundle.env, or install twitch-cli and run twitch configure.'
         Write-Host '  Developers: https://github.com/twitchdev/twitch-cli#installation' -ForegroundColor DarkGray
     }
+}
+
+$envAfterOAuth = Read-EnvKeyValueFile -Path $envFile
+if ($envAfterOAuth['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -eq 'true' -and
+    ([string]::IsNullOrWhiteSpace($envAfterOAuth['TWITCH_OAUTH_CLIENT_ID']) -or
+     [string]::IsNullOrWhiteSpace($envAfterOAuth['TWITCH_OAUTH_CLIENT_SECRET']))) {
+    Write-Host 'Sign in (optional) will fail until TWITCH_OAUTH_CLIENT_ID/SECRET are set (twitch configure + make twitch-sync, or oauth-bundle.env).' -ForegroundColor Yellow
 }
 
 $needsScraper = $Profile -in @('scraper', 'full')
@@ -117,17 +135,7 @@ if ($needsScraper -and $scraperUseImages) {
     }
 }
 
-$composeArgs = @(
-    'compose', '--env-file', '.env',
-    '-f', 'deploy/docker-compose.yml',
-    '-f', 'deploy/docker-compose.local-tunnel.yml'
-)
-if ($UseImages) {
-    $composeArgs += '-f', 'deploy/docker-compose.release.yml'
-}
-foreach ($p in (Get-EnvComposeProfiles -Profile $Profile)) {
-    $composeArgs += '--profile', $p
-}
+$composeArgs = Get-StreamcloneComposeArgs -Root (Get-Location) -Profile $Profile -UseImages:$UseImages -RelativePaths
 
 if (-not $NoUp) {
     Repair-FrontendDockerEntrypointLf
@@ -160,9 +168,6 @@ if (-not $NoUp) {
         exit $code
     }
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'reload-env-if-stale.ps1') -EnvFile $envFile 2>$null
-    if ($Profile -in @('clipper', 'full')) {
-        & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-clipper-auth.ps1') -EnvFile $envFile 2>$null
-    }
     Write-Host ''
     Write-Host 'Streamclone: http://localhost:8090/'
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-setup-control.ps1') -Root (Get-Location)
@@ -220,30 +225,6 @@ if (-not $NoSmoke -and -not $NoUp) {
             if (-not $ok) { Write-Warning '  scraper health check timed out' }
         }
     }
-
-    if ($Profile -in @('clipper', 'full')) {
-        Write-Host 'Checking clipper via proxy...'
-        $ok = $false
-        for ($i = 1; $i -le 30; $i++) {
-            foreach ($url in @('http://localhost:8090/clipper/health', 'http://localhost:8095/health')) {
-                try {
-                    Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3 | Out-Null
-                    Write-Host "  clipper ok ($url)"
-                    $ok = $true
-                    break
-                } catch { }
-            }
-            if ($ok) { break }
-            Start-Sleep -Seconds 2
-        }
-        if (-not $ok) { Write-Warning '  clipper health check timed out' }
-    }
-}
-
-if ($Profile -in @('clipper', 'full')) {
-    Write-Host ''
-    Write-Host 'Clip Studio: open http://localhost:8090 and click Sign in (optional) for a one-time Twitch login.'
-    Write-Host '  Developers with Twitch CLI: powershell -File scripts/twitch-auth.ps1 -Action local-auth'
 }
 
 Write-Host 'Setup complete.'

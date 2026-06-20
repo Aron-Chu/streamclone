@@ -366,3 +366,16 @@ export function peakLayerToReason(layer: ActivityWaveformLayerId): string {
       return 'manual'
   }
 }
+
+/** Maps an absolute VOD offset to an x coordinate on the waveform lane. */
+export function activityWaveformOffsetToX(
+  offsetSec: number,
+  durationSec: number,
+  containerWidth: number,
+): number {
+  if (!Number.isFinite(offsetSec) || !Number.isFinite(durationSec) || durationSec <= 0 || containerWidth <= 0) {
+    return 0
+  }
+  const ratio = Math.max(0, Math.min(1, offsetSec / durationSec))
+  return ratio * containerWidth
+}

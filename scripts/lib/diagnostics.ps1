@@ -262,13 +262,7 @@ function Get-StreamcloneDiagnostics {
     }
 
     $scraperReady = Test-StreamcloneHostServiceHealth -Url 'http://localhost:8000/health'
-    $clipperReady = $false
-    foreach ($clipperUrl in @((Get-StreamcloneAppUrl '/v1/clipper/health'), 'http://127.0.0.1:8095/health')) {
-        if (Test-StreamcloneHostServiceHealth -Url $clipperUrl) {
-            $clipperReady = $true
-            break
-        }
-    }
+    $clipperReady = Test-StreamcloneHostServiceHealth -Url 'http://127.0.0.1:8095/healthz'
     $pulseReady = Test-StreamcloneHostPulseReady
 
     $sibling = Get-EnvScraperSiblingPath

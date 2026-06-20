@@ -20,6 +20,7 @@ Provider data -> PostgreSQL -> asset worker -> WebP scales -> Redis dictionaries
 
 ```sh
 go test ./internal/emote/...
+go test ./internal/emoteimage/...
 go test ./internal/chat/parse ./internal/chat/enrich
 cd frontend && npm run build
 ```

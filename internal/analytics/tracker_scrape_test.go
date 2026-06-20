@@ -80,6 +80,43 @@ func TestParseTrackerDurationMinutesFromHTML(t *testing.T) {
 	}
 }
 
+func TestShouldSkipTrackerPrefersLiveCollector(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Minute)
+	ended := now.Add(20 * time.Minute)
+	rollups := make([]MinuteRollup, 20)
+	for i := range rollups {
+		val := 100 + i*10
+		if i >= 15 {
+			val = 250
+		}
+		rollups[i] = MinuteRollup{
+			MinuteTS:      now.Add(time.Duration(i) * time.Minute),
+			ViewerAvg:     val,
+			ViewerSamples: 1,
+		}
+	}
+	stream := &StreamRecord{
+		ViewerSamples: 20,
+		StartedAt:     now,
+		EndedAt:       &ended,
+		LastSeenAt:    now.Add(5 * time.Minute),
+	}
+	if !hasLiveCollectorViewerCoverage(stream, rollups) {
+		t.Fatal("expected live collector coverage for recent varied rollups")
+	}
+
+	staleSeen := now.Add(-72 * time.Hour)
+	staleStream := &StreamRecord{
+		ViewerSamples: 20,
+		StartedAt:     now.Add(-73 * time.Hour),
+		EndedAt:       &staleSeen,
+		LastSeenAt:    staleSeen,
+	}
+	if hasLiveCollectorViewerCoverage(staleStream, rollups) {
+		t.Fatal("expected stale stream to skip live collector preference")
+	}
+}
+
 func TestHasGoodViewerCoverageFromRollups(t *testing.T) {
 	now := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 	rollups := make([]MinuteRollup, 20)

@@ -1,4 +1,4 @@
-import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN, SETUP_CONTROL_AVAILABLE, SETUP_CONTROL_BASE, SETUP_CONTROL_TOKEN } from './config'
+import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN, SETUP_CONTROL_BASE, SETUP_CONTROL_TOKEN } from './config'
 import type { ClipPeriod, PlaybackLatencyMode, StatsPeriod } from './settings'
 import { buildVodStartRequestBody } from './utils/vodDeepLink'
 import type { HeatmapDetailResponse, HeatmapResponse } from './types/heatmap'
@@ -85,6 +85,8 @@ export interface AnalyticsStream {
   seventvEmoteUses: number
   vodId?: string
   vodSource?: string
+  canonicalStreamId?: string
+  viewerSource?: 'live' | 'tt' | 'merged' | 'restored' | 'unknown' | string
 }
 
 export interface AnalyticsMinuteRollup {
@@ -131,6 +133,7 @@ export interface AnalyticsStreamDetail {
   chatCoveragePct?: number
   vodDurationSec?: number
   chatCoverage?: ChatCoverageSummary
+  viewerSource?: 'live' | 'tt' | 'twitchtracker' | 'merged' | 'partial' | 'none' | string
 }
 
 export interface AnalyticsStreamsResponse {
@@ -646,6 +649,10 @@ export interface StreamDiagnostics {
   startupBreakdown?: StartupBreakdown
   fallbackAttempts?: number
   hlsProbe: HLSProbe
+  /** Relay transport currently serving playback: 'll-hls' | 'hls-mpegts' ('webrtc' reserved). */
+  activeTransport?: string
+  /** Server-side end-to-end live delay estimate (seconds) from live edge + segment/part window. */
+  measuredDelaySec?: number
   updatedAt: number
 }
 
@@ -908,6 +915,8 @@ export type SyncPhase =
   | 'resolving_vod'
   | 'fetching_comments'
   | 'writing_rollups'
+  | 'exporting_archive'
+  | 'export_pending'
   | 'completed'
   | 'failed'
 
@@ -919,20 +928,29 @@ export interface SyncPhaseTiming {
   rollupWriteMs?: number
 }
 
-export type SyncChatIndexPhase = 'fetching' | 'tokenizing' | 'writing' | 'done'
+export type SyncChatIndexPhase = 'fetching' | 'tokenizing' | 'writing' | 'finalizing' | 'done'
 
 export interface SyncChatProgress {
   active?: boolean
   vodId?: string
   fetchMode?: 'parallel' | 'serial' | string
   concurrency?: number
+  effectiveSegmentSec?: number
+  initialSegments?: number
+  hotSplits?: number
+  hotSegmentSplitReason?: string
+  autoClosedSegments?: number
   segmentsTotal?: number
   segmentsDone?: number
+  segmentsIncomplete?: number
+  cleanupPhase?: 'initial' | 'parallel_cleanup' | 'serial_retry' | string
+  commentsSaved?: number
   commentsFetched?: number
   timelineSec?: number
   vodDurationSec?: number
   streamDurationSec?: number
   rollupsExpected?: number
+  summaryRefreshDeferred?: boolean
   indexPhase?: SyncChatIndexPhase | string
   gqlPages?: number
   throttled?: boolean
@@ -943,6 +961,9 @@ export interface SyncTrackerProgress {
   active?: boolean
   url?: string
   message?: string
+  phase?: 'direct_http' | 'browser' | 'parsing' | string
+  expectedMs?: number
+  elapsedMs?: number
 }
 
 export interface SyncStatus {
@@ -957,7 +978,7 @@ export interface SyncStatus {
   resultMessage?: string
   error?: string
   viewersOnly?: boolean
-  viewerStatus?: string
+  viewerStatus?: 'pending' | 'ok' | 'failed' | 'skipped' | 'pending_backfill' | 'backfilling' | string
   timing?: SyncPhaseTiming
   chat?: SyncChatProgress
   tracker?: SyncTrackerProgress
@@ -1076,7 +1097,7 @@ export type EmoteProvider = 'seventv' | 'twitch' | 'ffz' | 'bttv'
 
 export interface EmoteProviderStatus {
   provider: EmoteProvider
-  state: 'ready' | 'processing' | 'failed'
+  state: 'ready' | 'processing' | 'partial' | 'failed'
   count: number
   pending: number
   failed?: number
@@ -1086,7 +1107,7 @@ export interface EmoteProviderStatus {
 }
 
 export interface EmoteEnsureResponse {
-  state: 'ready' | 'processing'
+  state: 'ready' | 'processing' | 'partial'
   count: number
   pending: number
   total?: number
@@ -1178,20 +1199,8 @@ export const stopSetupService = (service: 'scraper' | 'clipper' | 'pulse'): Prom
 }
 
 export const syncClipperAuthFromSignIn = (): Promise<{ ok: boolean; merged?: boolean; recreated?: boolean; message?: string }> => {
-  if (!SETUP_CONTROL_AVAILABLE) {
-    return Promise.resolve({ ok: false, message: 'Install helper unavailable in this browser context.' })
-  }
-  const headers: Record<string, string> = {}
-  if (SETUP_CONTROL_TOKEN) {
-    headers['X-Streamclone-Setup-Token'] = SETUP_CONTROL_TOKEN
-  }
-  return fetch(`${SETUP_CONTROL_BASE}/sync-clipper-auth`, { method: 'POST', headers }).then(async r => {
-    const body = await r.json().catch(() => ({})) as { ok: boolean; merged?: boolean; recreated?: boolean; message?: string; error?: string }
-    if (!r.ok) {
-      throw new ApiError(body.error || r.statusText, r.status)
-    }
-    return body
-  })
+  // Chat OAuth writes CLIPPER_AUTH_SYNC_PATH on sign-in; no setup-control round-trip needed for ReplayForge.
+  return Promise.resolve({ ok: true, merged: true, message: 'Clipper token synced via Streamclone sign-in.' })
 }
 
 export const getHostDiagnostics = (): Promise<HostDiagnostics> =>

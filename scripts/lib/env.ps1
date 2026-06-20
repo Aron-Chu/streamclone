@@ -27,10 +27,39 @@ function Get-EnvComposeProfiles {
     switch ($Profile) {
         'core' { return @() }
         'scraper' { return @('scraper') }
-        'clipper' { return @('clipper') }
-        'full' { return @('scraper', 'clipper') }
+        'clipper' {
+            Write-Warning 'STREAMCLONE_PROFILE=clipper is deprecated; ReplayForge runs outside compose. Using core compose profile.'
+            return @()
+        }
+        'full' { return @('scraper') }
         'pulse' { return @('pulse') }
     }
+}
+
+function Get-EnvFeatureComposeProfiles {
+    param([string]$EnvFile = (Join-Path (Get-EnvRepoRoot) '.env'))
+    $profiles = @()
+    if (-not (Test-Path $EnvFile)) { return $profiles }
+    $vals = Read-EnvKeyValueFile -Path $EnvFile
+    if ($vals['PULSE_WIRE_ENABLED'] -eq 'true') {
+        $profiles += 'pulse-wire'
+    }
+    if ($vals['PULSE_WIRE_SEMANTIC'] -eq 'true') {
+        $profiles += 'pulse-wire-semantic'
+    }
+    $scraperKey = [string]$vals['SCRAPER_API_KEY']
+    if (-not [string]::IsNullOrWhiteSpace($scraperKey)) {
+        $profiles += 'scraper'
+    }
+    return $profiles
+}
+
+function Get-StreamcloneComposeProfiles {
+    param(
+        [ValidateSet('core', 'scraper', 'clipper', 'full', 'pulse')][string]$Profile = 'core',
+        [string]$EnvFile = (Join-Path (Get-EnvRepoRoot) '.env')
+    )
+    return @((Get-EnvComposeProfiles -Profile $Profile) + (Get-EnvFeatureComposeProfiles -EnvFile $EnvFile) | Select-Object -Unique)
 }
 
 function Read-EnvKeyValueFile {
@@ -157,6 +186,40 @@ function Invoke-EnvApplyReleaseImageTag {
     Set-EnvFileValue -Path $EnvFile -Key 'STREAMCLONE_USE_IMAGES' -Value '1'
 }
 
+function Invoke-EnvApplyReleaseDefaults {
+    param([string]$EnvFile = (Join-Path (Get-EnvRepoRoot) '.env'))
+    $root = Get-EnvRepoRoot
+    $bundlePath = Join-Path $root 'deploy\env\release-bundle.env'
+    if (-not (Test-Path $bundlePath)) { return $false }
+    if (-not (Test-Path $EnvFile)) { return $false }
+
+    $existing = Read-EnvKeyValueFile -Path $EnvFile
+    $bundle = Read-EnvKeyValueFile -Path $bundlePath
+    $updated = $false
+
+    foreach ($key in $bundle.Keys) {
+        if ($key -eq 'IMAGE_TAG') { continue }
+        if ([string]::IsNullOrWhiteSpace([string]$existing[$key])) {
+            Set-EnvFileValue -Path $EnvFile -Key $key -Value $bundle[$key]
+            $updated = $true
+        }
+    }
+
+    $targetTag = [string]$bundle['IMAGE_TAG']
+    if ([string]::IsNullOrWhiteSpace($targetTag)) {
+        $targetTag = Get-EnvReleaseVersionTag
+    }
+    if (-not [string]::IsNullOrWhiteSpace($targetTag)) {
+        if ([string]$existing['IMAGE_TAG'] -ne $targetTag) {
+            Set-EnvFileValue -Path $EnvFile -Key 'IMAGE_TAG' -Value $targetTag
+            $updated = $true
+        }
+        Set-EnvFileValue -Path $EnvFile -Key 'STREAMCLONE_USE_IMAGES' -Value '1'
+    }
+
+    return $updated
+}
+
 function Repair-FrontendDockerEntrypointLf {
     $path = Join-Path (Get-EnvRepoRoot) 'frontend\docker-entrypoint.d\40-streamclone-config.sh'
     if (-not (Test-Path $path)) { return }
@@ -192,6 +255,7 @@ function Invoke-EnvSynthesize {
     $installId = if ($priorInstallId) { $priorInstallId } else { [Guid]::NewGuid().ToString('N') }
     Set-EnvFileValue -Path $OutFile -Key 'STREAMCLONE_INSTALL_ID' -Value $installId
     Ensure-LocalhostDevTokenImport -EnvFile $OutFile | Out-Null
+    Try-SyncTwitchOAuthToEnv -EnvFile $OutFile | Out-Null
 }
 
 function Test-EnvLoopbackPublicOrigin {
@@ -210,6 +274,7 @@ function Ensure-LocalhostDevTokenImport {
     param([string]$EnvFile = (Join-Path (Get-EnvRepoRoot) '.env'))
     if (-not (Test-Path $EnvFile)) { return $false }
     $vals = Read-EnvKeyValueFile -Path $EnvFile
+    if ($vals['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -eq 'false') { return $false }
     $loopback = Test-EnvLoopbackPublicOrigin -EnvValues $vals
     $before = [string]$vals['TWITCH_DEV_TOKEN_IMPORT_ENABLED']
     if (-not $loopback) { return $false }
@@ -739,6 +804,22 @@ function Sync-TwitchCliToEnv {
     }
     Set-EnvFileValue -Path $EnvFile -Key 'TWITCH_OAUTH_CLIENT_ID' -Value $cli['CLIENTID']
     Set-EnvFileValue -Path $EnvFile -Key 'TWITCH_OAUTH_CLIENT_SECRET' -Value $cli['CLIENTSECRET']
+}
+
+function Try-SyncTwitchOAuthToEnv {
+    param([string]$EnvFile = (Join-Path (Get-EnvRepoRoot) '.env'))
+    if (-not (Test-Path $EnvFile)) { return $false }
+    $vals = Read-EnvKeyValueFile -Path $EnvFile
+    if (-not [string]::IsNullOrWhiteSpace($vals['TWITCH_OAUTH_CLIENT_ID']) -and
+        -not [string]::IsNullOrWhiteSpace($vals['TWITCH_OAUTH_CLIENT_SECRET'])) {
+        return $false
+    }
+    try {
+        Sync-TwitchCliToEnv -EnvFile $EnvFile
+        return $true
+    } catch {
+        return $false
+    }
 }
 
 function Invoke-EnsureFrontendClipperConfig {

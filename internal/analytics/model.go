@@ -41,6 +41,8 @@ type StreamRecord struct {
 	SevenTVEmoteUses int64      `json:"seventvEmoteUses"`
 	VodID            string     `json:"vodId,omitempty"`
 	VodSource        string     `json:"vodSource,omitempty"`
+	CanonicalStreamID string    `json:"canonicalStreamId,omitempty"`
+	ViewerSource     string     `json:"viewerSource,omitempty"`
 }
 
 type MinuteRollup struct {
@@ -79,6 +81,7 @@ type StreamDetailResponse struct {
 	ChatCoveragePct  float64               `json:"chatCoveragePct,omitempty"`
 	VodDurationSec   int                   `json:"vodDurationSec,omitempty"`
 	ChatCoverage     *ChatCoverageSummary  `json:"chatCoverage,omitempty"`
+	ViewerSource     string                `json:"viewerSource,omitempty"`
 }
 
 type StreamsResponse struct {

@@ -37,12 +37,16 @@ export function analyticsStreamPathSlug(
 /**
  * When the live collector route has no chart minutes but a synced session exists,
  * pick the sidebar stream to open instead of the empty live placeholder row.
+ * With server-side dedupe, this mainly handles legacy rows and live-endpoint mismatches.
  */
 export function pickSyncedLiveStreamTarget(
   combinedStreams: AnalyticsStream[],
   opts?: { liveStreamId?: string; channelLive?: boolean },
 ): AnalyticsStream | undefined {
-  const synced = combinedStreams.filter(streamHasSyncedMinutes)
+  const visible = combinedStreams.filter(
+    stream => !stream.canonicalStreamId || stream.canonicalStreamId === stream.streamId,
+  )
+  const synced = visible.filter(streamHasSyncedMinutes)
   if (synced.length === 0) return undefined
 
   const liveStreamId = opts?.liveStreamId?.trim()
@@ -58,11 +62,11 @@ export function pickSyncedLiveStreamTarget(
 
   if (channelLive) {
     const liveRow = liveStreamId
-      ? combinedStreams.find(stream => stream.streamId === liveStreamId)
-      : combinedStreams[0]
+      ? visible.find(stream => stream.streamId === liveStreamId)
+      : visible[0]
     const collectorIsStale = !liveRow || !streamHasSyncedMinutes(liveRow)
     const newestSynced = synced[0]
-    const referenceMs = streamReferenceTimeMs(liveRow) ?? newestStreamReferenceTimeMs(combinedStreams) ?? Date.now()
+    const referenceMs = streamReferenceTimeMs(liveRow) ?? newestStreamReferenceTimeMs(visible) ?? Date.now()
     if (collectorIsStale && newestSynced && isRecentSyncedSession(newestSynced, referenceMs)) {
       return newestSynced
     }

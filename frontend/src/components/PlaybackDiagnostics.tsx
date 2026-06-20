@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { StreamDiagnostics } from '../api'
 import type { PlaybackMetrics } from '../playback'
+import { computeEndToEndLiveDelaySec } from '../playbackMath'
+import type { PlaybackLatencyMode } from '../settings'
 import { loadTwitchEmbedScript, type TwitchPlayerInstance } from '../utils/twitchEmbed'
 
 interface TwitchStatsInput {
@@ -67,6 +69,7 @@ export default function PlaybackDiagnostics({
   sessionId,
   onJumpLive,
   isVod = false,
+  effectiveLatencyMode,
 }: {
   channel: string
   metrics: PlaybackMetrics
@@ -74,6 +77,7 @@ export default function PlaybackDiagnostics({
   sessionId?: string
   onJumpLive?: () => void
   isVod?: boolean
+  effectiveLatencyMode?: PlaybackLatencyMode
 }) {
   const storageKey = `streamclone:twitch-stats:${channel}`
   const [open, setOpen] = useState(false)
@@ -141,6 +145,10 @@ export default function PlaybackDiagnostics({
   const manualLatency = parseNum(input.latencyToBroadcasterSec)
   const actualTwitchLatencySec = referenceLatency ?? manualLatency
   const localLiveLatencySec = metrics.latencyToLiveSec ?? metrics.behindLiveSec
+  const relayDelayBreakdown = computeEndToEndLiveDelaySec(
+    metrics,
+    diagnostics ? { liveEdge: diagnostics.liveEdge, hlsProbe: diagnostics.hlsProbe } : null,
+  )
 
   const benchmark = useMemo(() => ({
     channel,
@@ -172,7 +180,21 @@ export default function PlaybackDiagnostics({
           <MetricCell label="FPS" value={fmt(metrics.fps)} />
           <MetricCell label="Skipped" value={`${fmt(metrics.skippedFrames)} / ${fmt(metrics.totalFrames)}`} />
           <MetricCell label="Buffer" value={fmtSec(metrics.bufferSizeSec)} />
-          <MetricCell label="Live latency" value={fmtSec(metrics.latencyToLiveSec)} />
+          <MetricCell
+            label="Player to origin live"
+            value={fmtSec(metrics.latencyToLiveSec)}
+            title="hls.js latency to the MediaMTX live edge (not Twitch glass-to-glass)"
+          />
+          <MetricCell
+            label="Origin edge delay"
+            value={fmtSec(diagnostics?.measuredDelaySec)}
+            title="Relay measuredDelaySec: server live-edge segments × segment duration at MediaMTX"
+          />
+          <MetricCell
+            label="Est. display delay"
+            value={fmtSec(relayDelayBreakdown.displayDelaySec)}
+            title={relayDelayBreakdown.tooltip}
+          />
           <MetricCell label="Target" value={fmtSec(metrics.targetLatencySec)} />
           <MetricCell label="Behind live" value={fmtSec(metrics.behindLiveSec)} />
           <MetricCell label="Seekable end" value={fmtSec(metrics.seekableEndSec)} />
@@ -180,8 +202,9 @@ export default function PlaybackDiagnostics({
           <MetricCell label="Twitch delay" value={fmtSec(actualTwitchLatencySec)} title={referenceLatency !== null ? 'Read from Twitch embed hlsLatencyBroadcaster' : 'Manual comparison value'} />
           <MetricCell label="Local minus Twitch" value={delayDelta(localLiveLatencySec, actualTwitchLatencySec)} />
           <MetricCell label="Relay restarts" value={String(diagnostics?.restarts ?? 0)} title={diagnostics?.lastWorkerError} />
-          <MetricCell label="Live edge" value={diagnostics?.liveEdge ? String(diagnostics.liveEdge) : '-'} title="Streamlink HLS live-edge segments behind Twitch" />
+          <MetricCell label="Live edge" value={diagnostics?.liveEdge ? String(diagnostics.liveEdge) : '-'} title="Streamlink HLS live-edge when fallback backend is active" />
           <MetricCell label="Backend" value={diagnostics?.workerBackend || '-'} title={diagnostics?.lastStartError} />
+          <MetricCell label="Transport" value={diagnostics?.activeTransport || '-'} title="MediaMTX delivery variant (hls-mpegts, ll-hls)" />
           <MetricCell label="Rendition" value={diagnostics?.selectedRendition?.name || diagnostics?.quality || '-'} />
           <MetricCell label="Startup" value={diagnostics?.startupMs ? `${diagnostics.startupMs}ms` : '-'} />
           <MetricCell label="Upstream" value={diagnostics?.startupBreakdown?.upstreamFetchMs ? `${diagnostics.startupBreakdown.upstreamFetchMs}ms` : '-'} />
@@ -225,6 +248,7 @@ export default function PlaybackDiagnostics({
         <span>Codecs {metrics.codecs}</span>
         <span>Protocol {diagnostics?.protocol || metrics.protocol}</span>
         <span>Latency {diagnostics?.latencyMode || metrics.latencyMode}</span>
+        {effectiveLatencyMode ? <span>Effective {effectiveLatencyMode}</span> : null}
         {diagnostics?.liveEdge ? <span>Live edge {diagnostics.liveEdge}</span> : null}
         <span>Backend {diagnostics?.backendVersion || '-'}</span>
         <span>Probe {diagnostics?.hlsProbe?.ready ? 'ready' : diagnostics?.hlsProbe?.error || diagnostics?.hlsProbe?.statusCode || '-'}</span>

@@ -1,23 +1,9 @@
-import type { Locator, Page, Response } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 
 const DEFAULT_TIMEOUT = 90_000
 
-function isOkJson(res: Response) {
-  return res.ok() && res.request().method() === 'GET'
-}
-
 export async function waitForDirectoryReady(page: Page, timeout = DEFAULT_TIMEOUT) {
-  const streamsResponse = page.waitForResponse(
-    res => res.url().includes('/v1/streams') && !res.url().includes('/random') && isOkJson(res),
-    { timeout },
-  )
-  const categoriesResponse = page.waitForResponse(
-    res => res.url().includes('/v1/categories') && isOkJson(res),
-    { timeout },
-  )
-
   await page.goto('/')
-  await Promise.all([streamsResponse, categoriesResponse])
 
   await page.getByRole('heading', { name: 'Recommended Live Channels' }).waitFor({ state: 'visible', timeout })
 

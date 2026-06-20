@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        For product direction, see `docs/product-roadmap.md`. Keep requests scoped to one user-facing outcome.
+        For product direction, read `README.md`, `docs/install-desktop.md`, and `docs/options.md`. Keep requests scoped to one user-facing outcome.
   - type: textarea
     id: problem
     attributes:

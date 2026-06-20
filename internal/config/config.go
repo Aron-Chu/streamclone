@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"time"
 
@@ -38,6 +39,7 @@ type Config struct {
 	YouTubeAPIKey        string        `env:"YOUTUBE_API_KEY"`
 	YouTubeProvider      string        `env:"YOUTUBE_PROVIDER" envDefault:"auto"`
 	YouTubeAPIBaseURL    string        `env:"YOUTUBE_API_BASE_URL" envDefault:"https://www.googleapis.com/youtube/v3"`
+	StorygraphYTKeywords []string      `env:"STORYGRAPH_YT_KEYWORDS" envSeparator:","`
 	TwitchGQLURL         string        `env:"TWITCH_GQL_URL" envDefault:"https://gql.twitch.tv/gql"`
 	TwitchClientID       string        `env:"TWITCH_CLIENT_ID" envDefault:"kimne78kx3ncx6brgo4mv6wki5h1ko"`
 	EmoteServiceURL      string        `env:"EMOTE_SERVICE_URL"`
@@ -77,6 +79,9 @@ type Config struct {
 	AnalyticsVODGQLHotCommentsPerPage      int           `env:"ANALYTICS_VOD_GQL_HOT_COMMENTS_PER_PAGE" envDefault:"80"`
 	AnalyticsVODGQLPriorityEdgeSeconds     int           `env:"ANALYTICS_VOD_GQL_PRIORITY_EDGE_SECONDS" envDefault:"600"`
 	AnalyticsVODGQLIncrementalDB           bool          `env:"ANALYTICS_VOD_GQL_INCREMENTAL_DB" envDefault:"true"`
+	AnalyticsVODGQLDeferSummaryRefresh     bool          `env:"ANALYTICS_VOD_GQL_DEFER" envDefault:"true"`
+	AnalyticsVODGQLRollupFlushSegments     int           `env:"ANALYTICS_VOD_GQL_ROLLUP_FLUSH_SEGMENTS" envDefault:"8"`
+	AnalyticsVODGQLRollupFlushMS           int           `env:"ANALYTICS_VOD_GQL_ROLLUP_FLUSH_MS" envDefault:"2000"`
 	AnalyticsTrackerScrapeMS               int           `env:"ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS" envDefault:"120000"`
 	AnalyticsPassTTMaxAge                  bool          `env:"ANALYTICS_PASS_TT_MAXAGE" envDefault:"true"`
 	AnalyticsTTMaxAgeMS                    int           `env:"ANALYTICS_TT_MAX_AGE_MS" envDefault:"0"`
@@ -85,6 +90,10 @@ type Config struct {
 	AnalyticsTTDirectHTTPEnabled           bool          `env:"ANALYTICS_TT_DIRECT_HTTP_ENABLED" envDefault:"true"`
 	AnalyticsTTDirectHTTPStaleOnly         bool          `env:"ANALYTICS_TT_DIRECT_HTTP_STALE_ONLY" envDefault:"false"`
 	AnalyticsTTDirectHTTPTimeoutMS         int           `env:"ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS" envDefault:"1200"`
+	AnalyticsTTSyncTimeoutMS               int           `env:"ANALYTICS_TT_SYNC_TIMEOUT_MS" envDefault:"45000"`
+	AnalyticsTTBackgroundRetryEnabled      bool          `env:"ANALYTICS_TT_BACKGROUND_RETRY_ENABLED" envDefault:"true"`
+	AnalyticsTTViewerSmoothWindow        int           `env:"ANALYTICS_TT_VIEWER_SMOOTH_WINDOW" envDefault:"0"`
+	AnalyticsVODGQLQuietSegmentSeconds     int           `env:"ANALYTICS_VOD_GQL_QUIET_SEGMENT_SECONDS" envDefault:"900"`
 	AlwaysTrackedChannels                  []string      `env:"ALWAYS_TRACKED_CHANNELS" envSeparator:","`
 
 	TimeseriesEnabled         bool   `env:"TIMESERIES_ENABLED" envDefault:"false"`
@@ -108,7 +117,7 @@ type Config struct {
 	TwitchDevTokenImport    bool   `env:"TWITCH_DEV_TOKEN_IMPORT_ENABLED" envDefault:"false"`
 	ClipperAuthSyncPath     string `env:"CLIPPER_AUTH_SYNC_PATH"`
 	StreamcloneProfile      string `env:"STREAMCLONE_PROFILE" envDefault:"core"`
-	ClipperServiceURL       string `env:"CLIPPER_SERVICE_URL" envDefault:"http://clipper:8095"`
+	ClipperServiceURL       string `env:"CLIPPER_SERVICE_URL" envDefault:"http://host.docker.internal:8095"`
 	FrontendOrigin          string `env:"FRONTEND_ORIGIN" envDefault:"http://localhost:8090"`
 	AuthCookieSecret        string `env:"AUTH_COOKIE_SECRET" envDefault:"dev-insecure-cookie-secret"`
 	AuthCookieSameSite      string `env:"AUTH_COOKIE_SAMESITE" envDefault:"lax"`
@@ -119,10 +128,65 @@ type Config struct {
 	S3SecretKey   string `env:"S3_SECRET_KEY"`
 	CDNPublicBase string `env:"CDN_PUBLIC_BASE"`
 
-	CuratorAPIToken           string `env:"CURATOR_API_TOKEN"`
-	EmoteImportConcurrency    int    `env:"EMOTE_IMPORT_CONCURRENCY" envDefault:"8"`
-	EmoteWorkerConcurrency    int    `env:"EMOTE_WORKER_CONCURRENCY" envDefault:"8"`
-	EmoteDictionaryDebounceMS int    `env:"EMOTE_DICTIONARY_DEBOUNCE_MS" envDefault:"3000"`
+	CuratorAPIToken   string `env:"CURATOR_API_TOKEN"`
+	SetupControlToken string `env:"SETUP_CONTROL_TOKEN"`
+
+	PulseWireEnabled             bool          `env:"PULSE_WIRE_ENABLED" envDefault:"false"`
+	PulseWireSemantic            bool          `env:"PULSE_WIRE_SEMANTIC" envDefault:"false"`
+	StorygraphServiceURL         string        `env:"STORYGRAPH_SERVICE_URL" envDefault:"http://storygraph:8080"`
+	MediaMatcherURL              string        `env:"MEDIA_MATCHER_URL" envDefault:"http://media-matcher:8001"`
+	SocialRetentionDays          int           `env:"SOCIAL_RETENTION_DAYS" envDefault:"90"`
+	RedditCommercialOK           bool          `env:"REDDIT_COMMERCIAL_OK" envDefault:"false"`
+	StreamerbansIngestEnabled    bool          `env:"STREAMERBANS_INGEST_ENABLED" envDefault:"false"`
+	StreamerbansHomeURL          string        `env:"STREAMERBANS_HOME_URL" envDefault:"https://streamerbans.com/"`
+	XUnofficialOK                bool          `env:"X_UNOFFICIAL_OK" envDefault:"false"`
+	XAuthToken                   string        `env:"X_AUTH_TOKEN"`
+	EmusksXAuthToken             string        `env:"EMUSKS_X_AUTH_TOKEN"`
+	XIngestURL                   string        `env:"X_INGEST_URL" envDefault:"http://x-ingest:8098"`
+	MetadataServiceURL           string        `env:"METADATA_SERVICE_URL" envDefault:"http://metadata:8080"`
+	XMonthlyBudgetUSD            float64       `env:"X_MONTHLY_BUDGET_USD" envDefault:"0"`
+	MatchLinkThreshold           float64       `env:"PULSE_WIRE_MATCH_LINK" envDefault:"0.65"`
+	MatchReviewThreshold         float64       `env:"PULSE_WIRE_MATCH_REVIEW" envDefault:"0.40"`
+	SocialBrowserFetchBudget     int           `env:"STORYGRAPH_SOCIAL_BROWSER_FETCH_BUDGET" envDefault:"0"`
+	YouTubeBrowserFetchBudget    int           `env:"STORYGRAPH_YOUTUBE_BROWSER_FETCH_BUDGET" envDefault:"0"`
+	SocialScrapeUseProxy         bool          `env:"STORYGRAPH_SOCIAL_SCRAPE_USE_PROXY" envDefault:"false"`
+	IngestPollInterval           time.Duration `env:"STORYGRAPH_INGEST_INTERVAL" envDefault:"5m"`
+	FingerprintPollInterval      time.Duration `env:"STORYGRAPH_FINGERPRINT_INTERVAL" envDefault:"2m"`
+	PulseDirectorySampleInterval time.Duration `env:"PULSE_DIRECTORY_SAMPLE_INTERVAL" envDefault:"10m"`
+	PulseDirectoryTopN           int           `env:"PULSE_DIRECTORY_TOP_N" envDefault:"200"`
+	PulseDirectoryRetentionDays  int           `env:"PULSE_DIRECTORY_RETENTION_DAYS" envDefault:"30"`
+
+	ArchiveProtectRetention bool `env:"ARCHIVE_PROTECT_RETENTION" envDefault:"false"`
+	ArchiveExportOnSync     bool `env:"ARCHIVE_EXPORT_ON_SYNC" envDefault:"false"`
+	ArchiveEnabled            bool          `env:"ARCHIVE_ENABLED" envDefault:"false"`
+	ArchiveStorageProvider    string        `env:"ARCHIVE_STORAGE_PROVIDER" envDefault:"azure"`
+	ArchiveAzureStorageAccount string       `env:"ARCHIVE_AZURE_STORAGE_ACCOUNT"`
+	ArchiveAzureContainer     string        `env:"ARCHIVE_AZURE_CONTAINER" envDefault:"streamclone-archive"`
+	ArchiveAzurePrefix        string        `env:"ARCHIVE_AZURE_PREFIX" envDefault:"streamclone"`
+	ArchiveAzureConnectionStringFile string `env:"ARCHIVE_AZURE_CONNECTION_STRING_FILE"`
+	ArchiveExportInterval     time.Duration `env:"ARCHIVE_EXPORT_INTERVAL" envDefault:"1h"`
+	ArchivePGDumpNightly      bool          `env:"ARCHIVE_PG_DUMP_NIGHTLY" envDefault:"false"`
+
+	Tier0Enabled         bool          `env:"TIER0_ENABLED" envDefault:"false"`
+	Tier0SampleInterval  time.Duration `env:"TIER0_SAMPLE_INTERVAL" envDefault:"45s"`
+	Tier0RosterInterval  time.Duration `env:"TIER0_ROSTER_INTERVAL" envDefault:"5m"`
+	Tier0RosterTopN      int           `env:"TIER0_ROSTER_TOP_N" envDefault:"200"`
+
+	BackfillEnabled        bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
+	BackfillWorkerInterval time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`
+	PostEndWaitMin         time.Duration `env:"POST_END_WAIT_MIN" envDefault:"10m"`
+	PostEndWaitMax         time.Duration `env:"POST_END_WAIT_MAX" envDefault:"30m"`
+	PostEndCoveragePct     float64       `env:"POST_END_COVERAGE_PCT" envDefault:"70"`
+
+	BronzeEnabled              bool          `env:"BRONZE_ENABLED" envDefault:"false"`
+	BronzeTopN                 int           `env:"BRONZE_TOP_N" envDefault:"500"`
+	BronzeWorkerInterval       time.Duration `env:"BRONZE_WORKER_INTERVAL" envDefault:"5m"`
+	BronzeHelixConcurrency     int           `env:"BRONZE_HELIX_CONCURRENCY" envDefault:"2"`
+	BronzeTTSummaryConcurrency int           `env:"BRONZE_TT_SUMMARY_CONCURRENCY" envDefault:"4"`
+
+	EmoteImportConcurrency    int `env:"EMOTE_IMPORT_CONCURRENCY" envDefault:"8"`
+	EmoteWorkerConcurrency    int `env:"EMOTE_WORKER_CONCURRENCY" envDefault:"8"`
+	EmoteDictionaryDebounceMS int `env:"EMOTE_DICTIONARY_DEBOUNCE_MS" envDefault:"3000"`
 
 	Upstream upstream.Endpoints
 }
@@ -131,6 +195,11 @@ func Load() (Config, error) {
 	var c Config
 	if err := env.Parse(&c); err != nil {
 		return Config{}, err
+	}
+	if strings.TrimSpace(os.Getenv("ANALYTICS_VOD_GQL_DEFER")) == "" {
+		if legacy := strings.TrimSpace(os.Getenv("ANALYTICS_VOD_GQL_DEFER_SUMMARY_REFRESH")); legacy != "" {
+			c.AnalyticsVODGQLDeferSummaryRefresh = legacy == "1" || strings.EqualFold(legacy, "true")
+		}
 	}
 	if strings.TrimSpace(c.ScraperAPIURL) == "" {
 		if strings.TrimSpace(c.FirecrawlAPIURL) != "" {
@@ -142,5 +211,16 @@ func Load() (Config, error) {
 	if strings.TrimSpace(c.ScraperAPIKey) == "" && strings.TrimSpace(c.FirecrawlAPIKey) != "" {
 		c.ScraperAPIKey = strings.TrimSpace(c.FirecrawlAPIKey)
 	}
+	if len(c.StorygraphYTKeywords) == 0 && len(c.AlwaysTrackedChannels) > 0 {
+		c.StorygraphYTKeywords = append([]string(nil), c.AlwaysTrackedChannels...)
+	}
 	return c, nil
+}
+
+// XContentToken returns the configured X auth token for unofficial ingest sidecars.
+func (c Config) XContentToken() string {
+	if t := strings.TrimSpace(c.XAuthToken); t != "" {
+		return t
+	}
+	return strings.TrimSpace(c.EmusksXAuthToken)
 }

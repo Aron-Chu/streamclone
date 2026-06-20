@@ -55,6 +55,14 @@ STREAMCLONE_USE_IMAGES=1
 SCRAPER_USE_IMAGES=1
 # Loopback token-import/device-code endpoints are dev-only (docs/security.md).
 TWITCH_DEV_TOKEN_IMPORT_ENABLED=false
+# Pulse Wire (story graph + /pulse-wire) — on by default in desktop releases
+PULSE_WIRE_ENABLED=true
+PULSE_WIRE_SEMANTIC=false
+REDDIT_COMMERCIAL_OK=true
+STORYGRAPH_YT_KEYWORDS=kai cenat,xqc,caseoh,streamer drama
+# ReplayForge runs outside compose; host.docker.internal reaches the host from containers
+CLIPPER_SERVICE_URL=http://host.docker.internal:8095
+VITE_REPLAYFORGE_UI_URL=http://localhost:8096
 EOF
 
 if [ -n "${TWITCH_OAUTH_CLIENT_ID:-}" ] && [ -n "${TWITCH_OAUTH_CLIENT_SECRET:-}" ]; then
@@ -63,6 +71,8 @@ TWITCH_OAUTH_CLIENT_ID=$TWITCH_OAUTH_CLIENT_ID
 TWITCH_OAUTH_CLIENT_SECRET=$TWITCH_OAUTH_CLIENT_SECRET
 EOF
   echo "Included oauth-bundle.env from release secrets"
+else
+  echo "WARN: TWITCH_OAUTH secrets empty — bundle ships without oauth-bundle.env (Reddit-only Pulse Wire still works)" >&2
 fi
 cp "$ROOT/deploy/env/oauth-bundle.env.example" "$STAGE/deploy/env/oauth-bundle.env.example"
 mkdir -p "$STAGE/runtime"
@@ -78,7 +88,11 @@ cat >"$STAGE/README-quickstart.md" <<'EOF'
 3. Every day: double-click **Start Streamclone.cmd**
 4. Open http://localhost:8090/
 
-Optional: open **Stack status** in the app to start Analytics, Clip Studio, or **Pulse Dashboards**. Pulse runs local Grafana/InfluxDB on demand; normal Analytics works without it.
+**Pulse Wire** (enabled by default): open **Pulse Wire** in the nav for cross-platform story spread (Reddit, clips, news). Works without Twitch login; optional Sign in unlocks Helix-backed sources.
+
+**Pulse dashboards** (optional): open **Stack status** to start Grafana/InfluxDB chart export — separate from Pulse Wire; normal Analytics works without it.
+
+**ReplayForge / Clip Studio** (optional): install [ReplayForge](https://github.com/Aron-Chu/replayforge) separately on `:8095` (API) and `:8096` (UI). Streamclone links to it when running; no clipper container in the release stack.
 
 Stop (pause, keep data): **Stop Streamclone.cmd** / **Stop Streamclone.command**
 

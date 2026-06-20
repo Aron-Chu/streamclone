@@ -24,7 +24,7 @@ export type ServiceStartProgress = {
 
 const START_LABELS: Record<OptionalService, string> = {
   scraper: 'Analytics',
-  clipper: 'Clip Studio',
+  clipper: 'ReplayForge',
   pulse: 'Pulse Dashboards',
 }
 
@@ -126,7 +126,6 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
       const body = await res.json() as { status?: string }
       return body.status === 'ok'
     },
-    enabled: services.clipper === 'offline',
     staleTime: 10_000,
     refetchInterval: statusPollMs,
     retry: false,
@@ -134,7 +133,7 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
 
   const controlReady = Boolean(control.data?.ok)
   const scraperOffline = services.scraper === 'offline'
-  const clipperReady = services.clipper === 'ready' || clipperHealth.data === true
+  const clipperReady = clipperHealth.data === true
   const clipperOffline = !clipperReady
   const pulseOffline = services.pulse === 'offline'
 
@@ -154,7 +153,10 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
   }
 
   const startService = async (service: OptionalService) => {
-    // clipper: setup-control POST /start/clipper is legacy (embedded container). Prefer ReplayForge on :8095/:8096.
+    if (service === 'clipper') {
+      setActionError('ReplayForge runs as a separate app — install and start it from http://localhost:8096 (see docs/options.md).')
+      return false
+    }
     setActionError(null)
     let helperReady = controlReady
     if (!helperReady) {
@@ -181,11 +183,12 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
         }
       }
       if (!helperReady) {
-        setActionError(
-          SETUP_CONTROL_WAKE_ENABLED
+        const message = SETUP_CONTROL_AVAILABLE
+          ? `The install helper did not start in time (needed for ${START_LABELS[service]}). If the browser blocked the Streamclone link, run Start Streamclone from Desktop once, then try again.`
+          : SETUP_CONTROL_WAKE_ENABLED
             ? `The install helper did not start in time (needed for ${START_LABELS[service]}). If the browser blocked the Streamclone link, run Start Streamclone from Desktop once, then try again.`
-            : `The install helper is not running (needed to start ${START_LABELS[service]}). Close the app tab, run Start Streamclone from Desktop, then try again.`,
-        )
+            : `Cannot start ${START_LABELS[service]} from the browser yet. Run Start Streamclone (or \`powershell -File scripts/ensure-setup-control.ps1\`) once so SETUP_CONTROL_TOKEN is loaded, then refresh this page.`
+        setActionError(message)
         return false
       }
     }
@@ -226,7 +229,7 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
           },
         }))
       }
-      const maxAttempts = service === 'scraper' ? 450 : service === 'pulse' ? 90 : 45
+      const maxAttempts = service === 'scraper' ? 450 : 90
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise(resolve => window.setTimeout(resolve, 2000))
         let hostPercent = 18
@@ -300,9 +303,7 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
       setActionError(
         service === 'scraper'
           ? 'Analytics is still building or starting. First install can take 5–15 minutes — leave Docker Desktop open and refresh status.'
-          : service === 'pulse'
-            ? 'Pulse is still starting. Check Docker Desktop, then refresh Stack status in a minute.'
-            : 'Clip Studio is still starting. Check Docker Desktop and retry in a minute.',
+          : 'Pulse is still starting. Check Docker Desktop, then refresh Stack status in a minute.',
       )
       return false
     } catch (err) {

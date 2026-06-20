@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 
 import type { AnalyticsStreamDetail } from '../../api.ts'
+import type { ReplayHeatmapPoint } from '../../types/heatmap.ts'
 import {
   LIVE_HEAT_MAX_EMOTES,
-  LIVE_HEAT_SUBTITLE,
+  LIVE_HEAT_RANKED_SUBTITLE,
   LIVE_HEAT_TITLE,
   deriveLiveHeat,
   formatHeatOffset,
@@ -13,6 +14,7 @@ import { nearestMomentIndex } from '../../utils/vodSeek.ts'
 
 export interface VodMomentsPanelProps {
   detail?: AnalyticsStreamDetail | null
+  heatmapPoints?: ReplayHeatmapPoint[]
   currentOffsetSec: number
   onSeekMoment: (offsetSeconds: number) => void
   isLoading?: boolean
@@ -20,11 +22,12 @@ export interface VodMomentsPanelProps {
   className?: string
 }
 
-function toLiveHeatInput(detail: AnalyticsStreamDetail) {
+function toLiveHeatInput(detail: AnalyticsStreamDetail, heatmapPoints?: ReplayHeatmapPoint[]) {
   return {
     state: detail.state,
     rollups: detail.rollups ?? [],
     topEmotes: detail.topEmotes ?? [],
+    heatmapPoints,
     streamStartedAt: detail.stream?.startedAt,
   }
 }
@@ -87,7 +90,7 @@ function MomentRow({
               : 'border border-violet-400/30 bg-violet-500/15 text-violet-200'
           }`}
         >
-          {point.score}
+          {point.estimated ? `~${point.score}` : point.score}
         </span>
         <span className="font-mono text-xs font-bold tabular-nums text-zinc-300">{offsetLabel}</span>
         <span className="min-w-0 truncate text-[11px] font-semibold text-zinc-400">{point.reasonLabel}</span>
@@ -104,6 +107,7 @@ function MomentRow({
 
 export function VodMomentsPanel({
   detail,
+  heatmapPoints,
   currentOffsetSec,
   onSeekMoment,
   isLoading,
@@ -111,8 +115,8 @@ export function VodMomentsPanel({
   className,
 }: VodMomentsPanelProps) {
   const heat = useMemo(
-    () => (detail ? deriveLiveHeat(toLiveHeatInput(detail)) : null),
-    [detail],
+    () => (detail ? deriveLiveHeat(toLiveHeatInput(detail, heatmapPoints)) : null),
+    [detail, heatmapPoints],
   )
   const points = heat?.points ?? []
   const offsets = useMemo(() => points.map(p => p.offsetSeconds), [points])
@@ -167,7 +171,7 @@ export function VodMomentsPanel({
       <div className="flex shrink-0 items-center justify-between gap-2">
         <div className="min-w-0">
           <h4 className="text-xs font-black uppercase tracking-wide text-zinc-300">{LIVE_HEAT_TITLE}</h4>
-          <p className="text-[10px] font-semibold text-zinc-600">{LIVE_HEAT_SUBTITLE}</p>
+          <p className="text-[10px] font-semibold text-zinc-600">{LIVE_HEAT_RANKED_SUBTITLE}</p>
         </div>
         <div className="flex shrink-0 gap-1">
           <button

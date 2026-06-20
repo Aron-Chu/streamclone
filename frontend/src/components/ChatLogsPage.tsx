@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useVirtualizer } from '@tanstack/react-virtual'
 
 import {
   fetchChannelChatLogMessages,
@@ -13,6 +14,10 @@ import LogMessageBody from './chat/LogMessageBody'
 
 const ALL_STREAMS = 'all'
 const PAGE_LIMIT = 500
+
+type VirtualLogRow =
+  | { kind: 'segment'; key: string; entry: UnifiedLogEntry }
+  | { kind: 'log'; key: string; entry: UnifiedLogEntry }
 
 function formatTs(ts: string) {
   const date = new Date(ts)
@@ -163,14 +168,6 @@ export default function ChatLogsPage() {
     }
   }, [])
 
-  const onScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el || !messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage) return
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) {
-      messagesQuery.fetchNextPage()
-    }
-  }, [messagesQuery])
-
   const streams = streamsQuery.data?.streams ?? []
   const liveCount = streamsQuery.data?.liveMessageCount ?? 0
   const syncedTotal = useMemo(
@@ -185,20 +182,36 @@ export default function ChatLogsPage() {
       ? syncedTotal
       : selectedStream?.messageCount ?? 0
 
-  const renderedRows = useMemo(() => {
-    const rows: ReactElement[] = []
+  const virtualRows = useMemo(() => {
+    const rows: VirtualLogRow[] = []
     let previousStreamId = ''
     for (const entry of entries) {
       if (showSegments && entry.streamId && entry.streamId !== previousStreamId) {
-        rows.push(<StreamSegmentHeader key={`seg-${entry.streamId}-${entry.id}`} entry={entry} login={login} />)
+        rows.push({ kind: 'segment', key: `seg-${entry.streamId}-${entry.id}`, entry })
         previousStreamId = entry.streamId
       }
-      rows.push(
-        <LogRow key={`${entry.source}-${entry.kind}-${entry.id}`} entry={entry} onFilterUser={onFilterUser} />,
-      )
+      rows.push({ kind: 'log', key: `${entry.source}-${entry.kind}-${entry.id}`, entry })
     }
     return rows
-  }, [entries, login, onFilterUser, showSegments])
+  }, [entries, showSegments])
+
+  const rowVirtualizer = useVirtualizer({
+    count: virtualRows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: index => (virtualRows[index]?.kind === 'segment' ? 44 : 40),
+    overscan: 12,
+    getItemKey: index => virtualRows[index]?.key ?? index,
+  })
+
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = messagesQuery
+
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (hasNextPage && !isFetchingNextPage && el.scrollHeight - el.scrollTop - el.clientHeight < 120) {
+      void fetchNextPage()
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
   return (
     <main className="min-h-screen bg-[#07070a] text-zinc-100">
@@ -302,7 +315,30 @@ export default function ChatLogsPage() {
             ) : entries.length === 0 ? (
               <div className="px-4 py-10 text-center text-sm text-zinc-500">No messages match these filters.</div>
             ) : (
-              renderedRows
+              <div
+                className="relative w-full"
+                style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+              >
+                {rowVirtualizer.getVirtualItems().map(virtualRow => {
+                  const row = virtualRows[virtualRow.index]
+                  if (!row) return null
+                  return (
+                    <div
+                      key={row.key}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
+                      className="absolute left-0 top-0 w-full"
+                      style={{ transform: `translateY(${virtualRow.start}px)` }}
+                    >
+                      {row.kind === 'segment' ? (
+                        <StreamSegmentHeader entry={row.entry} login={login} />
+                      ) : (
+                        <LogRow entry={row.entry} onFilterUser={onFilterUser} />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             )}
             {messagesQuery.isFetchingNextPage ? (
               <div className="px-4 py-3 text-center text-xs text-zinc-500">Loading more…</div>

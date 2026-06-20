@@ -56,6 +56,11 @@ services:
     image: bluenviron/mediamtx:latest
     restart: unless-stopped
     volumes: ["./mediamtx.yml:/mediamtx.yml:ro"]
+    environment:
+      MTX_HLSVARIANT: ${MTX_HLSVARIANT:-mpegts}
+      MTX_HLSSEGMENTCOUNT: ${MTX_HLSSEGMENTCOUNT:-10}
+      MTX_HLSSEGMENTDURATION: ${MTX_HLSSEGMENTDURATION:-2s}
+      MTX_HLSPARTDURATION: ${MTX_HLSPARTDURATION:-200ms}
     ports: ["127.0.0.1:1935:1935", "127.0.0.1:8888:8888"]
 
   migrate:
@@ -77,6 +82,12 @@ services:
     environment:
       <<: *go-env
       REDDIT_PROVIDER: ${REDDIT_PROVIDER:-off}
+    healthcheck:
+      test: ["CMD", "/healthcheck", "http://localhost:8080/v1/streams?limit=1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports: ["127.0.0.1:8081:8080"]
@@ -101,7 +112,8 @@ services:
       DEFAULT_STREAM_QUALITY: ${DEFAULT_STREAM_QUALITY:-best}
       MEDIAMTX_RTMP: mediamtx:1935
       HLS_INTERNAL_BASE: http://mediamtx:8888
-      HLS_PUBLIC_BASE: http://localhost:8888
+      HLS_PUBLIC_BASE: ${HLS_PUBLIC_BASE:-http://localhost:8090}
+      HLS_LOW_LATENCY_ENABLED: ${HLS_LOW_LATENCY_ENABLED:-false}
       STREAMLINK_HLS_LIVE_EDGE: ${STREAMLINK_HLS_LIVE_EDGE:-2}
     ports: ["127.0.0.1:8082:8080"]
     depends_on:
@@ -143,12 +155,18 @@ services:
       ANALYTICS_VOD_GQL_CONCURRENCY_MIN: ${ANALYTICS_VOD_GQL_CONCURRENCY_MIN:-3}
       ANALYTICS_VOD_GQL_CONCURRENCY_MAX: ${ANALYTICS_VOD_GQL_CONCURRENCY_MAX:-8}
       ANALYTICS_VOD_GQL_INCREMENTAL_DB: ${ANALYTICS_VOD_GQL_INCREMENTAL_DB:-true}
+      ANALYTICS_VOD_GQL_DEFER: ${ANALYTICS_VOD_GQL_DEFER:-true}
+      ANALYTICS_VOD_GQL_ROLLUP_FLUSH_SEGMENTS: ${ANALYTICS_VOD_GQL_ROLLUP_FLUSH_SEGMENTS:-8}
+      ANALYTICS_VOD_GQL_ROLLUP_FLUSH_MS: ${ANALYTICS_VOD_GQL_ROLLUP_FLUSH_MS:-2000}
       ANALYTICS_VOD_CHAT_REPLAY_ENABLED: ${ANALYTICS_VOD_CHAT_REPLAY_ENABLED:-1}
       ANALYTICS_VOD_CHAT_SENDER_SALT: ${ANALYTICS_VOD_CHAT_SENDER_SALT:-local-dev}
       ANALYTICS_VOD_CHAT_PRESERVE_URLS: ${ANALYTICS_VOD_CHAT_PRESERVE_URLS:-0}
       ANALYTICS_VOD_GQL_SEGMENT_SECONDS: ${ANALYTICS_VOD_GQL_SEGMENT_SECONDS:-300}
       ANALYTICS_VOD_GQL_DENSE_SEGMENT_SECONDS: ${ANALYTICS_VOD_GQL_DENSE_SEGMENT_SECONDS:-120}
+      ANALYTICS_VOD_GQL_QUIET_SEGMENT_SECONDS: ${ANALYTICS_VOD_GQL_QUIET_SEGMENT_SECONDS:-900}
       ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS: ${ANALYTICS_TRACKER_SCRAPE_TIMEOUT_MS:-120000}
+      ANALYTICS_TT_SYNC_TIMEOUT_MS: ${ANALYTICS_TT_SYNC_TIMEOUT_MS:-45000}
+      ANALYTICS_TT_BACKGROUND_RETRY_ENABLED: ${ANALYTICS_TT_BACKGROUND_RETRY_ENABLED:-true}
       ANALYTICS_PASS_TT_MAXAGE: ${ANALYTICS_PASS_TT_MAXAGE:-true}
       ANALYTICS_TT_MAX_AGE_MS: ${ANALYTICS_TT_MAX_AGE_MS:-0}
       ANALYTICS_TT_STALE_MAX_AGE_MS: ${ANALYTICS_TT_STALE_MAX_AGE_MS:-604800000}
@@ -168,6 +186,8 @@ services:
       ANALYTICS_TT_DIRECT_HTTP_STALE_ONLY: ${ANALYTICS_TT_DIRECT_HTTP_STALE_ONLY:-false}
       ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS: ${ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS:-1200}
     ports: ["127.0.0.1:8086:8080"]
+    volumes:
+      - ../runtime:/runtime:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -175,6 +195,45 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+
+  storygraph:
+    <<: *go
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args: { SERVICE: storygraph }
+    env_file:
+      - ../.env
+    environment:
+      <<: *go-env
+      PULSE_WIRE_SEMANTIC: ${PULSE_WIRE_SEMANTIC:-false}
+      STORYGRAPH_INGEST_INTERVAL: ${STORYGRAPH_INGEST_INTERVAL:-5m}
+      STORYGRAPH_SOCIAL_BROWSER_FETCH_BUDGET: ${STORYGRAPH_SOCIAL_BROWSER_FETCH_BUDGET:-0}
+      STORYGRAPH_YOUTUBE_BROWSER_FETCH_BUDGET: ${STORYGRAPH_YOUTUBE_BROWSER_FETCH_BUDGET:-0}
+      STORYGRAPH_SOCIAL_SCRAPE_USE_PROXY: ${STORYGRAPH_SOCIAL_SCRAPE_USE_PROXY:-false}
+      SCRAPER_API_URL: ${SCRAPER_API_URL:-http://scraper:8000/v2/scrape}
+      ANALYTICS_SERVICE_URL: http://analytics:8080
+      CLIPPER_SERVICE_URL: ${CLIPPER_SERVICE_URL:-http://host.docker.internal:8095}
+      SETUP_CONTROL_TOKEN: ${SETUP_CONTROL_TOKEN:-}
+      SOCIAL_RETENTION_DAYS: ${SOCIAL_RETENTION_DAYS:-90}
+      MEDIA_MATCHER_URL: ${MEDIA_MATCHER_URL:-http://media-matcher:8001}
+      METADATA_SERVICE_URL: http://metadata:8080
+      X_UNOFFICIAL_OK: ${X_UNOFFICIAL_OK:-false}
+      X_AUTH_TOKEN: ${X_AUTH_TOKEN:-}
+      EMUSKS_X_AUTH_TOKEN: ${EMUSKS_X_AUTH_TOKEN:-}
+      X_INGEST_URL: ${X_INGEST_URL:-http://x-ingest:8098}
+    ports: ["127.0.0.1:8087:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      metadata:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
 
   emote:
     <<: *go
@@ -185,6 +244,8 @@ services:
       - ../.env
     environment:
       <<: *go-env
+      SEVENTV_EVENTAPI_ENABLED: ${SEVENTV_EVENTAPI_ENABLED:-false}
+      SEVENTV_EVENTAPI_URL: ${SEVENTV_EVENTAPI_URL:-wss://events.7tv.io/v3}
     ports: ["127.0.0.1:8084:8080"]
     depends_on:
       postgres:
@@ -209,6 +270,9 @@ services:
       VITE_CHAT_WS: auto
       VITE_CLIPPER_URL: auto
       VITE_CLIPPER_TOKEN: ${VITE_CLIPPER_TOKEN:-${CLIPPER_WEBHOOK_TOKEN:-}}
+      VITE_PULSE_WIRE_ENABLED: ${PULSE_WIRE_ENABLED}
+      VITE_HLS_LOW_LATENCY_ENABLED: ${HLS_LOW_LATENCY_ENABLED:-false}
+      VITE_ADAPTIVE_LIVE_LATENCY_ENABLED: ${ADAPTIVE_LIVE_LATENCY_ENABLED:-false}
       VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}
       STREAMCLONE_PROFILE: ${STREAMCLONE_PROFILE:-core}
       TWITCH_DEV_TOKEN_IMPORT_ENABLED: ${TWITCH_DEV_TOKEN_IMPORT_ENABLED:-false}
@@ -274,6 +338,11 @@ services:
       - ../.env
     environment:
       - SCRAPER_BROWSER=${SCRAPER_BROWSER:-camoufox}
+      - CHALLENGE_FALLBACK_ENABLED=${CHALLENGE_FALLBACK_ENABLED:-false}
+      - PYDOLL_CDP_URL=${PYDOLL_CDP_URL:-}
+      - PYDOLL_TIME_TO_WAIT_CAPTCHA=${PYDOLL_TIME_TO_WAIT_CAPTCHA:-10}
+      - PYDOLL_HEADLESS=${PYDOLL_HEADLESS:-}
+      - PYDOLL_PROFILE_DIR=${PYDOLL_PROFILE_DIR:-/data/chrome-profile}
       - CDP_URL=${CDP_URL:-}
       - SCRAPER_CDP_EPHEMERAL=${SCRAPER_CDP_EPHEMERAL:-false}
       - CDP_DEBUG_PORT=${CDP_DEBUG_PORT:-9222}
@@ -379,6 +448,47 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+
+  media-matcher:
+    profiles: [pulse-wire]
+    build:
+      context: ../media-matcher
+      dockerfile: Dockerfile
+    ports: ["127.0.0.1:8001:8001"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8001/healthz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  x-ingest:
+    profiles: [pulse-wire]
+    build:
+      context: ../cmd/x-ingest
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8098"
+      X_AUTH_TOKEN: ${X_AUTH_TOKEN:-}
+      EMUSKS_X_AUTH_TOKEN: ${EMUSKS_X_AUTH_TOKEN:-}
+    ports: ["127.0.0.1:8098:8098"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8098/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+
+  migrate-semantic:
+    profiles: [pulse-wire-semantic]
+    image: migrate/migrate
+    volumes: ["../migrations/optional:/migrations-optional:ro"]
+    command: ["-path", "/migrations-optional", "-database", "postgres://app:app@postgres:5432/streamclone?sslmode=disable", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   pg-data:

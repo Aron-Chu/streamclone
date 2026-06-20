@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  buildAnalyticsMomentLink,
+  buildMomentJumpLink,
   buildVodDeepLink,
   buildVodSeekTarget,
   buildVodStartRequestBody,
   parseVodAnalyticsContext,
+  preferTwitchEmbedReview,
 } from '../src/utils/vodDeepLink.ts'
 
 // Feature: moment-timeline, Task 3.3: VOD deep link smoke test
@@ -203,4 +206,30 @@ test('20.5/34.3: parseVodAnalyticsContext resolves sid and from=analytics deep l
   const noContext = parseVodAnalyticsContext(new URLSearchParams('vod=123'), 'caedrel', true)
   assert.equal(noContext.fromAnalytics, false)
   assert.equal(noContext.analyticsHref, null)
+})
+
+test('analytics VOD review prefers Twitch embed when sid is present', () => {
+  assert.equal(preferTwitchEmbedReview(true, true, '316955094498'), true)
+  assert.equal(preferTwitchEmbedReview(true, true, ''), false)
+  assert.equal(preferTwitchEmbedReview(true, false, '316955094498'), false)
+  assert.equal(preferTwitchEmbedReview(false, true, '316955094498'), false)
+})
+
+test('buildAnalyticsMomentLink routes to stream analytics with optional offset', () => {
+  assert.equal(
+    buildAnalyticsMomentLink('xqc', 3725, '316955094498'),
+    '/analytics/xqc/316955094498?offset=3725',
+  )
+  assert.equal(buildAnalyticsMomentLink('xqc', 0), '/analytics/xqc')
+})
+
+test('buildMomentJumpLink prefers VOD playback when vod id is known', () => {
+  assert.equal(
+    buildMomentJumpLink('xqc', 120, { vodId: '2371095470', analyticsStreamId: '316955094498' }),
+    '/c/xqc?vod=2371095470&offset=120&from=analytics&sid=316955094498',
+  )
+  assert.equal(
+    buildMomentJumpLink('xqc', 120, { analyticsStreamId: '316955094498' }),
+    '/analytics/xqc/316955094498?offset=120',
+  )
 })

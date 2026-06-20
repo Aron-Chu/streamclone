@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"streamclone/internal/archive"
 )
 
 type UnifiedQueryParams struct {
@@ -518,6 +520,28 @@ func (s *Store) PurgeLiveOlderThan(ctx context.Context, cutoff time.Time) (int64
 	if s == nil || s.db == nil {
 		return 0, nil
 	}
+	if s.archiveProtectRetention {
+		var missing int64
+		err := s.db.QueryRow(ctx, `
+			SELECT COUNT(*)
+			FROM live_chat_messages m
+			WHERE m.synced_at < $1
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM archive_exports ae
+				WHERE ae.artifact_type = $2
+				  AND ae.natural_key = m.channel || ':' || m.message_id
+				  AND ae.export_status = 'confirmed'
+			  )`,
+			cutoff.UTC(), archive.ArtifactLiveChatMessage,
+		).Scan(&missing)
+		if err != nil {
+			return 0, err
+		}
+		if err := archive.BlockIfMissing(archive.ArtifactLiveChatMessage, missing); err != nil {
+			return 0, err
+		}
+	}
 	tag, err := s.db.Exec(ctx, `DELETE FROM live_chat_messages WHERE synced_at < $1`, cutoff.UTC())
 	if err != nil {
 		return 0, err
@@ -529,6 +553,28 @@ func (s *Store) PurgeLiveOlderThan(ctx context.Context, cutoff time.Time) (int64
 func (s *Store) PurgeModEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, nil
+	}
+	if s.archiveProtectRetention {
+		var missing int64
+		err := s.db.QueryRow(ctx, `
+			SELECT COUNT(*)
+			FROM chat_mod_events ev
+			WHERE ev.synced_at < $1
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM archive_exports ae
+				WHERE ae.artifact_type = $2
+				  AND ae.natural_key = ev.channel || ':' || ev.kind || ':' || COALESCE(ev.message_id, '') || ':' || EXTRACT(EPOCH FROM ev.ts)::bigint::text || ':' || COALESCE(ev.target_login, '')
+				  AND ae.export_status = 'confirmed'
+			  )`,
+			cutoff.UTC(), archive.ArtifactChatModEvent,
+		).Scan(&missing)
+		if err != nil {
+			return 0, err
+		}
+		if err := archive.BlockIfMissing(archive.ArtifactChatModEvent, missing); err != nil {
+			return 0, err
+		}
 	}
 	tag, err := s.db.Exec(ctx, `DELETE FROM chat_mod_events WHERE synced_at < $1`, cutoff.UTC())
 	if err != nil {

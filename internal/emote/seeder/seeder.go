@@ -35,16 +35,24 @@ const (
 )
 
 type ProviderResult struct {
-	Provider   string
-	State      string
-	Count      int
-	Error      string
-	DurationMS int64
+	Provider      string
+	State         string
+	Count         int
+	ExpectedCount int
+	Error         string
+	DurationMS    int64
 }
 
 type ProviderSnapshot struct {
-	SetID string
-	Count int
+	SetID     string
+	Count     int
+	EmoteHash string
+}
+
+type ImportResult struct {
+	Imported int
+	Expected int
+	Failed   int
 }
 
 type Seeder struct {
@@ -199,15 +207,24 @@ func (s *Seeder) SeedChannelProviderSubset(ctx context.Context, login, twitchID 
 		providerStarted := time.Now()
 		var count int
 		var err error
+		var importResult ImportResult
 		switch provider {
 		case ProviderSevenTV:
-			count, err = s.seedSevenTV(ctx, twitchID, setID)
+			importResult, err = s.seedSevenTVWithResult(ctx, twitchID, setID)
+			count = importResult.Imported
+			result.ExpectedCount = importResult.Expected
 		case ProviderTwitch:
-			count, err = s.seedTwitch(ctx, twitchID, setID)
+			importResult, err = s.seedTwitchWithResult(ctx, twitchID, setID)
+			count = importResult.Imported
+			result.ExpectedCount = importResult.Expected
 		case ProviderFFZ:
-			count, err = s.seedFFZ(ctx, login, twitchID, setID)
+			importResult, err = s.seedFFZWithResult(ctx, login, twitchID, setID)
+			count = importResult.Imported
+			result.ExpectedCount = importResult.Expected
 		case ProviderBTTV:
-			count, err = s.seedBTTV(ctx, twitchID, setID)
+			importResult, err = s.seedBTTVWithResult(ctx, twitchID, setID)
+			count = importResult.Imported
+			result.ExpectedCount = importResult.Expected
 		default:
 			err = fmt.Errorf("unsupported provider %s", provider)
 		}
@@ -220,10 +237,12 @@ func (s *Seeder) SeedChannelProviderSubset(ctx context.Context, login, twitchID 
 			if s.log != nil {
 				s.log.Warn("provider seed failed", "provider", provider, "login", login, "err", err)
 			}
+		} else if result.ExpectedCount > 0 && result.Count < result.ExpectedCount {
+			result.State = "partial"
 		} else {
 			result.State = "ready"
 		}
-		if err := s.st.UpsertChannelProviderLoad(ctx, twitchID, string(provider), result.State, result.Count, result.Error); err != nil && s.log != nil {
+		if err := s.st.UpsertChannelProviderLoad(ctx, twitchID, string(provider), result.State, result.Count, result.ExpectedCount, result.Count, result.Error); err != nil && s.log != nil {
 			s.log.Warn("record provider seed state failed", "provider", provider, "login", login, "err", err)
 		}
 		results = append(results, result)
@@ -264,14 +283,57 @@ func providerSetName(login string, providers []Provider) string {
 }
 
 func (s *Seeder) seedSevenTV(ctx context.Context, twitchID, setID string) (int, error) {
+	result, err := s.seedSevenTVWithResult(ctx, twitchID, setID)
+	return result.Imported, err
+}
+
+func (s *Seeder) seedSevenTVWithResult(ctx context.Context, twitchID, setID string) (ImportResult, error) {
 	u, err := s.fetchSevenTVUser(ctx, twitchID)
 	if err != nil {
-		return 0, err
+		return ImportResult{}, err
 	}
 	if u.User.Username != "" {
 		_ = s.st.UpsertChannel(ctx, twitchID, strings.ToLower(u.User.Username), u.User.DisplayName)
 	}
-	return s.seedSevenTVUser(ctx, twitchID, setID, u)
+	userResult, err := s.seedSevenTVUserWithResult(ctx, twitchID, setID, u)
+	if err != nil {
+		return userResult, err
+	}
+	global, gErr := s.fetchSevenTVGlobal(ctx)
+	if gErr != nil && s.log != nil {
+		s.log.Warn("7tv global fetch failed", "twitch_id", twitchID, "err", gErr)
+		return userResult, nil
+	}
+	if len(global) == 0 {
+		return userResult, nil
+	}
+	globalEmotes := make([]remoteEmote, 0, len(global))
+	for _, em := range global {
+		if em.ID == "" || em.Name == "" {
+			continue
+		}
+		globalEmotes = append(globalEmotes, remoteEmote{
+			Provider:        ProviderSevenTV,
+			ProviderEmoteID: em.ID,
+			ProviderSetID:   "global",
+			Name:            em.Name,
+			OwnerID:         twitchID,
+			SourceURL:       fmt.Sprintf("%s/emote/%s/4x.webp", s.cdnURL, em.ID),
+			MimeType:        "image/webp",
+			Animated:        em.Data.Animated,
+			ZeroWidth:       sevenTVZeroWidth(em),
+			IsGlobal:        true,
+		})
+	}
+	sortRemoteEmotes(globalEmotes)
+	globalResult, importErr := s.importRemoteEmotesToSet(ctx, setID, globalEmotes)
+	userResult.Imported += globalResult.Imported
+	userResult.Expected += globalResult.Expected
+	userResult.Failed += globalResult.Failed
+	if importErr != nil {
+		return userResult, importErr
+	}
+	return userResult, nil
 }
 
 func (s *Seeder) SevenTVSnapshot(ctx context.Context, twitchID string) (ProviderSnapshot, error) {
@@ -282,7 +344,34 @@ func (s *Seeder) SevenTVSnapshot(ctx context.Context, twitchID string) (Provider
 	if u.EmoteSet == nil {
 		return ProviderSnapshot{}, nil
 	}
-	return ProviderSnapshot{SetID: u.EmoteSet.ID, Count: len(u.EmoteSet.Emotes)}, nil
+	return ProviderSnapshot{
+		SetID:     u.EmoteSet.ID,
+		Count:     len(u.EmoteSet.Emotes),
+		EmoteHash: sevenTVEmoteHash(u),
+	}, nil
+}
+
+func (s *Seeder) fetchSevenTVGlobal(ctx context.Context) ([]sevenTVEmote, error) {
+	url := fmt.Sprintf("%s/emote-sets/global", s.apiURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch 7tv global: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("7tv global returned %d", resp.StatusCode)
+	}
+	var payload struct {
+		Emotes []sevenTVEmote `json:"emotes"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode 7tv global: %w", err)
+	}
+	return payload.Emotes, nil
 }
 
 func (s *Seeder) fetchSevenTVUser(ctx context.Context, twitchID string) (*sevenTVUser, error) {
@@ -344,8 +433,13 @@ func (s *Seeder) SyncSevenTVEmoteFlags(ctx context.Context, twitchID string) (in
 }
 
 func (s *Seeder) seedSevenTVUser(ctx context.Context, twitchID, setID string, u *sevenTVUser) (int, error) {
+	result, err := s.seedSevenTVUserWithResult(ctx, twitchID, setID, u)
+	return result.Imported, err
+}
+
+func (s *Seeder) seedSevenTVUserWithResult(ctx context.Context, twitchID, setID string, u *sevenTVUser) (ImportResult, error) {
 	if u.EmoteSet == nil {
-		return 0, nil
+		return ImportResult{}, nil
 	}
 	emotes := make([]remoteEmote, 0, len(u.EmoteSet.Emotes))
 	for _, em := range u.EmoteSet.Emotes {
@@ -362,20 +456,28 @@ func (s *Seeder) seedSevenTVUser(ctx context.Context, twitchID, setID string, u 
 		})
 	}
 	sortRemoteEmotes(emotes)
-	count, err := s.importRemoteEmotesToSet(ctx, setID, emotes)
+	result, err := s.importRemoteEmotesToSet(ctx, setID, emotes)
 	if err != nil {
-		return count, err
+		return result, err
+	}
+	if err := s.syncSevenTVSet(ctx, setID, twitchID, u); err != nil {
+		return result, err
 	}
 	if _, err := s.SyncSevenTVEmoteFlags(ctx, twitchID); err != nil && s.log != nil {
 		s.log.Warn("sync 7tv zero-width flags", "twitch_id", twitchID, "err", err)
 	}
-	return count, nil
+	return result, nil
 }
 
 func (s *Seeder) seedFFZ(ctx context.Context, login, twitchID, setID string) (int, error) {
+	result, err := s.seedFFZWithResult(ctx, login, twitchID, setID)
+	return result.Imported, err
+}
+
+func (s *Seeder) seedFFZWithResult(ctx context.Context, login, twitchID, setID string) (ImportResult, error) {
 	resp, err := s.fetchFFZRoom(ctx, login, twitchID)
 	if err != nil {
-		return 0, err
+		return ImportResult{}, err
 	}
 	if resp.Room.ID != "" || resp.Room.DisplayName != "" {
 		roomLogin := strings.ToLower(strings.TrimSpace(resp.Room.ID))
@@ -392,7 +494,7 @@ func (s *Seeder) seedFFZ(ctx context.Context, login, twitchID, setID string) (in
 		}
 		for _, em := range set.Emoticons {
 			if err := ctx.Err(); err != nil {
-				return 0, err
+				return ImportResult{}, err
 			}
 			sourceURL := bestFFZURL(em.URLs)
 			if sourceURL == "" || em.Name == "" || em.ID == 0 {
@@ -415,9 +517,14 @@ func (s *Seeder) seedFFZ(ctx context.Context, login, twitchID, setID string) (in
 }
 
 func (s *Seeder) seedBTTV(ctx context.Context, twitchID, setID string) (int, error) {
+	result, err := s.seedBTTVWithResult(ctx, twitchID, setID)
+	return result.Imported, err
+}
+
+func (s *Seeder) seedBTTVWithResult(ctx context.Context, twitchID, setID string) (ImportResult, error) {
 	user, err := s.fetchBTTVUser(ctx, twitchID)
 	if err != nil {
-		return 0, err
+		return ImportResult{}, err
 	}
 	global, err := s.fetchBTTVGlobal(ctx)
 	if err != nil && s.log != nil {
@@ -495,16 +602,21 @@ func (s *Seeder) fetchBTTVGlobal(ctx context.Context) ([]bttvEmote, error) {
 }
 
 func (s *Seeder) seedTwitch(ctx context.Context, twitchID, setID string) (int, error) {
+	result, err := s.seedTwitchWithResult(ctx, twitchID, setID)
+	return result.Imported, err
+}
+
+func (s *Seeder) seedTwitchWithResult(ctx context.Context, twitchID, setID string) (ImportResult, error) {
 	if s.twitch == nil || !s.twitch.Enabled() {
-		return 0, fmt.Errorf("twitch helix unavailable")
+		return ImportResult{}, fmt.Errorf("twitch helix unavailable")
 	}
 	channelEmotes, err := s.twitch.ChannelEmotes(ctx, twitchID)
 	if err != nil {
-		return 0, err
+		return ImportResult{}, err
 	}
 	globalEmotes, err := s.twitch.GlobalEmotes(ctx)
 	if err != nil {
-		return 0, err
+		return ImportResult{}, err
 	}
 	emotes := make([]remoteEmote, 0, len(channelEmotes)+len(globalEmotes))
 	appendRows := func(rows []helix.ChatEmote) {
@@ -580,8 +692,40 @@ func (s *Seeder) fetchFFZURL(ctx context.Context, url string) (*ffzResponse, err
 }
 
 func (s *Seeder) importRemoteEmote(ctx context.Context, em remoteEmote) (string, bool, error) {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		id, existing, err := s.importRemoteEmoteOnce(ctx, em)
+		if err == nil {
+			return id, existing, nil
+		}
+		lastErr = err
+		if !isTransientImportErr(err) || attempt == maxAttempts {
+			break
+		}
+		time.Sleep(time.Duration(attempt*100) * time.Millisecond)
+	}
+	return "", false, lastErr
+}
+
+func isTransientImportErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "download:") ||
+		strings.Contains(msg, "store src:") ||
+		strings.Contains(msg, "cdn returned 5") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "timeout")
+}
+
+func (s *Seeder) importRemoteEmoteOnce(ctx context.Context, em remoteEmote) (string, bool, error) {
 	wantFlags := remoteEmoteFlags(em)
 	if existing, err := s.st.GetProviderEmote(ctx, string(em.Provider), em.ProviderEmoteID); err == nil {
+		if existing.Name != em.Name && em.Name != "" {
+			_ = s.st.UpdateEmoteName(ctx, existing.ID, em.Name)
+		}
 		if existing.Flags != wantFlags {
 			_ = s.st.UpdateEmoteFlags(ctx, existing.ID, wantFlags)
 		}
@@ -654,16 +798,16 @@ func (s *Seeder) importRemoteEmote(ctx context.Context, em remoteEmote) (string,
 	return emoteID, false, nil
 }
 
-func (s *Seeder) importRemoteEmotesToSet(ctx context.Context, setID string, emotes []remoteEmote) (int, error) {
+func (s *Seeder) importRemoteEmotesToSet(ctx context.Context, setID string, emotes []remoteEmote) (ImportResult, error) {
+	result := ImportResult{Expected: len(emotes)}
 	if len(emotes) == 0 {
-		return 0, nil
+		return result, nil
 	}
 	concurrency := minInt(s.importConcurrency, len(emotes))
 	jobs := make(chan remoteEmote)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	count := 0
 	var firstErr error
 	setFirstErr := func(err error) {
 		mu.Lock()
@@ -680,6 +824,9 @@ func (s *Seeder) importRemoteEmotesToSet(ctx context.Context, setID string, emot
 			for em := range jobs {
 				if err := ctx.Err(); err != nil {
 					setFirstErr(err)
+					mu.Lock()
+					result.Failed++
+					mu.Unlock()
 					continue
 				}
 				emoteID, _, err := s.importRemoteEmote(ctx, em)
@@ -687,16 +834,22 @@ func (s *Seeder) importRemoteEmotesToSet(ctx context.Context, setID string, emot
 					if s.log != nil {
 						s.log.Warn("skip provider emote", "provider", em.Provider, "name", em.Name, "err", err)
 					}
+					mu.Lock()
+					result.Failed++
+					mu.Unlock()
 					continue
 				}
 				if setID != "" {
 					if err := s.st.AddEmoteToSet(ctx, setID, emoteID, nil); err != nil {
 						setFirstErr(err)
+						mu.Lock()
+						result.Failed++
+						mu.Unlock()
 						continue
 					}
 				}
 				mu.Lock()
-				count++
+				result.Imported++
 				mu.Unlock()
 			}
 		}()
@@ -711,7 +864,7 @@ func (s *Seeder) importRemoteEmotesToSet(ctx context.Context, setID string, emot
 	}
 	close(jobs)
 	wg.Wait()
-	return count, firstErr
+	return result, firstErr
 }
 
 func (s *Seeder) rebuildChannelDictionary(ctx context.Context, login string) error {

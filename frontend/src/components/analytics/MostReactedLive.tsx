@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
-
-import { getAnalyticsLive, type AnalyticsStreamDetail } from '../../api.ts'
-import { buildVodDeepLink } from '../../utils/vodDeepLink.ts'
+import type { AnalyticsStreamDetail } from '../../api.ts'
+import type { ReplayHeatmapPoint } from '../../types/heatmap.ts'
+import { Link } from 'react-router-dom'
+import { useAnalyticsLive } from '../../hooks/useAnalyticsLive.ts'
+import { buildMomentJumpLink } from '../../utils/vodDeepLink.ts'
 import {
   LIVE_HEAT_COLLECTING_LABEL,
   LIVE_HEAT_MAX_EMOTES,
@@ -28,24 +29,44 @@ import {
 
 export interface MostReactedLiveProps {
   login: string
+  /** When provided, derive heat locally and skip the live fetch. */
+  detail?: AnalyticsStreamDetail
   /** Resolved VOD id, when known, for "Jump back" deep links. */
   vodId?: string
   /** Analytics stream id for sid= deep link (Twitch embed + activity graph). */
   analyticsStreamId?: string
   /** Stream start time for absolute VOD seek offsets. */
   streamStartedAt?: string
+  /** Backend replay heatmap points for consistent Top Moments scoring. */
+  heatmapPoints?: ReplayHeatmapPoint[]
   /** Disable polling when off-screen or the stream is not live. */
   enabled?: boolean
   className?: string
 }
 
-function toLiveHeatInput(detail: AnalyticsStreamDetail) {
+function toLiveHeatInput(detail: AnalyticsStreamDetail, heatmapPoints?: ReplayHeatmapPoint[]) {
   return {
     state: detail.state,
     rollups: detail.rollups ?? [],
     topEmotes: detail.topEmotes ?? [],
+    heatmapPoints,
     streamStartedAt: detail.stream?.startedAt,
   }
+}
+
+function ScoreBadge({ score, estimated, muted }: { score: number; estimated?: boolean; muted?: boolean }) {
+  return (
+    <span
+      className={`min-w-[2.25rem] rounded-md px-1.5 py-0.5 text-center text-xs font-black tabular-nums ${
+        muted
+          ? 'bg-white/5 text-zinc-500'
+          : 'bg-violet-500/15 text-violet-200 border border-violet-400/30'
+      }`}
+      title={estimated ? 'Estimated from local rollups until heatmap scoring is available.' : 'Backend replay heatmap score.'}
+    >
+      {estimated ? `~${score}` : score}
+    </span>
+  )
 }
 
 function EmoteStack({ point }: { point: LiveHeatPoint }) {
@@ -76,20 +97,6 @@ function EmoteStack({ point }: { point: LiveHeatPoint }) {
   )
 }
 
-function ScoreBadge({ score, muted }: { score: number; muted?: boolean }) {
-  return (
-    <span
-      className={`min-w-[2.25rem] rounded-md px-1.5 py-0.5 text-center text-xs font-black tabular-nums ${
-        muted
-          ? 'bg-white/5 text-zinc-500'
-          : 'bg-violet-500/15 text-violet-200 border border-violet-400/30'
-      }`}
-    >
-      {score}
-    </span>
-  )
-}
-
 function MomentRow({
   point,
   login,
@@ -102,18 +109,20 @@ function MomentRow({
   analyticsStreamId?: string
 }) {
   const offsetLabel = formatHeatOffset(point.offsetSeconds)
-  const canJump = Boolean(vodId)
+  const canJump = !point.collecting && Boolean(login)
 
   const body = (
     <div
-      className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${
+      className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 transition ${
         point.collecting
           ? 'border-white/5 bg-white/[0.02] opacity-60'
-          : 'border-white/10 bg-white/5 hover:border-violet-400/40'
+          : canJump
+            ? 'border-white/10 bg-white/5 hover:border-violet-300/40 hover:bg-white/[0.07] cursor-pointer'
+            : 'border-white/10 bg-white/5'
       }`}
     >
       <div className="flex min-w-0 items-center gap-3">
-        <ScoreBadge score={point.score} muted={point.collecting} />
+        <ScoreBadge score={point.score} estimated={point.estimated} muted={point.collecting} />
         <div className="flex min-w-0 flex-col">
           <span className="flex items-center gap-2 text-xs font-bold text-zinc-200">
             <span className="tabular-nums text-zinc-400">{offsetLabel}</span>
@@ -138,31 +147,41 @@ function MomentRow({
     return body
   }
 
-  const deepLink = buildVodDeepLink(login, vodId as string, point.offsetSeconds, analyticsStreamId)
+  const jumpHref = buildMomentJumpLink(login, point.offsetSeconds, { vodId, analyticsStreamId })
+  const jumpLabel = vodId
+    ? `Play moment in Streamclone at ${offsetLabel}`
+    : `Open analytics at ${offsetLabel}`
 
   return (
-    <a
-      href={deepLink}
+    <Link
+      to={jumpHref}
       className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
-      aria-label={`Play moment in Streamclone at ${offsetLabel}, score ${point.score}, ${point.reasonLabel}`}
+      aria-label={`${jumpLabel}, score ${point.score}, ${point.reasonLabel}`}
     >
       {body}
-    </a>
+    </Link>
   )
 }
 
-export function MostReactedLive({ login, vodId, analyticsStreamId, enabled = true, className }: MostReactedLiveProps) {
-  const query = useQuery({
-    queryKey: ['analytics-live-heat', login],
-    queryFn: () => getAnalyticsLive(login),
-    enabled: Boolean(login) && enabled,
+export function MostReactedLive({
+  login,
+  detail,
+  vodId,
+  analyticsStreamId,
+  heatmapPoints,
+  enabled = true,
+  className,
+}: MostReactedLiveProps) {
+  const selfFetch = detail === undefined
+  const query = useAnalyticsLive(login, {
+    enabled: Boolean(login) && enabled && selfFetch,
     refetchInterval: LIVE_HEAT_REFRESH_MS,
-    retry: false,
   })
 
-  if (!query.data) return null
+  const resolvedDetail = detail ?? query.data
+  if (!resolvedDetail) return null
 
-  const heat = deriveLiveHeat(toLiveHeatInput(query.data))
+  const heat = deriveLiveHeat(toLiveHeatInput(resolvedDetail, heatmapPoints))
 
   // Section only appears once enough completed rollups exist (Req 19.1).
   if (!heat.visible) return null

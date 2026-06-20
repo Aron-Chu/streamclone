@@ -23,6 +23,9 @@ if ($runUi) {
     Push-Location frontend
     try {
         npm run test:smoke
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
     } finally {
         Pop-Location
     }
