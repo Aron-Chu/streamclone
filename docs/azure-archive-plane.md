@@ -171,22 +171,20 @@ go test ./internal/emote/preload/...
 Bronze acceptance (Mode B, remote VM):
 
 ```powershell
-# Quick smoke after Mode B up (requires VM public IP or SSH-reachable host)
-pwsh scripts/azure-archive-acceptance.ps1 `
-  -Stage smoke `
-  -SshHost <VM_PUBLIC_IP> `
-  -SshKey $env:USERPROFILE\.ssh\id_ed25519_streamclone `
-  -Duration 5m `
-  -PollInterval 1m
+# Quick smoke after Mode B up (Tailscale default host)
+pwsh scripts/azure-archive-acceptance.ps1 -Stage smoke
+pwsh scripts/azure-archive-acceptance.ps1 -Stage smoke -SshKey ~/.ssh/azure-streamclone -Duration 5m -PollInterval 1m
 
 # 6h smoke — merge profile-bronze-smoke.env on VM before long run
-pwsh scripts/azure-archive-acceptance.ps1 -Stage smoke -SshHost <VM_PUBLIC_IP> -Duration 6h
+pwsh scripts/azure-archive-acceptance.ps1 -Stage smoke -Duration 6h
 
 # 24h acceptance — merge profile-bronze-acceptance.env on VM
-pwsh scripts/azure-archive-acceptance.ps1 -Stage acceptance -SshHost <VM_PUBLIC_IP> -Duration 24h
+pwsh scripts/azure-archive-acceptance.ps1 -Stage acceptance -Duration 24h
 ```
 
-**Parameters:** `-Stage smoke|acceptance`, `-SshHost` (required), `-SshUser` (default `streamclone`), `-SshKey`, `-Duration`, `-PollInterval`, `-RemoteRepoPath` (default `~/streamclone-src`), `-DryRun`.
+**Parameters:** `-Stage smoke|acceptance`, `-SshHost` (default `azure-streamclone`), `-SshUser` (default `streamclone`), `-SshKey`, `-Duration`, `-PollInterval`, `-RemoteRepoDir` (default `~/streamclone-src`), `-DryRun`.
+
+Operator public IP (for Terraform `allowed_ssh_cidr`): run `curl -s https://api.ipify.org` from your workstation before `terraform apply`.
 
 SSH polls `backfill bronze status`, `backfill status`, and `backfill coverage report` via Docker on the VM Mode B network (`streamclone-azure-archive-plane_default`). Snapshots copy locally to `docs/benchmarks/coverage-azure-archive-plane-*.json`.
 
