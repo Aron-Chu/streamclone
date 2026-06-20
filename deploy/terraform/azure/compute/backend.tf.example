@@ -1,0 +1,16 @@
+# Optional remote state — run AFTER first successful local-state apply.
+# Reuse the archive storage account tfstate container or create a dedicated key.
+#
+#   cd deploy/terraform/azure/compute
+#   cp backend.tf.example backend.tf
+#   # edit storage_account_name from archive terraform output
+#   terraform init -migrate-state
+
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "rg-streamclone-archive"
+    storage_account_name = "REPLACE_AFTER_ARCHIVE_APPLY"
+    container_name       = "tfstate"
+    key                  = "compute.tfstate"
+  }
+}

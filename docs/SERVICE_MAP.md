@@ -60,6 +60,15 @@ Go services listen on **`:8080` inside the container**. Health default: `GET /he
 
 Steering: `docs/scraper-cloudflare-and-proxy.md`.
 
+### Azure hybrid archive plane
+
+| Deployment | Hostname (Tailscale) | Scraper reachability | Notes |
+|------------|----------------------|----------------------|-------|
+| **Mode A — remote scraper** | `azure-streamclone` | `http://azure-streamclone:8000/v2/scrape` | Local sets `SCRAPER_API_URL`; local scraper profile off |
+| **Mode B — archive plane** | `azure-streamclone` | internal `http://scraper:8000/v2/scrape` on VM | Azure Postgres + workers; local workers off via `profile-local-hybrid.env` |
+
+Validation: `make hybrid-preflight`, `scripts/azure-hybrid-smoke.ps1`. Full runbook: [azure-archive-plane.md](azure-archive-plane.md).
+
 ### `pulse`
 
 | Service | Compose | Host port | Notes |

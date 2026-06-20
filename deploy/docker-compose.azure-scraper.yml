@@ -1,0 +1,53 @@
+# Mode A — Azure remote scraper only (Tailscale host exposes :8000 on tailnet).
+# Run on Azure VM with profile-azure-scraper.env + optional release overlay for GHCR.
+#
+# Host binds scraper to 127.0.0.1:8000; host-level Tailscale forwards tailnet traffic.
+# Do NOT publish 5432/6379/8000 on the public NSG.
+
+name: streamclone-azure-scraper
+
+services:
+  scraper:
+    build:
+      context: ../../streamclone-scraper
+      dockerfile: Dockerfile
+    container_name: streamclone-scraper
+    ports:
+      - "127.0.0.1:8000:8000"
+    shm_size: "2gb"
+    env_file:
+      - ../.env
+    environment:
+      SCRAPER_BROWSER: ${SCRAPER_BROWSER:-camoufox}
+      SCRAPER_EPHEMERAL_BROWSER: ${SCRAPER_EPHEMERAL_BROWSER:-false}
+      SCRAPER_HEADLESS: ${SCRAPER_HEADLESS:-true}
+      SCRAPER_MAX_CONCURRENT: ${SCRAPER_MAX_CONCURRENT:-1}
+      SCRAPER_BROWSER_POOL_SIZE: ${SCRAPER_BROWSER_POOL_SIZE:-1}
+      SCRAPER_CONTEXT_TTL_REQUESTS: ${SCRAPER_CONTEXT_TTL_REQUESTS:-50}
+      SCRAPER_BROWSER_TTL_SECONDS: ${SCRAPER_BROWSER_TTL_SECONDS:-3600}
+      SCRAPER_TT_DETAIL_CACHE_MS: ${SCRAPER_TT_DETAIL_CACHE_MS:-604800000}
+      CAMOUFOX_PERSISTENT_PROFILE: /data/camoufox-profile
+      BROWSER_PROFILE_DIR: /data/camoufox-profile
+      PROXY_SERVER: ${PROXY_SERVER:-}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+      PROXY_BYPASS: ${PROXY_BYPASS:-}
+      PROXY_POOL: ${PROXY_POOL:-}
+      SESSION_VAULT_KEY: ${SESSION_VAULT_KEY:-}
+      SESSION_VAULT_DIR: ${SESSION_VAULT_DIR:-/data/sessions}
+    volumes:
+      - scraper-profile:/data
+      - camoufox-cache:/root/.cache/camoufox
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+volumes:
+  scraper-profile:
+  camoufox-cache:

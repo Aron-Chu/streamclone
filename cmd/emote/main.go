@@ -14,6 +14,7 @@ import (
 	"streamclone/internal/emote/dict"
 	"streamclone/internal/emote/eventapi"
 	"streamclone/internal/emote/objstore"
+	"streamclone/internal/emote/preload"
 	"streamclone/internal/emote/seeder"
 	"streamclone/internal/emote/store"
 	"streamclone/internal/emote/worker"
@@ -76,6 +77,23 @@ func main() {
 	eventSub := eventapi.New(st, seed, d, logger)
 	eventSub.Start(ctx)
 	defer eventSub.Stop()
+
+	if cfg.EmoteRosterPreloadEnabled {
+		rosterPreloader := preload.NewRosterPreloader(
+			cfg.MetadataServiceURL,
+			cfg.EmoteRosterPreloadTopN,
+			cfg.AlwaysTrackedChannels,
+			seed,
+			twitch,
+			logger,
+		)
+		preload.StartRosterPreloader(ctx, rosterPreloader, cfg.EmoteRosterPreloadInterval, logger)
+		logger.Info("emote roster preloader started",
+			"interval", cfg.EmoteRosterPreloadInterval.String(),
+			"top_n", cfg.EmoteRosterPreloadTopN,
+			"always_tracked", len(cfg.AlwaysTrackedChannels),
+		)
+	}
 
 	h := api.New(st, obj, d, seed, logger, cfg.CuratorAPIToken)
 	h.SetEventSubscriber(eventSub)
