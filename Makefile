@@ -29,7 +29,7 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 
 .PHONY: help env up app stop down down-clean nuke restart rebuild up-scraper up-full \
 	refresh-auth reload-env reload-env-if-stale ensure-oauth ensure-clipper-auth ensure-frontend-config \
-	scraper-reload scraper-check scraper-preflight scraper-warm scraper-proxy-benchmark scraper-turnstile-benchmark flame-proxy-preflight flame-proxy-benchmark social-probe ps ports migrate logs sync-pulse-chart \
+	scraper-reload scraper-check scraper-preflight scraper-warm scraper-proxy-benchmark scraper-turnstile-benchmark flame-proxy-preflight flame-proxy-benchmark social-probe hybrid-preflight ps ports migrate logs sync-pulse-chart \
 	helm-kubeconfig helm-up helm-down helm-status helm-lint \
 	helm-grafana helm-grafana-stop helm-influx helm-influx-stop helm-open \
 	helm-pulse-wire helm-pulse-check helm-pulse helm-pulse-sync-token helm-pulse-watch \
@@ -40,9 +40,9 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
 	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp mcp-setup \
 	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
-	frontend-restart frontend-refresh frontend-logs compose-config-check check check-quick \
+	frontend-restart frontend-refresh frontend-logs compose-config-check azure-scraper-config-check azure-archive-plane-config-check check check-quick \
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
-	preflight-deps start stop-user ensure-localhost agent-smoke
+	preflight-deps start stop-user ensure-localhost agent-smoke coverage-report
 
 help:
 	@printf 'Streamclone — common targets\n\n'
@@ -138,6 +138,10 @@ scraper-check: env
 
 scraper-preflight: env
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/scraper-preflight.ps1
+
+hybrid-preflight: env
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/azure-hybrid-smoke.ps1 -PreflightOnly
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/scraper-preflight.ps1 -ScraperURL http://azure-streamclone:8000 -CheckOnly
 
 scraper-warm:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/warm-camoufox-profile.ps1
@@ -273,6 +277,9 @@ test-video:
 test-analytics:
 	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/analytics/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/analytics/...
 
+coverage-report:
+	@command -v $(GO) >/dev/null 2>&1 && $(GO) run ./cmd/backfill coverage report || docker run --rm -v "$(CURDIR):/src" -w /src --env-file .env $(GO_DOCKER_IMAGE) go run ./cmd/backfill coverage report
+
 test-emote:
 	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/emote/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/emote/...
 
@@ -378,6 +385,19 @@ compose-config-check: env
 	APP_DOMAIN=streamclone.example.invalid ACME_EMAIL=security@example.invalid docker compose --env-file $(ENV_FILE) \
 		-f deploy/docker-compose.yml \
 		-f deploy/docker-compose.prod.yml config --quiet
+
+azure-scraper-config-check: env
+	IMAGE_TAG=$(VERSION) docker compose --env-file $(ENV_FILE) \
+		--env-file deploy/env/profile-azure-scraper.env \
+		-f deploy/docker-compose.azure-scraper.yml \
+		-f deploy/docker-compose.release.yml config --quiet
+
+azure-archive-plane-config-check: env
+	IMAGE_TAG=$(VERSION) docker compose --env-file $(ENV_FILE) \
+		--env-file deploy/env/profile-archive.env \
+		--env-file deploy/env/profile-azure-workers.env \
+		-f deploy/docker-compose.azure-archive-plane.yml \
+		-f deploy/docker-compose.release.yml config --quiet
 
 check-quick: test vet frontend-test compose-config-check
 

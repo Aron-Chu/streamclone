@@ -39,3 +39,7 @@ services:
   scraper:
     image: ghcr.io/aron-chu/streamclone/scraper:${IMAGE_TAG:-latest}
     build: !reset null
+
+  analytics-workers:
+    image: ghcr.io/aron-chu/streamclone/analytics:${IMAGE_TAG:-latest}
+    build: !reset null

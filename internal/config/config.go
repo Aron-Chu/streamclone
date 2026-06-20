@@ -92,7 +92,7 @@ type Config struct {
 	AnalyticsTTDirectHTTPTimeoutMS         int           `env:"ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS" envDefault:"1200"`
 	AnalyticsTTSyncTimeoutMS               int           `env:"ANALYTICS_TT_SYNC_TIMEOUT_MS" envDefault:"45000"`
 	AnalyticsTTBackgroundRetryEnabled      bool          `env:"ANALYTICS_TT_BACKGROUND_RETRY_ENABLED" envDefault:"true"`
-	AnalyticsTTViewerSmoothWindow        int           `env:"ANALYTICS_TT_VIEWER_SMOOTH_WINDOW" envDefault:"0"`
+	AnalyticsTTViewerSmoothWindow          int           `env:"ANALYTICS_TT_VIEWER_SMOOTH_WINDOW" envDefault:"0"`
 	AnalyticsVODGQLQuietSegmentSeconds     int           `env:"ANALYTICS_VOD_GQL_QUIET_SEGMENT_SECONDS" envDefault:"900"`
 	AlwaysTrackedChannels                  []string      `env:"ALWAYS_TRACKED_CHANNELS" envSeparator:","`
 
@@ -156,30 +156,30 @@ type Config struct {
 	PulseDirectoryTopN           int           `env:"PULSE_DIRECTORY_TOP_N" envDefault:"200"`
 	PulseDirectoryRetentionDays  int           `env:"PULSE_DIRECTORY_RETENTION_DAYS" envDefault:"30"`
 
-	ArchiveProtectRetention bool `env:"ARCHIVE_PROTECT_RETENTION" envDefault:"false"`
-	ArchiveExportOnSync     bool `env:"ARCHIVE_EXPORT_ON_SYNC" envDefault:"false"`
-	ArchiveEnabled            bool          `env:"ARCHIVE_ENABLED" envDefault:"false"`
-	ArchiveStorageProvider    string        `env:"ARCHIVE_STORAGE_PROVIDER" envDefault:"azure"`
-	ArchiveAzureStorageAccount string       `env:"ARCHIVE_AZURE_STORAGE_ACCOUNT"`
-	ArchiveAzureContainer     string        `env:"ARCHIVE_AZURE_CONTAINER" envDefault:"streamclone-archive"`
-	ArchiveAzurePrefix        string        `env:"ARCHIVE_AZURE_PREFIX" envDefault:"streamclone"`
-	ArchiveAzureConnectionStringFile string `env:"ARCHIVE_AZURE_CONNECTION_STRING_FILE"`
-	ArchiveExportInterval     time.Duration `env:"ARCHIVE_EXPORT_INTERVAL" envDefault:"1h"`
-	ArchivePGDumpNightly      bool          `env:"ARCHIVE_PG_DUMP_NIGHTLY" envDefault:"false"`
+	ArchiveProtectRetention          bool          `env:"ARCHIVE_PROTECT_RETENTION" envDefault:"false"`
+	ArchiveExportOnSync              bool          `env:"ARCHIVE_EXPORT_ON_SYNC" envDefault:"false"`
+	ArchiveEnabled                   bool          `env:"ARCHIVE_ENABLED" envDefault:"false"`
+	ArchiveStorageProvider           string        `env:"ARCHIVE_STORAGE_PROVIDER" envDefault:"azure"`
+	ArchiveAzureStorageAccount       string        `env:"ARCHIVE_AZURE_STORAGE_ACCOUNT"`
+	ArchiveAzureContainer            string        `env:"ARCHIVE_AZURE_CONTAINER" envDefault:"streamclone-archive"`
+	ArchiveAzurePrefix               string        `env:"ARCHIVE_AZURE_PREFIX" envDefault:"streamclone"`
+	ArchiveAzureConnectionStringFile string        `env:"ARCHIVE_AZURE_CONNECTION_STRING_FILE"`
+	ArchiveExportInterval            time.Duration `env:"ARCHIVE_EXPORT_INTERVAL" envDefault:"1h"`
+	ArchivePGDumpNightly             bool          `env:"ARCHIVE_PG_DUMP_NIGHTLY" envDefault:"false"`
 
-	Tier0Enabled         bool          `env:"TIER0_ENABLED" envDefault:"false"`
-	Tier0SampleInterval  time.Duration `env:"TIER0_SAMPLE_INTERVAL" envDefault:"45s"`
-	Tier0RosterInterval  time.Duration `env:"TIER0_ROSTER_INTERVAL" envDefault:"5m"`
-	Tier0RosterTopN      int           `env:"TIER0_ROSTER_TOP_N" envDefault:"200"`
+	Tier0Enabled        bool          `env:"TIER0_ENABLED" envDefault:"false"`
+	Tier0SampleInterval time.Duration `env:"TIER0_SAMPLE_INTERVAL" envDefault:"45s"`
+	Tier0RosterInterval time.Duration `env:"TIER0_ROSTER_INTERVAL" envDefault:"5m"`
+	Tier0RosterTopN     int           `env:"TIER0_ROSTER_TOP_N" envDefault:"200"`
 
 	BackfillEnabled        bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
 	BackfillWorkerInterval time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`
 
-	GoldBackfillEnabled     bool          `env:"GOLD_BACKFILL_ENABLED" envDefault:"false"`
-	GoldMinPeakViewers      int           `env:"GOLD_MIN_PEAK_VIEWERS" envDefault:"0"`
-	GoldMinDurationMinutes  int           `env:"GOLD_MIN_DURATION_MINUTES" envDefault:"0"`
-	GoldEnqueuerInterval    time.Duration `env:"GOLD_ENQUEUER_INTERVAL" envDefault:"5m"`
-	GoldSyncTimeoutMS       int           `env:"GOLD_SYNC_TIMEOUT_MS" envDefault:"600000"`
+	GoldBackfillEnabled    bool          `env:"GOLD_BACKFILL_ENABLED" envDefault:"false"`
+	GoldMinPeakViewers     int           `env:"GOLD_MIN_PEAK_VIEWERS" envDefault:"0"`
+	GoldMinDurationMinutes int           `env:"GOLD_MIN_DURATION_MINUTES" envDefault:"0"`
+	GoldEnqueuerInterval   time.Duration `env:"GOLD_ENQUEUER_INTERVAL" envDefault:"5m"`
+	GoldSyncTimeoutMS      int           `env:"GOLD_SYNC_TIMEOUT_MS" envDefault:"600000"`
 	PostEndWaitMin         time.Duration `env:"POST_END_WAIT_MIN" envDefault:"10m"`
 	PostEndWaitMax         time.Duration `env:"POST_END_WAIT_MAX" envDefault:"30m"`
 	PostEndCoveragePct     float64       `env:"POST_END_COVERAGE_PCT" envDefault:"70"`
@@ -190,9 +190,12 @@ type Config struct {
 	BronzeHelixConcurrency     int           `env:"BRONZE_HELIX_CONCURRENCY" envDefault:"2"`
 	BronzeTTSummaryConcurrency int           `env:"BRONZE_TT_SUMMARY_CONCURRENCY" envDefault:"4"`
 
-	EmoteImportConcurrency    int `env:"EMOTE_IMPORT_CONCURRENCY" envDefault:"8"`
-	EmoteWorkerConcurrency    int `env:"EMOTE_WORKER_CONCURRENCY" envDefault:"8"`
-	EmoteDictionaryDebounceMS int `env:"EMOTE_DICTIONARY_DEBOUNCE_MS" envDefault:"3000"`
+	EmoteImportConcurrency     int           `env:"EMOTE_IMPORT_CONCURRENCY" envDefault:"8"`
+	EmoteWorkerConcurrency     int           `env:"EMOTE_WORKER_CONCURRENCY" envDefault:"8"`
+	EmoteDictionaryDebounceMS  int           `env:"EMOTE_DICTIONARY_DEBOUNCE_MS" envDefault:"3000"`
+	EmoteRosterPreloadEnabled  bool          `env:"EMOTE_ROSTER_PRELOAD_ENABLED" envDefault:"false"`
+	EmoteRosterPreloadInterval time.Duration `env:"EMOTE_ROSTER_PRELOAD_INTERVAL" envDefault:"6h"`
+	EmoteRosterPreloadTopN     int           `env:"EMOTE_ROSTER_PRELOAD_TOP_N" envDefault:"200"`
 
 	Upstream upstream.Endpoints
 }
