@@ -95,3 +95,46 @@ func TestResolveBackfillOutcomeNonTimeoutFailsImmediately(t *testing.T) {
 		t.Fatalf("attempt = %d, want 1", got.attempt)
 	}
 }
+
+func TestBackfillSyncParamsGold(t *testing.T) {
+	viewersOnly, forceChat := backfillSyncParams("gold")
+	if viewersOnly || !forceChat {
+		t.Fatalf("gold params = viewersOnly=%v forceChat=%v", viewersOnly, forceChat)
+	}
+}
+
+func TestBackfillSyncParamsSilver(t *testing.T) {
+	viewersOnly, forceChat := backfillSyncParams("silver")
+	if !viewersOnly || forceChat {
+		t.Fatalf("silver params = viewersOnly=%v forceChat=%v", viewersOnly, forceChat)
+	}
+}
+
+func TestBackfillExportLabel(t *testing.T) {
+	if backfillExportLabel("gold") != "backfill gold chat" {
+		t.Fatal("unexpected gold export label")
+	}
+	if backfillExportLabel("silver") != "backfill viewers-only" {
+		t.Fatal("unexpected silver export label")
+	}
+}
+
+type mockVODChatExporter struct{}
+
+func (mockVODChatExporter) ExportVODChat(context.Context, string) error { return nil }
+
+func TestNewBackfillWorkerVODChatExporter(t *testing.T) {
+	exp := mockVODChatExporter{}
+	w := NewBackfillWorker(nil, nil, nil, time.Second).WithVODChatExporter(exp)
+	if w.vodChatExporter == nil {
+		t.Fatal("expected vod chat exporter")
+	}
+}
+
+func TestResolveBackfillOutcomeGoldSuccess(t *testing.T) {
+	job := BackfillJob{Tier: "gold", Attempt: 0, ExportStatus: "pending"}
+	got := resolveBackfillOutcome(job, nil, time.Now())
+	if got.status != "done" || got.exportStatus != "confirmed" {
+		t.Fatalf("gold success outcome = %+v", got)
+	}
+}

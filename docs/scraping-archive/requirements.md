@@ -800,8 +800,8 @@ Rough transfer volumes for a full Bronze → Silver → Gold backfill on **top 5
 ### Phase 0 — Requirements & benchmark (current)
 
 - [x] This requirements doc
-- [ ] Proxy benchmark script + baseline JSON results
-- [ ] `.env.local` proxy profiles (user-provided, not committed)
+- [x] Proxy benchmark script + baseline JSON results (summary in [`proxy-benchmark.md`](proxy-benchmark.md); raw JSON local under `docs/benchmarks/` — 2026-06-20: premium 5/5, budget 4/5)
+- [x] `.env.local` proxy profiles (user-provided, not committed)
 
 ### Phase 1 — Export floor (manifest + guard + backup)
 
@@ -834,8 +834,8 @@ Rough transfer volumes for a full Bronze → Silver → Gold backfill on **top 5
 ### Phase 4 — Gold selective chat
 
 - [x] Defer `refreshStreamSummary` during incremental GQL (PERF2)
-- [ ] GQL chat queue with rules engine
-- [ ] VOD chat export to GCS
+- [x] GQL chat queue with rules engine (`gold_rules.go`, `gold_enqueuer.go`, gold tier in `backfill_worker.go`)
+- [x] VOD chat export to Azure (`ExportVODChat` → `vod_chat/stream_id={id}/messages.jsonl.gz`)
 - [ ] Parquet rollups (WR2) after restore tests pass
 
 ### Phase 5 — Restore & lazy load
