@@ -12,6 +12,7 @@ import (
 	"streamclone/internal/config"
 	"streamclone/internal/emote/api"
 	"streamclone/internal/emote/dict"
+	"streamclone/internal/emote/eventapi"
 	"streamclone/internal/emote/objstore"
 	"streamclone/internal/emote/seeder"
 	"streamclone/internal/emote/store"
@@ -72,7 +73,12 @@ func main() {
 	}
 	w.RunPool(ctx, workerConcurrency)
 
+	eventSub := eventapi.New(st, seed, d, logger)
+	eventSub.Start(ctx)
+	defer eventSub.Stop()
+
 	h := api.New(st, obj, d, seed, logger, cfg.CuratorAPIToken)
+	h.SetEventSubscriber(eventSub)
 
 	srv := httpx.New("emote", cfg.HTTPAddr, logger, metrics.HTTPMiddleware("emote"), httpx.CORS)
 	srv.AddReady(func(ctx context.Context) error {

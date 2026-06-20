@@ -1,0 +1,8 @@
+{
+  "name": "streamclone-x-ingest",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "emusks": "^2.3.3"
+  }
+}

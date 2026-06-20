@@ -46,13 +46,19 @@ type SyncService struct {
 	vodGQLConcurrencyMax          int
 	vodGQLSegmentSeconds          int
 	vodGQLDenseSegmentSeconds     int
+	vodGQLQuietSegmentSeconds     int
 	vodGQLHotSegmentPageThreshold int
 	vodGQLHotSlowAdvanceSec       int
 	vodGQLHotSlowAdvancePages     int
 	vodGQLHotCommentsPerPage      int
 	vodGQLPriorityEdgeSeconds     int
 	vodGQLIncrementalDB           bool
+	vodGQLDeferSummaryRefresh     bool
+	vodGQLRollupFlushSegments     int
+	vodGQLRollupFlushInterval     time.Duration
 	trackerScrapeTimeoutMS        int
+	ttSyncTimeoutMS               int
+	ttBackgroundRetryEnabled      bool
 	passTTMaxAge                  bool
 	ttMaxAgeMSDefault             int
 	ttStaleMaxAgeMS               int
@@ -60,8 +66,10 @@ type SyncService struct {
 	ttDirectHTTPEnabled           bool
 	ttDirectHTTPStaleOnly         bool
 	ttDirectHTTPTimeoutMS         int
+	ttViewerSmoothWindow          int
 	directHTTP                    directHTTPTelemetry
 	trackerPrefetch               trackerPrefetchState
+	trackerScrapeCoalesce         *trackerScrapeCoalesce
 	syncStatusCache               syncStatusCache
 	syncOwnerID                   string
 	activeSyncMu                  sync.RWMutex
@@ -74,9 +82,22 @@ type SyncService struct {
 	chatReplaySink    chatreplay.Sink
 	chatReplayCfg     chatreplay.SanitizeConfig
 	chatReplayEnabled bool
+
+	archiveExportOnSync bool
+	archiveExporter     SyncArchiveExporter
+	archiveTTExporter   ArchiveTTDetailExporter
 }
 
 var errTrackerAccessProtected = errors.New("tracker access protected")
+
+type SyncArchiveExporter interface {
+	ExportSync(ctx context.Context, streamID, channel, resultMessage string) error
+}
+
+// ArchiveTTDetailExporter uploads optional TwitchTracker HTML captured during sync.
+type ArchiveTTDetailExporter interface {
+	ExportTTDetail(ctx context.Context, login, streamID string, html []byte) error
+}
 
 func NewSyncService(
 	store *Store,
@@ -96,13 +117,19 @@ func NewSyncService(
 	vodGQLConcurrencyMax int,
 	vodGQLSegmentSeconds int,
 	vodGQLDenseSegmentSeconds int,
+	vodGQLQuietSegmentSeconds int,
 	vodGQLHotSegmentPageThreshold int,
 	vodGQLHotSlowAdvanceSec int,
 	vodGQLHotSlowAdvancePages int,
 	vodGQLHotCommentsPerPage int,
 	vodGQLPriorityEdgeSeconds int,
 	vodGQLIncrementalDB bool,
+	vodGQLDeferSummaryRefresh bool,
+	vodGQLRollupFlushSegments int,
+	vodGQLRollupFlushInterval time.Duration,
 	trackerScrapeTimeoutMS int,
+	ttSyncTimeoutMS int,
+	ttBackgroundRetryEnabled bool,
 	passTTMaxAge bool,
 	ttMaxAgeMSDefault int,
 	ttStaleMaxAgeMS int,
@@ -110,6 +137,7 @@ func NewSyncService(
 	ttDirectHTTPEnabled bool,
 	ttDirectHTTPStaleOnly bool,
 	ttDirectHTTPTimeoutMS int,
+	ttViewerSmoothWindow int,
 ) *SyncService {
 	if trackerScrapeTimeoutMS <= 0 {
 		trackerScrapeTimeoutMS = 120000
@@ -141,6 +169,12 @@ func NewSyncService(
 	if vodGQLDenseSegmentSeconds <= 0 {
 		vodGQLDenseSegmentSeconds = vodGQLSegmentDenseVOD
 	}
+	if vodGQLQuietSegmentSeconds <= 0 {
+		vodGQLQuietSegmentSeconds = 900
+	}
+	if ttSyncTimeoutMS <= 0 {
+		ttSyncTimeoutMS = 45000
+	}
 	if vodGQLHotSegmentPageThreshold <= 0 {
 		vodGQLHotSegmentPageThreshold = 10
 	}
@@ -155,6 +189,12 @@ func NewSyncService(
 	}
 	if vodGQLPriorityEdgeSeconds <= 0 {
 		vodGQLPriorityEdgeSeconds = gqlPriorityEdgeSecondsDefault
+	}
+	if vodGQLRollupFlushSegments <= 0 {
+		vodGQLRollupFlushSegments = 8
+	}
+	if vodGQLRollupFlushInterval <= 0 {
+		vodGQLRollupFlushInterval = 2 * time.Second
 	}
 	if ttDirectHTTPTimeoutMS <= 0 {
 		ttDirectHTTPTimeoutMS = 1200
@@ -200,13 +240,19 @@ func NewSyncService(
 		vodGQLConcurrencyMax:          vodGQLConcurrencyMax,
 		vodGQLSegmentSeconds:          vodGQLSegmentSeconds,
 		vodGQLDenseSegmentSeconds:     vodGQLDenseSegmentSeconds,
+		vodGQLQuietSegmentSeconds:     vodGQLQuietSegmentSeconds,
 		vodGQLHotSegmentPageThreshold: vodGQLHotSegmentPageThreshold,
 		vodGQLHotSlowAdvanceSec:       vodGQLHotSlowAdvanceSec,
 		vodGQLHotSlowAdvancePages:     vodGQLHotSlowAdvancePages,
 		vodGQLHotCommentsPerPage:      vodGQLHotCommentsPerPage,
 		vodGQLPriorityEdgeSeconds:     vodGQLPriorityEdgeSeconds,
 		vodGQLIncrementalDB:           vodGQLIncrementalDB,
+		vodGQLDeferSummaryRefresh:     vodGQLDeferSummaryRefresh,
+		vodGQLRollupFlushSegments:     vodGQLRollupFlushSegments,
+		vodGQLRollupFlushInterval:     vodGQLRollupFlushInterval,
 		trackerScrapeTimeoutMS:        trackerScrapeTimeoutMS,
+		ttSyncTimeoutMS:               ttSyncTimeoutMS,
+		ttBackgroundRetryEnabled:      ttBackgroundRetryEnabled,
 		passTTMaxAge:                  passTTMaxAge,
 		ttMaxAgeMSDefault:             ttMaxAgeMSDefault,
 		ttStaleMaxAgeMS:               ttStaleMaxAgeMS,
@@ -214,7 +260,9 @@ func NewSyncService(
 		ttDirectHTTPEnabled:           ttDirectHTTPEnabled,
 		ttDirectHTTPStaleOnly:         ttDirectHTTPStaleOnly,
 		ttDirectHTTPTimeoutMS:         ttDirectHTTPTimeoutMS,
+		ttViewerSmoothWindow:          ttViewerSmoothWindow,
 		trackerPrefetch:               *newTrackerPrefetchState(),
+		trackerScrapeCoalesce:         newTrackerScrapeCoalesce(),
 		syncOwnerID:                   newSyncOwnerID(),
 		activeSyncRegistry:            make(map[string]*activeSyncState),
 		log:                           logger.With("service", "sync"),
@@ -223,6 +271,21 @@ func NewSyncService(
 		chatReplayCfg:                 chatReplayCfg,
 		chatReplayEnabled:             chatReplayEnabled,
 	}
+}
+
+func (s *SyncService) WithArchiveExportOnSync(enabled bool, exporter SyncArchiveExporter) *SyncService {
+	if s != nil {
+		s.archiveExportOnSync = enabled
+		s.archiveExporter = exporter
+	}
+	return s
+}
+
+func (s *SyncService) WithArchiveTTDetailExporter(exporter ArchiveTTDetailExporter) *SyncService {
+	if s != nil {
+		s.archiveTTExporter = exporter
+	}
+	return s
 }
 
 // chatReplayPersistenceEnabled reports whether individual VOD chat messages
@@ -296,6 +359,11 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 			st.Channel = channel
 		}
 	})
+
+	canonicalID, canonErr := s.store.ResolveCanonicalStreamID(ctx, streamID)
+	if canonErr == nil && canonicalID != "" {
+		streamID = canonicalID
+	}
 
 	var login string
 	var startedAt time.Time
@@ -383,6 +451,9 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		if err := s.store.UpsertStreamPlaceholder(ctx, streamID, broadcasterID, login, title, startedAt); err != nil {
 			s.log.Warn("failed to upsert placeholder stream record", "stream_id", streamID, "err", err)
 		} else {
+			if canon, resolveErr := s.store.ResolveCanonicalStreamID(ctx, streamID); resolveErr == nil && canon != "" {
+				streamID = canon
+			}
 			s.log.Info("upserted placeholder stream record for sync", "stream_id", streamID, "login", login)
 		}
 	}
@@ -494,20 +565,28 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		// 2. Scrape TwitchTracker via local browser scraper
 		trackerURL := fmt.Sprintf("https://twitchtracker.com/%s/streams/%s", login, streamID)
 		s.log.Info("scraping TwitchTracker", "url", trackerURL)
+		trackerStart := time.Now()
+		firstTimeoutMS := s.ttSyncTimeoutMS
+		if firstTimeoutMS <= 0 {
+			firstTimeoutMS = s.trackerScrapeTimeoutMS
+		}
 		s.setSyncPhase(ctx, streamID, SyncPhaseScrapingTracker, "Scraping TwitchTracker page", func(st *SyncStatus) {
 			st.Tracker = &SyncTrackerProgress{
-				Active:  true,
-				URL:     trackerURL,
-				Message: "Browser scrape for viewer chart (meta#ecs)",
+				Active:     true,
+				URL:        trackerURL,
+				Phase:      "direct_http",
+				ExpectedMs: int64(firstTimeoutMS),
+				Message:    "Trying fast HTTP fetch (no browser)…",
 			}
 		})
 
-		trackerStart := time.Now()
-		html, err = s.scrapeTwitchTracker(ctx, trackerURL, stream, viewersOnly)
+		stopHeartbeat := s.runTrackerScrapeHeartbeat(ctx, streamID, int64(firstTimeoutMS))
+		html, err = s.scrapeTwitchTrackerCoalesced(ctx, streamID, trackerURL, stream, viewersOnly, firstTimeoutMS)
+		stopHeartbeat()
 		if err != nil && strings.Contains(strings.ToLower(err.Error()), "browser has been closed") {
 			s.log.Warn("retrying TwitchTracker scrape after Camoufox browser crash", "stream_id", streamID)
 			time.Sleep(2 * time.Second)
-			html, err = s.scrapeTwitchTracker(ctx, trackerURL, stream, viewersOnly)
+			html, err = s.scrapeTwitchTrackerCoalesced(ctx, streamID, trackerURL, stream, viewersOnly, firstTimeoutMS)
 		}
 		if err != nil {
 			metrics.AnalyticsScraperRequests.WithLabelValues("twitchtracker", "error").Inc()
@@ -534,21 +613,45 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 				return "", fmt.Errorf("failed to scrape TwitchTracker: %w", err)
 			}
 			viewerStatus = "failed"
-			s.log.Warn("TwitchTracker scrape failed; continuing chat sync", "stream_id", streamID, "err", err)
+			existingRollups, rollErr := s.store.RollupsByStream(ctx, streamID)
+			hasLiveViewers := rollErr == nil && (hasAnyViewerRollups(existingRollups) || (stream != nil && stream.ViewerSamples > 0))
+			if hasLiveViewers || s.ttBackgroundRetryEnabled {
+				viewerStatus = "pending_backfill"
+			}
+			s.log.Warn("TwitchTracker scrape failed; continuing chat sync", "stream_id", streamID, "err", err, "viewer_status", viewerStatus)
+			trackerMsg := "Viewer chart unavailable — chat sync continues. Run scripts/scraper-preflight.ps1 or Re-sync viewers after scraper recovery."
+			if viewerStatus == "pending_backfill" {
+				if hasLiveViewers {
+					trackerMsg = "Using live-collected viewer data — TwitchTracker backfill pending in background."
+				} else {
+					trackerMsg = "TwitchTracker backfill pending in background — chat sync continues."
+				}
+				if s.ttBackgroundRetryEnabled {
+					s.spawnTrackerBackgroundRetry(streamID, login, stream, trackerURL, startedAt)
+				}
+			}
 			s.setSyncPhase(ctx, streamID, SyncPhaseScrapingTracker, "TwitchTracker failed — continuing chat sync", func(st *SyncStatus) {
 				st.ViewerStatus = viewerStatus
 				if st.Tracker == nil {
 					st.Tracker = &SyncTrackerProgress{}
 				}
-				st.Tracker.Message = "Viewer chart unavailable — chat sync continues. Run scripts/scraper-preflight.ps1 or Re-sync viewers after scraper recovery."
+				st.Tracker.Message = trackerMsg
 			})
 		} else {
 			viewerStatus = "ok"
 		}
 	} else {
 		viewerStatus = "skipped"
-		s.log.Info("skipping TwitchTracker scrape; viewer timeline already synced", "stream_id", streamID)
-		s.setSyncPhase(ctx, streamID, SyncPhaseScrapingTracker, "Skipping TwitchTracker (viewers already synced)", nil)
+		skipMsg := "Skipping TwitchTracker (viewers already synced)"
+		if hasStreamRecord && stream != nil {
+			if rollups, rollErr := s.store.RollupsByStream(ctx, streamID); rollErr == nil && hasLiveCollectorViewerCoverage(stream, rollups) {
+				skipMsg = "Skipping TwitchTracker (using live-collected viewer data)"
+			}
+		}
+		s.log.Info(skipMsg, "stream_id", streamID)
+		s.setSyncPhase(ctx, streamID, SyncPhaseScrapingTracker, skipMsg, func(st *SyncStatus) {
+			st.ViewerStatus = viewerStatus
+		})
 		s.setSyncPhase(ctx, streamID, SyncPhaseParsingTracker, "Loading viewer rollups from database", nil)
 		tracker, err = s.trackerDataFromDB(ctx, stream)
 		if err != nil {
@@ -607,6 +710,8 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 			if st.Tracker == nil {
 				st.Tracker = &SyncTrackerProgress{}
 			}
+			st.Tracker.Active = true
+			st.Tracker.Phase = "parsing"
 			st.Tracker.Message = "Parsing meta#ecs viewer chart"
 		})
 		tracker, err = s.parseTwitchTrackerHTML(html, startedAt)
@@ -947,11 +1052,22 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 			SET ended_at = $2,
 			    peak_viewers = GREATEST(peak_viewers, $3::int),
 			    avg_viewers = CASE WHEN $4::int > 0 THEN GREATEST(avg_viewers, $4::int) ELSE avg_viewers END,
+			    viewer_source = CASE
+			        WHEN viewer_source = 'live' THEN 'merged'
+			        WHEN viewer_source IN ('', 'unknown') THEN 'tt'
+			        ELSE viewer_source
+			    END,
 			    updated_at = now()
 			WHERE stream_id = $1
 		`, streamID, endTS, peakViewers, tracker.AvgViewers)
 		if err != nil {
 			s.log.Error("failed to update stream end metadata in DB", "err", err)
+		} else {
+			source := ViewerSourceTT
+			if stream != nil && normalizeViewerSource(stream.ViewerSource) == ViewerSourceLive {
+				source = ViewerSourceMerged
+			}
+			_ = s.store.SetStreamViewerSource(ctx, streamID, source)
 		}
 	}
 
@@ -1040,6 +1156,11 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		cp.IndexPhase = "done"
 	}, true)
 	s.log.Info("historical stream sync completed successfully", "stream_id", streamID, "chat_comments", chatComments, "vod_id", vodID)
+	if html != "" && login != "" && s.archiveTTExporter != nil {
+		if err := s.archiveTTExporter.ExportTTDetail(ctx, login, streamID, []byte(html)); err != nil {
+			s.log.Warn("archive tt-detail export failed", "stream_id", streamID, "login", login, "err", err)
+		}
+	}
 	return msg, nil
 }
 
@@ -1243,8 +1364,33 @@ func formatScraperConnectError(err error, scraperURL string) string {
 }
 
 func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string, stream *StreamRecord, viewersOnly bool) (string, error) {
+	streamID := ""
+	if stream != nil {
+		streamID = stream.StreamID
+	}
+	return s.scrapeTwitchTrackerCoalesced(ctx, streamID, url, stream, viewersOnly, s.trackerScrapeTimeoutMS)
+}
+
+func (s *SyncService) scrapeTwitchTrackerCoalesced(ctx context.Context, streamID, url string, stream *StreamRecord, viewersOnly bool, timeoutMS int) (string, error) {
+	key := trackerScrapeCoalesceKey(url, stream)
+	return s.trackerScrapeCoalesce.do(ctx, key, func(scrapeCtx context.Context) (string, error) {
+		if timeoutMS > 0 {
+			var cancel context.CancelFunc
+			scrapeCtx, cancel = context.WithTimeout(scrapeCtx, time.Duration(timeoutMS)*time.Millisecond)
+			defer cancel()
+		}
+		return s.doScrapeTwitchTracker(scrapeCtx, streamID, url, stream, viewersOnly, timeoutMS)
+	})
+}
+
+func (s *SyncService) doScrapeTwitchTracker(ctx context.Context, streamID, url string, stream *StreamRecord, viewersOnly bool, timeoutMS int) (string, error) {
 	tryDirect := s.shouldTryDirectHTTP(stream) && s.directHTTP.allowed()
 	if tryDirect {
+		s.updateTrackerProgress(ctx, streamID, func(tp *SyncTrackerProgress) {
+			tp.Phase = "direct_http"
+			tp.Message = "Trying fast HTTP fetch (no browser)…"
+			tp.Active = true
+		})
 		htmlBody, directErr := s.scrapeTwitchTrackerDirect(ctx, url)
 		if directErr == nil {
 			s.directHTTP.record(true)
@@ -1259,17 +1405,26 @@ func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string, strea
 		s.log.Debug("direct TwitchTracker fetch temporarily disabled due to low success rate", "url", url)
 	}
 
+	s.updateTrackerProgress(ctx, streamID, func(tp *SyncTrackerProgress) {
+		tp.Phase = "browser"
+		tp.Message = "Browser scrape for viewer chart (meta#ecs) — Camoufox / Cloudflare"
+		tp.Active = true
+	})
+
 	if s.scraperKey == "" {
 		return "", fmt.Errorf("missing SCRAPER_API_KEY — TwitchTracker blocks direct scraping; set SCRAPER_API_KEY=local-dev-key in .env for the local scraper")
 	}
 
 	maxAge := s.trackerScrapeMaxAgeMS(stream, viewersOnly)
+	if timeoutMS <= 0 {
+		timeoutMS = s.trackerScrapeTimeoutMS
+	}
 	reqBody, err := json.Marshal(map[string]any{
 		"url":             url,
 		"formats":         []string{"rawHtml"},
 		"onlyMainContent": false,
 		"useProxy":        false, // datacenter proxies are Cloudflare-blocked on TwitchTracker
-		"timeout":         s.trackerScrapeTimeoutMS,
+		"timeout":         timeoutMS,
 		"maxAge":          maxAge,
 	})
 	if err != nil {
@@ -1341,6 +1496,76 @@ func (s *SyncService) scrapeTwitchTracker(ctx context.Context, url string, strea
 		return "", fmt.Errorf("scraper scrape returned empty html")
 	}
 	return htmlBody, nil
+}
+
+func (s *SyncService) updateViewerStatus(ctx context.Context, streamID, viewerStatus, trackerMessage string) {
+	status := s.loadOrInitSyncStatus(ctx, streamID)
+	status.ViewerStatus = viewerStatus
+	if trackerMessage != "" {
+		if status.Tracker == nil {
+			status.Tracker = &SyncTrackerProgress{}
+		}
+		status.Tracker.Message = trackerMessage
+	}
+	if err := s.persistSyncStatus(ctx, *status, true); err != nil {
+		s.log.Warn("failed to persist viewer status", "stream_id", streamID, "viewer_status", viewerStatus, "err", err)
+	}
+}
+
+func (s *SyncService) spawnTrackerBackgroundRetry(streamID, login string, stream *StreamRecord, trackerURL string, startedAt time.Time) {
+	if s == nil || !s.ttBackgroundRetryEnabled || streamID == "" || login == "" || trackerURL == "" {
+		return
+	}
+	retryKey := "bg-retry:" + streamID
+	if !s.trackerPrefetch.tryStart(retryKey) {
+		return
+	}
+	go func() {
+		defer s.trackerPrefetch.finish(retryKey)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.trackerScrapeTimeoutMS)*time.Millisecond+60*time.Second)
+		defer cancel()
+
+		s.updateViewerStatus(ctx, streamID, "backfilling", "Retrying TwitchTracker viewer backfill in background")
+
+		html, err := s.scrapeTwitchTrackerCoalesced(ctx, streamID, trackerURL, stream, false, s.trackerScrapeTimeoutMS)
+		if err != nil {
+			s.log.Warn("tracker background retry failed", "stream_id", streamID, "err", err)
+			s.updateViewerStatus(ctx, streamID, "pending_backfill", "TwitchTracker backfill failed — live viewer data still shown")
+			return
+		}
+
+		streamStart := startedAt
+		if streamStart.IsZero() && stream != nil {
+			streamStart = stream.StartedAt
+		}
+		if streamStart.IsZero() {
+			streamStart = time.Now().UTC()
+		}
+		tracker, parseErr := s.parseTwitchTrackerHTML(html, streamStart)
+		if parseErr != nil {
+			s.log.Warn("tracker background retry parse failed", "stream_id", streamID, "err", parseErr)
+			s.updateViewerStatus(ctx, streamID, "pending_backfill", "TwitchTracker backfill parse failed — live viewer data still shown")
+			return
+		}
+		if len(tracker.ViewerPoints) == 0 {
+			s.updateViewerStatus(ctx, streamID, "pending_backfill", "TwitchTracker backfill returned no viewer points")
+			return
+		}
+
+		rollupStart := tracker.ChartStartedAt
+		if rollupStart.IsZero() {
+			rollupStart = streamStart.UTC().Truncate(time.Minute)
+		}
+		durationSeconds := lastViewerOffsetSeconds(tracker.ViewerPoints)
+		if durationSeconds <= 0 && stream != nil && stream.EndedAt != nil && !stream.StartedAt.IsZero() {
+			durationSeconds = int(stream.EndedAt.Sub(stream.StartedAt).Seconds())
+		}
+		if durationSeconds <= 0 {
+			durationSeconds = 3600
+		}
+		s.persistEarlyViewerChart(ctx, streamID, rollupStart, durationSeconds, tracker.PeakViewers, tracker.AvgViewers, tracker.ViewerPoints, tracker.Games)
+		s.log.Info("tracker background retry completed", "stream_id", streamID, "viewer_points", len(tracker.ViewerPoints))
+	}()
 }
 
 type ttTitleRaw struct {
@@ -1616,7 +1841,7 @@ func synthesizeViewerPoints(durationMinutes, peakViewers, avgViewers int) []pars
 	}
 }
 
-func parseStreamcloneViewerChartJSON(html string, durationMinutes, peakViewers int) []parsedViewerPoint {
+func parseStreamcloneViewerChartJSON(html string, durationMinutes, peakViewers int, streamStart time.Time) []parsedViewerPoint {
 	re := regexp.MustCompile(`(?is)<script[^>]+id="streamclone-viewer-chart"[^>]*>(.*?)</script>`)
 	match := re.FindStringSubmatch(html)
 	if len(match) < 2 {
@@ -1654,7 +1879,11 @@ func parseStreamcloneViewerChartJSON(html string, durationMinutes, peakViewers i
 	for i, p := range raw {
 		var offsetSeconds int
 		if p.X > 1_000_000_000_000 {
-			offsetSeconds = int((p.X - minX) / 1000)
+			if !streamStart.IsZero() {
+				offsetSeconds = int(p.X/1000) - int(streamStart.Unix())
+			} else {
+				offsetSeconds = int((p.X - minX) / 1000)
+			}
 		} else if svgPixelMode && maxX > minX {
 			offsetSeconds = int((p.X - minX) / (maxX - minX) * float64(durationSeconds))
 		} else {
@@ -1810,9 +2039,16 @@ func (s *SyncService) parseTwitchTrackerHTML(html string, startedAt time.Time) (
 		}
 	}
 
-	if injected := parseStreamcloneViewerChartJSON(html, durationMinutes, peakViewers); len(injected) >= 3 && hasCompleteViewerChart(injected, durationMinutes*60) {
-		s.log.Info("parsed viewer chart from injected SVG sample JSON", "points", len(injected))
-		out.ViewerPoints = injected
+	if injected := parseStreamcloneViewerChartJSON(html, durationMinutes, peakViewers, startedAt); len(injected) >= 3 && hasCompleteViewerChart(injected, durationMinutes*60) {
+		if chartMeetsTTPointDensity(len(injected), durationMinutes) {
+			s.log.Info("parsed viewer chart from injected SVG sample JSON", "points", len(injected))
+			out.ViewerPoints = injected
+		} else {
+			s.log.Warn("injected SVG chart rejected: insufficient point density",
+				"points", len(injected),
+				"min_required", minTTChartPointsForDuration(durationMinutes),
+			)
+		}
 	}
 
 	// 4. Parse SVG Path coordinates
@@ -1824,6 +2060,13 @@ func (s *SyncService) parseTwitchTrackerHTML(html string, startedAt time.Time) (
 		viewerPath := findViewerPath(svg)
 		if viewerPath != "" {
 			viewerPoints = parsePathPoints(viewerPath, durationMinutes*60, peakViewers)
+			if len(viewerPoints) >= 3 && !chartMeetsTTPointDensity(len(viewerPoints), durationMinutes) {
+				s.log.Warn("SVG path chart rejected: insufficient point density",
+					"points", len(viewerPoints),
+					"min_required", minTTChartPointsForDuration(durationMinutes),
+				)
+				viewerPoints = nil
+			}
 		}
 	}
 
@@ -1942,7 +2185,18 @@ func (s *SyncService) interpolateViewerCount(minute int, points []parsedViewerPo
 	return InterpolateViewerCount(minute, toRollupViewerPoints(points))
 }
 
+func (s *SyncService) processTTViewerPoints(points []parsedViewerPoint) []parsedViewerPoint {
+	if len(points) == 0 {
+		return points
+	}
+	if s != nil && s.ttViewerSmoothWindow > 1 {
+		points = applyTTViewerMedianSmooth(points, s.ttViewerSmoothWindow)
+	}
+	return points
+}
+
 func (s *SyncService) buildViewerMinuteRollups(rollupStart time.Time, durationSeconds int, viewerPoints []parsedViewerPoint) []MinuteRollup {
+	viewerPoints = s.processTTViewerPoints(viewerPoints)
 	totalMinutes := durationSeconds / 60
 	if totalMinutes <= 0 {
 		totalMinutes = 1
@@ -2288,25 +2542,39 @@ func (c *chatRollupCache) has(minute int) bool {
 	return ok
 }
 
-func (s *SyncService) patchChatRollupsForSegment(
+func (s *SyncService) patchChatRollupsForSegments(
 	ctx context.Context,
 	streamID, login string,
 	rollupStartFn func() time.Time,
 	commentsMap map[int][]string,
-	seg gqlSegmentProgress,
+	segments []gqlSegmentProgress,
 	chatAlignSec int,
 	cache *chatRollupCache,
 ) error {
-	if rollupStartFn == nil || login == "" {
+	if rollupStartFn == nil || login == "" || len(segments) == 0 {
 		return nil
 	}
 	rollupStart := rollupStartFn()
 	if rollupStart.IsZero() {
 		return nil
 	}
-	startMinute, endMinute := segmentAlignedMinuteBounds(seg, chatAlignSec)
-	rollups := make([]MinuteRollup, 0, endMinute-startMinute+1)
-	for minute := startMinute; minute <= endMinute; minute++ {
+	minuteSet := make(map[int]struct{}, len(segments)*4)
+	for _, seg := range segments {
+		startMinute, endMinute := segmentAlignedMinuteBounds(seg, chatAlignSec)
+		for minute := startMinute; minute <= endMinute; minute++ {
+			minuteSet[minute] = struct{}{}
+		}
+	}
+	if len(minuteSet) == 0 {
+		return nil
+	}
+	minutes := make([]int, 0, len(minuteSet))
+	for minute := range minuteSet {
+		minutes = append(minutes, minute)
+	}
+	sort.Ints(minutes)
+	rollups := make([]MinuteRollup, 0, len(minutes))
+	for _, minute := range minutes {
 		comments, ok := commentsMap[minute]
 		if !ok || len(comments) == 0 {
 			continue
@@ -2329,13 +2597,12 @@ func (s *SyncService) patchChatRollupsForSegment(
 	if cache != nil {
 		cache.store(rollupStart, rollups)
 	}
-	s.log.Info("incremental chat rollup patch",
+	s.log.Info("incremental chat rollup flush",
 		"stream_id", streamID,
-		"segment_start_sec", seg.StartSec,
-		"segment_end_sec", seg.EndSec,
+		"segments", len(segments),
 		"chat_align_sec", chatAlignSec,
-		"minute_start", startMinute,
-		"minute_end", endMinute,
+		"minute_start", minutes[0],
+		"minute_end", minutes[len(minutes)-1],
 		"rollup_minutes", len(rollups),
 	)
 	status := s.loadOrInitSyncStatus(ctx, streamID)
@@ -2346,7 +2613,22 @@ func (s *SyncService) patchChatRollupsForSegment(
 	if err := s.saveSyncStatus(ctx, *status); err != nil {
 		s.log.Warn("failed to persist incremental rollup progress", "stream_id", streamID, "err", err)
 	}
-	return s.store.BulkPatchChatRollups(ctx, streamID, rollups)
+	return s.store.BulkPatchChatRollups(ctx, streamID, rollups, RollupWriteOptions{
+		RefreshSummary:     !(s.vodGQLIncrementalDB && s.vodGQLDeferSummaryRefresh),
+		SummaryRefreshMode: "deferred",
+	})
+}
+
+func (s *SyncService) patchChatRollupsForSegment(
+	ctx context.Context,
+	streamID, login string,
+	rollupStartFn func() time.Time,
+	commentsMap map[int][]string,
+	seg gqlSegmentProgress,
+	chatAlignSec int,
+	cache *chatRollupCache,
+) error {
+	return s.patchChatRollupsForSegments(ctx, streamID, login, rollupStartFn, commentsMap, []gqlSegmentProgress{seg}, chatAlignSec, cache)
 }
 
 func (s *SyncService) writeChatRollupsOnly(ctx context.Context, streamID, login string, rollupStart time.Time, commentsMap map[int][]string, cache *chatRollupCache) error {
@@ -2405,7 +2687,7 @@ func gqlBackoffDelay(attempt int, retryAfter time.Duration) time.Duration {
 
 const gqlVideoCommentsMaxRetries = 5
 
-func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLRequest, coord *gqlRateCoordinator) (GQLResponse, error) {
+func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLRequest, coord *gqlRateCoordinator, stats *gqlRequestStats) (GQLResponse, error) {
 	bodyBytes, err := json.Marshal([]GQLRequest{reqBody})
 	if err != nil {
 		return GQLResponse{}, err
@@ -2413,6 +2695,7 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 
 	var count429, count503 int
 	for attempt := 0; attempt <= gqlVideoCommentsMaxRetries; attempt++ {
+		pageStarted := time.Now()
 		if coord != nil {
 			if waitErr := coord.Wait(ctx); waitErr != nil {
 				return GQLResponse{}, waitErr
@@ -2428,10 +2711,13 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 		resp, err := s.gqlHTTPClient(ctx).Do(req)
 		if err != nil {
 			metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()
+			metrics.AnalyticsVODGQLPageDuration.WithLabelValues("error").Observe(time.Since(pageStarted).Seconds())
 			return GQLResponse{}, err
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+			statusLabel := fmt.Sprintf("%d", resp.StatusCode)
+			metrics.AnalyticsVODGQLThrottleTotal.WithLabelValues(statusLabel).Inc()
 			if resp.StatusCode == http.StatusTooManyRequests {
 				count429++
 			} else {
@@ -2449,8 +2735,10 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 				return GQLResponse{}, fmt.Errorf("gql video comments status %d after %d retries", resp.StatusCode, attempt)
 			}
 			delay := gqlBackoffDelay(attempt, retryAfter)
+			metrics.AnalyticsVODGQLBackoffSecondsTotal.Add(delay.Seconds())
+			stats.recordThrottle(resp.StatusCode, delay)
 			if coord != nil {
-				coord.Throttle(retryAfter, attempt)
+				coord.Throttle(resp.StatusCode, retryAfter, attempt)
 				coord.RecordRateLimit()
 			}
 			s.log.Warn("gql video comments throttled; backing off",
@@ -2496,6 +2784,7 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 			coord.RecordSuccess()
 		}
 		metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("success").Inc()
+		metrics.AnalyticsVODGQLPageDuration.WithLabelValues("success").Observe(time.Since(pageStarted).Seconds())
 		return respBody[0], nil
 	}
 	metrics.AnalyticsVODGQLPagesFetched.WithLabelValues("error").Inc()

@@ -64,21 +64,27 @@ if [ "$NON_INTERACTIVE" = false ]; then
 
 [1] Core only          — watch + chat + emotes (no Twitch login required)
 [2] + Analytics charts — uses scraper image or streamclone-scraper sibling repo
-[3] + Clip Studio      — needs Twitch device-code login
-[4] Full stack         — scraper + clipper
+[3] Full stack         — core + Analytics scraper
 
 MENU
-  read -r -p "Choose profile [1-4, default 1]: " choice
+  read -r -p "Choose profile [1-3, default 1]: " choice
   case "${choice:-1}" in
     1|"") PROFILE=core ;;
     2) PROFILE=scraper ;;
-    3) PROFILE=clipper ;;
-    4) PROFILE=full ;;
+    3) PROFILE=full ;;
     *) echo "Invalid choice; using core."; PROFILE=core ;;
   esac
 fi
 
 echo "Profile: $PROFILE"
+
+if [ "$PROFILE" = "clipper" ] || [ "$PROFILE" = "full" ]; then
+  if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-replayforge-hint.ps1" || true
+  elif command -v pwsh >/dev/null 2>&1; then
+    pwsh -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-replayforge-hint.ps1" || true
+  fi
+fi
 
 env_preflight_docker
 echo "Docker: ok"
@@ -87,6 +93,18 @@ env_synthesize "$PROFILE" .env
 printf '%s' "$PROFILE" >.streamclone-profile
 var_count="$(grep -c '^[A-Z]' .env || true)"
 echo ".env: synthesized ($var_count keys, secrets generated)"
+
+oauth_id="$(env_read_value .env TWITCH_OAUTH_CLIENT_ID || true)"
+oauth_secret="$(env_read_value .env TWITCH_OAUTH_CLIENT_SECRET || true)"
+if [ -z "$oauth_id" ] || [ -z "$oauth_secret" ]; then
+  echo "Note: Twitch OAuth app creds not set — optional Sign in and Helix features need them; Reddit-only Pulse Wire still works."
+fi
+
+if command -v powershell.exe >/dev/null 2>&1; then
+  powershell.exe -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-oauth-env.ps1" -EnvFile "$ROOT/.env" || true
+elif command -v pwsh >/dev/null 2>&1; then
+  pwsh -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-oauth-env.ps1" -EnvFile "$ROOT/.env" || true
+fi
 
 # Twitch CLI (optional)
 if [ "$SKIP_TWITCH" = false ]; then
@@ -107,17 +125,19 @@ if [ "$SKIP_TWITCH" = false ]; then
       fi
     else
       echo "  twitch configure not run yet — skip or run: twitch configure"
-      if [ "$NON_INTERACTIVE" = false ] && { [ "$PROFILE" = "clipper" ] || [ "$PROFILE" = "full" ]; }; then
-        read -r -p "Run twitch configure now? [y/N]: " cfg
-        case "$cfg" in
-          y|Y|yes|YES) twitch configure ;;
-        esac
-      fi
     fi
   else
     echo "Twitch CLI: not found — https://github.com/twitchdev/twitch-cli"
-    echo "  Clip Studio / chat OAuth need it; core viewing works without login."
+    echo "  Sign in (optional) still needs TWITCH_OAUTH_CLIENT_ID/SECRET in .env."
+    echo "  Copy deploy/env/oauth-bundle.env.example to oauth-bundle.env, or install twitch-cli."
   fi
+fi
+
+dev_import="$(env_read_value .env TWITCH_DEV_TOKEN_IMPORT_ENABLED || true)"
+oauth_id="$(env_read_value .env TWITCH_OAUTH_CLIENT_ID || true)"
+oauth_secret="$(env_read_value .env TWITCH_OAUTH_CLIENT_SECRET || true)"
+if [ "$dev_import" = "true" ] && { [ -z "$oauth_id" ] || [ -z "$oauth_secret" ]; }; then
+  echo "Sign in (optional) will fail until TWITCH_OAUTH_CLIENT_ID/SECRET are set (twitch configure + make twitch-sync, or oauth-bundle.env)."
 fi
 
 # Scraper sibling
@@ -179,7 +199,7 @@ if [ "$USE_IMAGES" = true ]; then
   compose_args+=(-f deploy/docker-compose.release.yml)
 fi
 
-read -r -a profiles <<<"$(env_compose_profiles "$PROFILE")"
+read -r -a profiles <<<"$(env_streamclone_compose_profiles "$PROFILE" "$ROOT/.env")"
 for p in "${profiles[@]}"; do
   [ -n "$p" ] && compose_args+=(--profile "$p")
 done
@@ -203,15 +223,6 @@ if [ "$SKIP_UP" = false ]; then
       pwsh -ExecutionPolicy Bypass -File "$ROOT/scripts/reload-env-if-stale.ps1" -EnvFile "$ROOT/.env" || true
     fi
   fi
-  case "$PROFILE" in
-    clipper|full)
-      if command -v powershell.exe >/dev/null 2>&1; then
-        powershell.exe -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-clipper-auth.ps1" -EnvFile "$ROOT/.env" || true
-      elif command -v pwsh >/dev/null 2>&1; then
-        pwsh -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-clipper-auth.ps1" -EnvFile "$ROOT/.env" || true
-      fi
-      ;;
-  esac
   echo ""
   echo "Streamclone: http://localhost:8090"
 fi
@@ -241,33 +252,6 @@ if [ "$SKIP_SMOKE" = false ] && [ "$SKIP_UP" = false ]; then
       done
     fi
   fi
-
-  needs_clipper=false
-  case "$PROFILE" in
-    clipper|full) needs_clipper=true ;;
-  esac
-  if [ "$needs_clipper" = true ]; then
-    echo "Checking clipper via proxy..."
-    for i in $(seq 1 30); do
-      if curl -fsS http://localhost:8090/clipper/health >/dev/null 2>&1; then
-        echo "  clipper ok"
-        break
-      fi
-      if curl -fsS http://localhost:8095/health >/dev/null 2>&1; then
-        echo "  clipper ok (direct :8095)"
-        break
-      fi
-      [ "$i" -eq 30 ] && echo "  clipper health check timed out" >&2
-      sleep 2
-    done
-  fi
 fi
-
-case "$PROFILE" in
-  clipper|full)
-    echo ""
-    echo "Optional: run 'make twitch-local-auth' for clip creation scopes."
-    ;;
-esac
 
 echo "Setup complete."

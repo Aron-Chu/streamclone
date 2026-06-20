@@ -5,8 +5,11 @@ rtmpAddress: :1935
 
 hls: yes
 hlsAddress: :8888
+# Default transport is mpegts (stable after ffmpeg copy→RTMP).
+# Enable LL-HLS via compose env MTX_HLSVARIANT=lowLatency and HLS_LOW_LATENCY_ENABLED=true.
+# Shorter live windows: MTX_HLSSEGMENTCOUNT (default 10), MTX_HLSSEGMENTDURATION (default 2s).
 hlsVariant: mpegts
-hlsSegmentCount: 15
+hlsSegmentCount: 10
 hlsSegmentDuration: 2s
 hlsAllowOrigins: ["*"]
 # Treat Caddy as a trusted CDN so browser HLS works over HTTP localhost without Secure cookies.

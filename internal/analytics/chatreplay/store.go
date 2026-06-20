@@ -12,6 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"streamclone/internal/archive"
+	"streamclone/internal/metrics"
 )
 
 // Pagination defaults for the chat-replay query (Requirement 27.5).
@@ -24,12 +27,20 @@ const (
 // the analytics_vod_chat_messages table. It follows the pgxpool.Pool pattern
 // used by the analytics package Store.
 type Store struct {
-	db *pgxpool.Pool
+	db                      *pgxpool.Pool
+	archiveProtectRetention bool
 }
 
 // NewStore constructs a chat-replay Store backed by the given connection pool.
 func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
+}
+
+func (s *Store) WithArchiveProtectRetention(enabled bool) *Store {
+	if s != nil {
+		s.archiveProtectRetention = enabled
+	}
+	return s
 }
 
 // Ping verifies database connectivity.
@@ -59,10 +70,11 @@ func (s *Store) Insert(ctx context.Context, msg VODChatMessage) error {
 
 // BulkInsert upserts a batch of messages in a single round-trip. Each row uses
 // ON CONFLICT (stream_id, message_id) DO NOTHING for idempotency. Rows missing
-// a stream id or message id are skipped.
-func (s *Store) BulkInsert(ctx context.Context, msgs []VODChatMessage) error {
+// a stream id or message id are skipped. The returned count is the number of
+// rows actually inserted (duplicates contribute zero).
+func (s *Store) BulkInsert(ctx context.Context, msgs []VODChatMessage) (int, error) {
 	if s == nil || s.db == nil || len(msgs) == 0 {
-		return nil
+		return 0, nil
 	}
 	batch := &pgx.Batch{}
 	queued := 0
@@ -72,7 +84,7 @@ func (s *Store) BulkInsert(ctx context.Context, msgs []VODChatMessage) error {
 		}
 		frags, err := marshalFrags(msg.EmoteFrags)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		batch.Queue(insertSQL,
 			msg.StreamID, msg.MinuteTS, msg.MessageID, msg.DisplayName,
@@ -81,16 +93,22 @@ func (s *Store) BulkInsert(ctx context.Context, msgs []VODChatMessage) error {
 		queued++
 	}
 	if queued == 0 {
-		return nil
+		return 0, nil
 	}
 	br := s.db.SendBatch(ctx, batch)
 	defer br.Close()
+	inserted := 0
 	for i := 0; i < queued; i++ {
-		if _, err := br.Exec(); err != nil {
-			return err
+		tag, err := br.Exec()
+		if err != nil {
+			return inserted, err
 		}
+		inserted += int(tag.RowsAffected())
 	}
-	return nil
+	if inserted > 0 {
+		metrics.AnalyticsChatReplayRowsWrittenTotal.Add(float64(inserted))
+	}
+	return inserted, nil
 }
 
 const insertSQL = `
@@ -246,6 +264,28 @@ func (s *Store) DeleteByStream(ctx context.Context, streamID string) (int64, err
 func (s *Store) PurgeOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, nil
+	}
+	if s.archiveProtectRetention {
+		var missing int64
+		err := s.db.QueryRow(ctx, `
+			SELECT COUNT(*)
+			FROM analytics_vod_chat_messages m
+			WHERE m.synced_at < $1
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM archive_exports ae
+				WHERE ae.artifact_type = $2
+				  AND ae.natural_key = m.stream_id || ':' || m.message_id
+				  AND ae.export_status = 'confirmed'
+			  )`,
+			cutoff.UTC(), archive.ArtifactVODChatMessage,
+		).Scan(&missing)
+		if err != nil {
+			return 0, err
+		}
+		if err := archive.BlockIfMissing(archive.ArtifactVODChatMessage, missing); err != nil {
+			return 0, err
+		}
 	}
 	tag, err := s.db.Exec(ctx,
 		`DELETE FROM analytics_vod_chat_messages WHERE synced_at < $1`,

@@ -89,12 +89,14 @@ const (
 	SyncPhaseResolvingVOD     SyncPhase = "resolving_vod"
 	SyncPhaseFetchingComments SyncPhase = "fetching_comments"
 	SyncPhaseWritingRollups   SyncPhase = "writing_rollups"
+	SyncPhaseExportingArchive SyncPhase = "exporting_archive"
+	SyncPhaseExportPending    SyncPhase = "export_pending"
 	SyncPhaseCompleted        SyncPhase = "completed"
 	SyncPhaseFailed           SyncPhase = "failed"
 )
 
 func (p SyncPhase) IsTerminal() bool {
-	return p == SyncPhaseCompleted || p == SyncPhaseFailed
+	return p == SyncPhaseCompleted || p == SyncPhaseExportPending || p == SyncPhaseFailed
 }
 
 type SyncPhaseTiming struct {
@@ -107,36 +109,48 @@ type SyncPhaseTiming struct {
 
 // SyncChatProgress tracks VOD GQL comment paging (runs in parallel with tracker scrape).
 type SyncChatProgress struct {
-	Active            bool   `json:"active,omitempty"`
-	VodID             string `json:"vodId,omitempty"`
-	FetchMode         string `json:"fetchMode,omitempty"` // parallel | serial
-	Concurrency       int    `json:"concurrency,omitempty"`
-	SegmentsTotal     int    `json:"segmentsTotal,omitempty"`
-	SegmentsDone      int    `json:"segmentsDone,omitempty"`
-	CommentsFetched   int    `json:"commentsFetched,omitempty"`
-	TimelineSec       int    `json:"timelineSec,omitempty"`
-	VodDurationSec    int    `json:"vodDurationSec,omitempty"`
-	StreamDurationSec int    `json:"streamDurationSec,omitempty"`
-	RollupsExpected   int    `json:"rollupsExpected,omitempty"`
-	IndexPhase        string `json:"indexPhase,omitempty"` // fetching | tokenizing | writing | done
-	GQLPages          int    `json:"gqlPages,omitempty"`
-	Throttled         bool   `json:"throttled,omitempty"`
-	Message           string `json:"message,omitempty"`
+	Active                 bool   `json:"active,omitempty"`
+	VodID                  string `json:"vodId,omitempty"`
+	FetchMode              string `json:"fetchMode,omitempty"` // parallel | serial
+	Concurrency            int    `json:"concurrency,omitempty"`
+	EffectiveSegmentSec    int    `json:"effectiveSegmentSec,omitempty"`
+	InitialSegments        int    `json:"initialSegments,omitempty"`
+	SegmentsTotal          int    `json:"segmentsTotal,omitempty"`
+	SegmentsDone           int    `json:"segmentsDone,omitempty"`
+	SegmentsIncomplete     int    `json:"segmentsIncomplete,omitempty"`
+	HotSplits              int    `json:"hotSplits,omitempty"`
+	HotSegmentSplitReason  string `json:"hotSegmentSplitReason,omitempty"`
+	AutoClosedSegments     int    `json:"autoClosedSegments,omitempty"`
+	CleanupPhase           string `json:"cleanupPhase,omitempty"` // initial | parallel_cleanup | serial_retry
+	CommentsFetched        int    `json:"commentsFetched,omitempty"`
+	CommentsSaved          int    `json:"commentsSaved,omitempty"`
+	TimelineSec            int    `json:"timelineSec,omitempty"`
+	VodDurationSec         int    `json:"vodDurationSec,omitempty"`
+	StreamDurationSec      int    `json:"streamDurationSec,omitempty"`
+	RollupsExpected        int    `json:"rollupsExpected,omitempty"`
+	SummaryRefreshDeferred bool   `json:"summaryRefreshDeferred,omitempty"`
+	IndexPhase             string `json:"indexPhase,omitempty"` // fetching | tokenizing | writing | finalizing | done
+	GQLPages               int    `json:"gqlPages,omitempty"`
+	Throttled              bool   `json:"throttled,omitempty"`
+	Message                string `json:"message,omitempty"`
 }
 
 // SyncTrackerProgress tracks TwitchTracker browser scrape (parallel with chat on first sync).
 type SyncTrackerProgress struct {
-	Active  bool   `json:"active,omitempty"`
-	URL     string `json:"url,omitempty"`
-	Message string `json:"message,omitempty"`
+	Active     bool   `json:"active,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Phase      string `json:"phase,omitempty"` // direct_http | browser | parsing
+	ExpectedMs int64  `json:"expectedMs,omitempty"`
+	ElapsedMs  int64  `json:"elapsedMs,omitempty"`
 }
 
 type SyncNetworkUsage struct {
-	TrackerScrapeBytes int64 `json:"trackerScrapeBytes,omitempty"`
-	GQLFetchBytes      int64 `json:"gqlFetchBytes,omitempty"`
-	EmotePreloadBytes  int64 `json:"emotePreloadBytes,omitempty"`
-	HelixBytes         int64 `json:"helixBytes,omitempty"`
-	TotalBytes         int64 `json:"totalBytes,omitempty"`
+	TrackerScrapeBytes int64   `json:"trackerScrapeBytes,omitempty"`
+	GQLFetchBytes      int64   `json:"gqlFetchBytes,omitempty"`
+	EmotePreloadBytes  int64   `json:"emotePreloadBytes,omitempty"`
+	HelixBytes         int64   `json:"helixBytes,omitempty"`
+	TotalBytes         int64   `json:"totalBytes,omitempty"`
 	LastRateBps        float64 `json:"lastRateBps,omitempty"`
 }
 
@@ -364,14 +378,52 @@ func (s *SyncService) updateTrackerProgress(ctx context.Context, streamID string
 	if mutate != nil {
 		mutate(status.Tracker)
 	}
-	if !status.Tracker.Active {
-		if status.Tracker.Message == "Parsing meta#ecs viewer chart" || status.Tracker.Message == "Browser scrape for viewer chart (meta#ecs)" {
-			status.Tracker.Message = ""
-		}
-	}
 	if err := s.saveSyncStatus(ctx, *status); err != nil {
 		s.log.Warn("failed to persist tracker sync progress", "stream_id", streamID, "err", err)
 	}
+}
+
+func trackerProgressPhaseLabel(phase string) string {
+	switch phase {
+	case "direct_http":
+		return "Fast HTTP fetch"
+	case "browser":
+		return "Browser scrape (Camoufox)"
+	case "parsing":
+		return "Parsing viewer chart"
+	default:
+		return "TwitchTracker"
+	}
+}
+
+func (s *SyncService) runTrackerScrapeHeartbeat(ctx context.Context, streamID string, expectedMS int64) func() {
+	if s == nil || streamID == "" || expectedMS <= 0 {
+		return func() {}
+	}
+	hbCtx, cancel := context.WithCancel(context.Background())
+	start := time.Now()
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-hbCtx.Done():
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				elapsedMS := time.Since(start).Milliseconds()
+				s.updateTrackerProgress(ctx, streamID, func(tp *SyncTrackerProgress) {
+					tp.Active = true
+					tp.ExpectedMs = expectedMS
+					tp.ElapsedMs = elapsedMS
+					phaseLabel := trackerProgressPhaseLabel(tp.Phase)
+					tp.Message = fmt.Sprintf("%s · %ds / ~%ds", phaseLabel, elapsedMS/1000, expectedMS/1000)
+				})
+			}
+		}
+	}()
+	return cancel
 }
 
 func (s *SyncService) releaseSyncLock(ctx context.Context, streamID string) {
@@ -459,6 +511,23 @@ func (s *SyncService) runSyncJob(streamID, channelOpt string, viewersOnly, force
 			st.Error = err.Error()
 		})
 		return
+	}
+	if s.archiveExportOnSync {
+		s.setSyncPhase(ctx, streamID, SyncPhaseExportingArchive, "Exporting archive", nil)
+		if s.archiveExporter == nil {
+			s.setSyncPhase(ctx, streamID, SyncPhaseExportPending, "Archive export pending", func(st *SyncStatus) {
+				st.ResultMessage = msg
+				st.Error = "ARCHIVE_EXPORT_ON_SYNC is enabled but no archive exporter is configured"
+			})
+			return
+		}
+		if err := s.archiveExporter.ExportSync(ctx, streamID, normalizeLogin(channelOpt), msg); err != nil {
+			s.setSyncPhase(ctx, streamID, SyncPhaseExportPending, "Archive export pending", func(st *SyncStatus) {
+				st.ResultMessage = msg
+				st.Error = err.Error()
+			})
+			return
+		}
 	}
 	s.setSyncPhase(ctx, streamID, SyncPhaseCompleted, "Sync completed", func(st *SyncStatus) {
 		st.ResultMessage = msg

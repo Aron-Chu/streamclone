@@ -14,10 +14,12 @@ type Streamer interface {
 }
 
 type StartupBreakdown struct {
-	UpstreamFetchMs int64 `json:"upstreamFetchMs,omitempty"`
-	WorkerSpawnMs   int64 `json:"workerSpawnMs,omitempty"`
-	HLSReadyMs      int64 `json:"hlsReadyMs,omitempty"`
-	TotalMs         int64 `json:"totalMs,omitempty"`
+	UpstreamFetchMs int64  `json:"upstreamFetchMs,omitempty"`
+	WorkerSpawnMs   int64  `json:"workerSpawnMs,omitempty"`
+	HLSProbeBudgetMs int64 `json:"hlsProbeBudgetMs,omitempty"`
+	HLSReadyMs      int64  `json:"hlsReadyMs,omitempty"`
+	TotalMs         int64  `json:"totalMs,omitempty"`
+	Backend         string `json:"backend,omitempty"`
 }
 
 type Session struct {

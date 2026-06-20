@@ -1,8 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { FormEvent, KeyboardEvent, WheelEvent } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import type { AuthUser, ChannelEmote, ChatBadge, EmoteBenchmark, EmoteProviderStatus } from '../api'
 import { LatencySummary, useChatStore } from '../chatStore'
 import { normalizeBrowserOriginUrl } from '../config'
+import {
+  shouldPauseAutoFollowOnScroll,
+  shouldPauseAutoFollowOnWheel,
+} from '../utils/chatAutoScroll'
 import ChatLogRow from './chat/ChatLogRow'
 
 function normalizeMentionToken(value: string) {
@@ -47,7 +52,7 @@ function StatLine({ label, stat }: { label: string; stat: LatencySummary }) {
 }
 
 export interface ChatEmoteStatus {
-  state: 'idle' | 'loading' | 'ready' | 'processing' | 'failed'
+  state: 'idle' | 'loading' | 'ready' | 'processing' | 'partial' | 'failed'
   count: number
   pending: number
   total?: number
@@ -68,7 +73,7 @@ function emoteLabel(status: ChatEmoteStatus | undefined, revision: number) {
   if (!status) return revision > 0 ? `emotes updated ${revision}` : 'emotes ready'
   if (status.providers?.length) {
     return status.providers.map(provider => {
-      if (provider.state === 'processing') return `${providerLabel(provider.provider)} ${provider.percent ?? 0}%`
+      if (provider.state === 'processing' || provider.state === 'partial') return `${providerLabel(provider.provider)} ${provider.percent ?? 0}%`
       if (provider.state === 'failed') return `${providerLabel(provider.provider)} failed`
       return `${providerLabel(provider.provider)} ready`
     }).join(' · ')
@@ -76,7 +81,7 @@ function emoteLabel(status: ChatEmoteStatus | undefined, revision: number) {
   if (status.state === 'idle') return 'emotes idle'
   if (status.state === 'loading') return 'emotes loading'
   if (status.state === 'failed') return 'emotes unavailable'
-  if (status.state === 'processing') return `emotes ${status.percent ?? 0}%`
+  if (status.state === 'processing' || status.state === 'partial') return `emotes ${status.percent ?? 0}%`
   if (revision > 0) return `emotes ready ${status.count} +${revision}`
   return `emotes ready ${status.count}`
 }
@@ -136,10 +141,10 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
   const latencyStats = useChatStore(s => s.latencyStats)
   const sendMessage = useChatStore(s => s.sendMessage)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const lastCountRef = useRef(0)
   const lastScrollTopRef = useRef(0)
+  const autoFollowRef = useRef(true)
   const programmaticScrollRef = useRef(false)
   const programmaticScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isPinned, setIsPinned] = useState(true)
@@ -153,31 +158,46 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
   const activeBase = completion?.base || token.token
   const suggestions = useMemo(() => emoteMatches(loadedEmotes, activeBase), [loadedEmotes, activeBase])
 
-  const prefillMention = (login: string) => {
+  const rowVirtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 34,
+    overscan: 15,
+    getItemKey: index => messages[index]?.clientMsgId ?? messages[index]?.id ?? index,
+  })
+
+  const prefillMention = useCallback((login: string) => {
     setDraft(`@${login} `)
     requestAnimationFrame(() => {
       inputRef.current?.focus()
       const cursor = (`@${login} `).length
       inputRef.current?.setSelectionRange(cursor, cursor)
     })
-  }
+  }, [])
 
-  const scrollToBottom = () => {
+  const pauseAutoFollow = useCallback(() => {
+    autoFollowRef.current = false
+    setIsPinned(false)
+  }, [])
+
+  const scrollToBottom = useCallback(() => {
+    if (messages.length === 0) return
     const el = scrollRef.current
     if (!el) return
+    autoFollowRef.current = true
     programmaticScrollRef.current = true
     if (programmaticScrollTimer.current) clearTimeout(programmaticScrollTimer.current)
     programmaticScrollTimer.current = setTimeout(() => { programmaticScrollRef.current = false }, 150)
-    el.scrollTop = el.scrollHeight
+    rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' })
     lastScrollTopRef.current = el.scrollTop
     setIsPinned(true)
     setNewMessages(0)
     requestAnimationFrame(() => {
-      if (!scrollRef.current) return
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      if (!scrollRef.current || messages.length === 0) return
+      rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' })
       lastScrollTopRef.current = scrollRef.current.scrollTop
     })
-  }
+  }, [messages.length, rowVirtualizer])
 
   const jumpLabel = newMessages > 0 ? `↓ ${newMessages} new message${newMessages === 1 ? '' : 's'}` : 'Jump to bottom'
 
@@ -188,18 +208,18 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
       setNewMessages(0)
       return
     }
-    if (isPinned) {
+    if (autoFollowRef.current) {
       if (document.visibilityState === 'visible') {
         requestAnimationFrame(scrollToBottom)
       }
     } else if (messages.length > prev) {
       setNewMessages(count => count + messages.length - prev)
     }
-  }, [messages.length, isPinned])
+  }, [messages.length, scrollToBottom])
 
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && isPinned) {
+      if (document.visibilityState === 'visible' && autoFollowRef.current) {
         requestAnimationFrame(() => {
           requestAnimationFrame(scrollToBottom)
         })
@@ -207,40 +227,32 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [isPinned])
+  }, [scrollToBottom])
 
   useEffect(() => {
-    const content = contentRef.current
-    if (!content || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => {
-      if (!isPinned) return
-      requestAnimationFrame(scrollToBottom)
-    })
-    observer.observe(content)
-    return () => observer.disconnect()
-  }, [isPinned])
+    if (!autoFollowRef.current || messages.length === 0) return
+    requestAnimationFrame(scrollToBottom)
+  }, [rowVirtualizer.getTotalSize(), messages.length, scrollToBottom])
 
-  const onScroll = () => {
+  const onScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
     if (programmaticScrollRef.current) return
     const scrollTop = el.scrollTop
-    const distanceFromBottom = el.scrollHeight - scrollTop - el.clientHeight
-    const atBottom = distanceFromBottom < 32
-    const userScrolledUp = scrollTop < lastScrollTopRef.current - 2
+    const userScrolledUp = shouldPauseAutoFollowOnScroll(scrollTop, lastScrollTopRef.current)
     lastScrollTopRef.current = scrollTop
 
-    if (atBottom) {
-      setIsPinned(true)
-      setNewMessages(0)
-      return
+    if (userScrolledUp) {
+      pauseAutoFollow()
     }
+  }, [pauseAutoFollow])
 
-    // Scrolled away from bottom: pause auto-follow until Jump to bottom.
-    if (isPinned || userScrolledUp || distanceFromBottom > 32) {
-      setIsPinned(false)
+  const onWheelCapture = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    if (programmaticScrollRef.current) return
+    if (shouldPauseAutoFollowOnWheel(event.deltaY)) {
+      pauseAutoFollow()
     }
-  }
+  }, [pauseAutoFollow])
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -252,7 +264,9 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
     sendMessage(channel, text, user, loadedEmotes)
     setDraft('')
     setCompletion(null)
-    requestAnimationFrame(scrollToBottom)
+    if (autoFollowRef.current) {
+      requestAnimationFrame(scrollToBottom)
+    }
   }
 
   const insertCompletion = (emote: ChannelEmote, state: CompletionState | null, baseToken = token.token) => {
@@ -345,8 +359,13 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
         </div>
       ) : null}
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} onScroll={onScroll} className="scrollbar-hidden h-full overflow-y-auto py-2">
-          <div ref={contentRef}>
+        <div
+          ref={scrollRef}
+          data-testid="chat-scroll-container"
+          onScroll={onScroll}
+          onWheelCapture={onWheelCapture}
+          className="scrollbar-hidden h-full overflow-y-auto py-2"
+        >
           {messages.length === 0 ? (
             <div className="grid h-full place-items-center px-6 text-center">
               <div>
@@ -364,21 +383,38 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
               </div>
             </div>
           ) : (
-            messages.map(msg => (
-              <ChatLogRow
-                key={msg.clientMsgId ?? msg.id}
-                msg={msg}
-                badges={badgeCatalog}
-                mentionNames={mentionNames}
-                canMention={isAuthenticated}
-                onMention={prefillMention}
-              />
-            ))
+            <div
+              className="relative w-full"
+              style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+            >
+              {rowVirtualizer.getVirtualItems().map(virtualRow => {
+                const msg = messages[virtualRow.index]
+                if (!msg) return null
+                return (
+                  <div
+                    key={msg.clientMsgId ?? msg.id}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    className="absolute left-0 top-0 w-full"
+                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  >
+                    <ChatLogRow
+                      msg={msg}
+                      badges={badgeCatalog}
+                      mentionNames={mentionNames}
+                      canMention={isAuthenticated}
+                      onMention={prefillMention}
+                      recentMessages={messages}
+                    />
+                  </div>
+                )
+              })}
+            </div>
           )}
-          </div>
         </div>
         {!isPinned ? (
           <button
+            data-testid="chat-jump-bottom"
             onClick={scrollToBottom}
             className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border border-violet-200/30 bg-violet-500 px-4 py-2 text-xs font-black text-white shadow-xl shadow-black/50 transition hover:bg-violet-400"
           >

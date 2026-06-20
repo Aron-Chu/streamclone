@@ -384,3 +384,118 @@ func (c *HelixClient) VideoDurationSeconds(ctx context.Context, videoID string) 
 	}
 	return seconds, nil
 }
+
+// ArchivedVOD is one Helix archive video row for Bronze VOD index export.
+type ArchivedVOD struct {
+	StreamID        string    `json:"streamId"`
+	VideoID         string    `json:"videoId"`
+	Title           string    `json:"title"`
+	Category        string    `json:"category,omitempty"`
+	ThumbnailURL    string    `json:"thumbnailUrl,omitempty"`
+	StartedAt       time.Time `json:"startedAt"`
+	EndedAt         time.Time `json:"endedAt,omitempty"`
+	DurationMinutes int       `json:"durationMinutes,omitempty"`
+}
+
+// ArchivedStreamHistory lists past broadcasts via Helix /videos (no per-minute viewer stats).
+func (c *HelixClient) ArchivedStreamHistory(ctx context.Context, login string, limit int) ([]ArchivedVOD, error) {
+	if !c.Enabled() || login == "" {
+		return nil, ErrHelixDisabled
+	}
+	if limit <= 0 {
+		limit = 80
+	}
+	login = normalizeLogin(login)
+	q := url.Values{}
+	q.Set("login", login)
+	var users struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := c.get(ctx, "/users", q, &users); err != nil {
+		return nil, err
+	}
+	if len(users.Data) == 0 || users.Data[0].ID == "" {
+		return nil, fmt.Errorf("helix user not found: %s", login)
+	}
+	broadcasterID := users.Data[0].ID
+
+	out := make([]ArchivedVOD, 0, limit)
+	cursor := ""
+	for page := 0; page < 10 && len(out) < limit; page++ {
+		q = url.Values{}
+		q.Set("user_id", broadcasterID)
+		q.Set("type", "archive")
+		q.Set("first", "100")
+		if cursor != "" {
+			q.Set("after", cursor)
+		}
+		var resp struct {
+			Data []struct {
+				ID        string `json:"id"`
+				StreamID  string `json:"stream_id"`
+				Title     string `json:"title"`
+				GameName  string `json:"game_name"`
+				Thumbnail string `json:"thumbnail_url"`
+				CreatedAt string `json:"created_at"`
+				Duration  string `json:"duration"`
+			} `json:"data"`
+			Pagination struct {
+				Cursor string `json:"cursor"`
+			} `json:"pagination"`
+		}
+		if err := c.get(ctx, "/videos", q, &resp); err != nil {
+			return out, err
+		}
+		for _, item := range resp.Data {
+			if item.StreamID == "" {
+				continue
+			}
+			startedAt, endedAt, durationMinutes := helixVideoTimes(item.CreatedAt, item.Duration)
+			title := strings.TrimSpace(item.Title)
+			if title == "" {
+				title = "Stream"
+			}
+			vod := ArchivedVOD{
+				StreamID:        item.StreamID,
+				VideoID:         item.ID,
+				Title:           title,
+				Category:        strings.TrimSpace(item.GameName),
+				ThumbnailURL:    normalizeThumbnail(strings.TrimSpace(item.Thumbnail)),
+				StartedAt:       startedAt,
+				DurationMinutes: durationMinutes,
+			}
+			if !endedAt.IsZero() {
+				vod.EndedAt = endedAt
+			}
+			out = append(out, vod)
+			if len(out) >= limit {
+				break
+			}
+		}
+		cursor = resp.Pagination.Cursor
+		if cursor == "" || len(resp.Data) == 0 {
+			break
+		}
+	}
+	return out, nil
+}
+
+func helixVideoTimes(createdAt, duration string) (startedAt, endedAt time.Time, durationMinutes int) {
+	if createdAt != "" {
+		startedAt, _ = time.Parse(time.RFC3339, createdAt)
+	}
+	if duration != "" {
+		if d, err := time.ParseDuration(duration); err == nil {
+			durationMinutes = int(d.Minutes())
+			if durationMinutes <= 0 && d > 0 {
+				durationMinutes = 1
+			}
+			if !startedAt.IsZero() {
+				endedAt = startedAt.Add(d)
+			}
+		}
+	}
+	return startedAt, endedAt, durationMinutes
+}

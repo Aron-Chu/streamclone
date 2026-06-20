@@ -23,6 +23,7 @@
 	}
 	reverse_proxy @video video:8080 {
 		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-For {http.request.remote.host}
 		transport http {
 			read_timeout 2m
 			write_timeout 2m
@@ -55,6 +56,13 @@
 		}
 	}
 
+	@storygraph {
+		path /v1/pulse-wire /v1/pulse-wire/* /v1/channels/*/spread /v1/channels/*/spread/*
+	}
+	reverse_proxy @storygraph storygraph:8080 {
+		header_up X-Forwarded-Proto https
+	}
+
 	@hls {
 		path /live/*
 	}
@@ -83,7 +91,7 @@
 	}
 	route @clipper {
 		uri replace /v1/clipper /v1
-		reverse_proxy clipper:8095 {
+		reverse_proxy host.docker.internal:8095 {
 			header_up X-Forwarded-Proto https
 		}
 	}

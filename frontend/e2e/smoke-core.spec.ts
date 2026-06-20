@@ -25,14 +25,16 @@ test('welcome overlay appears on first visit and dismisses', async ({ page }) =>
   await expect(page.locator('a[href^="/c/"]').first()).toBeVisible()
 })
 
-test('/welcome redirect triggers onboarding overlay once', async ({ page }) => {
+test('/welcome redirect lands on usable directory when onboarding is already dismissed', async ({ page }) => {
   await page.addInitScript((key) => {
     window.localStorage.setItem(key, '1')
   }, ONBOARDING_DISMISSED_KEY)
 
   await page.goto('/welcome')
   await page.waitForURL('/')
-  await expect(page.getByRole('button', { name: 'Browse live streams' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: 'Browse live streams' })).toBeHidden()
+  await expect(page.getByRole('heading', { name: 'Recommended Live Channels' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('a[href^="/c/"]').first()).toBeVisible()
 })
 
 test('channel route loads player shell or structured offline state', async ({ page }) => {

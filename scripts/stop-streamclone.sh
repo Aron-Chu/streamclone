@@ -7,7 +7,7 @@ echo "Stopping Streamclone..."
 docker compose --env-file .env \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.local-tunnel.yml \
-  --profile scraper --profile clipper \
+  --profile scraper \
   down --remove-orphans --timeout 30 2>/dev/null || true
 
 docker compose --env-file .env \

@@ -1,9 +1,12 @@
 import { Link } from 'react-router-dom'
 
-import type { AnalyticsStreamDetail, AnalyticsTopEmote } from '../../api.ts'
+import type { AnalyticsMinuteRollup, AnalyticsStream, AnalyticsStreamDetail, AnalyticsTopEmote } from '../../api.ts'
+import type { ReplayHeatmapPoint } from '../../types/heatmap.ts'
 import { normalizeBrowserOriginUrl } from '../../config.ts'
 import { resolveEmoteImageUrl } from '../../utils/emoteImageUrl.ts'
 import { pulseDashboardUrl } from '../../utils/pulseDashboard.ts'
+import ActivityWaveform from '../analytics/ActivityWaveform.tsx'
+import VodActivityGraphPanel from './VodActivityGraphPanel.tsx'
 import VodMomentsPanel from './VodMomentsPanel.tsx'
 
 function emoteImageUrl(emote: AnalyticsTopEmote): string | undefined {
@@ -25,9 +28,18 @@ function formatCount(value: number) {
 export interface VodStreamPulsePanelProps {
   channelLogin: string
   streamId: string
+  vodId: string
   detail?: AnalyticsStreamDetail | null
+  rollups?: AnalyticsMinuteRollup[] | null
+  heatmapPoints?: ReplayHeatmapPoint[]
+  totalDurationSec?: number | null
   currentOffsetSec?: number
+  highlightOffsetSec?: number
+  onSeek?: (offsetSeconds: number) => void
   onSeekMoment?: (offsetSeconds: number) => void
+  analyticsStreams?: AnalyticsStream[]
+  onStreamLinked?: (streamId: string) => void
+  onSyncComplete?: () => void
   isLoading?: boolean
   isError?: boolean
   className?: string
@@ -36,15 +48,25 @@ export interface VodStreamPulsePanelProps {
 export function VodStreamPulsePanel({
   channelLogin,
   streamId,
+  vodId,
   detail,
+  rollups,
+  heatmapPoints,
+  totalDurationSec,
   currentOffsetSec = 0,
+  highlightOffsetSec,
+  onSeek,
   onSeekMoment,
+  analyticsStreams = [],
+  onStreamLinked,
+  onSyncComplete,
   isLoading,
   isError,
   className,
 }: VodStreamPulsePanelProps) {
   const stream = detail?.stream
   const topEmotes = (detail?.topEmotes ?? []).slice(0, 12)
+  const hasRollups = (rollups?.length ?? 0) > 0
   const grafanaUrl = pulseDashboardUrl(channelLogin, {
     streamId,
     startedAt: stream?.startedAt,
@@ -58,7 +80,7 @@ export function VodStreamPulsePanel({
         <div className="min-w-0">
           <h3 className="text-sm font-black text-violet-100">Emote Pulse</h3>
           <p className="mt-1 text-[11px] font-semibold leading-relaxed text-zinc-500">
-            Synced rollups for this VOD. Click moments to jump; heatmap tracks playback.
+            Scrub the activity chart or use Prev/Next moments to jump playback.
           </p>
         </div>
         <div className="mt-2.5 flex flex-wrap gap-2">
@@ -80,9 +102,39 @@ export function VodStreamPulsePanel({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 py-3">
+        {hasRollups && rollups && onSeek ? (
+          <section className="shrink-0 space-y-2">
+            <h4 className="text-[11px] font-black uppercase tracking-wide text-zinc-400">Activity</h4>
+            <ActivityWaveform
+              rollups={rollups}
+              totalDurationSec={totalDurationSec ?? undefined}
+              variant="analytics"
+              currentOffsetSec={currentOffsetSec}
+              highlightOffsetSec={highlightOffsetSec ?? currentOffsetSec}
+              onSeek={onSeek}
+              className="rounded-lg border border-white/10 bg-zinc-900/80"
+            />
+          </section>
+        ) : !isLoading && !hasRollups ? (
+          <VodActivityGraphPanel
+            channelLogin={channelLogin}
+            vodId={vodId}
+            streamId={streamId}
+            streams={analyticsStreams}
+            onStreamLinked={onStreamLinked ?? (() => undefined)}
+            onSyncComplete={onSyncComplete}
+            className="shrink-0"
+          />
+        ) : isLoading && !detail ? (
+          <div className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-6 text-center text-xs font-semibold text-zinc-500">
+            Loading activity chart…
+          </div>
+        ) : null}
+
         {onSeekMoment ? (
           <VodMomentsPanel
             detail={detail}
+            heatmapPoints={heatmapPoints}
             currentOffsetSec={currentOffsetSec}
             onSeekMoment={onSeekMoment}
             isLoading={isLoading}
@@ -90,11 +142,7 @@ export function VodStreamPulsePanel({
           />
         ) : null}
 
-        {isLoading && !detail ? (
-          <div className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-6 text-center text-xs font-semibold text-zinc-500">
-            Loading stream pulse…
-          </div>
-        ) : isError ? (
+        {isLoading && !detail ? null : isError ? (
           <div className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-6 text-center text-xs font-semibold text-zinc-500">
             Pulse data unavailable. Re-sync this stream in Analytics.
           </div>

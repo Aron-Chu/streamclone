@@ -17,6 +17,8 @@ import (
 	"streamclone/internal/metadata/cache"
 	"streamclone/internal/metadata/gql"
 	"streamclone/internal/metadata/model"
+	"streamclone/internal/social/reddit"
+	"streamclone/internal/upstream"
 )
 
 type testStore struct {
@@ -85,11 +87,23 @@ func (f *fakeGQL) ChannelAbout(context.Context, string) (gql.ChannelAbout, error
 }
 
 type fakeHelix struct {
-	query  model.ClipQuery
-	badges model.ChatBadgeCatalog
+	query      model.ClipQuery
+	badges     model.ChatBadgeCatalog
+	topStreams []gql.Stream
 }
 
 func (f *fakeHelix) Enabled() bool { return true }
+
+func (f *fakeHelix) TopLiveStreams(_ context.Context, limit int, _ string) (gql.Page[gql.Stream], error) {
+	if f.topStreams == nil {
+		return gql.Page[gql.Stream]{}, nil
+	}
+	items := f.topStreams
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return gql.Page[gql.Stream]{Items: items}, nil
+}
 
 func (f *fakeHelix) ChannelDetails(context.Context, string) (model.ChannelDetails, error) {
 	return model.ChannelDetails{ID: "b1", Login: "streamer", DisplayName: "Streamer", UpdatedAt: time.Now().UnixMilli()}, nil
@@ -175,6 +189,222 @@ func TestRandomStreamReturnsOneFromPool(t *testing.T) {
 	}
 }
 
+type pagingFakeGQL struct {
+	pageSize   int
+	totalItems int
+	calls      []struct {
+		limit  int
+		cursor string
+	}
+}
+
+func (f *pagingFakeGQL) TopStreams(_ context.Context, limit int, cursor string) (gql.Page[gql.Stream], error) {
+	f.calls = append(f.calls, struct {
+		limit  int
+		cursor string
+	}{limit, cursor})
+	if f.pageSize <= 0 {
+		f.pageSize = 25
+	}
+	pageIndex := 0
+	if cursor != "" {
+		pageIndex, _ = strconv.Atoi(cursor)
+	}
+	start := pageIndex * f.pageSize
+	if start >= f.totalItems {
+		return gql.Page[gql.Stream]{}, nil
+	}
+	end := min(start+limit, f.totalItems)
+	items := make([]gql.Stream, 0, end-start)
+	for i := start; i < end; i++ {
+		items = append(items, gql.Stream{
+			ID:    strconv.Itoa(i),
+			Login: fmt.Sprintf("streamer%d", i),
+			Title: fmt.Sprintf("Stream %d", i),
+		})
+	}
+	nextCursor := ""
+	if end < f.totalItems {
+		nextCursor = strconv.Itoa(pageIndex + 1)
+	}
+	return gql.Page[gql.Stream]{Items: items, Cursor: nextCursor}, nil
+}
+
+func (f *pagingFakeGQL) Categories(context.Context, int, string) (gql.Page[gql.Category], error) {
+	return gql.Page[gql.Category]{}, nil
+}
+
+func (f *pagingFakeGQL) CategoryStreams(context.Context, string, int, string) (gql.Page[gql.Stream], error) {
+	return gql.Page[gql.Stream]{}, nil
+}
+
+func (f *pagingFakeGQL) Search(context.Context, string, int) (gql.SearchResult, error) {
+	return gql.SearchResult{}, nil
+}
+
+func (f *pagingFakeGQL) Channel(context.Context, string) (gql.Channel, error) {
+	return gql.Channel{}, nil
+}
+
+func (f *pagingFakeGQL) ChannelAbout(context.Context, string) (gql.ChannelAbout, error) {
+	return gql.ChannelAbout{}, nil
+}
+
+func TestStreamsAggregatesHighLimitAcrossPages(t *testing.T) {
+	fake := &pagingFakeGQL{pageSize: 25, totalItems: 220}
+	h := New(newTestCache(), fake)
+	r := chi.NewRouter()
+	h.Mount(r)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/streams?limit=200", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body %s", rec.Code, rec.Body.String())
+	}
+	var page gql.Page[gql.Stream]
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 200 {
+		t.Fatalf("expected 200 items, got %d", len(page.Items))
+	}
+	if page.Items[0].Login != "streamer0" || page.Items[199].Login != "streamer199" {
+		t.Fatalf("unexpected item range: first=%+v last=%+v", page.Items[0], page.Items[199])
+	}
+	if len(fake.calls) < 8 {
+		t.Fatalf("expected at least 8 paginated GQL calls, got %d: %+v", len(fake.calls), fake.calls)
+	}
+	for _, call := range fake.calls {
+		if call.limit != 25 {
+			t.Fatalf("expected page size 25, got %+v", call)
+		}
+	}
+}
+
+func helixTopStreams(n int) []gql.Stream {
+	items := make([]gql.Stream, 0, n)
+	for i := 0; i < n; i++ {
+		items = append(items, gql.Stream{
+			ID:           strconv.Itoa(i),
+			Login:        fmt.Sprintf("helix%d", i),
+			DisplayName:  fmt.Sprintf("Helix %d", i),
+			Title:        fmt.Sprintf("Stream %d", i),
+			ViewersCount: n - i,
+			Category:     "Just Chatting",
+			ThumbnailURL: fmt.Sprintf("https://static.example/%d.jpg", i),
+			IsLive:       true,
+		})
+	}
+	return items
+}
+
+func TestFetchTopStreamsUsesHelixPrimaryForHighLimit(t *testing.T) {
+	hx := &fakeHelix{topStreams: helixTopStreams(200)}
+	gqlFake := &pagingFakeGQL{pageSize: 25, totalItems: 220}
+	h := New(newTestCache(), gqlFake).WithHelix(hx)
+
+	page, err := h.fetchTopStreams(context.Background(), 200, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 200 {
+		t.Fatalf("expected 200 items, got %d", len(page.Items))
+	}
+	if page.Items[0].Login != "helix0" || page.Items[199].Login != "helix199" {
+		t.Fatalf("unexpected helix range: first=%+v last=%+v", page.Items[0], page.Items[199])
+	}
+	if len(gqlFake.calls) != 0 {
+		t.Fatalf("expected no GQL calls when Helix is primary, got %+v", gqlFake.calls)
+	}
+}
+
+func TestFetchTopStreamsHelixBackfillOnGQLSchemaFailure(t *testing.T) {
+	hx := &fakeHelix{topStreams: helixTopStreams(200)}
+	gqlFake := &schemaFailGQL{pageSize: 25, firstPageItems: 25, totalItems: 220}
+	h := New(newTestCache(), gqlFake).WithHelix(hx)
+
+	page, err := h.fetchTopStreamsGQL(context.Background(), 200, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 200 {
+		t.Fatalf("expected 200 items after Helix backfill, got %d", len(page.Items))
+	}
+	if len(gqlFake.calls) != 2 {
+		t.Fatalf("expected 2 GQL calls before schema failure, got %d: %+v", len(gqlFake.calls), gqlFake.calls)
+	}
+	if page.Items[0].Login != "streamer0" {
+		t.Fatalf("expected first item from GQL page 1, got %+v", page.Items[0])
+	}
+	if page.Items[24].Login != "streamer24" {
+		t.Fatalf("expected GQL tail before backfill, got %+v", page.Items[24])
+	}
+	if page.Items[25].Login != "helix0" {
+		t.Fatalf("expected Helix backfill after GQL failure, got %+v", page.Items[25])
+	}
+}
+
+type schemaFailGQL struct {
+	pageSize       int
+	firstPageItems int
+	totalItems     int
+	calls          []struct {
+		limit  int
+		cursor string
+	}
+}
+
+func (f *schemaFailGQL) TopStreams(_ context.Context, limit int, cursor string) (gql.Page[gql.Stream], error) {
+	f.calls = append(f.calls, struct {
+		limit  int
+		cursor string
+	}{limit, cursor})
+	if f.pageSize <= 0 {
+		f.pageSize = 25
+	}
+	if cursor == "" {
+		items := make([]gql.Stream, 0, f.firstPageItems)
+		for i := 0; i < f.firstPageItems; i++ {
+			items = append(items, gql.Stream{
+				ID:    strconv.Itoa(i),
+				Login: fmt.Sprintf("streamer%d", i),
+				Title: fmt.Sprintf("Stream %d", i),
+			})
+		}
+		return gql.Page[gql.Stream]{Items: items, Cursor: "page2"}, nil
+	}
+	return gql.Page[gql.Stream]{}, upstream.ErrUpstreamSchema
+}
+
+func (f *schemaFailGQL) Categories(context.Context, int, string) (gql.Page[gql.Category], error) {
+	return gql.Page[gql.Category]{}, nil
+}
+
+func (f *schemaFailGQL) CategoryStreams(context.Context, string, int, string) (gql.Page[gql.Stream], error) {
+	return gql.Page[gql.Stream]{}, nil
+}
+
+func (f *schemaFailGQL) Search(context.Context, string, int) (gql.SearchResult, error) {
+	return gql.SearchResult{}, nil
+}
+
+func (f *schemaFailGQL) Channel(context.Context, string) (gql.Channel, error) {
+	return gql.Channel{}, nil
+}
+
+func (f *schemaFailGQL) ChannelAbout(context.Context, string) (gql.ChannelAbout, error) {
+	return gql.ChannelAbout{}, nil
+}
+
+func TestParseLimitCapsAtMax(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/streams?limit=999", nil)
+	if got := parseLimit(req); got != maxLimit {
+		t.Fatalf("expected maxLimit %d, got %d", maxLimit, got)
+	}
+}
+
 func TestChannelClipsBuildsPeriodQuery(t *testing.T) {
 	hx := &fakeHelix{}
 	h := New(newTestCache(), &fakeGQL{}).WithHelix(hx)
@@ -219,7 +449,7 @@ func TestChannelDetailsAddsOptionalGQLAboutPanels(t *testing.T) {
 }
 
 func TestParseRedditHTMLListing(t *testing.T) {
-	posts := parseRedditHTMLListing(`<a href="/r/LivestreamFail/comments/abc123/post_slug/">Funny streamer clip</a>`, "https://www.reddit.com", "streamer")
+	posts := reddit.ParseHTMLListing(`<a href="/r/LivestreamFail/comments/abc123/post_slug/">Funny streamer clip</a>`, "https://www.reddit.com", "streamer")
 	if len(posts) != 1 {
 		t.Fatalf("expected post, got %+v", posts)
 	}
@@ -498,7 +728,7 @@ func TestRedditLSFOffAutoEnablesWhenScraperReady(t *testing.T) {
 
 func TestParseRedditHTMLListingShredditPost(t *testing.T) {
 	body := `<shreddit-post permalink="/r/LivestreamFail/comments/abc123/some_title/" post-title="ohnepixel throws keyboard"></shreddit-post>`
-	posts := parseRedditHTMLListing(body, "https://www.reddit.com", "ohnepixel")
+	posts := reddit.ParseHTMLListing(body, "https://www.reddit.com", "ohnepixel")
 	if len(posts) != 1 || posts[0].ID != "abc123" {
 		t.Fatalf("expected shreddit post parse, got %+v", posts)
 	}
@@ -884,41 +1114,72 @@ func TestChannelYouTubeRoute(t *testing.T) {
 	}
 }
 
-func TestRedditLSFCachedMissReturnsPendingWithoutAutoWarm(t *testing.T) {
-	h := New(newTestCache(), &fakeGQL{})
+func TestRedditLSFCachedMissAutoWarms(t *testing.T) {
 	started := make(chan struct{}, 1)
-	h.http = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case started <- struct{}{}:
 		default:
 		}
 		time.Sleep(2 * time.Second)
-		return &http.Response{
-			StatusCode: http.StatusForbidden,
-			Body:       http.NoBody,
-			Header:     make(http.Header),
-		}, nil
-	})}
-	h.redditProvider = "off"
-	h.redditHTMLFallback = false
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	h := New(newTestCache(), &fakeGQL{}).
+		WithExternalSources("", srv.URL, "test-agent").
+		WithRedditOptions(RedditOptions{BaseURL: srv.URL, Provider: "off"})
 	h.scraperAPIKey = ""
 
 	posts, sources := h.fetchRedditLSFCached(context.Background(), "ohnepixel", "7d", "top", false)
 	if len(posts) != 0 {
 		t.Fatalf("expected no posts on cache miss, got %d", len(posts))
 	}
-	if len(sources) != 1 || sources[0].Provider != "pending" {
-		t.Fatalf("expected pending source, got %+v", sources)
+	if len(sources) != 1 || !strings.Contains(sources[0].Message, "fetching from Reddit") {
+		t.Fatalf("expected warming source on cache miss, got %+v", sources)
 	}
 	select {
 	case <-started:
-		t.Fatal("did not expect background warm without refresh")
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected background warm on cache miss")
 	}
+}
 
-	posts, sources = h.fetchRedditLSFCached(context.Background(), "ohnepixel", "7d", "top", true)
-	if len(posts) != 0 {
-		t.Fatalf("expected no posts while warming, got %d", len(posts))
+func TestRedditLSFCachedStaleRefreshReturnsPostsWhileWarming(t *testing.T) {
+	started := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		time.Sleep(2 * time.Second)
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	store := &testStore{data: map[string][]byte{}}
+	key := redditLSFCacheKey("ohnepixel", "7d", "top")
+	stalePosts := []model.RedditPost{{ID: "abc123", Title: "Stale clip", Provider: "public_json"}}
+	payload, err := json.Marshal(redditLSFCacheValue{
+		Items:     stalePosts,
+		Sources:   []model.SourceStatus{{Source: "reddit_lsf", Provider: "public_json", State: "ready"}},
+		Period:    "7d",
+		Sort:      "top",
+		UpdatedAt: time.Now().UnixMilli(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.data[key+":stale"] = payload
+
+	h := New(cache.New(store, time.Minute, time.Hour), &fakeGQL{}).
+		WithExternalSources("", srv.URL, "test-agent").
+		WithRedditOptions(RedditOptions{BaseURL: srv.URL, Provider: "off"})
+	h.scraperAPIKey = ""
+
+	posts, sources := h.fetchRedditLSFCached(context.Background(), "ohnepixel", "7d", "top", true)
+	if len(posts) != 1 || posts[0].ID != "abc123" {
+		t.Fatalf("expected stale posts while warming, got %+v", posts)
 	}
 	if len(sources) != 1 || !strings.Contains(sources[0].Message, "fetching from Reddit") {
 		t.Fatalf("expected warming source, got %+v", sources)
@@ -926,6 +1187,6 @@ func TestRedditLSFCachedMissReturnsPendingWithoutAutoWarm(t *testing.T) {
 	select {
 	case <-started:
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("expected background warm after refresh")
+		t.Fatal("expected background warm on stale refresh")
 	}
 }

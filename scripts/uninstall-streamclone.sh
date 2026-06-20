@@ -43,7 +43,7 @@ use_release_images() {
   local root="$1"
   [ -f "$root/VERSION" ] && return 0
   [ -f "$root/deploy/env/release-bundle.env" ] && return 0
-  if [ -f "$root/.env" ] && grep -q '^STREAMCLONE_USE_IMAGES=1' "$root/.env" 2>/dev/null; then
+  if [ -f "$root/.env" ] && [ "$(env_read_value "$root/.env" STREAMCLONE_USE_IMAGES 2>/dev/null || true)" = "1" ]; then
     return 0
   fi
   return 1
@@ -56,21 +56,45 @@ compose_down() {
   [ -f "$env_file" ] || return 0
   cd "$root"
 
+  # shellcheck source=scripts/lib/env.sh
+  source "$root/scripts/lib/env.sh"
+  ENV_REPO_ROOT="$root"
+
   local stop_script="$root/scripts/stop-streamclone.sh"
   if [ -f "$stop_script" ]; then
     bash "$stop_script" 2>/dev/null || true
     sleep 2
   fi
 
+  local profile=core
+  if [ -f "$root/.streamclone-profile" ]; then
+    profile="$(tr -d ' \n\r' <"$root/.streamclone-profile")"
+  elif [ -f "$env_file" ]; then
+    profile="$(env_read_value "$env_file" STREAMCLONE_PROFILE 2>/dev/null || true)"
+  fi
+  case "$profile" in
+    core|scraper|clipper|full|pulse) ;;
+    *) profile=full ;;
+  esac
+
   local -a compose_args=(compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml)
   if use_release_images "$root"; then
     compose_args+=(-f deploy/docker-compose.release.yml)
   fi
+  read -r -a profiles <<<"$(env_streamclone_compose_profiles "$profile" "$env_file")"
+  local -a profile_args=()
+  for p in "${profiles[@]}"; do
+    [ -n "$p" ] && profile_args+=(--profile "$p")
+  done
   local -a down_args=(down --remove-orphans --timeout 30)
   [ "$volumes_flag" = "1" ] && down_args+=(-v)
 
-  echo "Stopping Docker stack..."
-  docker "${compose_args[@]}" --profile scraper --profile clipper "${down_args[@]}" 2>/dev/null || true
+  if [ "${#profile_args[@]}" -gt 0 ]; then
+    echo "Stopping Docker stack (compose profiles: ${profiles[*]})..."
+  else
+    echo "Stopping Docker stack..."
+  fi
+  docker "${compose_args[@]}" "${profile_args[@]}" "${down_args[@]}" 2>/dev/null || true
   docker "${compose_args[@]}" "${down_args[@]}" 2>/dev/null || true
 }
 
@@ -83,7 +107,7 @@ echo "Install folder: $ROOT"
 echo ""
 echo "This will:"
 echo "  - Stop all Streamclone Docker containers"
-echo "  - Delete Docker volumes (database, MinIO, clipper data)"
+echo "  - Delete Docker volumes (database, MinIO, analytics data)"
 echo "  - Remove .env and local secrets"
 echo "  - Remove Desktop / macOS shortcuts"
 [ "$PRUNE_IMAGES" = "1" ] && echo "  - Remove downloaded ghcr.io/aron-chu/streamclone images"
@@ -117,7 +141,7 @@ if [ "$PRUNE_IMAGES" = "1" ]; then
     [ -n "$maybe" ] && tag="$maybe"
   fi
   echo "Pruning GHCR images (tag: $tag)..."
-  for repo in metadata video chat analytics emote frontend clipper; do
+  for repo in metadata video chat analytics emote storygraph frontend; do
     docker image rm -f "ghcr.io/aron-chu/streamclone/${repo}:${tag}" 2>/dev/null || true
   done
 fi

@@ -32,8 +32,34 @@ permissions:
   packages: write
 
 jobs:
+  release-gate:
+    name: Release gate (make check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install security-scan deps
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | bash -s -- -b /usr/local/bin
+          sudo apt-get update && sudo apt-get install -y ripgrep
+      - run: cp .env.dev .env
+      - run: cd frontend && npm ci
+      - run: make check
+
   publish:
     name: Build and push ${{ matrix.image }}
+    needs: release-gate
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -107,6 +133,7 @@ jobs:
 
   publish-scraper:
     name: Build and push scraper
+    needs: release-gate
     runs-on: ubuntu-latest
     continue-on-error: true
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_scraper == 'true'
@@ -321,6 +348,11 @@ jobs:
           TWITCH_OAUTH_CLIENT_ID: ${{ secrets.TWITCH_OAUTH_CLIENT_ID }}
           TWITCH_OAUTH_CLIENT_SECRET: ${{ secrets.TWITCH_OAUTH_CLIENT_SECRET }}
         run: bash scripts/package-release.sh
+
+      - name: Validate release env synthesis
+        env:
+          VERSION: ${{ steps.ver.outputs.value }}
+        run: bash scripts/validate-release-env.sh
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2

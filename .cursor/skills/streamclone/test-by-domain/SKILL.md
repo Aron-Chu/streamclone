@@ -14,8 +14,12 @@ Read `AGENTS.md` and `.kiro/steering/tech.md`.
 | Frontend | `cd frontend && npm run build && npm test` |
 | Clipper | `make clipper-test` |
 | Compose/env/deploy | `make compose-config-check`, `make security-scan` |
-| Playback | `go test ./internal/video/...`, frontend build |
-| Analytics | `go test ./internal/analytics/...`, frontend build |
+| Playback | `make test-video`, frontend build |
+| Analytics | `make test-analytics`, frontend build |
+| Pulse Wire | `make test-storygraph` |
+| Emotes | `make test-emote` |
+| Metadata / directory | `make test-metadata` |
 | Docs only | link check, `git diff --check -- '*.md'` |
+| Stack up after edits | `make agent-smoke` |
 
 Use `make check` before a broad PR when time allows.

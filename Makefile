@@ -2,7 +2,8 @@ GO ?= go
 GO_DOCKER_IMAGE ?= golang:1.25-alpine
 VERSION ?= $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo latest)
 ENV_FILE ?= .env
-COMPOSE_CORE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml
+COMPOSE_FEATURE_PROFILES ?= $(shell bash -c 'source scripts/lib/env.sh 2>/dev/null; env_feature_compose_profiles "$(ENV_FILE)"' | awk '{for (i=1;i<=NF;i++) printf " --profile %s", $$i}')
+COMPOSE_CORE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml$(COMPOSE_FEATURE_PROFILES)
 COMPOSE_SCRAPER ?= $(COMPOSE_CORE) --profile scraper
 COMPOSE_FULL ?= $(COMPOSE_CORE) --profile scraper --profile clipper
 HELM ?= helm
@@ -24,30 +25,31 @@ CODEGRAPH_VENV ?= .codegraph/.venv
 CODEGRAPH_PY ?= $(CODEGRAPH_VENV)/bin/python
 CODEGRAPH_DB ?= .codegraph/streamclone.kuzu
 
-ENV_RELOAD_SERVICES ?= chat metadata analytics emote
+ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 
 .PHONY: help env up app stop down down-clean nuke restart rebuild up-scraper up-full \
 	refresh-auth reload-env reload-env-if-stale ensure-oauth ensure-clipper-auth ensure-frontend-config \
-	scraper-reload scraper-check scraper-preflight scraper-warm ps ports migrate logs sync-pulse-chart \
+	scraper-reload scraper-check scraper-preflight scraper-warm scraper-proxy-benchmark scraper-turnstile-benchmark flame-proxy-preflight flame-proxy-benchmark social-probe ps ports migrate logs sync-pulse-chart \
 	helm-kubeconfig helm-up helm-down helm-status helm-lint \
 	helm-grafana helm-grafana-stop helm-influx helm-influx-stop helm-open \
 	helm-pulse-wire helm-pulse-check helm-pulse helm-pulse-sync-token helm-pulse-watch \
 	pulse pulse-on pulse-off pulse-check pulse-down pulse-watch \
 	test vet build tidy integration-up integration-down integration-test \
+	test-video test-analytics test-emote test-storygraph test-metadata \
 	go-test-docker go-vet-docker go-build-docker \
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
-	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp \
+	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp mcp-setup \
 	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
-	frontend-restart frontend-refresh frontend-logs compose-config-check check \
+	frontend-restart frontend-refresh frontend-logs compose-config-check check check-quick \
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
-	preflight-deps start stop-user ensure-localhost
+	preflight-deps start stop-user ensure-localhost agent-smoke
 
 help:
 	@printf 'Streamclone — common targets\n\n'
 	@printf 'Stack:\n'
 	@printf '  make up / app        Start core stack\n'
 	@printf '  make up-scraper      Core + TwitchTracker scraper\n'
-	@printf '  make up-full         Scraper + clipper\n'
+	@printf '  make up-full         Core + Analytics scraper\n'
 	@printf '  make stop / down     Stop compose (keep data)\n'
 	@printf '  make down-clean      Stop + remove pg/minio/clipper/influx/grafana volumes\n'
 	@printf '  make nuke            Full teardown: compose (all profiles), helm pulse, setup-control, orphans\n'
@@ -64,7 +66,9 @@ help:
 	@printf '  make pulse-check     Verify pods, forwards, env, and Influx data\n'
 	@printf '  make pulse-off       Stop port-forwards only\n'
 	@printf '  make pulse-down      Stop forwards + uninstall k8s release\n\n'
-	@printf 'Quality: make check | test | vet | build | clipper-test | smoke | security-scan\n'
+	@printf 'Quality: make check-quick | make check | test | vet | build | clipper-test | smoke | agent-smoke\n'
+	@printf 'Agent MCP: make mcp-setup | codegraph | bash scripts/mcp-preflight.sh\n'
+	@printf '          make test-video | test-analytics | test-emote | test-storygraph | test-metadata\n'
 	@printf '          make frontend-test | frontend-audit | compose-config-check\n'
 	@printf '          make frontend-refresh  Build + migrate + restart frontend/chat/analytics\n'
 	@printf '          make frontend-restart  Rebuild frontend image + restart frontend/proxy only\n'
@@ -86,7 +90,6 @@ up-scraper: env ensure-oauth
 up-full: env ensure-oauth
 	$(COMPOSE_FULL) up -d --build --remove-orphans
 	@$(MAKE) reload-env-if-stale
-	@$(MAKE) ensure-clipper-auth
 	@$(MAKE) ensure-localhost PORTS=8090
 	@if [ -z "$$SCRAPER_SKIP_PREFLIGHT" ]; then $(MAKE) scraper-preflight; fi
 
@@ -119,12 +122,13 @@ ensure-oauth: env
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-oauth-env.ps1 -EnvFile $(ENV_FILE) || true
 
 ensure-clipper-auth: env
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-clipper-auth.ps1 -EnvFile $(ENV_FILE) || true
+	@echo "ensure-clipper-auth is deprecated — Clip Studio runs in ReplayForge, not Streamclone compose."
+	@echo "See docs/agents-streamclone-and-replayforge.md"
 
 ensure-frontend-config: env
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-frontend-config.ps1 -EnvFile $(ENV_FILE) || true
 
-refresh-auth: env ensure-oauth reload-env-if-stale ensure-clipper-auth
+refresh-auth: env ensure-oauth reload-env-if-stale
 
 scraper-reload: env
 	$(COMPOSE_SCRAPER) up -d --no-deps --force-recreate scraper
@@ -137,6 +141,21 @@ scraper-preflight: env
 
 scraper-warm:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/warm-camoufox-profile.ps1
+
+scraper-proxy-benchmark:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/scraper-proxy-benchmark.ps1
+
+scraper-turnstile-benchmark:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/scraper-turnstile-benchmark.ps1
+
+flame-proxy-preflight:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/flame-proxy-preflight.ps1
+
+flame-proxy-benchmark:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/run-flame-proxy-benchmark.ps1 -UseFlameApi -RotateSessionOnFail -RecreateScraperOnRetry
+
+social-probe:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/social-probe.ps1
 
 ps: env
 	@docker ps -a --filter "name=streamclone" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
@@ -248,6 +267,21 @@ go-build-docker:
 test:
 	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./... || $(MAKE) go-test-docker
 
+test-video:
+	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/video/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/video/...
+
+test-analytics:
+	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/analytics/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/analytics/...
+
+test-emote:
+	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/emote/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/emote/...
+
+test-storygraph:
+	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/storygraph/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/storygraph/...
+
+test-metadata:
+	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/metadata/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/metadata/...
+
 integration-up:
 	docker compose -f internal/integration/docker-compose.test.yml up -d
 
@@ -284,6 +318,10 @@ codegraph:
 
 codegraph-mcp:
 	$(CODEGRAPH_PY) tools/codegraph/codegraph_mcp.py --repo "$(CURDIR)" --db "$(CURDIR)/$(CODEGRAPH_DB)"
+
+mcp-setup: codegraph-install codegraph
+	@bash scripts/mcp-preflight.sh
+	@printf '\nNext: copy .cursor/mcp.recommended.json.example → .cursor/mcp.json (gitignored)\n'
 
 twitch: env
 	@if [ "$(TWITCH_ACTION)" = "sync" ]; then \
@@ -341,6 +379,8 @@ compose-config-check: env
 		-f deploy/docker-compose.yml \
 		-f deploy/docker-compose.prod.yml config --quiet
 
+check-quick: test vet frontend-test compose-config-check
+
 check: security-scan frontend-build frontend-audit frontend-test clipper-test test vet build compose-config-check
 
 frontend-restart: env
@@ -360,10 +400,10 @@ frontend-refresh: env frontend-build
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-setup-control.ps1
 	@$(MAKE) ensure-localhost PORTS=8090
 
-clipper-restart: env ensure-clipper-auth
-	$(COMPOSE_FULL) build clipper
-	$(COMPOSE_FULL) up -d --no-deps --force-recreate clipper local-proxy
-	@$(MAKE) ensure-localhost PORTS=8090
+clipper-restart:
+	@echo "clipper-restart is deprecated — manage ReplayForge separately (../replayforge)."
+	@echo "See docs/agents-streamclone-and-replayforge.md"
+	@exit 1
 
 frontend-logs: env
 	$(COMPOSE_CORE) logs -f frontend
@@ -389,6 +429,9 @@ install-hooks:
 
 security-scan:
 	@bash scripts/security-scan.sh
+
+agent-smoke:
+	@bash scripts/agent-smoke.sh
 
 preflight-deps:
 	@bash scripts/preflight-deps.sh --install-hints

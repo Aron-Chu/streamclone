@@ -78,7 +78,7 @@ export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean 
 
 function ServiceStartProgressBar({ progress, compact = false }: { progress: ServiceStartProgress; compact?: boolean }) {
   const width = Math.max(0, Math.min(100, progress.percent))
-  const label = progress.service === 'scraper' ? 'Analytics' : progress.service === 'pulse' ? 'Pulse Dashboards' : 'ReplayForge'
+  const label = progress.service === 'scraper' ? 'Analytics' : 'Pulse Dashboards'
   return (
     <div className={`rounded-lg border border-white/10 bg-white/[0.035] ${compact ? 'p-2.5' : 'p-3'}`}>
       <div className={`mb-2 flex items-center justify-between gap-2 font-black uppercase tracking-wide text-zinc-300 ${
@@ -312,13 +312,10 @@ export default function OptionalServicesPanel({
             ) : null}
           </div>
         </div>
-        {(startProgressByService.scraper || startProgressByService.clipper || startProgressByService.pulse) ? (
+        {(startProgressByService.scraper || startProgressByService.pulse) ? (
           <div className="mt-2 space-y-2">
             {startProgressByService.scraper ? (
               <ServiceStartProgressBar progress={startProgressByService.scraper} compact />
-            ) : null}
-            {startProgressByService.clipper ? (
-              <ServiceStartProgressBar progress={startProgressByService.clipper} compact />
             ) : null}
             {startProgressByService.pulse ? (
               <ServiceStartProgressBar progress={startProgressByService.pulse} compact />
@@ -338,7 +335,7 @@ export default function OptionalServicesPanel({
         <div className="text-xs font-black uppercase tracking-[0.2em] text-violet-300">Welcome to Streamclone</div>
         <h1 className="text-2xl font-black text-white">What is running right now</h1>
         <p className="text-sm font-semibold leading-6 text-zinc-400">
-          Live checks for the core stack and optional Analytics, Clip Studio, and Pulse dashboard services.
+          Live checks for the core stack and optional Analytics, ReplayForge, and Pulse dashboard services.
         </p>
       </div>
 
@@ -360,13 +357,10 @@ export default function OptionalServicesPanel({
         </button>
       </div>
 
-      {(startProgressByService.scraper || startProgressByService.clipper || startProgressByService.pulse) ? (
+      {(startProgressByService.scraper || startProgressByService.pulse) ? (
         <div className="space-y-2">
           {startProgressByService.scraper ? (
             <ServiceStartProgressBar progress={startProgressByService.scraper} />
-          ) : null}
-          {startProgressByService.clipper ? (
-            <ServiceStartProgressBar progress={startProgressByService.clipper} />
           ) : null}
           {startProgressByService.pulse ? (
             <ServiceStartProgressBar progress={startProgressByService.pulse} />
@@ -399,8 +393,8 @@ export default function OptionalServicesPanel({
         ) : null}
         {showClipper ? (
           <ServiceCard
-            title="ReplayForge (clipper)"
-            detail="Clip Studio jobs and rendered clips. Runs as a separate app on localhost."
+            title="ReplayForge"
+            detail="Clip Studio jobs and rendered clips. Install and run ReplayForge separately (API :8095, UI :8096) — not started from Streamclone Stack status."
             status={clipperStatus}
             offlineHref={replayforgeUi}
             offlineLabel="Start ReplayForge"
@@ -413,7 +407,7 @@ export default function OptionalServicesPanel({
             title="Pulse Dashboards"
             detail="Grafana dashboards for emote/chat rollups (Emote Pulse) and service metrics (Ops). Works with Compose pulse profile or Helm (`make pulse`)."
             status={pulseStatus}
-            actionLabel="Start Pulse"
+            actionLabel="Start Pulse dashboards"
             onAction={() => void startService('pulse')}
             busy={isStarting('pulse')}
             progress={startProgressByService.pulse ?? null}
@@ -437,7 +431,7 @@ export default function OptionalServicesPanel({
               title="Pulse Dashboards"
               detail="Grafana dashboards for emote/chat rollups and service metrics. Helm users: run `make pulse`, then open dashboards below."
               status={pulseStatus}
-              actionLabel="Start Pulse"
+              actionLabel="Start Pulse dashboards"
               onAction={() => void startService('pulse')}
               busy={isStarting('pulse')}
               progress={startProgressByService.pulse ?? null}

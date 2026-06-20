@@ -2,22 +2,23 @@ import { Link } from 'react-router-dom'
 
 import type {
   AnalyticsStreamDetail,
-  AnalyticsTopEmote,
   ChannelInsights,
   ClipCard,
   InsightCard,
 } from '../../api.ts'
-import { normalizeBrowserOriginUrl } from '../../config.ts'
+import { PULSE_WIRE_ENABLED } from '../../config.ts'
 import { useOptionalServices } from '../../hooks/useOptionalServices.ts'
-import { resolveEmoteImageUrl } from '../../utils/emoteImageUrl.ts'
+import { insightToCommunityPost } from '../../utils/insightCommunityPost.ts'
 import {
-  analyticsNotTrackedMessage,
   isLsfPending,
   isLsfWarming,
   summarizeLsfEmptyState,
 } from '../../utils/pulseEmptyState.ts'
 import { LiveStatsBand } from '../analytics/LiveStatsBand.tsx'
+import { MostReactedLive } from '../analytics/MostReactedLive.tsx'
 import TrackAnalyticsToggle from './TrackAnalyticsToggle.tsx'
+import SocialSpreadPanel from './SocialSpreadPanel.tsx'
+import CommunityPostCard from '../pulsewire/community/CommunityPostCard'
 
 function fullCount(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return '—'
@@ -30,16 +31,6 @@ function formatClipDuration(seconds?: number) {
   const mm = Math.floor(total / 60)
   const ss = total % 60
   return `${mm}:${ss.toString().padStart(2, '0')}`
-}
-
-function emoteImageUrl(emote: AnalyticsTopEmote): string | undefined {
-  const url = resolveEmoteImageUrl({
-    provider: emote.provider,
-    id: emote.id,
-    imageUrl: emote.imageUrl,
-    scale: '2x',
-  })
-  return url ? normalizeBrowserOriginUrl(url, ['/emotes/']) : undefined
 }
 
 function PulseLsfLoadingSkeleton({ subtitle }: { subtitle: string }) {
@@ -72,51 +63,7 @@ function PulseLsfLoadingSkeleton({ subtitle }: { subtitle: string }) {
 }
 
 function PulseLsfCard({ post }: { post: InsightCard }) {
-  const threadUrl = post.permalink || post.url
-  const subreddit = post.subreddit ? `r/${post.subreddit.replace(/^r\//, '')}` : 'Reddit'
-  return (
-    <article className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-      <div className="flex gap-3">
-        {post.thumbnail ? (
-          <img
-            src={post.thumbnail}
-            alt=""
-            className="h-14 w-14 shrink-0 rounded object-cover"
-            loading="lazy"
-          />
-        ) : null}
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-black uppercase tracking-wide text-violet-300">{subreddit}</div>
-          <h4 className="mt-1 line-clamp-2 text-sm font-black leading-5 text-white">{post.title}</h4>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-zinc-500">
-            <span>{fullCount(post.score)} upvotes</span>
-            <span>·</span>
-            <span>{fullCount(post.comments)} comments</span>
-          </div>
-          {post.streamerTags?.length ? (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {post.streamerTags.map(tag => (
-                <span
-                  key={tag}
-                  className="rounded border border-violet-400/20 bg-violet-500/10 px-2 py-0.5 text-[10px] font-black uppercase text-violet-200"
-                >
-                  Matched: {tag}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <a
-        href={threadUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="mt-3 inline-flex rounded border border-white/10 bg-black/30 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-zinc-200 transition hover:border-violet-300/40 hover:text-white"
-      >
-        Open thread
-      </a>
-    </article>
-  )
+  return <CommunityPostCard post={insightToCommunityPost(post)} variant="channel" />
 }
 
 function ClipSpikeCard({ clip }: { clip: ClipCard }) {
@@ -193,11 +140,11 @@ function StreamPulsePanel({
   const lsfWarming = isLsfWarming(insights?.sources)
   const lsfPending = isLsfPending(insights?.sources)
   const clipSpike = insights?.clips?.[0]
-  const topEmotes = liveAnalytics?.topEmotes?.slice(0, 8) ?? []
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="space-y-4 p-4">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
+        <div className="space-y-4 p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -239,10 +186,25 @@ function StreamPulsePanel({
         <section>
           <LiveStatsBand
             login={channelLogin}
+            detail={liveAnalytics}
+            detailLoading={liveAnalyticsLoading}
             enabled
             className="rounded-lg border border-white/10 bg-zinc-950/60 p-3"
           />
         </section>
+
+        {liveAnalytics ? (
+          <section>
+            <MostReactedLive
+              login={channelLogin}
+              detail={liveAnalytics}
+              vodId={liveAnalytics.vodId}
+              analyticsStreamId={liveAnalytics.stream?.streamId}
+              enabled={false}
+              className="rounded-lg border border-white/10 bg-zinc-950/60 p-3"
+            />
+          </section>
+        ) : null}
 
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-2">
@@ -300,37 +262,11 @@ function StreamPulsePanel({
           )}
         </section>
 
-        <section className="space-y-3">
-          <h3 className="text-xs font-black uppercase text-zinc-400">Top emotes</h3>
-          {!trackLiveAnalytics ? (
-            <div className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-4 text-xs font-semibold text-zinc-500">
-              {analyticsNotTrackedMessage()} Use <span className="text-violet-200">Track streamer</span> above to enable live emote spikes.
-            </div>
-          ) : liveAnalyticsLoading && !topEmotes.length ? (
-            <div className="text-xs font-semibold text-zinc-500">Loading live emotes…</div>
-          ) : topEmotes.length ? (
-            <div className="flex flex-wrap gap-2">
-              {topEmotes.map(emote => {
-                const image = emoteImageUrl(emote)
-                return (
-                  <div
-                    key={emote.key}
-                    title={`${emote.name} · ${fullCount(emote.count)}`}
-                    className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-2 py-1.5"
-                  >
-                    {image ? (
-                      <img src={image} alt={emote.name} className="h-6 w-6 object-contain" loading="lazy" />
-                    ) : null}
-                    <span className="max-w-[5rem] truncate text-[11px] font-black text-zinc-200">{emote.name}</span>
-                    <span className="text-[10px] font-semibold text-zinc-500">{fullCount(emote.count)}</span>
-                  </div>
-                )
-              })}
-            </div>
-          ) : (
-            <div className="text-xs font-semibold text-zinc-500">No emote spikes yet this stream.</div>
-          )}
-        </section>
+        {PULSE_WIRE_ENABLED ? (
+          <section className="space-y-3">
+            <SocialSpreadPanel login={channelLogin} />
+          </section>
+        ) : null}
 
         <section className="space-y-3">
           <h3 className="text-xs font-black uppercase text-zinc-400">Clip spike</h3>
@@ -350,6 +286,7 @@ function StreamPulsePanel({
           >
             Open full analytics →
           </Link>
+        </div>
         </div>
       </div>
     </div>

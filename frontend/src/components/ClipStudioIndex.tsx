@@ -60,7 +60,7 @@ export default function ClipStudioIndex() {
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-400/90">Clip Studio</p>
         <h1 className="mt-1 text-2xl font-bold text-zinc-50">Local clip archive</h1>
         <p className="mt-2 max-w-xl text-sm text-zinc-400">
-          Vertical exports from analytics moments and manual triggers. Clip Studio is an optional tier — start the clipper profile to create and edit clips.
+          Vertical exports from analytics moments and manual triggers. ReplayForge (Clip Studio) is a separate install — start it at localhost:8096 to create and edit clips.
         </p>
 
         <div className="mt-6">
@@ -73,11 +73,11 @@ export default function ClipStudioIndex() {
             <p className="text-sm text-zinc-500">Loading archive…</p>
           ) : loadFailed ? (
             <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-4 text-sm text-rose-200">
-              Could not reach the clipper service. Use Start Clip Studio above, then refresh.
+              Could not reach ReplayForge. Install and start ReplayForge, then refresh.
             </div>
           ) : jobs.length === 0 ? (
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6 text-center text-sm text-zinc-500">
-              No clips yet. Queue a moment from Analytics or trigger a manual clip when Clip Studio is running.
+              No clips yet. Queue a moment from Analytics or trigger a manual clip when ReplayForge is running.
             </div>
           ) : (
             <div className="flex flex-col gap-2">

@@ -4,13 +4,14 @@ import type {
   OpsActiveStream,
   OpsNetworkPrometheus,
 } from '../api'
-import { formatMbps } from './clientNetworkProbe'
+import { formatMbps } from './clientNetworkProbe.ts'
 
 export type NetworkTaskCategory = 'stream' | 'optional' | 'core' | 'page' | 'browser'
 export type NetworkTaskImpact = 'high' | 'medium' | 'low' | 'unknown'
 
 export type NetworkTaskDisableAction =
   | { kind: 'stop-relay'; channel: string }
+  | { kind: 'untrack-channel'; channel: string }
   | { kind: 'stop-optional'; service: 'scraper' | 'clipper' | 'pulse' }
   | { kind: 'pause-page-monitoring' }
 

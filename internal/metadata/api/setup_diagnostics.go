@@ -42,7 +42,7 @@ func (h *Handler) setupDiagnostics(w http.ResponseWriter, r *http.Request) {
 		"emote":     "http://emote:8080/healthz",
 		"analytics": "http://analytics:8080/healthz",
 		"scraper":   scraperHealthURL(h.scraperAPIURL),
-		"clipper":   h.clipperServiceURL + "/v1/twitch/status",
+		"clipper":   h.clipperServiceURL + "/healthz",
 	})
 	services := setupDiagnosticsServices{
 		Metadata:  "ready",

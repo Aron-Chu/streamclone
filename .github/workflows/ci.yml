@@ -21,14 +21,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # gitleaks scans SHA^..SHA on PRs; shallow checkout breaks parent resolution.
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  backend:
-    name: Go test and vet
+  check-quick:
+    name: Quick PR gate
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,59 +36,45 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test ./...
-      - run: go vet ./...
-      - name: govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
-
-  frontend:
-    name: Frontend build
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm run build
-      - name: npm audit
-        run: npm audit --audit-level=high
+      - run: cp .env.dev .env
+      - run: cd frontend && npm ci
+      - run: make check-quick
 
-  compose-config:
-    name: Compose config validation
+  check-full:
+    name: Full gate (make check)
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: cp .env.dev .env
-      - name: Read VERSION
-        id: version
-        run: echo "value=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
-      - name: Validate core compose
-        run: ${{ env.COMPOSE_CI }} config --quiet
-      - name: Validate release compose overlay
-        env:
-          IMAGE_TAG: ${{ steps.version.outputs.value }}
-        run: |
-          docker compose --env-file .env \
-            -f deploy/docker-compose.yml \
-            -f deploy/docker-compose.local-tunnel.yml \
-            -f deploy/docker-compose.release.yml config --quiet
-      - name: Validate production compose overlay
-        env:
-          APP_DOMAIN: streamclone.example.invalid
-          ACME_EMAIL: security@example.invalid
-        run: |
-          docker compose --env-file .env \
-            -f deploy/docker-compose.yml \
-            -f deploy/docker-compose.prod.yml config --quiet
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: azure/setup-helm@v4
+      - name: Install security-scan deps
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | bash -s -- -b /usr/local/bin
+          sudo apt-get update && sudo apt-get install -y ripgrep
+      - run: cp .env.dev .env
+      - run: cd frontend && npm ci
+      - run: make check
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
       - name: Validate Emote Pulse Helm chart
         if: hashFiles('charts/pulse/Chart.yaml') != ''
         run: |
@@ -96,18 +82,46 @@ jobs:
           helm template streamclone-pulse charts/pulse \
             -f deploy/env/helm-local.example.yaml >/tmp/streamclone-pulse.yaml
 
+  codegraph:
+    name: Code graph rebuild
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            code:
+              - 'internal/**'
+              - 'frontend/src/**'
+              - 'cmd/**'
+              - 'tools/codegraph/**'
+      - if: steps.changes.outputs.code == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - if: steps.changes.outputs.code == 'true'
+        run: |
+          make codegraph-install
+          make codegraph
+      - if: steps.changes.outputs.code == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codegraph-kuzu
+          path: .codegraph/streamclone.kuzu
+          retention-days: 7
+          if-no-files-found: error
+
   smoke-core:
     name: Core compose smoke
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
     needs:
-      - backend
-      - frontend
-      - compose-config
+      - check-full
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v6
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
         with:
           node-version: "22"
           cache: npm
@@ -119,7 +133,6 @@ jobs:
       - name: Start core stack
         run: ${{ env.COMPOSE_CI }} up -d --no-build
       - name: Install frontend deps and Playwright browsers
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
         working-directory: frontend
         run: |
           npm ci
@@ -127,7 +140,6 @@ jobs:
       - name: Wait for health endpoints
         run: bash scripts/smoke-core.sh
       - name: Playwright UI smoke
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
         working-directory: frontend
         run: npm run test:smoke
       - name: Check metrics endpoints

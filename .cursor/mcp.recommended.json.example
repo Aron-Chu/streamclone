@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "streamclone-codegraph": {
+      "command": "bash",
+      "args": ["${workspaceFolder}/scripts/codegraph-mcp.sh"]
+    },
+    "streamclone-stack": {
+      "command": "bash",
+      "args": ["${workspaceFolder}/scripts/stack-mcp.sh"]
+    },
+    "streamclone-data": {
+      "command": "bash",
+      "args": ["${workspaceFolder}/scripts/data-mcp.sh"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    }
+  }
+}

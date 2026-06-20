@@ -125,6 +125,48 @@ var (
 	AnalyticsVODGQLSegments = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "analytics_vod_gql_segments_total", Help: "Twitch GQL VOD comment segment transitions by state.",
 	}, []string{"state"})
+	AnalyticsVODGQLThrottleTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_vod_gql_throttle_total", Help: "Twitch GQL VOD comment throttle responses by upstream status.",
+	}, []string{"status"})
+	AnalyticsVODGQLBackoffSecondsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "analytics_vod_gql_backoff_seconds_total", Help: "Total backoff seconds spent waiting after throttled Twitch GQL VOD comment responses.",
+	})
+	AnalyticsVODGQLWorkerPagesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_vod_gql_worker_pages_total", Help: "Twitch GQL VOD comment pages fetched by worker label.",
+	}, []string{"worker"})
+	AnalyticsVODGQLHotSplitsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_vod_gql_hot_splits_total", Help: "Hot VOD chat segment splits by trigger reason.",
+	}, []string{"reason"})
+	AnalyticsVODGQLAutoCloseTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_vod_gql_auto_close_total", Help: "VOD GQL segment auto-closes by reason.",
+	}, []string{"reason"})
+	AnalyticsVODGQLPageDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "analytics_vod_gql_page_duration_seconds",
+		Help:    "Twitch GQL VOD comment page fetch duration by result.",
+		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20},
+	}, []string{"result"})
+	AnalyticsVODGQLSummaryRefreshTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_vod_gql_summary_refresh_total", Help: "analytics_streams summary refresh attempts during VOD GQL sync by mode and result.",
+	}, []string{"mode", "result"})
+	AnalyticsVODGQLSummaryRefreshDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "analytics_vod_gql_summary_refresh_duration_seconds",
+		Help:    "Time spent refreshing analytics_streams summary rows during VOD GQL sync.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"mode", "result"})
+	AnalyticsVODGQLFinalizingJobs = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "analytics_vod_gql_finalizing_jobs", Help: "Historical analytics sync jobs currently finalizing deferred VOD GQL writes.",
+	})
+	AnalyticsRollupRowsWrittenTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_rollup_rows_written_total", Help: "Analytics rollup rows written by write kind.",
+	}, []string{"kind"})
+	AnalyticsRollupWriteBatchSize = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "analytics_rollup_write_batch_size",
+		Help:    "Analytics rollup batch size by write kind.",
+		Buckets: []float64{1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
+	}, []string{"kind"})
+	AnalyticsChatReplayRowsWrittenTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "analytics_chat_replay_rows_written_total", Help: "Persisted VOD chat replay rows written in batch inserts.",
+	})
 	AnalyticsHeatmapCacheRequests = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "analytics_heatmap_cache_requests_total", Help: "Replay heatmap cache lookups by result.",
 	}, []string{"result"})
@@ -137,6 +179,11 @@ var (
 	AnalyticsSyncActive = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "analytics_sync_active", Help: "Active historical analytics sync jobs by channel and phase.",
 	}, []string{"channel", "phase"})
+	DirectHLSFetchDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "direct_hls_fetch_duration_seconds",
+		Help:    "Direct HLS proxy fetch duration by kind (playlist or segment).",
+		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10},
+	}, []string{"kind"})
 )
 
 type statusRecorder struct {

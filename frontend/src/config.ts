@@ -14,6 +14,10 @@ type RuntimeConfig = {
   setupControlUrl?: string
   setupControlWakeEnabled?: string | boolean
   devTokenImportEnabled?: string | boolean
+  pulseWireEnabled?: string | boolean
+  hlsLowLatencyEnabled?: string | boolean
+  adaptiveLiveLatencyEnabled?: string | boolean
+  hlsCdnBearer?: string
   installId?: string
 }
 
@@ -24,6 +28,9 @@ declare global {
 }
 
 const runtime = typeof window === 'undefined' ? {} : window.__STREAMCLONE_CONFIG__ ?? {}
+const viteEnv = (typeof import.meta !== 'undefined' && import.meta.env)
+  ? import.meta.env as Record<string, string | undefined>
+  : {}
 const browserOrigin = typeof window === 'undefined' ? '' : window.location.origin
 const browserWsOrigin = typeof window === 'undefined'
   ? ''
@@ -46,7 +53,8 @@ export function normalizeBrowserOriginUrl(value: string | undefined, pathPrefixe
     if (!pathPrefixes.some(prefix => url.pathname.startsWith(prefix))) {
       return url.toString()
     }
-    if (url.origin === window.location.origin) {
+    const hitsRawMediaMtx = url.port === '8888' || url.hostname === 'mediamtx'
+    if (url.origin === window.location.origin && !hitsRawMediaMtx) {
       return url.toString()
     }
     url.protocol = window.location.protocol
@@ -57,34 +65,47 @@ export function normalizeBrowserOriginUrl(value: string | undefined, pathPrefixe
   }
 }
 
-export const METADATA = resolveHttp(runtime.metadataUrl || (import.meta.env.VITE_METADATA_URL as string), browserOrigin || 'http://localhost:8081')
-export const VIDEO = resolveHttp(runtime.videoUrl || (import.meta.env.VITE_VIDEO_URL as string), browserOrigin || 'http://localhost:8082')
-export const EMOTE = resolveHttp(runtime.emoteUrl || (import.meta.env.VITE_EMOTE_URL as string), browserOrigin || 'http://localhost:8084')
-export const ANALYTICS = resolveHttp(runtime.analyticsUrl || (import.meta.env.VITE_ANALYTICS_URL as string), browserOrigin || 'http://localhost:8086')
-export const CHAT_WS = resolveWs(runtime.chatWs || (import.meta.env.VITE_CHAT_WS as string), browserWsOrigin ? `${browserWsOrigin}/v1/ws` : 'ws://localhost:8083/v1/ws')
-export const CHAT_HTTP = resolveHttp(runtime.chatHttp || (import.meta.env.VITE_CHAT_HTTP as string), browserOrigin || 'http://localhost:8083')
-export const CLIPPER = resolveHttp(runtime.clipperUrl || (import.meta.env.VITE_CLIPPER_URL as string), 'http://localhost:8095')
-export const CLIPPER_TOKEN = String(runtime.clipperToken ?? import.meta.env.VITE_CLIPPER_TOKEN ?? '')
+function resolveHlsCdnBearer() {
+  const configured = String(runtime.hlsCdnBearer ?? viteEnv.VITE_HLS_CDN_BEARER ?? '').trim()
+  if (configured) return configured
+  if (typeof window !== 'undefined') {
+    const { hostname, port } = window.location
+    if ((hostname === 'localhost' || hostname === '127.0.0.1') && port === '8090') {
+      return 'streamclone-local-hls-cdn'
+    }
+  }
+  return ''
+}
+
+export const HLS_CDN_BEARER = resolveHlsCdnBearer()
+export const METADATA = resolveHttp(runtime.metadataUrl || viteEnv.VITE_METADATA_URL, browserOrigin || 'http://localhost:8081')
+export const VIDEO = resolveHttp(runtime.videoUrl || viteEnv.VITE_VIDEO_URL, browserOrigin || 'http://localhost:8082')
+export const EMOTE = resolveHttp(runtime.emoteUrl || viteEnv.VITE_EMOTE_URL, browserOrigin || 'http://localhost:8084')
+export const ANALYTICS = resolveHttp(runtime.analyticsUrl || viteEnv.VITE_ANALYTICS_URL, browserOrigin || 'http://localhost:8086')
+export const CHAT_WS = resolveWs(runtime.chatWs || viteEnv.VITE_CHAT_WS, browserWsOrigin ? `${browserWsOrigin}/v1/ws` : 'ws://localhost:8083/v1/ws')
+export const CHAT_HTTP = resolveHttp(runtime.chatHttp || viteEnv.VITE_CHAT_HTTP, browserOrigin || 'http://localhost:8083')
+export const CLIPPER = resolveHttp(runtime.clipperUrl || viteEnv.VITE_CLIPPER_URL, 'http://localhost:8095')
+export const CLIPPER_TOKEN = String(runtime.clipperToken ?? viteEnv.VITE_CLIPPER_TOKEN ?? '')
 export const REPLAYFORGE_UI = resolveHttp(
-  runtime.replayforgeUiUrl || (import.meta.env.VITE_REPLAYFORGE_UI_URL as string),
+  runtime.replayforgeUiUrl || viteEnv.VITE_REPLAYFORGE_UI_URL,
   'http://localhost:8096',
 )
-export const MAX_RETAINED_MESSAGES = Number(runtime.maxRetainedMessages ?? import.meta.env.VITE_MAX_RETAINED_MESSAGES ?? 250)
-export const STREAMCLONE_PROFILE = String(runtime.streamcloneProfile ?? import.meta.env.VITE_STREAMCLONE_PROFILE ?? 'core').toLowerCase()
-export const DEV_TOKEN_IMPORT_ENABLED = String(runtime.devTokenImportEnabled ?? import.meta.env.VITE_TWITCH_DEV_TOKEN_IMPORT_ENABLED ?? 'false') === 'true'
-export const SETUP_CONTROL_TOKEN = String(runtime.setupControlToken ?? import.meta.env.VITE_SETUP_CONTROL_TOKEN ?? '')
+export const MAX_RETAINED_MESSAGES = Number(runtime.maxRetainedMessages ?? viteEnv.VITE_MAX_RETAINED_MESSAGES ?? 250)
+export const STREAMCLONE_PROFILE = String(runtime.streamcloneProfile ?? viteEnv.VITE_STREAMCLONE_PROFILE ?? 'core').toLowerCase()
+export const DEV_TOKEN_IMPORT_ENABLED = String(runtime.devTokenImportEnabled ?? viteEnv.VITE_TWITCH_DEV_TOKEN_IMPORT_ENABLED ?? 'false') === 'true'
+export const SETUP_CONTROL_TOKEN = String(runtime.setupControlToken ?? viteEnv.VITE_SETUP_CONTROL_TOKEN ?? '')
 export const SETUP_CONTROL_WAKE_ENABLED = ['true', '1'].includes(
-  String(runtime.setupControlWakeEnabled ?? import.meta.env.VITE_SETUP_CONTROL_WAKE_ENABLED ?? 'false').toLowerCase(),
+  String(runtime.setupControlWakeEnabled ?? viteEnv.VITE_SETUP_CONTROL_WAKE_ENABLED ?? 'false').toLowerCase(),
 )
 export const SETUP_CONTROL_AVAILABLE = Boolean(SETUP_CONTROL_TOKEN)
   && (
-    !import.meta.env.DEV
+    !viteEnv.DEV
     || browserOrigin.endsWith(':8090')
-    || String(import.meta.env.VITE_SETUP_CONTROL_ENABLE ?? 'false') === 'true'
+    || String(viteEnv.VITE_SETUP_CONTROL_ENABLE ?? 'false') === 'true'
   )
 
 function resolveSetupControlBase() {
-  const configured = String(runtime.setupControlUrl ?? import.meta.env.VITE_SETUP_CONTROL_URL ?? '').trim()
+  const configured = String(runtime.setupControlUrl ?? viteEnv.VITE_SETUP_CONTROL_URL ?? '').trim()
   if (configured) return configured.replace(/\/$/, '')
   if (typeof window !== 'undefined') {
     const { hostname, port } = window.location
@@ -96,4 +117,13 @@ function resolveSetupControlBase() {
 }
 
 export const SETUP_CONTROL_BASE = resolveSetupControlBase()
-export const STREAMCLONE_INSTALL_ID = String(runtime.installId ?? import.meta.env.VITE_STREAMCLONE_INSTALL_ID ?? '').trim()
+export const STREAMCLONE_INSTALL_ID = String(runtime.installId ?? viteEnv.VITE_STREAMCLONE_INSTALL_ID ?? '').trim()
+export const PULSE_WIRE_ENABLED = ['true', '1'].includes(
+  String(runtime.pulseWireEnabled ?? viteEnv.VITE_PULSE_WIRE_ENABLED ?? 'false').toLowerCase(),
+)
+export const HLS_LOW_LATENCY_ENABLED = ['true', '1'].includes(
+  String(runtime.hlsLowLatencyEnabled ?? viteEnv.VITE_HLS_LOW_LATENCY_ENABLED ?? 'false').toLowerCase(),
+)
+export const ADAPTIVE_LIVE_LATENCY_ENABLED = ['true', '1'].includes(
+  String(runtime.adaptiveLiveLatencyEnabled ?? viteEnv.VITE_ADAPTIVE_LIVE_LATENCY_ENABLED ?? 'false').toLowerCase(),
+)

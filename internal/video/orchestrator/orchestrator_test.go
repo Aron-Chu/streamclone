@@ -387,13 +387,16 @@ func TestSelectRenditionBestChoosesHighestQualityWhenUnsorted(t *testing.T) {
 
 func TestBackendProbeTimeout(t *testing.T) {
 	full := 15 * time.Second
-	if got := backendProbeTimeout(full, 0, 2); got != backendProbeFastTimeout {
-		t.Fatalf("first backend with fallback: got %v want %v", got, backendProbeFastTimeout)
+	if got := backendProbeTimeout(full, "direct_hls", 0, 2); got != full {
+		t.Fatalf("direct_hls primary: got %v want %v", got, full)
 	}
-	if got := backendProbeTimeout(full, 1, 2); got != full {
-		t.Fatalf("final backend: got %v want %v", got, full)
+	if got := backendProbeTimeout(full, "streamlink", 1, 2); got != full {
+		t.Fatalf("streamlink fallback: got %v want %v", got, full)
 	}
-	if got := backendProbeTimeout(full, 0, 1); got != full {
+	if got := backendProbeTimeout(full, "streamlink", 0, 2); got != backendProbeFastTimeout {
+		t.Fatalf("streamlink primary with fallback: got %v want %v", got, backendProbeFastTimeout)
+	}
+	if got := backendProbeTimeout(full, "direct_hls", 0, 1); got != full {
 		t.Fatalf("single backend: got %v want %v", got, full)
 	}
 }

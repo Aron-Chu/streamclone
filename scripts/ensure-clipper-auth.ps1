@@ -1,3 +1,6 @@
+# DEPRECATED — in-repo clipper compose profile is retired; use ReplayForge (../replayforge).
+# See docs/agents-streamclone-and-replayforge.md. Kept for legacy callers only; do not add new references.
+#
 # Validate clipper Twitch token, auto-refresh when possible, recreate clipper if env drifted.
 # docker compose restart does NOT reload env_file — only --force-recreate does.
 param(

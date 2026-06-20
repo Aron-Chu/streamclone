@@ -112,7 +112,7 @@ func StartDirectHLS(channel, sourceURL, rtmpURL string, logw io.Writer) (*Worker
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return nil, fmt.Errorf("invalid hls source url")
 	}
-	args := append([]string{"-hide_banner", "-loglevel", "error"}, ffmpegReconnectFlags()...)
+	args := append([]string{"-hide_banner", "-loglevel", "error"}, ffmpegDirectHLSInputFlags()...)
 	args = append(args, "-i", sourceURL, "-c", "copy", "-f", "flv", rtmpURL)
 	ff := exec.Command("ffmpeg", args...)
 	ff.Stderr = logw
@@ -137,6 +137,19 @@ func ffmpegReconnectFlags() []string {
 		"-reconnect_max_retries", "5",
 		"-reconnect_delay_max", "5",
 	}
+}
+
+// ffmpegDirectHLSInputFlags tunes optional first-byte latency for the manifest proxy path.
+// Defaults match ffmpegReconnectFlags; set FFMPEG_DIRECT_HLS_ANALYZEDURATION / PROBESIZE to override.
+func ffmpegDirectHLSInputFlags() []string {
+	flags := ffmpegReconnectFlags()
+	if v := strings.TrimSpace(os.Getenv("FFMPEG_DIRECT_HLS_ANALYZEDURATION")); v != "" {
+		flags = append(flags, "-analyzeduration", v)
+	}
+	if v := strings.TrimSpace(os.Getenv("FFMPEG_DIRECT_HLS_PROBESIZE")); v != "" {
+		flags = append(flags, "-probesize", v)
+	}
+	return flags
 }
 
 func Reconcile(match string) int {

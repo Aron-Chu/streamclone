@@ -1,10 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 
-import { getAnalyticsLive, type AnalyticsStreamDetail } from '../../api.ts'
+import type { AnalyticsStreamDetail } from '../../api.ts'
+import { useAnalyticsLive } from '../../hooks/useAnalyticsLive.ts'
 import {
   LIVE_REFRESH_MS,
-  LIVE_REQUEST_TIMEOUT_MS,
   MAX_TOP_EMOTES,
   SPARKLINE_MAX_POINTS,
   deriveLiveStats,
@@ -28,6 +27,9 @@ import {
 
 export interface LiveStatsBandProps {
   login: string
+  /** When provided, skip fetching and render from this live detail payload. */
+  detail?: AnalyticsStreamDetail
+  detailLoading?: boolean
   /** Disable polling when the band is off-screen or the stream is not live. */
   enabled?: boolean
   className?: string
@@ -56,26 +58,6 @@ function useReducedMotion(): boolean {
   }, [])
 
   return reduced
-}
-
-/** Reject if getAnalyticsLive does not resolve within the timeout (Req 18.5). */
-function fetchLiveWithTimeout(login: string): Promise<AnalyticsStreamDetail> {
-  return new Promise<AnalyticsStreamDetail>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error('live stats request timed out')),
-      LIVE_REQUEST_TIMEOUT_MS,
-    )
-    getAnalyticsLive(login).then(
-      value => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      err => {
-        clearTimeout(timer)
-        reject(err)
-      },
-    )
-  })
 }
 
 function toLiveStatsInput(detail: AnalyticsStreamDetail): LiveStatsInput {
@@ -224,24 +206,21 @@ function Sparkline({
   )
 }
 
-export function LiveStatsBand({ login, enabled = true, className }: LiveStatsBandProps) {
+export function LiveStatsBand({ login, detail, detailLoading, enabled = true, className }: LiveStatsBandProps) {
   const reducedMotion = useReducedMotion()
+  const selfFetch = detail === undefined
 
-  const query = useQuery({
-    queryKey: ['analytics-live-stats', login],
-    queryFn: () => fetchLiveWithTimeout(login),
-    enabled: Boolean(login) && enabled,
+  const query = useAnalyticsLive(login, {
+    enabled: Boolean(login) && enabled && selfFetch,
     refetchInterval: LIVE_REFRESH_MS,
-    retry: false,
+    withTimeout: selfFetch,
   })
 
-  // React Query keeps the last successful `data` even when a refetch errors, so
-  // retaining last values on error/timeout is automatic; we only flag staleness
-  // and rely on refetchInterval to retry next cycle (Req 18.5).
-  const stale = Boolean(query.error) && Boolean(query.data)
+  const resolvedDetail = detail ?? query.data
+  const stale = selfFetch && Boolean(query.error) && Boolean(query.data)
 
-  if (!query.data) {
-    if (query.isError) {
+  if (!resolvedDetail) {
+    if (selfFetch && query.isError) {
       return (
         <div
           className={
@@ -260,12 +239,12 @@ export function LiveStatsBand({ login, enabled = true, className }: LiveStatsBan
           'rounded-xl border border-white/10 bg-zinc-950/60 px-4 py-3 text-xs text-zinc-500'
         }
       >
-        Loading live stats…
+        {detailLoading || (selfFetch && query.isLoading) ? 'Loading live stats…' : 'Live stats unavailable'}
       </div>
     )
   }
 
-  const stats = deriveLiveStats(toLiveStatsInput(query.data))
+  const stats = deriveLiveStats(toLiveStatsInput(resolvedDetail))
 
   return (
     <div
@@ -401,6 +380,9 @@ export function LiveStatsBand({ login, enabled = true, className }: LiveStatsBan
       )}
 
       <div className="min-h-[36px]">
+        <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">
+          Chat activity (last 60 min)
+        </span>
         <Sparkline series={stats.sparkline} reducedMotion={reducedMotion} />
       </div>
     </div>

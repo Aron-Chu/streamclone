@@ -56,7 +56,7 @@ func (h *Handler) WithSetupWelcome(opts SetupWelcomeOptions) *Handler {
 	h.oauthClientSecret = strings.TrimSpace(opts.OAuthClientSecret)
 	clipperURL := strings.TrimSpace(opts.ClipperServiceURL)
 	if clipperURL == "" {
-		clipperURL = "http://clipper:8095"
+		clipperURL = "http://host.docker.internal:8095"
 	}
 	h.clipperServiceURL = strings.TrimRight(clipperURL, "/")
 	return h
@@ -73,7 +73,7 @@ func (h *Handler) setupWelcome(w http.ResponseWriter, r *http.Request) {
 
 	statuses := h.probeSetupServices(ctx, map[string]string{
 		"scraper": scraperHealthURL(h.scraperAPIURL),
-		"clipper": h.clipperServiceURL + "/v1/twitch/status",
+		"clipper": h.clipperServiceURL + "/healthz",
 	})
 	services := setupWelcomeServices{
 		Scraper: statuses["scraper"],

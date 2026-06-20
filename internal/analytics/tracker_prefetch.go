@@ -60,7 +60,7 @@ func (s *SyncService) PrefetchTracker(login, streamID string) (queued bool) {
 		}
 
 		url := "https://twitchtracker.com/" + login + "/streams/" + streamID
-		if _, err := s.scrapeTwitchTracker(ctx, url, stream, false); err != nil {
+		if _, err := s.scrapeTwitchTrackerCoalesced(ctx, streamID, url, stream, false, s.trackerScrapeTimeoutMS); err != nil {
 			s.log.Debug("tracker prefetch scrape failed", "stream_id", streamID, "err", err)
 			return
 		}

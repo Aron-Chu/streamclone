@@ -19,6 +19,7 @@ import (
 	"streamclone/internal/emote/flags"
 	"streamclone/internal/emote/objstore"
 	"streamclone/internal/emote/seeder"
+	emotesync "streamclone/internal/emote/sync"
 	"streamclone/internal/emote/store"
 )
 
@@ -31,11 +32,21 @@ type Handler struct {
 	seed            *seeder.Seeder
 	log             *slog.Logger
 	token           string
+	eventSub        eventSubscriber
 	ensure          func(context.Context, string, string, []seeder.Provider) (ensureResponse, int, error)
 	seedMu          sync.Mutex
 	seeding         map[string]struct{}
 	loadedMu        sync.Mutex
 	loadedProviders map[string]map[seeder.Provider]struct{}
+}
+
+type eventSubscriber interface {
+	Register(ctx context.Context, login, twitchID, providerSetID string) error
+	Unregister(login string)
+}
+
+func (h *Handler) SetEventSubscriber(sub eventSubscriber) {
+	h.eventSub = sub
 }
 
 func New(st *store.Store, obj *objstore.Client, d *dict.Dict, seed *seeder.Seeder, log *slog.Logger, token string) *Handler {
@@ -325,12 +336,16 @@ func (h *Handler) ensureEmotes(ctx context.Context, login, twitchID string, prov
 			if _, err := h.seed.SyncSevenTVEmoteFlags(ctx, twitchID); err != nil && h.log != nil {
 				h.log.Warn("sync 7tv zero-width flags", "login", login, "twitch_id", twitchID, "err", err)
 			}
+			h.registerSevenTVSubscription(ctx, login, twitchID)
 		}
 		dictStarted := time.Now()
 		if err := h.rebuildChannelDictionary(ctx, login); err != nil {
 			return ensureResponse{}, http.StatusInternalServerError, err
 		}
 		resp := makeEnsureResponse("ready", ready, pending, providers)
+		if hasPartialProvider(resp.Providers) {
+			resp.State = "processing"
+		}
 		applyProviderSummary(&resp, providerSummary, providerLoads)
 		resp.Benchmark = benchmarkFromResponse(resp, true)
 		resp.Benchmark.DictionaryMs = time.Since(dictStarted).Milliseconds()
@@ -374,7 +389,7 @@ func (h *Handler) providersNeedingRefresh(ctx context.Context, login, twitchID s
 			if err != nil {
 				return nil, err
 			}
-			if providerSnapshotNeedsRefresh(ok, local.ProviderSetID, local.Count, remote.SetID, remote.Count) {
+			if providerSnapshotNeedsRefresh(ok, local.ProviderSetID, local.EmoteHash, local.Count, remote.SetID, remote.EmoteHash, remote.Count) {
 				stale = append(stale, provider)
 			}
 		}
@@ -382,14 +397,30 @@ func (h *Handler) providersNeedingRefresh(ctx context.Context, login, twitchID s
 	return stale, nil
 }
 
-func providerSnapshotNeedsRefresh(localFound bool, localSetID string, localCount int, remoteSetID string, remoteCount int) bool {
-	if remoteSetID == "" || remoteCount == 0 {
-		return false
+func providerSnapshotNeedsRefresh(localFound bool, localSetID, localHash string, localCount int, remoteSetID, remoteHash string, remoteCount int) bool {
+	return emotesync.ProviderSnapshotNeedsRefresh(localFound, localSetID, localHash, remoteSetID, remoteHash, localCount, remoteCount)
+}
+
+func hasPartialProvider(providers []ensureProviderResponse) bool {
+	for _, provider := range providers {
+		if provider.State == "partial" || provider.State == "processing" {
+			return true
+		}
 	}
-	if !localFound {
-		return true
+	return false
+}
+
+func (h *Handler) registerSevenTVSubscription(ctx context.Context, login, twitchID string) {
+	if h.eventSub == nil || h.st == nil {
+		return
 	}
-	return localSetID != remoteSetID || localCount != remoteCount
+	setID, ok, err := h.st.GetChannelSevenTVProviderSetID(ctx, login)
+	if err != nil || !ok {
+		return
+	}
+	if err := h.eventSub.Register(ctx, login, twitchID, setID); err != nil && h.log != nil {
+		h.log.Warn("7tv event subscription failed", "login", login, "set_id", setID, "err", err)
+	}
 }
 
 func mergeProviders(base []seeder.Provider, extra []seeder.Provider) []seeder.Provider {
@@ -499,10 +530,16 @@ func applyProviderSummary(resp *ensureResponse, summary map[string]store.Provide
 			resp.Providers[i].Error = load.Error
 		}
 	}
+	if hasPartialProvider(resp.Providers) {
+		resp.State = "processing"
+	}
 }
 
 func providerProgressTotal(item store.ProviderEmoteSummary, load store.ChannelProviderLoad, loadOK bool) int {
 	observed := item.Ready + item.Pending + item.Failed
+	if loadOK && load.ExpectedCount > observed {
+		return load.ExpectedCount
+	}
 	if loadOK && load.Count > observed {
 		return load.Count
 	}
@@ -510,6 +547,9 @@ func providerProgressTotal(item store.ProviderEmoteSummary, load store.ChannelPr
 }
 
 func providerProgressState(item store.ProviderEmoteSummary, load store.ChannelProviderLoad, loadOK bool, fallback string) string {
+	if loadOK && load.State == "partial" {
+		return "partial"
+	}
 	if item.Failed > 0 && item.Ready == 0 && item.Pending == 0 {
 		return "failed"
 	}
@@ -517,6 +557,9 @@ func providerProgressState(item store.ProviderEmoteSummary, load store.ChannelPr
 		return "processing"
 	}
 	total := providerProgressTotal(item, load, loadOK)
+	if loadOK && load.ExpectedCount > 0 && item.Ready < load.ExpectedCount {
+		return "partial"
+	}
 	if loadOK && load.Count > 0 && item.Ready < load.Count {
 		return "processing"
 	}
@@ -696,6 +739,9 @@ func (h *Handler) startSeed(login, twitchID string, setProviders, seedProviders 
 		for _, result := range results {
 			if result.State != "failed" {
 				h.markProviderLoaded(login, seeder.Provider(result.Provider))
+			}
+			if result.Provider == string(seeder.ProviderSevenTV) && result.State != "failed" {
+				h.registerSevenTVSubscription(ctx, login, twitchID)
 			}
 		}
 		if h.log != nil {

@@ -9,11 +9,17 @@ Small index for docs, cleanup, and install bug-fix notes.
 | [README.md](../README.md) | Project intro |
 | [docs/install-desktop.md](install-desktop.md) | Install and lifecycle |
 | [docs/options.md](options.md) | Optional tiers |
+| [docs/ENVIRONMENT.md](ENVIRONMENT.md) | Compose profiles and env overlays |
+| [docs/SERVICE_MAP.md](SERVICE_MAP.md) | Service boundaries and ports |
+| [docs/TESTING.md](TESTING.md) | Test matrix and focused commands |
+| [docs/MCP.md](MCP.md) | Local MCP setup and usage |
 | [SECURITY.md](../SECURITY.md) | Vulnerability reporting |
 | [docs/security.md](security.md) | Operator hardening |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow |
-| [docs/product-roadmap.md](product-roadmap.md) | Compact roadmap |
 | [docs/scraper-cloudflare-and-proxy.md](scraper-cloudflare-and-proxy.md) | Scraper notes |
+| [docs/tiers-scraper-and-social-spread.md](tiers-scraper-and-social-spread.md) | Tier detachment, scraper coupling, proxies, Social spread |
+| [docs/scraping-archive/requirements.md](scraping-archive/requirements.md) | Bulk scrape + Azure blob archive requirements |
+| [docs/agents-streamclone-and-replayforge.md](agents-streamclone-and-replayforge.md) | Clip Studio / ReplayForge boundary |
 | [deploy/FREE_DEPLOYMENT.md](../deploy/FREE_DEPLOYMENT.md) | Public VM notes |
 
 Agent docs live in `AGENTS.md`, `.kiro/steering/`, `.cursor/skills/streamclone/`, and `tools/*/README.md`.
@@ -57,6 +63,8 @@ Bug fixes ship from this repo. Copying source into the release install only upda
 | 2026-06-15 | pending | Require setup-control proxy readiness during install/start/repair and clean stale Docker resources without `.env` |
 | 2026-06-15 | pending | Repair localhost relays for IPv4 and IPv6 |
 | 2026-06-15 | pending | Repo hygiene: `make check`, CodeQL, CODEOWNERS, issue templates, `.gitignore` cleanup |
+| 2026-06-17 | pending | Install automation: Pulse Wire release defaults, ReplayForge vs clipper cleanup, release env merge on upgrade, warming UI |
+| 2026-06-19 | pending | Uninstall uses same compose profiles as start/stop (`pulse-wire`, feature flags from `.env`) on Windows and bash |
 
 ## Legacy Config Aliases
 

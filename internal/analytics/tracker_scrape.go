@@ -14,13 +14,22 @@ const (
 )
 
 func (s *SyncService) shouldSkipTracker(ctx context.Context, stream *StreamRecord) bool {
-	if stream == nil || stream.ViewerSamples <= 0 {
+	if stream == nil {
 		return false
 	}
 	rollups, err := s.store.RollupsByStream(ctx, stream.StreamID)
 	if err != nil {
 		s.log.Warn("skip tracker coverage check failed; using viewerSamples only", "stream_id", stream.StreamID, "err", err)
 		return stream.ViewerSamples > 0
+	}
+	if Tier0CoveragePct(stream, rollups) >= 70 {
+		return true
+	}
+	if hasLiveCollectorViewerCoverage(stream, rollups) {
+		return true
+	}
+	if stream.ViewerSamples <= 0 {
+		return false
 	}
 	return hasGoodViewerCoverageFromRollups(rollups, stream)
 }

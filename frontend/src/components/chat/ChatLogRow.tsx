@@ -5,7 +5,7 @@ import { normalizeBrowserOriginUrl } from '../../config'
 import { linkifyText } from '../../utils/linkifyText'
 import { resolveEmoteImageUrl } from '../../utils/emoteImageUrl'
 import ChatUserMenu, { mentionLoginFromFragment, type ChatUserFilter } from './ChatUserMenu'
-import { EmoteStack } from './LogMessageBody'
+import { ChatEmoteImage, ChatEmoteStack } from './ChatEmoteTooltipLayer'
 
 function normalizeMentionToken(value: string) {
   return value.trim().replace(/^@+/, '').toLowerCase()
@@ -18,6 +18,7 @@ interface FragProps {
   canMention?: boolean
   onMention?: (login: string) => void
   onFilterUser?: (filter: ChatUserFilter) => void
+  recentMessages?: Message[]
   fragKey: string
 }
 
@@ -30,13 +31,14 @@ function resolveFragmentEmoteUrl(f: Fragment): string {
   })
 }
 
-function Frag({ f, selfMention, mentionColor, canMention, onMention, onFilterUser, fragKey }: FragProps) {
+function Frag({ f, selfMention, mentionColor, canMention, onMention, onFilterUser, recentMessages, fragKey }: FragProps) {
   if (f.t === 'emote') {
     return (
-      <img
+      <ChatEmoteImage
         src={normalizeBrowserOriginUrl(resolveFragmentEmoteUrl(f), ['/emotes/'])}
-        alt={f.c}
-        title={f.c}
+        name={f.c}
+        provider={f.provider}
+        fallbackId={f.id}
         className="inline-block align-middle drop-shadow"
         style={{ height: '1.65em', width: f.zw ? '1.65em' : undefined }}
         decoding="async"
@@ -58,6 +60,7 @@ function Frag({ f, selfMention, mentionColor, canMention, onMention, onFilterUse
         canMention={canMention}
         onMention={onMention}
         onFilterUser={onFilterUser}
+        recentMessages={recentMessages}
         className="whitespace-pre-wrap break-words font-black hover:underline"
       >
         {body}
@@ -103,6 +106,7 @@ export function renderMessageFragments(
     canMention?: boolean
     onMention?: (login: string) => void
     onFilterUser?: (filter: ChatUserFilter) => void
+    recentMessages?: Message[]
   },
 ) {
   const nodes: ReactNode[] = []
@@ -117,11 +121,18 @@ export function renderMessageFragments(
         next++
       }
       nodes.push(
-        <EmoteStack
+        <ChatEmoteStack
           key={`stack-${index}-${fragment.c}`}
           baseName={fragment.c}
-          baseUrl={resolveFragmentEmoteUrl(fragment)}
-          overlays={overlays.map(overlay => ({ name: overlay.c, url: resolveFragmentEmoteUrl(overlay) }))}
+          baseUrl={normalizeBrowserOriginUrl(resolveFragmentEmoteUrl(fragment), ['/emotes/'])}
+          baseProvider={fragment.provider}
+          baseId={fragment.id}
+          overlays={overlays.map(overlay => ({
+            name: overlay.c,
+            url: normalizeBrowserOriginUrl(resolveFragmentEmoteUrl(overlay), ['/emotes/']),
+            provider: overlay.provider,
+            id: overlay.id,
+          }))}
         />,
       )
       index = next
@@ -137,6 +148,7 @@ export function renderMessageFragments(
         canMention={options?.canMention}
         onMention={options?.onMention}
         onFilterUser={options?.onFilterUser}
+        recentMessages={options?.recentMessages}
       />,
     )
     index++
@@ -151,6 +163,7 @@ export interface ChatLogRowProps {
   canMention?: boolean
   onMention?: (login: string) => void
   onFilterUser?: (filter: ChatUserFilter) => void
+  recentMessages?: Message[]
   showAck?: boolean
 }
 
@@ -167,6 +180,7 @@ export const ChatLogRow = memo(function ChatLogRow({
   canMention = false,
   onMention,
   onFilterUser,
+  recentMessages,
   showAck = true,
 }: ChatLogRowProps) {
   if (msg.kind === 'mod_event') {
@@ -207,6 +221,7 @@ export const ChatLogRow = memo(function ChatLogRow({
         canMention={canMention}
         onMention={onMention}
         onFilterUser={onFilterUser}
+        recentMessages={recentMessages}
         className="mr-1 font-black hover:underline"
       >
         {msg.user || 'viewer'}:
@@ -217,6 +232,7 @@ export const ChatLogRow = memo(function ChatLogRow({
           canMention,
           onMention,
           onFilterUser,
+          recentMessages,
         })}
       </span>
       {showAck && msg.ackState && msg.source === 'local' ? (

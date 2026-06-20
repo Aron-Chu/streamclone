@@ -53,6 +53,7 @@ interface ChatState {
   activeChannel: string | null
   lastError: string | null
   emoteRevision: number
+  emoteDeltaToken: number
   chatLatencyMs: number | null
   sourceLatencyMs: number | null
   relayLatencyMs: number | null
@@ -466,7 +467,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         })
       }
       if (data.type === 'emote_delta') {
-        set(state => ({ emoteRevision: state.emoteRevision + 1 }))
+        set(state => ({
+          emoteRevision: state.emoteRevision + 1,
+          emoteDeltaToken: state.emoteDeltaToken + 1,
+        }))
       }
     }
 
@@ -495,6 +499,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     activeChannel: null,
     lastError: null,
     emoteRevision: 0,
+    emoteDeltaToken: 0,
     chatLatencyMs: null,
     sourceLatencyMs: null,
     relayLatencyMs: null,

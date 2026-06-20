@@ -206,6 +206,8 @@ type diagnosticsResp struct {
 	StartupBreakdown  registry.StartupBreakdown `json:"startupBreakdown,omitempty"`
 	FallbackAttempts  int                       `json:"fallbackAttempts"`
 	HLSProbe          hlsProbeResp              `json:"hlsProbe"`
+	ActiveTransport   string                    `json:"activeTransport,omitempty"`
+	MeasuredDelaySec  *float64                  `json:"measuredDelaySec,omitempty"`
 	UpdatedAt         int64                     `json:"updatedAt"`
 }
 
@@ -434,11 +436,12 @@ func (h *Orchestrator) startWorker(ctx context.Context, channel, quality, rtmp s
 			}
 			continue
 		}
-		probeTimeout := backendProbeTimeout(h.o.HLSProbeTimeout, i, len(backends))
+		probeTimeout := backendProbeTimeout(h.o.HLSProbeTimeout, backend, i, len(backends))
 		hlsReadyStartedAt := time.Now()
 		if err := waitForHLS(ctx, h.o.HLSProbeBase, channel, probeTimeout, stabilityWindow, skipVariant); err != nil {
 			st.Kill()
-			lastErr = err
+			lastErr = fmt.Errorf("%w (backend=%s probe_budget=%s elapsed=%s)", err, backend, probeTimeout, time.Since(hlsReadyStartedAt).Round(time.Millisecond))
+			h.o.Log.Warn("hls readiness probe failed", "channel", channel, "backend", backend, "probe_budget", probeTimeout, "elapsed", time.Since(hlsReadyStartedAt), "err", err)
 			continue
 		}
 		hlsReadyMs := time.Since(hlsReadyStartedAt).Milliseconds()
@@ -447,8 +450,10 @@ func (h *Orchestrator) startWorker(ctx context.Context, channel, quality, rtmp s
 			last = lastErr.Error()
 		}
 		return st, backend, i > 0, fallbackAttempts, last, registry.StartupBreakdown{
-			WorkerSpawnMs: spawnMs,
-			HLSReadyMs:    hlsReadyMs,
+			WorkerSpawnMs:    spawnMs,
+			HLSProbeBudgetMs: probeTimeout.Milliseconds(),
+			HLSReadyMs:       hlsReadyMs,
+			Backend:          backend,
 		}, nil
 	}
 	if lastErr == nil {
@@ -457,7 +462,16 @@ func (h *Orchestrator) startWorker(ctx context.Context, channel, quality, rtmp s
 	return nil, "", fallbackAttempts > 0, fallbackAttempts, lastErr.Error(), registry.StartupBreakdown{}, lastErr
 }
 
-func backendProbeTimeout(full time.Duration, backendIndex, backendCount int) time.Duration {
+func backendProbeTimeout(full time.Duration, backend string, backendIndex, backendCount int) time.Duration {
+	if strings.EqualFold(strings.TrimSpace(backend), "direct_hls") {
+		if v := strings.TrimSpace(os.Getenv("HLS_DIRECT_PROBE_TIMEOUT_SEC")); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				return time.Duration(n) * time.Second
+			}
+		}
+		// direct_hls needs ffmpeg publish + at least one MediaMTX segment; do not fast-fail.
+		return full
+	}
 	if backendCount <= 1 || backendIndex >= backendCount-1 {
 		return full
 	}
@@ -647,7 +661,7 @@ func (h *Orchestrator) supervise(s *registry.Session, channel, quality, rtmp str
 				s.RecordWorkerError(serr)
 				continue
 			}
-			probeTimeout := backendProbeTimeout(h.o.HLSProbeTimeout, backendIdx, len(backends))
+			probeTimeout := backendProbeTimeout(h.o.HLSProbeTimeout, backend, backendIdx, len(backends))
 			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 			probeErr := waitForHLS(ctx, h.o.HLSProbeBase, channel, probeTimeout, stabilityWindow, skipVariant)
 			cancel()
@@ -758,15 +772,17 @@ func (h *Orchestrator) diagnostics(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	s, ok := h.o.Registry.Get(channel)
 	if !ok {
+		hlsProbe := probeHLS(r.Context(), h.o.HLSProbeBase, channel)
 		writeJSON(w, http.StatusOK, diagnosticsResp{
-			Channel:        channel,
-			Active:         false,
-			MaxRestarts:    h.o.MaxRestarts,
-			BackendVersion: h.o.BackendVersion,
-			LatencyMode:    "stable",
-			RenderProtocol: "HLS",
-			HLSProbe:       probeHLS(r.Context(), h.o.HLSProbeBase, channel),
-			UpdatedAt:      now.UnixMilli(),
+			Channel:          channel,
+			Active:           false,
+			MaxRestarts:      h.o.MaxRestarts,
+			BackendVersion:   h.o.BackendVersion,
+			LatencyMode:      "stable",
+			RenderProtocol:   "HLS",
+			ActiveTransport:  activeTransport(hlsProbe),
+			HLSProbe:         hlsProbe,
+			UpdatedAt:        now.UnixMilli(),
 		})
 		return
 	}
@@ -799,6 +815,8 @@ func (h *Orchestrator) diagnostics(w http.ResponseWriter, r *http.Request) {
 		HLSProbe:          probeHLS(r.Context(), h.o.HLSProbeBase, channel),
 		UpdatedAt:         now.UnixMilli(),
 	}
+	resp.ActiveTransport = activeTransport(resp.HLSProbe)
+	resp.MeasuredDelaySec = computeEndToEndLiveDelaySec(s.LiveEdge, resp.HLSProbe)
 	if !workerStarted.IsZero() {
 		resp.WorkerStarted = workerStarted.UnixMilli()
 		resp.WorkerUptimeMs = now.Sub(workerStarted).Milliseconds()
@@ -1044,6 +1062,7 @@ func (h *Orchestrator) proxyPlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	started := time.Now()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1068,6 +1087,7 @@ func (h *Orchestrator) proxyPlaylist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	recordDirectHLSFetch(sourceURL, time.Since(started))
 
 	cleanedPlaylist := filterTwitchAdSegments(string(bodyBytes), sourceURL)
 

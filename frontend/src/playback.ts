@@ -1,5 +1,7 @@
 import { RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type Hls from 'hls.js'
+import { ADAPTIVE_LIVE_LATENCY_ENABLED, HLS_CDN_BEARER, HLS_LOW_LATENCY_ENABLED } from './config'
+import { createLiveLatencyController } from './liveLatencyController'
 import { calculateLiveEdge } from './playbackMath'
 import type { PlaybackLatencyMode } from './settings'
 
@@ -34,7 +36,7 @@ export interface PlaybackMetrics {
   firstFrameMs: number | null
 }
 
-const emptyMetrics: PlaybackMetrics = {
+export const emptyMetrics: PlaybackMetrics = {
   downloadResolution: '-',
   renderResolution: '-',
   viewportResolution: '-',
@@ -67,6 +69,8 @@ const maxFatalNetworkRecoveries = 3
 const maxFatalMediaRecoveries = 2
 const stallDowngradeThreshold = 3
 const rebufferDowngradeMs = 4000
+const latencyRecoveryStableMs = 30_000
+const driftJumpLiveSec = 8
 
 /** VOD relays publish a short live HLS window; clamp when duration is known. */
 function clampVodRelaySeek(video: HTMLVideoElement, seekTarget: number): number {
@@ -91,9 +95,21 @@ function vodResumePosition(video: HTMLVideoElement, seekTarget: number): number 
   return 0
 }
 
+function modeIndex(mode: PlaybackLatencyMode) {
+  if (mode === 'instant') return 0
+  if (mode === 'fast') return 1
+  return 2
+}
+
 function nextLatencyMode(mode: PlaybackLatencyMode): PlaybackLatencyMode | null {
   if (mode === 'instant') return 'fast'
   if (mode === 'fast') return 'stable'
+  return null
+}
+
+function previousLatencyMode(mode: PlaybackLatencyMode): PlaybackLatencyMode | null {
+  if (mode === 'stable') return 'fast'
+  if (mode === 'fast') return 'instant'
   return null
 }
 
@@ -150,36 +166,95 @@ function hlsVodRelayConfig() {
   }
 }
 
-function hlsLatencyConfig(latencyMode: PlaybackLatencyMode) {
+function hlsLatencyConfig(latencyMode: PlaybackLatencyMode, llHls: boolean) {
+  if (llHls) {
+    switch (latencyMode) {
+      case 'instant':
+        return {
+          lowLatencyMode: true,
+          liveSyncDuration: 0.5,
+          liveMaxLatencyDuration: 2,
+          maxBufferLength: 2,
+          backBufferLength: 4,
+          maxLiveSyncPlaybackRate: 1.3,
+        }
+      case 'fast':
+        return {
+          lowLatencyMode: true,
+          liveSyncDuration: 1,
+          liveMaxLatencyDuration: 3,
+          maxBufferLength: 4,
+          backBufferLength: 8,
+          maxLiveSyncPlaybackRate: 1.2,
+        }
+      default:
+        return {
+          lowLatencyMode: true,
+          liveSyncDuration: 2,
+          liveMaxLatencyDuration: 5,
+          maxBufferLength: 8,
+          backBufferLength: 12,
+          maxLiveSyncPlaybackRate: 1.05,
+        }
+    }
+  }
   switch (latencyMode) {
     case 'instant':
       return {
-        lowLatencyMode: true,
-        liveSyncDurationCount: 1,
-        liveMaxLatencyDurationCount: 2,
-        maxBufferLength: 2,
-        backBufferLength: 4,
+        lowLatencyMode: false,
+        liveSyncDurationCount: 2,
+        liveMaxLatencyDurationCount: 3,
+        maxBufferLength: 4,
+        backBufferLength: 6,
         maxLiveSyncPlaybackRate: 1.3,
       }
     case 'fast':
       return {
-        lowLatencyMode: true,
-        liveSyncDurationCount: 1.5,
-        liveMaxLatencyDurationCount: 3,
-        maxBufferLength: 4,
-        backBufferLength: 8,
+        lowLatencyMode: false,
+        liveSyncDurationCount: 2,
+        liveMaxLatencyDurationCount: 4,
+        maxBufferLength: 6,
+        backBufferLength: 12,
         maxLiveSyncPlaybackRate: 1.2,
       }
     default:
       return {
         lowLatencyMode: false,
-        liveSyncDurationCount: 5,
-        liveMaxLatencyDurationCount: 9,
-        maxBufferLength: 15,
-        backBufferLength: 30,
-        maxLiveSyncPlaybackRate: 1,
+        liveSyncDurationCount: 4,
+        liveMaxLatencyDurationCount: 6,
+        maxBufferLength: 10,
+        backBufferLength: 20,
+        maxLiveSyncPlaybackRate: 1.05,
       }
   }
+}
+
+function manifestHasParts(hls: Hls | null) {
+  const hlsAny = hls as unknown as {
+    level?: { details?: { partList?: unknown[]; partTarget?: number } }
+    levels?: Array<{ details?: { partList?: unknown[]; partTarget?: number } }>
+  } | null
+  const details = hlsAny?.level?.details
+  if (details?.partList && details.partList.length > 0) return true
+  if (typeof details?.partTarget === 'number' && details.partTarget > 0) return true
+  const levels = hlsAny?.levels ?? []
+  return levels.some(level => {
+    const levelDetails = level.details
+    return Boolean(levelDetails?.partList?.length) || (typeof levelDetails?.partTarget === 'number' && levelDetails.partTarget > 0)
+  })
+}
+
+function applyLlHlsRuntimeConfig(hls: Hls, latencyMode: PlaybackLatencyMode) {
+  const cfg = hlsLatencyConfig(latencyMode, true)
+  const hlsAny = hls as unknown as { config?: Record<string, unknown> }
+  if (!hlsAny.config) return
+  Object.assign(hlsAny.config, cfg)
+}
+
+function detectLlHls(enabledByConfig: boolean, hls: Hls | null, manifestText?: string) {
+  if (enabledByConfig) return true
+  if (manifestText?.includes('#EXT-X-PART')) return true
+  return manifestHasParts(hls)
 }
 
 function latencyModeLabel(mode: PlaybackLatencyMode) {
@@ -279,7 +354,17 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     setState('starting')
     setError(null)
     const playbackMode = options.mode ?? 'live'
+    const userLatencyMode = options.latencyMode ?? 'stable'
     const latencyMode = playbackMode === 'vod' ? 'stable' : effectiveLatencyMode
+    let runtimeMode = latencyMode
+    let llHlsActive = HLS_LOW_LATENCY_ENABLED
+    // A2 adaptive controller is flag-gated; off => today's one-way downgrade for live.
+    const adaptiveEnabled = ADAPTIVE_LIVE_LATENCY_ENABLED
+    const latencyController = playbackMode === 'live' && adaptiveEnabled
+      ? createLiveLatencyController(userLatencyMode, llHlsActive)
+      : null
+    let lastStallAt = 0
+    let lastLatencyUpgradeAt = 0
     const seekTarget = playbackMode === 'vod' ? seekOnStartRef.current : 0
     const isVodRepositioning = playbackMode === 'vod' && Boolean(options.vodRepositioning)
     let seekApplied = seekTarget <= 0
@@ -287,21 +372,131 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     video.muted = Boolean(options.muted)
 
     const downgradeLatency = () => {
-      const next = nextLatencyMode(latencyMode)
+      // When adaptive control owns live, the controller handles drift/stalls instead.
+      if (playbackMode === 'live' && adaptiveEnabled) return
+      const next = nextLatencyMode(runtimeMode)
       if (!next || !alive) return
+      runtimeMode = next
       setEffectiveLatencyMode(next)
       options.onLatencyDowngrade?.(next)
     }
 
+    const tryBoundedLatencyRecovery = () => {
+      if (playbackMode !== 'live' || adaptiveEnabled || !alive) return
+      const userIdx = modeIndex(userLatencyMode)
+      const runtimeIdx = modeIndex(runtimeMode)
+      if (runtimeIdx <= userIdx) return
+      const now = performance.now()
+      if (lastStallAt > 0 && now-lastStallAt < latencyRecoveryStableMs) return
+      if (now-lastLatencyUpgradeAt < latencyRecoveryStableMs) return
+      const snapshot = readPlaybackMetrics(video, hlsRef.current, stageRef.current, {
+        recoveryAttempts: recoveryRef.current,
+        stalls: stallsRef.current,
+        firstFrameMs: firstFrameRef.current === null ? null : Math.max(0, Math.round(firstFrameRef.current - startedAtRef.current)),
+        lastFragment: lastFragRef.current,
+        fps: fpsRef.current.fps,
+        latencyMode: runtimeMode,
+      })
+      const behind = snapshot.behindLiveSec ?? 0
+      const targetBehind = runtimeMode === 'stable' ? 8 : runtimeMode === 'fast' ? 6 : 4
+      if (behind > targetBehind + 2 || (snapshot.bufferSizeSec ?? 0) < 2) return
+      const upgraded = previousLatencyMode(runtimeMode)
+      if (!upgraded || modeIndex(upgraded) < userIdx) return
+      runtimeMode = upgraded
+      lastLatencyUpgradeAt = now
+      setEffectiveLatencyMode(upgraded)
+    }
+
+    const applyLatencyControl = () => {
+      if (playbackMode !== 'live' || !latencyController || !alive) return
+      const hls = hlsRef.current
+      const snapshot = readPlaybackMetrics(video, hls, stageRef.current, {
+        recoveryAttempts: recoveryRef.current,
+        stalls: stallsRef.current,
+        firstFrameMs: firstFrameRef.current === null ? null : Math.max(0, Math.round(firstFrameRef.current - startedAtRef.current)),
+        lastFragment: lastFragRef.current,
+        fps: fpsRef.current.fps,
+        latencyMode: runtimeMode,
+      })
+      const hlsAny = hls as unknown as {
+        bandwidthEstimate?: number
+        currentLevel?: number
+        levels?: unknown[]
+        config?: { maxLiveSyncPlaybackRate?: number }
+        autoLevelCapping?: number
+      } | null
+      const downloadBitrate = snapshot.downloadBitrateKbps
+      const bandwidth = snapshot.bandwidthEstimateKbps
+      const fetchRatio = downloadBitrate && bandwidth && bandwidth > 0 ? downloadBitrate / bandwidth : null
+      const levelCount = hlsAny?.levels?.length ?? 0
+      const currentLevel = Number.isFinite(hlsAny?.currentLevel) ? Number(hlsAny?.currentLevel) : -1
+      const out = latencyController.tick({
+        behindLiveSec: snapshot.behindLiveSec,
+        targetLatencySec: snapshot.targetLatencySec,
+        bufferSizeSec: snapshot.bufferSizeSec,
+        stalls: stallsRef.current,
+        fetchRatio,
+        userMode: userLatencyMode,
+        effectiveMode: runtimeMode,
+        levelCount,
+        currentLevel,
+      })
+      if (out.effectiveMode !== runtimeMode) {
+        runtimeMode = out.effectiveMode
+        setEffectiveLatencyMode(out.effectiveMode)
+        if (modeIndex(out.effectiveMode) > modeIndex(userLatencyMode)) {
+          options.onLatencyDowngrade?.(out.effectiveMode)
+        }
+      }
+      if (out.shouldJumpLive) {
+        const edge = getLiveEdgeMetrics(video, hls)
+        if (edge.jumpTargetSec !== null) {
+          video.currentTime = edge.jumpTargetSec
+        }
+      }
+      video.playbackRate = out.playbackRate
+      if (hlsAny?.config) {
+        hlsAny.config.maxLiveSyncPlaybackRate = out.maxLiveSyncPlaybackRate
+      }
+      if (hlsAny && out.levelCap !== null) {
+        hlsAny.autoLevelCapping = out.levelCap
+      } else       if (hlsAny && out.levelCap === null && typeof hlsAny.autoLevelCapping === 'number') {
+        hlsAny.autoLevelCapping = -1
+      }
+    }
+
+    const applyDriftRecovery = () => {
+      if (playbackMode !== 'live' || !alive) return
+      if (video.paused || video.seeking) return
+      const hls = hlsRef.current
+      const snapshot = readPlaybackMetrics(video, hls, stageRef.current, {
+        recoveryAttempts: recoveryRef.current,
+        stalls: stallsRef.current,
+        firstFrameMs: firstFrameRef.current === null ? null : Math.max(0, Math.round(firstFrameRef.current - startedAtRef.current)),
+        lastFragment: lastFragRef.current,
+        fps: fpsRef.current.fps,
+        latencyMode: runtimeMode,
+      })
+      const behind = snapshot.behindLiveSec
+      if (behind === null || behind < driftJumpLiveSec) return
+      const edge = getLiveEdgeMetrics(video, hls)
+      if (edge.jumpTargetSec !== null) {
+        video.currentTime = edge.jumpTargetSec
+      }
+    }
+
     const updateMetrics = () => {
       if (!alive) return
+      applyLatencyControl()
+      applyDriftRecovery()
+      tryBoundedLatencyRecovery()
       setMetrics(readPlaybackMetrics(video, hlsRef.current, stageRef.current, {
         recoveryAttempts: recoveryRef.current,
         stalls: stallsRef.current,
         firstFrameMs: firstFrameRef.current === null ? null : Math.max(0, Math.round(firstFrameRef.current - startedAtRef.current)),
         lastFragment: lastFragRef.current,
         fps: fpsRef.current.fps,
-        latencyMode,
+        latencyMode: runtimeMode,
       }))
     }
 
@@ -338,10 +533,11 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
     const onPlaying = () => markPlaying()
     const onWaiting = () => {
       stallsRef.current += 1
+      lastStallAt = performance.now()
       if (rebufferStartedRef.current === null) {
         rebufferStartedRef.current = performance.now()
       }
-      if (stallsRef.current >= stallDowngradeThreshold && nextLatencyMode(latencyMode)) {
+      if (stallsRef.current >= stallDowngradeThreshold && (playbackMode !== 'live' || !adaptiveEnabled) && nextLatencyMode(runtimeMode)) {
         downgradeLatency()
         stallsRef.current = 0
       }
@@ -389,7 +585,7 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
       const { default: HlsPlayer } = await import('hls.js')
       if (!alive) return
       if (HlsPlayer.isSupported()) {
-        const latency = playbackMode === 'vod' ? hlsVodRelayConfig() : hlsLatencyConfig(latencyMode)
+        const latency = playbackMode === 'vod' ? hlsVodRelayConfig() : hlsLatencyConfig(runtimeMode, llHlsActive)
         const maxNetworkRecoveries = playbackMode === 'vod' ? 6 : maxFatalNetworkRecoveries
         const hls = new HlsPlayer({
           ...latency,
@@ -397,8 +593,11 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
           capLevelToPlayerSize: true,
           maxBufferHole: 0.5,
           enableWorker: true,
-          xhrSetup: xhr => {
+          xhrSetup: (xhr, url) => {
             xhr.withCredentials = true
+            if (HLS_CDN_BEARER && `${url}`.includes('/live/')) {
+              xhr.setRequestHeader('Authorization', `Bearer ${HLS_CDN_BEARER}`)
+            }
           },
         })
         hlsRef.current = hls
@@ -408,11 +607,24 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
         })
         hls.on(HlsPlayer.Events.MANIFEST_PARSED, () => {
           stageRef.current = 'manifest-parsed'
+          llHlsActive = detectLlHls(HLS_LOW_LATENCY_ENABLED, hls)
+          if (llHlsActive) {
+            applyLlHlsRuntimeConfig(hls, runtimeMode)
+          }
+          latencyController?.reset(runtimeMode)
           updateMetrics()
           if (!seekApplied && seekTarget > 0) {
             seekApplied = applyVodRelaySeek(video, seekTarget)
           }
           if (options.autoPlay !== false) video.play().catch(() => undefined)
+        })
+        hls.on(HlsPlayer.Events.LEVEL_LOADED, () => {
+          if (llHlsActive) return
+          if (detectLlHls(HLS_LOW_LATENCY_ENABLED, hls)) {
+            llHlsActive = true
+            applyLlHlsRuntimeConfig(hls, runtimeMode)
+            updateMetrics()
+          }
         })
         hls.on(HlsPlayer.Events.BUFFER_APPENDED, () => {
           if (stageRef.current !== 'first-frame') stageRef.current = 'buffered'
@@ -456,7 +668,10 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
             if (!unauthorizedEscalated && playbackMode !== 'vod') {
               unauthorizedEscalated = true
               setState('retrying')
-              options.onUnauthorizedHls?.()
+              // Bearer is already on xhrSetup; only restart relay after playlist reloads fail.
+              if (unauthorizedReloadCount > maxUnauthorizedReloads) {
+                options.onUnauthorizedHls?.()
+              }
               return
             }
             if (playbackMode === 'vod') {
@@ -484,6 +699,16 @@ export function useHlsPlayback(videoRef: RefObject<HTMLVideoElement>, options: U
               stageRef.current = 'frag-404-recover'
               hls.startLoad(vodHoldPosition())
               updateMetrics()
+            }
+            if (
+              playbackMode === 'live'
+              && responseCode === 404
+              && (details.includes('manifest') || details.includes('level'))
+            ) {
+              stageRef.current = 'manifest-404-retry'
+              updateMetrics()
+              setState('retrying')
+              hls.loadSource(src)
             }
             return
           }

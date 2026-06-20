@@ -215,21 +215,24 @@ func TestProviderSnapshotNeedsRefresh(t *testing.T) {
 		name       string
 		localFound bool
 		localSetID string
+		localHash  string
 		localCount int
 		remoteSet  string
+		remoteHash string
 		remoteCnt  int
 		want       bool
 	}{
-		{name: "missing local snapshot", localFound: false, remoteSet: "set-1", remoteCnt: 10, want: true},
-		{name: "count mismatch", localFound: true, localSetID: "set-1", localCount: 96, remoteSet: "set-1", remoteCnt: 954, want: true},
-		{name: "set mismatch", localFound: true, localSetID: "set-1", localCount: 10, remoteSet: "set-2", remoteCnt: 10, want: true},
-		{name: "matching snapshot", localFound: true, localSetID: "set-1", localCount: 10, remoteSet: "set-1", remoteCnt: 10, want: false},
-		{name: "no remote set", localFound: true, localSetID: "set-1", localCount: 10, remoteSet: "", remoteCnt: 0, want: false},
+		{name: "missing local snapshot", localFound: false, remoteSet: "set-1", remoteCnt: 10, remoteHash: "abc", want: true},
+		{name: "count mismatch", localFound: true, localSetID: "set-1", localHash: "abc", localCount: 96, remoteSet: "set-1", remoteHash: "abc", remoteCnt: 954, want: true},
+		{name: "hash mismatch", localFound: true, localSetID: "set-1", localHash: "abc", localCount: 10, remoteSet: "set-1", remoteHash: "def", remoteCnt: 10, want: true},
+		{name: "set mismatch", localFound: true, localSetID: "set-1", localHash: "abc", localCount: 10, remoteSet: "set-2", remoteHash: "abc", remoteCnt: 10, want: true},
+		{name: "matching snapshot", localFound: true, localSetID: "set-1", localHash: "abc", localCount: 10, remoteSet: "set-1", remoteHash: "abc", remoteCnt: 10, want: false},
+		{name: "no remote set", localFound: true, localSetID: "set-1", localHash: "abc", localCount: 10, remoteSet: "", remoteHash: "", remoteCnt: 0, want: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := providerSnapshotNeedsRefresh(tt.localFound, tt.localSetID, tt.localCount, tt.remoteSet, tt.remoteCnt)
+			got := providerSnapshotNeedsRefresh(tt.localFound, tt.localSetID, tt.localHash, tt.localCount, tt.remoteSet, tt.remoteHash, tt.remoteCnt)
 			if got != tt.want {
 				t.Fatalf("providerSnapshotNeedsRefresh() = %v, want %v", got, tt.want)
 			}

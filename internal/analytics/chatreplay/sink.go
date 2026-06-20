@@ -19,10 +19,10 @@ type Sink interface {
 	// FlushSegment persists buffered messages whose aligned minute falls within
 	// [startMinute, endMinute] inclusive. Used by the parallel path's
 	// per-segment checkpoint hook.
-	FlushSegment(ctx context.Context, startMinute, endMinute int) error
+	FlushSegment(ctx context.Context, startMinute, endMinute int) (int, error)
 	// Flush persists all remaining buffered messages. Called once at the end of
 	// a fetch (and at serial checkpoint boundaries).
-	Flush(ctx context.Context) error
+	Flush(ctx context.Context) (int, error)
 }
 
 // StoreSink is a Store-backed, segment-aware buffer implementing Sink. Messages
@@ -61,14 +61,14 @@ func (s *StoreSink) Add(msg VODChatMessage) {
 // FlushSegment persists buffered messages whose offset minute falls within
 // [startMinute, endMinute] inclusive, retaining the rest. Safe on a nil
 // receiver.
-func (s *StoreSink) FlushSegment(ctx context.Context, startMinute, endMinute int) error {
+func (s *StoreSink) FlushSegment(ctx context.Context, startMinute, endMinute int) (int, error) {
 	if s == nil || s.store == nil {
-		return nil
+		return 0, nil
 	}
 	s.mu.Lock()
 	if len(s.buf) == 0 {
 		s.mu.Unlock()
-		return nil
+		return 0, nil
 	}
 	due := make([]VODChatMessage, 0, len(s.buf))
 	keep := s.buf[:0:0]
@@ -84,20 +84,20 @@ func (s *StoreSink) FlushSegment(ctx context.Context, startMinute, endMinute int
 	s.mu.Unlock()
 
 	if len(due) == 0 {
-		return nil
+		return 0, nil
 	}
 	return s.store.BulkInsert(ctx, due)
 }
 
 // Flush persists all remaining buffered messages. Safe on a nil receiver.
-func (s *StoreSink) Flush(ctx context.Context) error {
+func (s *StoreSink) Flush(ctx context.Context) (int, error) {
 	if s == nil || s.store == nil {
-		return nil
+		return 0, nil
 	}
 	s.mu.Lock()
 	if len(s.buf) == 0 {
 		s.mu.Unlock()
-		return nil
+		return 0, nil
 	}
 	due := s.buf
 	s.buf = nil
@@ -110,9 +110,9 @@ func (s *StoreSink) Flush(ctx context.Context) error {
 // disabled but a non-nil Sink value is required.
 type NopSink struct{}
 
-func (NopSink) Add(VODChatMessage)                          {}
-func (NopSink) FlushSegment(context.Context, int, int) error { return nil }
-func (NopSink) Flush(context.Context) error                  { return nil }
+func (NopSink) Add(VODChatMessage)                                  {}
+func (NopSink) FlushSegment(context.Context, int, int) (int, error) { return 0, nil }
+func (NopSink) Flush(context.Context) (int, error)                  { return 0, nil }
 
 // Compile-time checks that both implementations satisfy Sink.
 var (

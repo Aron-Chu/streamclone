@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import WelcomeOverlay from './components/WelcomeOverlay'
+import { ChatEmoteTooltipProvider } from './components/chat/ChatEmoteTooltipLayer'
 
 const Directory = lazy(() => import('./components/Directory'))
 const Channel = lazy(() => import('./components/Channel'))
@@ -9,6 +10,8 @@ const StudioRedirect = lazy(() => import('./components/StudioRedirect'))
 const BrowsePage = lazy(() => import('./components/BrowsePage'))
 const ChatLogsPage = lazy(() => import('./components/ChatLogsPage'))
 const NetworkPage = lazy(() => import('./components/NetworkPage'))
+const PulseWire = lazy(() => import('./components/pulsewire/PulseWirePage'))
+const StreamerPulseWire = lazy(() => import('./components/pulsewire/StreamerStatProfile'))
 
 function RouteLoadingSkeleton() {
   return (
@@ -40,6 +43,13 @@ export default function App() {
   const [authNotice, setAuthNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
 
   useEffect(() => {
+    const { hostname, port, protocol, pathname, search, hash } = window.location
+    if (hostname === 'localhost' && port === '8090') {
+      window.location.replace(`${protocol}//127.0.0.1:${port}${pathname}${search}${hash}`)
+    }
+  }, [])
+
+  useEffect(() => {
     const url = new URL(window.location.href)
     const status = url.searchParams.get('auth')
     if (status !== 'success' && status !== 'error') return
@@ -54,7 +64,7 @@ export default function App() {
   }, [])
 
   return (
-    <>
+    <ChatEmoteTooltipProvider>
       {authNotice ? (
         <div className={`fixed left-1/2 top-4 z-[60] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded border px-4 py-3 text-sm font-bold shadow-2xl ${authNotice.tone === 'success' ? 'border-emerald-300/30 bg-emerald-500/15 text-emerald-100' : 'border-red-300/30 bg-red-500/15 text-red-100'}`}>
           {authNotice.message}
@@ -74,10 +84,13 @@ export default function App() {
           <Route path="/logs/:login" element={<ChatLogsPage />} />
           <Route path="/logs/:login/:streamId" element={<ChatLogsPage />} />
           <Route path="/network" element={<NetworkPage />} />
+          <Route path="/pulse-wire" element={<PulseWire />} />
+          <Route path="/pulse-wire/streamer/:login" element={<StreamerPulseWire />} />
+          <Route path="/pulse-wire/:storyId" element={<PulseWire />} />
           <Route path="/studio" element={<StudioRedirect />} />
           <Route path="/studio/:jobId" element={<StudioRedirect />} />
         </Routes>
       </Suspense>
-    </>
+    </ChatEmoteTooltipProvider>
   )
 }

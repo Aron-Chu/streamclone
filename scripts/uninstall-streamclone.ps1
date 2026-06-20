@@ -14,6 +14,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\env.ps1')
 . (Join-Path $PSScriptRoot 'lib\install-upgrade.ps1')
+. (Join-Path $PSScriptRoot 'lib\stack-progress.ps1')
 
 function Set-UninstallProgress {
     param(
@@ -219,36 +220,20 @@ function Invoke-StreamcloneComposeDown {
 
     Set-Location $Root
 
-    $profile = 'core'
-    $profileFile = Join-Path $Root '.streamclone-profile'
-    if (Test-Path $profileFile) {
-        $profile = (Get-Content $profileFile -Raw).Trim()
-    } elseif (Test-Path $envFile) {
-        $vals = Read-EnvKeyValueFile -Path $envFile
-        if ($vals['STREAMCLONE_PROFILE']) { $profile = $vals['STREAMCLONE_PROFILE'] }
-    }
+    $profile = Get-StreamcloneProfileFromRoot -Root $Root -Default 'core'
 
-    $composeArgs = @(
-        'compose', '--env-file', '.env',
-        '-f', 'deploy/docker-compose.yml',
-        '-f', 'deploy/docker-compose.local-tunnel.yml'
-    )
-    if (Test-StreamcloneUseReleaseImages -Root $Root) {
-        $composeArgs += '-f', 'deploy/docker-compose.release.yml'
-    }
-    if ($profile -notin @('core', 'scraper', 'clipper', 'full')) {
+    if ($profile -notin @('core', 'scraper', 'clipper', 'full', 'pulse')) {
         # Unknown/legacy profile marker: tear down everything to be safe.
         $profile = 'full'
     }
-    $optionalProfiles = @((Get-EnvComposeProfiles -Profile $profile) + @('pulse') | Select-Object -Unique)
-    if ($optionalProfiles.Count -gt 0) {
-        Write-Host "Installed profile: $profile (optional services: $($optionalProfiles -join ', '))" -ForegroundColor DarkGray
+    $composeProfiles = @(Get-StreamcloneComposeProfiles -Profile $profile -EnvFile $envFile)
+    if ($composeProfiles.Count -gt 0) {
+        Write-Host "Installed profile: $profile (compose profiles: $($composeProfiles -join ', '))" -ForegroundColor DarkGray
     } else {
-        Write-Host "Installed profile: $profile (no optional services)" -ForegroundColor DarkGray
+        Write-Host "Installed profile: $profile (core only)" -ForegroundColor DarkGray
     }
-    foreach ($p in $optionalProfiles) {
-        $composeArgs += '--profile', $p
-    }
+
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profile -RelativePaths
 
     $downArgs = @('down', '--remove-orphans', '--timeout', '30')
     if ($Volumes) { $downArgs += '-v' }
@@ -265,16 +250,9 @@ function Invoke-StreamcloneComposeDown {
                 Write-Host 'Docker engine unavailable - stack may still be running. Start Docker Desktop and run Finish Streamclone Docker cleanup.cmd if needed.' -ForegroundColor Yellow
             }
         }
-        if ($optionalProfiles.Count -gt 0) {
-            $composeArgsNoProfiles = @(
-                'compose', '--env-file', '.env',
-                '-f', 'deploy/docker-compose.yml',
-                '-f', 'deploy/docker-compose.local-tunnel.yml'
-            )
-            if (Test-StreamcloneUseReleaseImages -Root $Root) {
-                $composeArgsNoProfiles += '-f', 'deploy/docker-compose.release.yml'
-            }
-            $result = Invoke-EnvDockerCaptured -Arguments ($composeArgsNoProfiles + $downArgs)
+        if ($composeProfiles.Count -gt 0) {
+            $coreComposeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile 'core' -RelativePaths
+            $result = Invoke-EnvDockerCaptured -Arguments ($coreComposeArgs + $downArgs)
             foreach ($line in $result.Output) { Write-Host $line }
         }
         Invoke-StreamcloneDockerResourceCleanup -Volumes:$Volumes

@@ -19,6 +19,7 @@ TwitchTracker commonly blocks direct HTTP clients. The working path is a browser
 2. Keep a persistent scraper profile.
 3. Warm the profile before heavy syncs when possible.
 4. Let Analytics request direct TwitchTracker egress.
+5. Optional: enable `CHALLENGE_FALLBACK_ENABLED=true` so Pydoll handles Turnstile after passive waits fail. Run `make scraper-turnstile-benchmark` to compare handlers.
 
 Useful commands:
 
@@ -26,21 +27,33 @@ Useful commands:
 make up-scraper
 make scraper-check
 make scraper-preflight
+make scraper-turnstile-benchmark
 ```
 
-Windows CDP fallback:
+Windows CDP fallback (Camoufox Playwright CDP or Pydoll):
 
 ```powershell
 powershell -File scripts\scraper-cdp.ps1
 ```
 
-Then set `CDP_URL=http://host.docker.internal:9222` and `SCRAPER_BROWSER=cdp`.
+Then set `CDP_URL=http://host.docker.internal:9222` and `SCRAPER_BROWSER=cdp`, or set `PYDOLL_CDP_URL` with `CHALLENGE_FALLBACK_ENABLED=true` / `SCRAPER_BROWSER=pydoll`.
 
 ## Proxy Findings
 
 Datacenter proxies made TwitchTracker Cloudflare behavior worse in local tests. Analytics currently sends `useProxy: false` for TwitchTracker detail work, and scraper routing may bypass proxies for Tracker URLs.
 
 Use `PROXY_*` only for experiments or other scrape targets. Keep proxy credentials in `.env.local`; never commit them.
+
+Validate Flame API key and GB balance before proxy benchmarks: `make flame-proxy-preflight`.
+
+Reddit/X social paths: `make social-probe`.
+
+Social browser fallbacks are bounded separately from item counts. `social.Budget.MaxBrowserFetches`
+caps scraper-backed YouTube, Reddit fallback, and StreamerBans fallback calls so a small
+`MaxItems` budget cannot fan out into many browser fetches across expanded keywords. Storygraph
+sets those caps with `STORYGRAPH_SOCIAL_BROWSER_FETCH_BUDGET` and
+`STORYGRAPH_YOUTUBE_BROWSER_FETCH_BUDGET`. Both default to `0` on the shared local
+scraper, which disables social browser fallback unless explicitly opted in.
 
 ## Operational Tips
 
@@ -51,7 +64,11 @@ Use `PROXY_*` only for experiments or other scrape targets. Keep proxy credentia
 
 ## Related Files
 
+- [docs/tiers-scraper-and-social-spread.md](tiers-scraper-and-social-spread.md) — tier detachment, shared scraper, proxies, Social spread
+- [docs/scraping-archive/requirements.md](scraping-archive/requirements.md) — bulk scrape tiers, Azure blob archive, backfill phases, benchmark procedures
 - `.kiro/steering/analytics.md`
 - `internal/analytics/sync.go`
 - `internal/metadata/api/api.go`
 - `scripts/scraper-preflight.*`
+- `scripts/scraper-proxy-benchmark.ps1`
+- `scripts/scraper-turnstile-benchmark.ps1`

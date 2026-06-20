@@ -226,6 +226,11 @@ export default function NetworkPage() {
               onStartPulse={() => void optional.startService('pulse')}
               startingPulse={optional.isStarting('pulse')}
             />
+            {optional.actionError ? (
+              <p className="rounded-lg border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-sm font-semibold text-amber-50">
+                {optional.actionError}
+              </p>
+            ) : null}
           </>
         ) : null}
 

@@ -342,29 +342,145 @@ type ProviderEmoteSummary struct {
 }
 
 type ChannelProviderLoad struct {
-	Provider string
-	State    string
-	Count    int
-	Error    string
+	Provider      string
+	State         string
+	Count         int
+	ExpectedCount int
+	ImportedCount int
+	Error         string
 }
 
 type ChannelProviderSetSnapshot struct {
 	ProviderSetID string
 	Count         int
+	EmoteHash     string
+}
+
+type SetProviderEmote struct {
+	EmoteID         string
+	ProviderEmoteID string
+	Name            string
+}
+
+func (s *Store) UpdateEmoteName(ctx context.Context, id, name string) error {
+	_, err := s.db.Exec(ctx, `UPDATE emotes SET name=$1, updated_at=now() WHERE id=$2::uuid`, name, id)
+	return err
+}
+
+func (s *Store) ListSetProviderEmotes(ctx context.Context, setID, provider string) ([]SetProviderEmote, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT e.id, COALESCE(e.provider_emote_id, ''), e.name
+		FROM emote_set_items i
+		JOIN emotes e ON e.id = i.emote_id
+		WHERE i.emote_set_id = $1::uuid
+			AND i.status = 1
+			AND e.status = 1
+			AND e.is_global = false
+			AND COALESCE(e.provider, 'custom') = $2`, setID, provider,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SetProviderEmote
+	for rows.Next() {
+		var item SetProviderEmote
+		if err := rows.Scan(&item.EmoteID, &item.ProviderEmoteID, &item.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListActiveSevenTVChannels(ctx context.Context) ([]Channel, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT c.twitch_id, c.login, c.display_name, c.active_emote_set_id, c.updated_at
+		FROM channels c
+		WHERE c.active_emote_set_id IS NOT NULL
+			AND EXISTS (
+				SELECT 1
+				FROM emote_set_items i
+				JOIN emotes e ON e.id = i.emote_id
+				WHERE i.emote_set_id = c.active_emote_set_id
+					AND i.status = 1
+					AND e.status = 1
+					AND COALESCE(e.provider, 'custom') = 'seventv'
+					AND COALESCE(e.provider_set_id, '') <> ''
+					AND COALESCE(e.provider_set_id, '') <> 'global'
+			)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Channel
+	for rows.Next() {
+		var ch Channel
+		if err := rows.Scan(&ch.TwitchID, &ch.Login, &ch.DisplayName, &ch.ActiveEmoteSetID, &ch.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, ch)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetChannelSevenTVProviderSetID(ctx context.Context, login string) (string, bool, error) {
+	var setID string
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(e.provider_set_id, '')
+		FROM channels c
+		JOIN emote_set_items i ON i.emote_set_id = c.active_emote_set_id AND i.status = 1
+		JOIN emotes e ON e.id = i.emote_id
+		WHERE c.login = $1
+			AND COALESCE(e.provider, 'custom') = 'seventv'
+			AND COALESCE(e.provider_set_id, '') <> ''
+			AND COALESCE(e.provider_set_id, '') <> 'global'
+		ORDER BY i.added_at DESC
+		LIMIT 1`, login,
+	).Scan(&setID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return setID, setID != "", nil
 }
 
 func (s *Store) GetChannelEmotes(ctx context.Context, login string) ([]ChannelEmote, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT COALESCE(i.alias, e.name), e.id, e.is_global, e.flags, COALESCE(e.provider, 'custom')
-		FROM channels c
-		JOIN emote_sets es ON es.id = c.active_emote_set_id
-		JOIN emote_set_items i ON i.emote_set_id = es.id
-		JOIN emotes e ON e.id = i.emote_id
-		WHERE c.login=$1 AND e.status=1 AND i.status=1
-		UNION
-		SELECT e.name, e.id, e.is_global, e.flags, COALESCE(e.provider, 'custom')
-		FROM emotes e
-		WHERE e.is_global=true AND e.status=1`, login,
+		WITH ranked AS (
+			SELECT COALESCE(i.alias, e.name) AS name, e.id AS emote_id, e.is_global, e.flags,
+				COALESCE(e.provider, 'custom') AS provider,
+				CASE COALESCE(e.provider, 'custom')
+					WHEN 'twitch' THEN 1
+					WHEN 'seventv' THEN 2
+					WHEN 'bttv' THEN 3
+					WHEN 'ffz' THEN 4
+					WHEN 'custom' THEN 5
+					ELSE 6
+				END AS provider_rank
+			FROM channels c
+			JOIN emote_sets es ON es.id = c.active_emote_set_id
+			JOIN emote_set_items i ON i.emote_set_id = es.id
+			JOIN emotes e ON e.id = i.emote_id
+			WHERE c.login=$1 AND e.status=1 AND i.status=1
+			UNION ALL
+			SELECT e.name, e.id, e.is_global, e.flags, COALESCE(e.provider, 'custom') AS provider,
+				CASE COALESCE(e.provider, 'custom')
+					WHEN 'twitch' THEN 1
+					WHEN 'seventv' THEN 2
+					WHEN 'bttv' THEN 3
+					WHEN 'ffz' THEN 4
+					WHEN 'custom' THEN 5
+					ELSE 6
+				END AS provider_rank
+			FROM emotes e
+			WHERE e.is_global=true AND e.status=1
+		)
+		SELECT name, emote_id, is_global, flags, provider
+		FROM ranked
+		ORDER BY provider_rank, name`, login,
 	)
 	if err != nil {
 		return nil, err
@@ -466,13 +582,23 @@ func (s *Store) GetChannelProviderSetSnapshot(ctx context.Context, login, provid
 			FROM channels c
 			JOIN emote_set_items i ON i.emote_set_id = c.active_emote_set_id AND i.status = 1
 			JOIN emotes e ON e.id = i.emote_id
-			WHERE c.login = $1 AND COALESCE(e.provider, 'custom') = $2
+			WHERE c.login = $1 AND COALESCE(e.provider, 'custom') = $2 AND e.is_global = false
 			GROUP BY COALESCE(e.provider_set_id, '')
 			ORDER BY COUNT(*) DESC
 			LIMIT 1
+		),
+		provider_ids AS (
+			SELECT array_agg(e.provider_emote_id ORDER BY e.provider_emote_id COLLATE "C") AS ids
+			FROM channels c
+			JOIN emote_set_items i ON i.emote_set_id = c.active_emote_set_id AND i.status = 1
+			JOIN emotes e ON e.id = i.emote_id
+			WHERE c.login = $1 AND COALESCE(e.provider, 'custom') = $2 AND e.is_global = false
 		)
-		SELECT provider_set_id, count FROM provider_items`, login, provider,
-	).Scan(&item.ProviderSetID, &item.Count)
+		SELECT p.provider_set_id, p.count,
+			COALESCE(encode(digest(array_to_string(ids, ','), 'sha256'), 'hex'), '')
+		FROM provider_items p
+		CROSS JOIN provider_ids`, login, provider,
+	).Scan(&item.ProviderSetID, &item.Count, &item.EmoteHash)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ChannelProviderSetSnapshot{}, false, nil
@@ -482,22 +608,24 @@ func (s *Store) GetChannelProviderSetSnapshot(ctx context.Context, login, provid
 	return item, true, nil
 }
 
-func (s *Store) UpsertChannelProviderLoad(ctx context.Context, twitchID, provider, state string, count int, lastErr string) error {
+func (s *Store) UpsertChannelProviderLoad(ctx context.Context, twitchID, provider, state string, count, expectedCount, importedCount int, lastErr string) error {
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO channel_emote_providers (twitch_id, provider, state, count, last_error)
-		VALUES ($1, $2, $3, $4, NULLIF($5, ''))
+		INSERT INTO channel_emote_providers (twitch_id, provider, state, count, expected_count, imported_count, last_error)
+		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''))
 		ON CONFLICT (twitch_id, provider) DO UPDATE SET
 			state=EXCLUDED.state,
 			count=EXCLUDED.count,
+			expected_count=EXCLUDED.expected_count,
+			imported_count=EXCLUDED.imported_count,
 			last_error=EXCLUDED.last_error,
-			updated_at=now()`, twitchID, provider, state, count, lastErr,
+			updated_at=now()`, twitchID, provider, state, count, expectedCount, importedCount, lastErr,
 	)
 	return err
 }
 
 func (s *Store) GetChannelProviderLoads(ctx context.Context, login string) (map[string]ChannelProviderLoad, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT p.provider, p.state, p.count, COALESCE(p.last_error, '')
+		SELECT p.provider, p.state, p.count, COALESCE(p.expected_count, 0), COALESCE(p.imported_count, 0), COALESCE(p.last_error, '')
 		FROM channel_emote_providers p
 		JOIN channels c ON c.twitch_id = p.twitch_id
 		WHERE c.login=$1`, login,
@@ -510,7 +638,7 @@ func (s *Store) GetChannelProviderLoads(ctx context.Context, login string) (map[
 	loads := make(map[string]ChannelProviderLoad)
 	for rows.Next() {
 		var item ChannelProviderLoad
-		if err := rows.Scan(&item.Provider, &item.State, &item.Count, &item.Error); err != nil {
+		if err := rows.Scan(&item.Provider, &item.State, &item.Count, &item.ExpectedCount, &item.ImportedCount, &item.Error); err != nil {
 			return nil, err
 		}
 		loads[item.Provider] = item

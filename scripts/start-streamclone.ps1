@@ -36,6 +36,10 @@ if ([string]::IsNullOrWhiteSpace($Profile)) {
     $Profile = 'core'
 }
 
+if ($Profile -eq 'clipper') {
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-replayforge-hint.ps1')
+}
+
 $pullImages = $UseImages.IsPresent
 if (-not $UseImages.IsPresent) {
     $pullImages = Test-StreamcloneUseImagesDefault -Base $Root
@@ -57,29 +61,19 @@ if (-not $SkipSetup -and -not (Test-Path $envFile)) {
         Write-Host 'Using pre-built GHCR images (release bundle or STREAMCLONE_USE_IMAGES=1).'
     }
     . (Join-Path $PSScriptRoot 'lib\env.ps1')
-    Repair-StreamcloneCaddyfileLocalTunnel -Root $Root | Out-Null
+    . (Join-Path $PSScriptRoot 'lib\stack-progress.ps1')
     Ensure-StreamcloneInstallId -EnvFile $envFile | Out-Null
+    Invoke-EnvApplyReleaseDefaults -EnvFile $envFile | Out-Null
     Ensure-LocalhostDevTokenImport -EnvFile $envFile | Out-Null
-    $composeArgs = @(
-        'compose', '--env-file', '.env',
-        '-f', 'deploy/docker-compose.yml',
-        '-f', 'deploy/docker-compose.local-tunnel.yml'
-    )
-    if ($pullImages) {
-        $composeArgs += '-f', 'deploy/docker-compose.release.yml'
-    }
-    foreach ($p in (Get-EnvComposeProfiles -Profile $Profile)) {
-        $composeArgs += '--profile', $p
-    }
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-oauth-env.ps1') -EnvFile $envFile 2>$null | Out-Host
+    Repair-StreamcloneCaddyfileLocalTunnel -Root $Root | Out-Null
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $Profile -UseImages:$pullImages
     $upArgs = @('up', '-d', '--remove-orphans')
     if ($pullImages) { $upArgs += '--pull', 'missing' } else { $upArgs += '--build' }
     $code = Invoke-EnvDocker -Arguments ($composeArgs + $upArgs)
     if ($code -ne 0) { exit $code }
 
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'reload-env-if-stale.ps1') -EnvFile $envFile 2>$null
-    if ($Profile -in @('clipper', 'full')) {
-        & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-clipper-auth.ps1') -EnvFile $envFile 2>$null
-    }
 }
 
 & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'validate-env.ps1') -Profile $Profile -EnvFile $envFile 2>&1 | Out-Host
@@ -120,10 +114,6 @@ if (Test-Path $registerScript) {
 Write-Host ''
 Write-Host ("Streamclone is running at {0}" -f (Get-StreamcloneAppUrl)) -ForegroundColor Green
 Write-Host 'Stop:  powershell -File scripts/stop-streamclone.ps1'
-if ($Profile -in @('clipper', 'full')) {
-    Write-Host ("Clips: open {0} and click Sign in (optional) (one-time Twitch login)" -f (Get-StreamcloneAppUrl))
-    Write-Host '      or: powershell -File scripts/twitch-auth.ps1 -Action local-auth  (Twitch CLI)'
-}
 
 if (-not $NoBrowser) {
     Start-Process (Get-StreamcloneAppUrl)

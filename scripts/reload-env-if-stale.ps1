@@ -2,7 +2,7 @@
 # docker compose restart does NOT reload env_file — only --force-recreate does.
 param(
     [string]$EnvFile = '.env',
-    [string[]]$Services = @('chat', 'metadata', 'analytics', 'emote')
+    [string[]]$Services = @('chat', 'metadata', 'analytics', 'emote', 'storygraph', 'frontend')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,6 +44,7 @@ function Get-ContainerEnvValue {
 
 $desiredId = Read-EnvValue -Path $envPath -Key 'TWITCH_OAUTH_CLIENT_ID'
 $desiredDevToken = Read-EnvValue -Path $envPath -Key 'TWITCH_DEV_TOKEN_IMPORT_ENABLED'
+$desiredPulseWire = Read-EnvValue -Path $envPath -Key 'PULSE_WIRE_ENABLED'
 $checkOAuth = -not [string]::IsNullOrWhiteSpace($desiredId)
 
 $profile = Read-EnvValue -Path $envPath -Key 'STREAMCLONE_PROFILE'
@@ -73,6 +74,14 @@ foreach ($line in $psResult.Output) {
         $actualDev = Get-ContainerEnvValue -Container $container -Key 'TWITCH_DEV_TOKEN_IMPORT_ENABLED'
         if ($null -ne $actualDev -and $actualDev -ne $desiredDevToken) {
             [void]$stale.Add('chat')
+        }
+    }
+
+    if ($service -in @('frontend', 'storygraph')) {
+        $pulseKey = if ($service -eq 'frontend') { 'VITE_PULSE_WIRE_ENABLED' } else { 'PULSE_WIRE_ENABLED' }
+        $actualPulse = Get-ContainerEnvValue -Container $container -Key $pulseKey
+        if ($null -ne $actualPulse -and $actualPulse -ne $desiredPulseWire) {
+            [void]$stale.Add($service)
         }
     }
 
