@@ -12,6 +12,9 @@ const ChatLogsPage = lazy(() => import('./components/ChatLogsPage'))
 const NetworkPage = lazy(() => import('./components/NetworkPage'))
 const PulseWire = lazy(() => import('./components/pulsewire/PulseWirePage'))
 const StreamerPulseWire = lazy(() => import('./components/pulsewire/StreamerStatProfile'))
+const ArchiveAdminPage = lazy(() => import('./pages/admin/ArchiveAdminPage'))
+const AdminJobsPage = lazy(() => import('./pages/admin/AdminJobsPage'))
+const AdminCoveragePage = lazy(() => import('./pages/admin/AdminCoveragePage'))
 
 function RouteLoadingSkeleton() {
   return (
@@ -87,6 +90,9 @@ export default function App() {
           <Route path="/pulse-wire" element={<PulseWire />} />
           <Route path="/pulse-wire/streamer/:login" element={<StreamerPulseWire />} />
           <Route path="/pulse-wire/:storyId" element={<PulseWire />} />
+          <Route path="/admin/archive" element={<ArchiveAdminPage />} />
+          <Route path="/admin/jobs" element={<AdminJobsPage />} />
+          <Route path="/admin/coverage" element={<AdminCoveragePage />} />
           <Route path="/studio" element={<StudioRedirect />} />
           <Route path="/studio/:jobId" element={<StudioRedirect />} />
         </Routes>

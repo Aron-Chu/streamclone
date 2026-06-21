@@ -283,6 +283,7 @@ func main() {
 	heatmapCache := heatmap.NewCache(rdb, logger)
 	handler.WithHeatmapCache(heatmapCache)
 	handler.WithTimeseries(tsWriter)
+	adminArchiveHandler := analytics.NewAdminArchiveHandler(pool, cfg)
 	chatReplayStore := chatreplay.NewStore(pool).WithArchiveProtectRetention(cfg.ArchiveProtectRetention)
 	chatReplayHandler := chatreplay.NewHandler(chatReplayStore).WithLogger(logger).WithIngestEnabled(func() bool {
 		return cfg.ChatLogPersistEnabled
@@ -297,6 +298,7 @@ func main() {
 		return store.Ping(ctx)
 	})
 	handler.Routes(srv.Router)
+	adminArchiveHandler.Routes(srv.Router, cfg)
 	chatReplayHandler.Routes(srv.Router)
 
 	if err := srv.Run(ctx); err != nil {
