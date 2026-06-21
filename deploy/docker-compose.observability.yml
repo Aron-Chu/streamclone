@@ -1,0 +1,38 @@
+# Observability overlay — Prometheus + Grafana only (no Influx/pulse).
+# Usage: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml --profile observability up -d
+
+services:
+  prometheus-obs:
+    profiles: [observability]
+    image: prometheus/prometheus:v2.55.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus-observability.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+
+  grafana-obs:
+    profiles: [observability]
+    image: grafana/grafana:11.5.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-streampulse}
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - grafana-obs-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus-obs:
+        condition: service_started
+
+volumes:
+  grafana-obs-data:
