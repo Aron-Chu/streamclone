@@ -36,6 +36,6 @@ run_go() {
 }
 
 echo "==> archive restore drill for stream ${STREAM_ID}"
-run_go ./cmd/archive restore --stream-id="${STREAM_ID}"
+run_go ./cmd/archive restore --stream-id "${STREAM_ID}"
 
 echo "archive-restore-drill: pass"

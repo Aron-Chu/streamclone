@@ -258,11 +258,11 @@ fi
 # Gate 10 — admin archive route via Caddy (401 not 404)
 GATE=10
 echo "==> Gate 10: admin archive route via Caddy"
-admin_code="$(curl -sf -o /dev/null -w '%{http_code}' "${PUBLIC_ORIGIN}/v1/admin/archive/jobs" || echo 000)"
+admin_code="$(curl -s -o /dev/null -w '%{http_code}' "${PUBLIC_ORIGIN}/v1/admin/archive/jobs" || echo 000)"
 if [[ "${admin_code}" == "404" ]]; then
   fail "admin archive route returned 404 (metadata?) — check Caddy @admin_archive"
 fi
-if [[ "${admin_code}" == "401" || "${admin_code}" == "200" || "${admin_code}" == "404" ]]; then
+if [[ "${admin_code}" == "401" || "${admin_code}" == "200" ]]; then
   pass "admin archive HTTP ${admin_code} (401 expected without token)"
 else
   fail "admin archive unexpected HTTP ${admin_code}"

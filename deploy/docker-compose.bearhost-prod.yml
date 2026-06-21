@@ -21,6 +21,7 @@ services:
       BACKFILL_ENABLED: "false"
       GOLD_BACKFILL_ENABLED: "false"
       ARCHIVE_PG_DUMP_NIGHTLY: "false"
+      ADMIN_ARCHIVE_ENABLED: ${ADMIN_ARCHIVE_ENABLED:-1}
 
   analytics-workers:
     build:
@@ -103,4 +104,5 @@ services:
       VITE_CHAT_WS: ws://${APP_DOMAIN:?Set APP_DOMAIN in .env}/v1/ws
       VITE_PULSE_WIRE_ENABLED: "false"
       VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}
-    volumes: !reset ["./nginx.bearhost.conf:/etc/nginx/conf.d/default.conf:ro"]
+    volumes: !override
+      - "./nginx.bearhost.conf:/etc/nginx/conf.d/default.conf:ro"
