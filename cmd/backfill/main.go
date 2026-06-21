@@ -73,8 +73,23 @@ func main() {
 				}
 				logger.Info("bronze run-once completed")
 				return
+			case "vod-range":
+				login := bronzeLoginFromArgs(os.Args[3:])
+				if login == "" {
+					fmt.Println("Usage: backfill bronze vod-range --login=<channel>")
+					os.Exit(2)
+				}
+				out, err := bronzeVODRange(ctx, cfg, pool, login)
+				if err != nil {
+					logger.Error("bronze vod-range failed", "err", err)
+					os.Exit(1)
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(out)
+				return
 			default:
-				fmt.Println("Usage: backfill bronze status | backfill bronze run-once")
+				fmt.Println("Usage: backfill bronze status | backfill bronze run-once | backfill bronze vod-range --login=<channel>")
 				os.Exit(2)
 			}
 		case "sessions":
@@ -217,6 +232,41 @@ func main() {
 				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel")
 				os.Exit(2)
 			}
+		case "silver":
+			if len(os.Args) < 3 {
+				fmt.Println("Usage: backfill silver enqueue-from-bronze")
+				os.Exit(2)
+			}
+			switch os.Args[2] {
+			case "enqueue-from-bronze":
+				blob, err := newArchiveBlobStore(cfg)
+				if err != nil {
+					logger.Error("archive blob init failed", "err", err)
+					os.Exit(1)
+				}
+				enqueuer := analytics.NewSilverEnqueuer(
+					pool,
+					analytics.NewArchiveVODCatalog(blob),
+					analytics.SilverEnqueuerConfig{
+						SinceDays: cfg.SilverEnqueueSinceDays,
+						TopN:      cfg.SilverEnqueueTopN,
+						MaxPerRun: cfg.SilverEnqueueMaxPerRun,
+						Interval:  cfg.SilverEnqueueInterval,
+					},
+				)
+				result, err := enqueuer.RunOnce(ctx)
+				if err != nil {
+					logger.Error("silver enqueue-from-bronze failed", "err", err)
+					os.Exit(1)
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(result)
+				return
+			default:
+				fmt.Println("Usage: backfill silver enqueue-from-bronze")
+				os.Exit(2)
+			}
 		case "gold":
 			if len(os.Args) < 3 {
 				fmt.Println("Usage: backfill gold enqueue --stream-id=<id> [--login=] | backfill gold eval --stream-id=<id>")
@@ -272,7 +322,89 @@ func main() {
 	fmt.Println("backfill worker runs inside analytics when BACKFILL_ENABLED=true")
 	fmt.Println("gold enqueuer runs inside analytics when GOLD_BACKFILL_ENABLED=true")
 	fmt.Println("bronze indexer runs inside analytics when BRONZE_ENABLED=true")
-	fmt.Println("Use: backfill status | backfill jobs list|show|retry-failed|resume|cancel | backfill coverage report | backfill gold enqueue|eval | backfill bronze status | backfill bronze run-once | backfill sessions cleanup [--login=...]")
+	fmt.Println("Use: backfill status | backfill jobs list|show|retry-failed|resume|cancel | backfill coverage report | backfill silver enqueue-from-bronze | backfill gold enqueue|eval | backfill bronze status | backfill bronze run-once | backfill bronze vod-range --login=<channel> | backfill sessions cleanup [--login=...]")
+}
+
+func newArchiveBlobStore(cfg config.Config) (archive.BlobStore, error) {
+	if !cfg.ArchiveEnabled || cfg.ArchiveStorageProvider != "azure" {
+		return nil, fmt.Errorf("archive azure export must be enabled (ARCHIVE_ENABLED=true)")
+	}
+	return archive.NewAzureBlobStore(archive.AzureConfig{
+		StorageAccount:       cfg.ArchiveAzureStorageAccount,
+		Container:            cfg.ArchiveAzureContainer,
+		Prefix:               cfg.ArchiveAzurePrefix,
+		ConnectionStringFile: cfg.ArchiveAzureConnectionStringFile,
+	})
+}
+
+type bronzeVODRangeResult struct {
+	Login      string    `json:"login"`
+	RowCount   int       `json:"rowCount"`
+	NewestAt   time.Time `json:"newestAt,omitempty"`
+	OldestAt   time.Time `json:"oldestAt,omitempty"`
+	SpanDays   float64   `json:"spanDays,omitempty"`
+	BlobKey    string    `json:"blobKey,omitempty"`
+}
+
+func bronzeLoginFromArgs(args []string) string {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--login=") {
+			return strings.TrimSpace(strings.TrimPrefix(arg, "--login="))
+		}
+	}
+	return ""
+}
+
+func bronzeVODRange(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, login string) (bronzeVODRangeResult, error) {
+	login = strings.ToLower(strings.TrimSpace(login))
+	out := bronzeVODRangeResult{Login: login, BlobKey: archive.VODIndexBlobKey(login)}
+	if login == "" {
+		return out, fmt.Errorf("login required")
+	}
+	if !cfg.ArchiveEnabled || cfg.ArchiveStorageProvider != "azure" {
+		return out, fmt.Errorf("archive azure export must be enabled")
+	}
+	blob, err := newArchiveBlobStore(cfg)
+	if err != nil {
+		return out, err
+	}
+	raw, err := blob.Get(ctx, out.BlobKey)
+	if err != nil {
+		return out, err
+	}
+	data, err := archive.Gunzip(raw)
+	if err != nil {
+		return out, err
+	}
+	var newest, oldest time.Time
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var vod analytics.ArchivedVOD
+		if err := json.Unmarshal([]byte(line), &vod); err != nil {
+			continue
+		}
+		if vod.StartedAt.IsZero() {
+			continue
+		}
+		out.RowCount++
+		if newest.IsZero() || vod.StartedAt.After(newest) {
+			newest = vod.StartedAt
+		}
+		if oldest.IsZero() || vod.StartedAt.Before(oldest) {
+			oldest = vod.StartedAt
+		}
+	}
+	if out.RowCount == 0 {
+		return out, fmt.Errorf("no VOD rows in blob")
+	}
+	out.NewestAt = newest.UTC()
+	out.OldestAt = oldest.UTC()
+	out.SpanDays = newest.Sub(oldest).Hours() / 24
+	_ = pool // reserved for future manifest lookup
+	return out, nil
 }
 
 func coverageArgsFromCLI(args []string) (sinceRaw, outPath string) {

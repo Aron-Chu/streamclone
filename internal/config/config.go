@@ -186,6 +186,11 @@ type Config struct {
 
 	BackfillEnabled        bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
 	BackfillWorkerInterval time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`
+	SilverAutoEnqueueEnabled bool        `env:"SILVER_AUTO_ENQUEUE_ENABLED" envDefault:"false"`
+	SilverEnqueueSinceDays   int         `env:"SILVER_ENQUEUE_SINCE_DAYS" envDefault:"60"`
+	SilverEnqueueTopN        int         `env:"SILVER_ENQUEUE_TOP_N" envDefault:"200"`
+	SilverEnqueueMaxPerRun   int         `env:"SILVER_ENQUEUE_MAX_PER_RUN" envDefault:"25"`
+	SilverEnqueueInterval    time.Duration `env:"SILVER_ENQUEUE_INTERVAL" envDefault:"15m"`
 
 	GoldBackfillEnabled    bool          `env:"GOLD_BACKFILL_ENABLED" envDefault:"false"`
 	GoldMinPeakViewers     int           `env:"GOLD_MIN_PEAK_VIEWERS" envDefault:"0"`

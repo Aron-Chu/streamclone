@@ -157,6 +157,7 @@ func main() {
 	var archiveExporter analytics.SyncArchiveExporter
 	var archiveSyncExporter *archive.SyncExporter
 	var archiveWriter *archive.Writer
+	var archiveBlob archive.BlobStore
 	if cfg.ArchiveEnabled && cfg.ArchiveStorageProvider == "azure" {
 		blob, blobErr := archive.NewAzureBlobStore(archive.AzureConfig{
 			StorageAccount:       cfg.ArchiveAzureStorageAccount,
@@ -168,6 +169,7 @@ func main() {
 			logger.Error("archive blob init failed", "err", blobErr)
 			os.Exit(1)
 		}
+		archiveBlob = blob
 		manifest := archive.NewManifestStore(pool)
 		archiveWriter = archive.NewWriter(blob, manifest)
 		archiveSyncExporter = archive.NewSyncExporter(archiveWriter, archive.NewPgxAnalyticsDB(pool))
@@ -220,6 +222,11 @@ func main() {
 
 	startArchiveWorkers(ctx, cfg, pool, syncService, archiveSyncExporter, archiveWriter, logger)
 
+	if cfg.ArchiveEnabled || cfg.Tier0Enabled || cfg.BronzeEnabled || cfg.BackfillEnabled {
+		metrics.StartArchiveMetricsRefresh(ctx, pool, cfg.ArchiveMetricsRefreshInterval)
+		logger.Info("archive metrics refresh started", "interval", cfg.ArchiveMetricsRefreshInterval.String())
+	}
+
 	if cfg.Tier0Enabled {
 		roster := analytics.NewRosterSyncer(pool, cfg.MetadataServiceURL, cfg.Tier0RosterTopN, allAlways)
 		if archiveWriter != nil {
@@ -247,6 +254,27 @@ func main() {
 			"interval", cfg.BackfillWorkerInterval.String(),
 			"gold_enabled", cfg.GoldBackfillEnabled,
 		)
+		if cfg.SilverAutoEnqueueEnabled && archiveBlob != nil {
+			silverEnqueuer := analytics.NewSilverEnqueuer(
+				pool,
+				analytics.NewArchiveVODCatalog(archiveBlob),
+				analytics.SilverEnqueuerConfig{
+					SinceDays: cfg.SilverEnqueueSinceDays,
+					TopN:      cfg.SilverEnqueueTopN,
+					MaxPerRun: cfg.SilverEnqueueMaxPerRun,
+					Interval:  cfg.SilverEnqueueInterval,
+				},
+			)
+			analytics.StartSilverEnqueuer(ctx, silverEnqueuer, logger)
+			logger.Info("silver auto-enqueuer started",
+				"since_days", cfg.SilverEnqueueSinceDays,
+				"top_n", cfg.SilverEnqueueTopN,
+				"max_per_run", cfg.SilverEnqueueMaxPerRun,
+				"interval", cfg.SilverEnqueueInterval.String(),
+			)
+		} else if cfg.SilverAutoEnqueueEnabled && archiveBlob == nil {
+			logger.Warn("SILVER_AUTO_ENQUEUE_ENABLED is true but archive blob store is not configured")
+		}
 	}
 	if cfg.GoldBackfillEnabled {
 		goldRules := analytics.NewGoldRulesEngine(allAlways, cfg.GoldMinPeakViewers, cfg.GoldMinDurationMinutes)
