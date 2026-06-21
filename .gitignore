@@ -74,6 +74,9 @@ deploy/env/helm-local.yaml
 .streamclone-scraper-warmup.log
 .streamclone-scraper-warmup.log.err
 .streamclone-scraper-warmup.requested
+runtime/
+deploy/terraform/**/*.tfplan
+deploy/terraform/**/tfplan*
 runtime/clipper-twitch.env
 # local output / scratch
 *.bin
