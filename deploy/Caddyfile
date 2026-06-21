@@ -35,6 +35,16 @@
 		}
 	}
 
+	@admin_archive {
+		path /v1/admin/archive /v1/admin/archive/* /v1/admin/system /v1/admin/system/*
+	}
+	reverse_proxy @admin_archive analytics:8080 {
+		transport http {
+			read_timeout 15m
+			write_timeout 15m
+		}
+	}
+
 	@storygraph {
 		path /v1/pulse-wire /v1/pulse-wire/* /v1/channels/*/spread /v1/channels/*/spread/*
 	}
