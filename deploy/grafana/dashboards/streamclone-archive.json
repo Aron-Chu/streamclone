@@ -1,46 +1,175 @@
 {
   "uid": "streamclone-archive",
   "title": "Streamclone Archive",
-  "tags": ["streamclone", "archive"],
+  "tags": ["streamclone", "archive", "bearhost"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 3,
   "refresh": "30s",
   "panels": [
     {
       "id": 1,
       "type": "stat",
       "title": "Archive jobs running",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "targets": [{ "expr": "sum(streamclone_archive_jobs_running)", "legendFormat": "running" }]
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sum(streamclone_archive_jobs_running)", "legendFormat": "running", "refId": "A" }]
     },
     {
       "id": 2,
       "type": "stat",
       "title": "Archive jobs queued",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "targets": [{ "expr": "sum(streamclone_archive_jobs_queued)", "legendFormat": "queued" }]
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [{ "expr": "sum(streamclone_archive_jobs_queued)", "legendFormat": "queued", "refId": "A" }]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Bronze channels indexed",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [{ "expr": "bronze_channels_indexed_total", "legendFormat": "indexed", "refId": "A" }]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Bronze roster target",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [{ "expr": "bronze_channels_target", "legendFormat": "target", "refId": "A" }]
     },
     {
       "id": 3,
       "type": "timeseries",
       "title": "Backfill queue depth",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "targets": [{ "expr": "sum by (tier, status) (backfill_jobs_gauge)", "legendFormat": "{{tier}} {{status}}" }]
+      "targets": [{ "expr": "sum by (tier, status) (backfill_jobs_gauge)", "legendFormat": "{{tier}} {{status}}", "refId": "A" }]
     },
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Archive coverage ratio",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-      "targets": [{ "expr": "streamclone_archive_coverage_ratio", "legendFormat": "{{tier}}" }]
+      "title": "Archive coverage ratio by tier",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [{ "expr": "streamclone_archive_coverage_ratio", "legendFormat": "{{tier}}", "refId": "A" }]
     },
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Archive uploads",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
-      "targets": [{ "expr": "sum by (artifact_type) (rate(archive_exports_confirmed_total[5m]))", "legendFormat": "{{artifact_type}}" }]
+      "title": "Archive uploads (rate)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [{ "expr": "sum by (artifact_type) (rate(archive_exports_confirmed_total[5m]))", "legendFormat": "{{artifact_type}}", "refId": "A" }]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Bronze index progress",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "bronze_channels_indexed_total", "legendFormat": "indexed total", "refId": "A" },
+        { "expr": "bronze_channels_target", "legendFormat": "target", "refId": "B" }
+      ]
+    },
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Scraper & workers (BearHost VPS)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "collapsed": false
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Workers metrics up",
+      "description": "Prometheus can scrape analytics-workers /metrics",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 21 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "targets": [{ "expr": "max(up{job=\"analytics-workers\"})", "legendFormat": "up", "refId": "A" }]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "TT scraper error rate (15m)",
+      "description": "Share of TwitchTracker scraper calls failing (via analytics-workers)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 21 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 25 }
+            ]
+          }
+        }
+      },
+      "targets": [{
+        "expr": "100 * sum(rate(analytics_scraper_requests_total{result=\"error\"}[15m])) / clamp_min(sum(rate(analytics_scraper_requests_total[15m])), 0.001)",
+        "legendFormat": "error %",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Active sync jobs",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 21 },
+      "targets": [{ "expr": "sum(analytics_sync_active)", "legendFormat": "active", "refId": "A" }]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "TT scraper success / min",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 21 },
+      "fieldConfig": { "defaults": { "unit": "cpm", "decimals": 1 } },
+      "targets": [{
+        "expr": "60 * sum(rate(analytics_scraper_requests_total{result=\"success\"}[5m]))",
+        "legendFormat": "success/min",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Scraper requests / sec",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+      "targets": [{
+        "expr": "sum by (source, result) (rate(analytics_scraper_requests_total[5m]))",
+        "legendFormat": "{{source}} {{result}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "VOD GQL throttles / sec",
+      "description": "Twitch rate limits during chat/VOD backfill (indirect pipeline health)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+      "targets": [{
+        "expr": "sum by (status) (rate(analytics_vod_gql_throttle_total[5m]))",
+        "legendFormat": "{{status}}",
+        "refId": "A"
+      }]
     }
   ]
 }

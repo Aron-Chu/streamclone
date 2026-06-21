@@ -17,3 +17,14 @@ groups:
           severity: info
         annotations:
           summary: Silver archive coverage below 50%
+
+      - alert: ScraperErrorRateHigh
+        expr: |
+          sum(rate(analytics_scraper_requests_total{result="error"}[15m]))
+          / clamp_min(sum(rate(analytics_scraper_requests_total[15m])), 0.001) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TwitchTracker scraper error rate above 25%
+          description: Check streamclone-scraper logs and Cloudflare/proxy on BearHost.

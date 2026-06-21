@@ -52,13 +52,16 @@ env_compose_profiles() {
 
 env_feature_compose_profiles() {
   local file="${1:-$ENV_REPO_ROOT/.env}"
-  local pulse pulse_sem scraper_key
+  local pulse pulse_sem scraper_key disable_scraper
   pulse="$(env_read_value "$file" PULSE_WIRE_ENABLED 2>/dev/null || true)"
   pulse_sem="$(env_read_value "$file" PULSE_WIRE_SEMANTIC 2>/dev/null || true)"
   scraper_key="$(env_read_value "$file" SCRAPER_API_KEY 2>/dev/null || true)"
+  disable_scraper="$(env_read_value "$file" STREAMCLONE_DISABLE_LOCAL_SCRAPER 2>/dev/null || true)"
   [ "$pulse" = "true" ] && printf '%s ' pulse-wire
   [ "$pulse_sem" = "true" ] && printf '%s ' pulse-wire-semantic
-  [ -n "$scraper_key" ] && printf '%s ' scraper
+  if [ -n "$scraper_key" ] && [ "$disable_scraper" != "1" ] && [ "$disable_scraper" != "true" ]; then
+    printf '%s ' scraper
+  fi
 }
 
 env_streamclone_compose_profiles() {

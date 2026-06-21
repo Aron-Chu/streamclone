@@ -32,6 +32,7 @@ bearhost_compose() {
     --env-file deploy/env/profile-full.env
     --env-file deploy/env/profile-archive.env
     --env-file deploy/env/profile-bearhost-prod.env
+    --env-file deploy/env/profile-bearhost-corpus.env
     -f deploy/docker-compose.yml
     -f deploy/docker-compose.prod.yml
     -f deploy/docker-compose.bearhost-prod.yml
@@ -110,6 +111,7 @@ env_files=(
   "deploy/env/profile-full.env"
   "deploy/env/profile-archive.env"
   "deploy/env/profile-bearhost-prod.env"
+  "deploy/env/profile-bearhost-corpus.env"
 )
 docker_args=(
   --rm

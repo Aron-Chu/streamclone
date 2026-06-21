@@ -13,8 +13,11 @@ bearhost_grafana_dashboard_url() {
 }
 
 bearhost_grafana_warn_local_pulse() {
+  if [[ -z "${GRAFANA_ADMIN_USER:-}" || -z "${GRAFANA_ADMIN_PASSWORD:-}" ]]; then
+    return 0
+  fi
   local local_ds
-  local_ds="$(curl -sf -H 'Authorization: Basic YWRtaW46c3RyZWFtcHVsc2U=' \
+  local_ds="$(curl -sf -u "${GRAFANA_ADMIN_USER}:${GRAFANA_ADMIN_PASSWORD}" \
     http://127.0.0.1:3000/api/datasources 2>/dev/null || true)"
   if echo "$local_ds" | grep -q '"type":"influxdb"'; then
     echo ""

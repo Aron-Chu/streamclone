@@ -9,24 +9,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=scripts/lib/bearhost-compose.sh
+source "${ROOT}/scripts/lib/bearhost-compose.sh"
+
 BACKUP_DIR="${STREAMCLONE_BACKUPS_DIR:-/opt/streamclone/backups}"
 RETENTION_DAYS="${BEARHOST_BACKUP_RETENTION_DAYS:-14}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT="${BACKUP_DIR}/streamclone-${STAMP}.sql.gz"
-
-bearhost_compose() {
-  docker compose \
-    --env-file .env \
-    --env-file deploy/env/profile-full.env \
-    --env-file deploy/env/profile-archive.env \
-    --env-file deploy/env/profile-bearhost-prod.env \
-    -f deploy/docker-compose.yml \
-    -f deploy/docker-compose.release.yml \
-    -f deploy/docker-compose.prod.yml \
-    -f deploy/docker-compose.bearhost-prod.yml \
-    --profile scraper \
-    "$@"
-}
 
 mkdir -p "${BACKUP_DIR}"
 

@@ -4,7 +4,7 @@
 services:
   prometheus-obs:
     profiles: [observability]
-    image: prometheus/prometheus:v2.55.0
+    image: prom/prometheus:v2.55.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:9090:9090"
@@ -28,7 +28,7 @@ services:
       GF_USERS_DEFAULT_THEME: dark
     volumes:
       - grafana-obs-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/provisioning-obs:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       prometheus-obs:
