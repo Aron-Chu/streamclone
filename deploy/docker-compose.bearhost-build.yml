@@ -1,0 +1,33 @@
+# BearHost build-local overlay — compile app images from repo checkout (no GHCR pull).
+# Omit docker-compose.release.yml and merge this file instead.
+#
+# Scraper context ../../streamclone-scraper → /opt/streamclone/streamclone-scraper when
+# app lives at /opt/streamclone/app (rsync sibling repo there; see bearhost-rsync-to-vps.sh).
+
+services:
+  metadata:
+    image: !reset null
+
+  video:
+    image: !reset null
+
+  chat:
+    image: !reset null
+
+  analytics:
+    image: !reset null
+
+  emote:
+    image: !reset null
+
+  frontend:
+    image: !reset null
+
+  scraper:
+    image: !reset null
+    build:
+      context: ../../streamclone-scraper
+      dockerfile: Dockerfile
+
+  analytics-workers:
+    image: !reset null

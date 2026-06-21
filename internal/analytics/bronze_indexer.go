@@ -14,6 +14,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"streamclone/internal/metrics"
+	"streamclone/internal/archive"
+	"streamclone/internal/archive/jobtracker"
 )
 
 const bronzeHelixVODLimit = 80
@@ -35,6 +39,10 @@ type bronzeHelixClient interface {
 	ArchivedStreamHistory(ctx context.Context, login string, limit int) ([]ArchivedVOD, error)
 }
 
+type bronzeChannelProfile interface {
+	ChannelProfile(ctx context.Context, login string) (channelID, displayName string, rawHelix json.RawMessage, ok bool)
+}
+
 type bronzeArchiveExporter interface {
 	ExportTop500(ctx context.Context, payload []byte) error
 	ExportVODIndex(ctx context.Context, login string, lines []byte) error
@@ -46,6 +54,10 @@ type BronzeIndexer struct {
 	db               *pgxpool.Pool
 	helix            bronzeHelixClient
 	writer           bronzeArchiveExporter
+	bronzeExp        *archive.BronzeExporter
+	identityEnabled  bool
+	crosswalkEnabled bool
+	sevenTVAPIURL    string
 	metadataURL      string
 	ttAPIURL         string
 	userAgent        string
@@ -55,6 +67,11 @@ type BronzeIndexer struct {
 	helixConcurrency int
 	ttConcurrency    int
 	channelsPerTick  int
+	jobTracker       *jobtracker.Tracker
+	jobProgress      bool
+	vodCatalogState  *archive.VodCatalogState
+	tombstoneEnabled bool
+	coverageEnabled  bool
 }
 
 func NewBronzeIndexer(
@@ -106,9 +123,39 @@ func NewBronzeIndexer(
 	}
 }
 
+func (b *BronzeIndexer) WithJobTracker(tracker *jobtracker.Tracker, enabled bool) *BronzeIndexer {
+	if b != nil {
+		b.jobTracker = tracker
+		b.jobProgress = enabled
+	}
+	return b
+}
+
 func (b *BronzeIndexer) WithWriter(writer bronzeArchiveExporter) *BronzeIndexer {
 	if b != nil {
 		b.writer = writer
+	}
+	return b
+}
+
+func (b *BronzeIndexer) WithBronzeTombstones(state *archive.VodCatalogState, tombstoneEnabled, coverageEnabled bool) *BronzeIndexer {
+	if b != nil {
+		b.vodCatalogState = state
+		b.tombstoneEnabled = tombstoneEnabled
+		b.coverageEnabled = coverageEnabled
+	}
+	return b
+}
+
+func (b *BronzeIndexer) WithBronzeCorpus(exp *archive.BronzeExporter, identityEnabled, crosswalkEnabled bool, sevenTVAPIURL string) *BronzeIndexer {
+	if b != nil {
+		b.bronzeExp = exp
+		b.identityEnabled = identityEnabled
+		b.crosswalkEnabled = crosswalkEnabled
+		b.sevenTVAPIURL = strings.TrimRight(strings.TrimSpace(sevenTVAPIURL), "/")
+		if b.sevenTVAPIURL == "" {
+			b.sevenTVAPIURL = "https://7tv.io/v3"
+		}
 	}
 	return b
 }
@@ -128,10 +175,22 @@ func (b *BronzeIndexer) RunOnce(ctx context.Context) error {
 	if b.writer == nil {
 		return fmt.Errorf("bronze indexer: archive writer not configured")
 	}
+	var jobID string
+	if b.jobProgress && b.jobTracker != nil {
+		id, err := b.jobTracker.CreateJob(ctx, jobtracker.JobTypeBronzeRoster, "bronze", "worker", nil)
+		if err != nil {
+			return err
+		}
+		jobID = id
+		defer func() {
+			_ = b.jobTracker.FinishJob(ctx, jobID, jobtracker.JobStatusSucceeded, "")
+		}()
+	}
 	logins, err := b.buildChannelList(ctx)
 	if err != nil {
 		return err
 	}
+	metrics.SetBronzeChannelsTarget(len(logins))
 	if err := b.exportChannelList(ctx, logins); err != nil {
 		return err
 	}
@@ -141,6 +200,9 @@ func (b *BronzeIndexer) RunOnce(ctx context.Context) error {
 	}
 	if len(targets) == 0 {
 		return nil
+	}
+	if jobID != "" && b.jobTracker != nil {
+		_ = b.jobTracker.SetTotalItems(ctx, jobID, len(targets))
 	}
 	helixSem := make(chan struct{}, b.helixConcurrency)
 	ttSem := make(chan struct{}, b.ttConcurrency)
@@ -152,16 +214,34 @@ func (b *BronzeIndexer) RunOnce(ctx context.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			var itemID string
+			if jobID != "" && b.jobTracker != nil {
+				itemID, _ = b.jobTracker.UpsertItem(ctx, jobID, login, login, "", "", "bronze_vod_catalog")
+				_ = b.jobTracker.StartItem(ctx, itemID)
+			}
 			if err := b.indexLogin(ctx, login, helixSem, ttSem); err != nil {
+				if itemID != "" && b.jobTracker != nil {
+					_ = b.jobTracker.FailItem(ctx, jobID, itemID, err.Error())
+				}
 				errMu.Lock()
 				if firstErr == nil {
 					firstErr = err
 				}
 				errMu.Unlock()
+				return
+			}
+			if itemID != "" && b.jobTracker != nil {
+				_ = b.jobTracker.SucceedItem(ctx, jobID, itemID, "", "")
+				_ = b.jobTracker.Heartbeat(ctx, jobID)
 			}
 		}()
 	}
 	wg.Wait()
+	if b.coverageEnabled && b.bronzeExp != nil {
+		if summary, covErr := b.buildBronzeCoverageSummary(ctx, logins); covErr == nil {
+			_ = b.bronzeExp.ExportBronzeCoverage(ctx, summary)
+		}
+	}
 	return firstErr
 }
 
@@ -264,7 +344,13 @@ func (b *BronzeIndexer) exportChannelList(ctx context.Context, logins []string) 
 	if err != nil {
 		return err
 	}
-	return b.writer.ExportTop500(ctx, payload)
+	if err := b.writer.ExportTop500(ctx, payload); err != nil {
+		return err
+	}
+	if b.bronzeExp != nil {
+		return b.bronzeExp.ExportRosterTier0(ctx, payload)
+	}
+	return nil
 }
 
 func (b *BronzeIndexer) pickStaleLogins(ctx context.Context, roster []string) ([]string, error) {
@@ -361,6 +447,9 @@ func (b *BronzeIndexer) indexLogin(ctx context.Context, login string, helixSem, 
 		}
 		errMsg += "summary: " + summaryErr.Error()
 	}
+	if errMsg == "" {
+		metrics.IncBronzeChannelsIndexed()
+	}
 	_, err := b.db.Exec(ctx, `
 		INSERT INTO bronze_index_state (
 			login, last_helix_at, last_summary_at, helix_blob_uri, summary_blob_uri,
@@ -389,7 +478,83 @@ func (b *BronzeIndexer) indexLogin(ctx context.Context, login string, helixSem, 
 	if summaryErr != nil {
 		return summaryErr
 	}
+	if err := b.exportBronzeIdentityCrosswalk(ctx, login); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (b *BronzeIndexer) exportBronzeIdentityCrosswalk(ctx context.Context, login string) error {
+	if b.bronzeExp == nil || (!b.identityEnabled && !b.crosswalkEnabled) {
+		return nil
+	}
+	prof, ok := b.helix.(bronzeChannelProfile)
+	if !ok {
+		return nil
+	}
+	channelID, displayName, rawHelix, found := prof.ChannelProfile(ctx, login)
+	if !found || channelID == "" {
+		return nil
+	}
+	if b.identityEnabled {
+		if err := b.bronzeExp.ExportIdentity(ctx, archive.ChannelIdentityBlob{
+			Login:         login,
+			ChannelID:     channelID,
+			DisplayName:   displayName,
+			RawHelix:      rawHelix,
+		}); err != nil {
+			return err
+		}
+	}
+	if b.crosswalkEnabled {
+		providers := map[string]string{"twitch": channelID}
+		if sevenTVID := b.lookupSevenTVUser(ctx, channelID); sevenTVID != "" {
+			providers["7tv"] = sevenTVID
+		}
+		if err := b.bronzeExp.ExportCrosswalk(ctx, archive.ProviderCrosswalkBlob{
+			Login:     login,
+			ChannelID: channelID,
+			Providers: providers,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *BronzeIndexer) lookupSevenTVUser(ctx context.Context, twitchID string) string {
+	if b.httpClient == nil || twitchID == "" {
+		return ""
+	}
+	apiURL := b.sevenTVAPIURL
+	if apiURL == "" {
+		apiURL = "https://7tv.io/v3"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/users/twitch/%s", apiURL, twitchID), nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := b.httpClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return ""
+	}
+	var parsed struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.User.ID)
 }
 
 func nullableTime(ok bool, t time.Time) *time.Time {
@@ -418,6 +583,50 @@ func (b *BronzeIndexer) exportHelixIndex(ctx context.Context, login string) (row
 	}
 	if err := b.writer.ExportVODIndex(ctx, login, []byte(buf.String())); err != nil {
 		return 0, "", err
+	}
+	if b.bronzeExp != nil && len(vods) > 0 {
+		channelID := ""
+		if prof, ok := b.helix.(bronzeChannelProfile); ok {
+			if id, _, _, found := prof.ChannelProfile(ctx, login); found {
+				channelID = id
+			}
+		}
+		catalogLines := make([]archive.BronzeCatalogLine, 0, len(vods))
+		for _, vod := range vods {
+			rawHelix, marshalErr := json.Marshal(vod)
+			if marshalErr != nil {
+				return 0, "", marshalErr
+			}
+			duration := ""
+			if vod.DurationMinutes > 0 {
+				duration = fmt.Sprintf("%dm", vod.DurationMinutes)
+			}
+			catalogLines = append(catalogLines, archive.BronzeCatalogLine{
+				Login:     login,
+				ChannelID: channelID,
+				VodID:     vod.VideoID,
+				Title:     vod.Title,
+				CreatedAt: vod.StartedAt,
+				Duration:  duration,
+				RawHelix:  rawHelix,
+			})
+		}
+		if err := b.bronzeExp.ExportVODCatalog(ctx, login, channelID, catalogLines); err != nil {
+			return 0, "", err
+		}
+		if b.tombstoneEnabled && b.vodCatalogState != nil && b.bronzeExp != nil {
+			vodIDs := make([]string, 0, len(catalogLines))
+			for _, line := range catalogLines {
+				if line.VodID != "" {
+					vodIDs = append(vodIDs, line.VodID)
+				}
+			}
+			if removed, tombErr := b.vodCatalogState.ReplaceLoginCatalog(ctx, login, vodIDs); tombErr == nil {
+				for _, vodID := range removed {
+					_ = b.bronzeExp.ExportTombstone(ctx, login, vodID)
+				}
+			}
+		}
 	}
 	return len(vods), fmt.Sprintf("channels/vod_index/%s.jsonl.gz", login), nil
 }
@@ -515,6 +724,31 @@ func ListBronzeIndexState(ctx context.Context, db *pgxpool.Pool, limit int) ([]B
 		out = append(out, state)
 	}
 	return out, rows.Err()
+}
+
+func (b *BronzeIndexer) buildBronzeCoverageSummary(ctx context.Context, logins []string) (archive.BronzeCoverageSummary, error) {
+	summary := archive.BronzeCoverageSummary{
+		Date:          time.Now().UTC().Format("2006-01-02"),
+		TopN:          b.topN,
+		ChannelsTotal: len(logins),
+	}
+	if b.db == nil {
+		return summary, nil
+	}
+	rows, err := b.db.Query(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE last_helix_at IS NOT NULL) AS with_helix,
+			COUNT(*) FILTER (WHERE last_summary_at IS NOT NULL) AS with_summary,
+			COUNT(*) FILTER (WHERE COALESCE(error,'') <> '') AS with_errors
+		FROM bronze_index_state`)
+	if err != nil {
+		return summary, err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		_ = rows.Scan(&summary.WithVODIndex, &summary.WithSummary, &summary.Errors)
+	}
+	return summary, rows.Err()
 }
 
 func StartBronzeWorker(ctx context.Context, indexer *BronzeIndexer, interval time.Duration, log interface {

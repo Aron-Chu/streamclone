@@ -9,6 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"streamclone/internal/metrics"
+	"streamclone/internal/archive/jobtracker"
 )
 
 const maxBackfillSyncAttempts = 3
@@ -32,14 +35,22 @@ type VODChatExporter interface {
 	ExportVODChat(ctx context.Context, streamID string) error
 }
 
+// GoldLiteExporter uploads minute chat/emote aggregates from rollups.
+type GoldLiteExporter interface {
+	ExportGoldLite(ctx context.Context, streamID string, requireRollups bool) error
+}
+
 // BackfillWorker processes queued TT gap-fill jobs.
 type BackfillWorker struct {
-	db              *pgxpool.Pool
-	sync            *SyncService
-	exporter        SyncArchiveExporter
-	vodChatExporter VODChatExporter
-	interval        time.Duration
-	goldSyncTimeout time.Duration
+	db                   *pgxpool.Pool
+	sync                 *SyncService
+	exporter             SyncArchiveExporter
+	vodChatExporter      VODChatExporter
+	goldLiteExporter     GoldLiteExporter
+	goldLiteRequireRollups bool
+	interval             time.Duration
+	goldSyncTimeout      time.Duration
+	jobTracker           *jobtracker.Tracker
 }
 
 func NewBackfillWorker(db *pgxpool.Pool, sync *SyncService, exporter SyncArchiveExporter, interval time.Duration) *BackfillWorker {
@@ -47,6 +58,13 @@ func NewBackfillWorker(db *pgxpool.Pool, sync *SyncService, exporter SyncArchive
 		interval = 30 * time.Second
 	}
 	return &BackfillWorker{db: db, sync: sync, exporter: exporter, interval: interval}
+}
+
+func (w *BackfillWorker) WithJobTracker(tracker *jobtracker.Tracker) *BackfillWorker {
+	if w != nil {
+		w.jobTracker = tracker
+	}
+	return w
 }
 
 func (w *BackfillWorker) WithGoldSyncTimeout(timeout time.Duration) *BackfillWorker {
@@ -63,18 +81,43 @@ func (w *BackfillWorker) WithVODChatExporter(exporter VODChatExporter) *Backfill
 	return w
 }
 
-func backfillSyncParams(tier string) (viewersOnly, forceChat bool) {
-	if strings.EqualFold(strings.TrimSpace(tier), "gold") {
-		return false, true
+func (w *BackfillWorker) WithGoldLiteExporter(exporter GoldLiteExporter, requireRollups bool) *BackfillWorker {
+	if w != nil {
+		w.goldLiteExporter = exporter
+		w.goldLiteRequireRollups = requireRollups
 	}
-	return true, false
+	return w
+}
+
+func backfillSyncParams(tier string) (viewersOnly, forceChat bool) {
+	switch strings.ToLower(strings.TrimSpace(tier)) {
+	case "gold", "gold_full":
+		return false, true
+	case "gold_lite":
+		return true, false
+	default:
+		return true, false
+	}
 }
 
 func backfillExportLabel(tier string) string {
-	if strings.EqualFold(strings.TrimSpace(tier), "gold") {
-		return "backfill gold chat"
+	switch strings.ToLower(strings.TrimSpace(tier)) {
+	case "gold", "gold_full":
+		return "backfill gold-full chat"
+	case "gold_lite":
+		return "backfill gold-lite aggregates"
+	default:
+		return "backfill viewers-only"
 	}
-	return "backfill viewers-only"
+}
+
+func isGoldFullTier(tier string) bool {
+	switch strings.ToLower(strings.TrimSpace(tier)) {
+	case "gold", "gold_full":
+		return true
+	default:
+		return false
+	}
 }
 
 func (w *BackfillWorker) RunOnce(ctx context.Context) error {
@@ -87,7 +130,7 @@ func (w *BackfillWorker) RunOnce(ctx context.Context) error {
 	}
 	viewersOnly, forceChat := backfillSyncParams(job.Tier)
 	syncCtx := ctx
-	if strings.EqualFold(job.Tier, "gold") && w.goldSyncTimeout > 0 {
+	if isGoldFullTier(job.Tier) && w.goldSyncTimeout > 0 {
 		var cancel context.CancelFunc
 		syncCtx, cancel = context.WithTimeout(ctx, w.goldSyncTimeout)
 		defer cancel()
@@ -98,7 +141,12 @@ func (w *BackfillWorker) RunOnce(ctx context.Context) error {
 		if err := w.exporter.ExportSync(ctx, job.StreamID, job.Login, backfillExportLabel(job.Tier)); err != nil {
 			outcome.exportStatus = "failed"
 			outcome.errMsg = err.Error()
-		} else if strings.EqualFold(job.Tier, "gold") && w.vodChatExporter != nil {
+		} else if strings.EqualFold(job.Tier, "gold_lite") && w.goldLiteExporter != nil {
+			if err := w.goldLiteExporter.ExportGoldLite(ctx, job.StreamID, w.goldLiteRequireRollups); err != nil {
+				outcome.exportStatus = "failed"
+				outcome.errMsg = err.Error()
+			}
+		} else if isGoldFullTier(job.Tier) && w.vodChatExporter != nil {
 			if err := w.vodChatExporter.ExportVODChat(ctx, job.StreamID); err != nil {
 				outcome.exportStatus = "failed"
 				outcome.errMsg = err.Error()
@@ -110,13 +158,24 @@ func (w *BackfillWorker) RunOnce(ctx context.Context) error {
 			UPDATE backfill_jobs
 			SET status=$2, export_status=$3, error=NULLIF($4,''), attempt=$5, next_run_at=$6, updated_at=now()
 			WHERE id=$1`, job.ID, outcome.status, outcome.exportStatus, outcome.errMsg, outcome.attempt, outcome.nextRunAt)
+		metrics.RefreshBackfillJobGauges(ctx, w.db)
+		w.updateArchiveItem(ctx, job.ID, outcome.status, outcome.errMsg)
 		return err
 	}
 	_, err = w.db.Exec(ctx, `
 		UPDATE backfill_jobs
 		SET status=$2, export_status=$3, error=NULLIF($4,''), attempt=$5, updated_at=now()
 		WHERE id=$1`, job.ID, outcome.status, outcome.exportStatus, outcome.errMsg, outcome.attempt)
+	metrics.RefreshBackfillJobGauges(ctx, w.db)
+	w.updateArchiveItem(ctx, job.ID, outcome.status, outcome.errMsg)
 	return err
+}
+
+func (w *BackfillWorker) updateArchiveItem(ctx context.Context, backfillJobID int64, status, errMsg string) {
+	if w == nil || w.jobTracker == nil {
+		return
+	}
+	_ = w.jobTracker.UpdateItemFromBackfill(ctx, backfillJobID, status, "", errMsg)
 }
 
 type backfillOutcome struct {
@@ -224,6 +283,7 @@ func StartBackfillWorker(ctx context.Context, worker *BackfillWorker, log interf
 	go func() {
 		ticker := time.NewTicker(worker.interval)
 		defer ticker.Stop()
+		metrics.RefreshBackfillJobGauges(ctx, worker.db)
 		for {
 			select {
 			case <-ctx.Done():

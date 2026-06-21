@@ -40,7 +40,7 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
 	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp mcp-setup \
 	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
-	frontend-restart frontend-refresh frontend-logs compose-config-check azure-scraper-config-check azure-archive-plane-config-check check check-quick \
+	frontend-restart frontend-refresh frontend-logs compose-config-check azure-scraper-config-check azure-archive-plane-config-check bearhost-config-check bearhost-config-check-local bearhost-config-check-release bearhost-rsync check check-quick \
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
 	preflight-deps start stop-user ensure-localhost agent-smoke coverage-report
 
@@ -382,6 +382,10 @@ compose-config-check: env
 		-f deploy/docker-compose.yml \
 		-f deploy/docker-compose.local-tunnel.yml \
 		-f deploy/docker-compose.release.yml config --quiet
+	IMAGE_TAG=$(VERSION) docker compose --env-file $(ENV_FILE) \
+		-f deploy/docker-compose.yml \
+		-f deploy/docker-compose.observability.yml \
+		--profile observability config --quiet
 	APP_DOMAIN=streamclone.example.invalid ACME_EMAIL=security@example.invalid docker compose --env-file $(ENV_FILE) \
 		-f deploy/docker-compose.yml \
 		-f deploy/docker-compose.prod.yml config --quiet
@@ -398,6 +402,42 @@ azure-archive-plane-config-check: env
 		--env-file deploy/env/profile-azure-workers.env \
 		-f deploy/docker-compose.azure-archive-plane.yml \
 		-f deploy/docker-compose.release.yml config --quiet
+
+bearhost-config-check-release: env
+	APP_DOMAIN=141.11.243.103 ACME_EMAIL=security@example.invalid PUBLIC_ORIGIN=http://141.11.243.103 \
+	IMAGE_TAG=$(VERSION) docker compose --env-file $(ENV_FILE) \
+		--env-file deploy/env/profile-full.env \
+		--env-file deploy/env/profile-archive.env \
+		--env-file deploy/env/profile-bearhost-prod.env \
+		-f deploy/docker-compose.yml \
+		-f deploy/docker-compose.release.yml \
+		-f deploy/docker-compose.prod.yml \
+		-f deploy/docker-compose.bearhost-prod.yml \
+		--profile scraper config --quiet
+
+bearhost-config-check-local: env
+	APP_DOMAIN=141.11.243.103 ACME_EMAIL=security@example.invalid PUBLIC_ORIGIN=http://141.11.243.103 \
+	BEARHOST_BUILD_LOCAL=1 SCRAPER_USE_IMAGES=0 IMAGE_TAG=$(VERSION) docker compose --env-file $(ENV_FILE) \
+		--env-file deploy/env/profile-full.env \
+		--env-file deploy/env/profile-archive.env \
+		--env-file deploy/env/profile-bearhost-prod.env \
+		-f deploy/docker-compose.yml \
+		-f deploy/docker-compose.prod.yml \
+		-f deploy/docker-compose.bearhost-prod.yml \
+		-f deploy/docker-compose.bearhost-build.yml \
+		--profile scraper config --quiet
+
+bearhost-config-check: bearhost-config-check-release bearhost-config-check-local
+
+bearhost-corpus-smoke:
+	@bash scripts/bearhost-corpus-smoke.sh
+
+archive-restore-drill:
+	@bash scripts/archive-restore-drill.sh
+
+bearhost-rsync:
+	@python3 -c "import pathlib; f=pathlib.Path('scripts/bearhost-rsync-to-vps.sh'); f.write_text(f.read_text().replace('\r\n','\n').replace('\r','\n'), encoding='utf-8')" 2>/dev/null || true
+	bash scripts/bearhost-rsync-to-vps.sh
 
 check-quick: test vet frontend-test compose-config-check
 
