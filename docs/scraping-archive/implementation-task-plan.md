@@ -8,7 +8,7 @@ Verified against repo: 2026-06-20
 
 **Azure E2E probe:** YES — `C:\Users\Aron\.streamclone\azure-archive-connection-string` present on dev machine
 **Last bearhost-config-check-local:** PASS (2026-06-20)
-**Last check-quick:** PASS (2026-06-20, WSL `make check-quick`)
+**Last check-quick:** PASS (2026-06-20, WSL `make check-quick` after R1/R2/R3 split: `c1fdcd3`, `901ea8b`, `a6efecb`)
 
 ### Release 1
 - [x] TASK-001 — Baseline inventory sign-off (§2 verified 2026-06-20)
@@ -26,8 +26,8 @@ Verified against repo: 2026-06-20
 - [x] TASK-017 — jobtracker library
 - [x] TASK-018 — Wire jobtracker (bronze/backfill workers)
 - [x] TASK-019 — CLI `jobs` + `coverage report`
-- [ ] TASK-031 — BearHost corpus smoke (script ready; **operator run** on staging)
-- [ ] TASK-031B — Restore drill smoke (script ready; **operator run** with `STREAM_ID`)
+- [ ] TASK-031 — BearHost corpus smoke (**BLOCKED** on VPS 2026-06-20 — see blockers log)
+- [ ] TASK-031B — Restore drill smoke (**BLOCKED** on VPS 2026-06-20 — see blockers log)
 
 ### Release 2
 - [x] TASK-033 — Caddy admin routes
@@ -59,7 +59,9 @@ Verified against repo: 2026-06-20
 ### Blockers log
 | Date | Task | Reason | Owner action |
 |------|------|--------|--------------|
-| 2026-06-20 | TASK-031/031B | Scripts ready; live Azure bronze + restore not run in agent session | Operator: `CORPUS_WORKERS_ENABLED=1 bash scripts/bearhost-corpus-smoke.sh`; `STREAM_ID=… bash scripts/archive-restore-drill.sh` |
+| 2026-06-20 | TASK-031 | VPS rsync OK; corpus smoke exit **127** (`go: command not found` on host). Azure secret at `/etc/streamclone/secrets/` OK when exported; `CORPUS_WORKERS_ENABLED=1` set but analytics/workers restart-loop (wrong in-container `ARCHIVE_AZURE_CONNECTION_STRING_FILE` path vs `/run/streamclone-secrets/` mount). Missing Twitch creds in VPS `.env`. | Install host Go **or** wrap scripts with `docker run golang:1.25-alpine`; fix `profile-bearhost-prod.env` secret path for container; add Twitch creds; rerun `bash scripts/bearhost-corpus-smoke.sh` |
+| 2026-06-20 | TASK-031B | Restore drill exit **127** (no host Go). `archive_jobs` count **0** on VPS — no `STREAM_ID` available yet. | Fix corpus smoke first; pick `STREAM_ID` from `go run ./cmd/backfill jobs list`; `STREAM_ID=<id> bash scripts/archive-restore-drill.sh` |
+| 2026-06-20 | TASK-031/031B (deploy) | `bearhost-deploy-phased.sh` failed Phase 5 frontend build (admin UI TS on VPS tree). Smoke gate **10** returns **404** (want **401**); gate **1** fail (analytics restart). Origin currently **502**. | Complete phased deploy after frontend fix; verify Caddy `@admin_archive`; `curl /v1/admin/archive/jobs` → 401 |
 | 2026-06-20 | TASK-030 | Proxy routing requires operator sign-off per proxy-benchmark.md | Keep `ANALYTICS_TT_USE_PROXY=false`; re-run budget benchmark before enable |
 
 ---
