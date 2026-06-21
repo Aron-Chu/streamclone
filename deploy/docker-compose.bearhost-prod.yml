@@ -101,4 +101,6 @@ services:
       VITE_ANALYTICS_URL: http://${APP_DOMAIN:?Set APP_DOMAIN in .env}
       VITE_CHAT_HTTP: http://${APP_DOMAIN:?Set APP_DOMAIN in .env}
       VITE_CHAT_WS: ws://${APP_DOMAIN:?Set APP_DOMAIN in .env}/v1/ws
+      VITE_PULSE_WIRE_ENABLED: "false"
       VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}
+    volumes: !reset ["./nginx.bearhost.conf:/etc/nginx/conf.d/default.conf:ro"]

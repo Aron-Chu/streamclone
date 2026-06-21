@@ -241,16 +241,11 @@ pass "no OOM/restart storm in last 50 log lines per service"
 GATE=9
 echo "==> Gate 9: corpus preflight"
 corpus_preflight_ok=0
-secret_file="${ARCHIVE_AZURE_CONNECTION_STRING_FILE:-/run/streamclone-secrets/azure-archive-connection-string}"
-if bearhost_compose exec -T analytics-workers test -f "${secret_file}" 2>/dev/null; then
-  if grep -qE '^TWITCH_OAUTH_CLIENT_ID=.+' .env 2>/dev/null && grep -qE '^TWITCH_OAUTH_CLIENT_SECRET=.+' .env 2>/dev/null; then
-    corpus_preflight_ok=1
-    pass "corpus preflight: Azure secret file + Twitch creds present"
-  else
-    echo "bearhost-smoke: corpus preflight SKIP — Twitch OAuth creds missing in .env"
-  fi
+if bearhost_corpus_preflight; then
+  corpus_preflight_ok=1
+  pass "corpus preflight requirements present"
 else
-  echo "bearhost-smoke: corpus preflight SKIP — Azure secret file not mounted (${secret_file})"
+  echo "bearhost-smoke: corpus preflight requirements still missing"
 fi
 if [[ "${corpus_preflight_ok}" == "1" && "${CORPUS_WORKERS_ENABLED:-0}" == "1" ]]; then
   pass "CORPUS_WORKERS_ENABLED=1 with preflight ok"

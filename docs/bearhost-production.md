@@ -54,7 +54,14 @@ Streamclone full production on BearHost VPS **141.11.243.103** — IP-only HTTP 
 
 1. Host file `${STREAMCLONE_SECRETS_DIR}/azure-archive-connection-string` exists (maps to container `ARCHIVE_AZURE_CONNECTION_STRING_FILE`).
 
-2. `.env` contains non-empty `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` (Helix bronze VOD index).
+2. `.env` contains a complete Twitch credential pair: `TWITCH_CLIENT_ID` + `TWITCH_CLIENT_SECRET` or `TWITCH_OAUTH_CLIENT_ID` + `TWITCH_OAUTH_CLIENT_SECRET`.
+
+Quick host check before enabling corpus:
+
+```bash
+bash scripts/bearhost-vps-env-check.sh
+BEARHOST_CORPUS_PREFLIGHT_ONLY=1 bash scripts/bearhost-smoke.sh
+```
 
 
 
@@ -76,6 +83,13 @@ bash scripts/bearhost-deploy-phased.sh   # phase 4 picks up flag; or:
 
 docker compose ... up -d --force-recreate analytics-workers
 
+```
+
+Corpus smoke and restore drill can run without host Go:
+
+```bash
+BEARHOST_USE_DOCKER_GO=1 bash scripts/bearhost-corpus-smoke.sh
+STREAM_ID=<id> BEARHOST_USE_DOCKER_GO=1 bash scripts/archive-restore-drill.sh
 ```
 
 
@@ -365,6 +379,8 @@ sudo install -m 600 -o streamclone -g streamclone \
   ~/azure-archive-connection-string \
 
   /etc/streamclone/secrets/azure-archive-connection-string
+
+bash scripts/bearhost-vps-env-check.sh
 
 ```
 

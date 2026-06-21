@@ -25,20 +25,34 @@ bearhost_env_value() {
   grep -E "^${key}=" "${file}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '\r' || true
 }
 
+bearhost_twitch_credential_summary() {
+  local file="${1:-.env}"
+  local client_id client_secret oauth_id oauth_secret
+  client_id="$(bearhost_env_value TWITCH_CLIENT_ID "${file}")"
+  client_secret="$(bearhost_env_value TWITCH_CLIENT_SECRET "${file}")"
+  oauth_id="$(bearhost_env_value TWITCH_OAUTH_CLIENT_ID "${file}")"
+  oauth_secret="$(bearhost_env_value TWITCH_OAUTH_CLIENT_SECRET "${file}")"
+
+  if [[ -n "${oauth_id}" && -n "${oauth_secret}" ]]; then
+    printf 'TWITCH_OAUTH_CLIENT_ID/SECRET'
+    return 0
+  fi
+  if [[ -n "${client_id}" && -n "${client_secret}" ]]; then
+    printf 'TWITCH_CLIENT_ID/SECRET'
+    return 0
+  fi
+  return 1
+}
+
 bearhost_corpus_preflight() {
   local secret_path failures=()
   secret_path="$(bearhost_host_azure_secret_path)"
   if [[ ! -f "${secret_path}" ]]; then
     failures+=("Azure secret file missing: ${secret_path}")
   fi
-  local twitch_id twitch_secret
-  twitch_id="$(bearhost_env_value TWITCH_CLIENT_ID)"
-  twitch_secret="$(bearhost_env_value TWITCH_CLIENT_SECRET)"
-  if [[ -z "${twitch_id}" ]]; then
-    failures+=("TWITCH_CLIENT_ID missing in .env")
-  fi
-  if [[ -z "${twitch_secret}" ]]; then
-    failures+=("TWITCH_CLIENT_SECRET missing in .env")
+  local twitch_summary=""
+  if ! twitch_summary="$(bearhost_twitch_credential_summary ".env")"; then
+    failures+=("No complete Twitch credential pair in .env (need TWITCH_CLIENT_ID/SECRET or TWITCH_OAUTH_CLIENT_ID/SECRET)")
   fi
   if ((${#failures[@]} > 0)); then
     echo "bearhost-corpus-preflight FAIL:" >&2
@@ -47,6 +61,6 @@ bearhost_corpus_preflight() {
     done
     return 1
   fi
-  echo "bearhost-corpus-preflight PASS: ${secret_path}; Twitch client creds present"
+  echo "bearhost-corpus-preflight PASS: ${secret_path}; ${twitch_summary} present"
   return 0
 }
