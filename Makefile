@@ -40,7 +40,7 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
 	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp mcp-setup \
 	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
-	frontend-restart frontend-refresh frontend-logs compose-config-check azure-scraper-config-check azure-archive-plane-config-check bearhost-config-check bearhost-config-check-local bearhost-config-check-release bearhost-rsync check check-quick \
+	frontend-restart frontend-refresh frontend-logs compose-config-check azure-scraper-config-check azure-archive-plane-config-check bearhost-config-check bearhost-config-check-local bearhost-config-check-release bearhost-rsync bearhost bearhost-help bearhost-bronze-status bearhost-grafana-tunnel bearhost-grafana-tunnel-start bearhost-grafana-tunnel-stop bearhost-grafana-sync bearhost-observability-enable bearhost-observability-status bearhost-observability-up bearhost-observability-down local-vps-only check check-quick \
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
 	preflight-deps start stop-user ensure-localhost agent-smoke coverage-report
 
@@ -51,6 +51,7 @@ help:
 	@printf '  make up-scraper      Core + TwitchTracker scraper\n'
 	@printf '  make up-full         Core + Analytics scraper\n'
 	@printf '  make stop / down     Stop compose (keep data)\n'
+	@printf '  make local-vps-only  Stop local scraper; disable Tier-0/Bronze (VPS owns scrape)\n'
 	@printf '  make down-clean      Stop + remove pg/minio/clipper/influx/grafana volumes\n'
 	@printf '  make nuke            Full teardown: compose (all profiles), helm pulse, setup-control, orphans\n'
 	@printf '  make restart         stop + up\n'
@@ -71,7 +72,18 @@ help:
 	@printf '          make test-video | test-analytics | test-emote | test-storygraph | test-metadata\n'
 	@printf '          make frontend-test | frontend-audit | compose-config-check\n'
 	@printf '          make frontend-refresh  Build + migrate + restart frontend/chat/analytics\n'
-	@printf '          make frontend-restart  Rebuild frontend image + restart frontend/proxy only\n'
+	@printf '          make frontend-restart  Rebuild frontend image + restart frontend/proxy only\n\n'
+	@printf 'BearHost VPS (corpus + Grafana — from your PC):\n'
+	@printf '  make bearhost-help              List BearHost make targets\n'
+	@printf '  make local-vps-only             Stop local scraper; VPS owns scrape\n'
+	@printf '  make bearhost-bronze-status     Bronze/VOD job summary (SSH to VPS)\n'
+	@printf '  make bearhost-grafana-tunnel-start Background tunnel → :3001 (VPS Grafana)\n'
+	@printf '  make bearhost-grafana-tunnel-stop  Stop :3000/:3001 SSH tunnels\n'
+	@printf '  make bearhost-grafana-tunnel       Foreground tunnel → :3001 (Ctrl+C to stop)\n'
+	@printf '  make bearhost-observability-enable  Rsync + start Prometheus/Grafana on VPS\n'
+	@printf '  make bearhost-grafana-sync      Rsync dashboard/provisioning + reload Grafana\n'
+	@printf '  make bearhost-observability-status  Prometheus/Grafana container status on VPS\n'
+	@printf '  make bearhost-rsync             Push repo checkout to VPS\n'
 
 env:
 	@test -f .env || cp .env.dev .env
@@ -432,12 +444,89 @@ bearhost-config-check: bearhost-config-check-release bearhost-config-check-local
 bearhost-corpus-smoke:
 	@bash scripts/bearhost-corpus-smoke.sh
 
-archive-restore-drill:
-	@bash scripts/archive-restore-drill.sh
+bearhost-help bearhost:
+	@printf 'BearHost VPS — common targets (see docs/site-links.md)\n\n'
+	@printf '  make local-vps-only                 Disable local Tier-0/Bronze/scraper\n'
+	@printf '  make bearhost-bronze-status         Bronze indexer + backfill summary\n'
+	@printf '  make bearhost-grafana-tunnel-start    Background tunnel → localhost:3001\n'
+	@printf '  make bearhost-grafana-tunnel-stop     Stop SSH tunnels on :3000/:3001\n'
+	@printf '  make bearhost-grafana-tunnel          Foreground tunnel → localhost:3001\n'
+	@printf '  make bearhost-observability-enable  First-time: rsync + metrics + Grafana up\n'
+	@printf '  make bearhost-grafana-sync          After dashboard edits: rsync + reload\n'
+	@printf '  make bearhost-observability-status  Check prometheus-obs / grafana-obs on VPS\n'
+	@printf '  make bearhost-rsync                 Sync app + scraper trees to VPS\n\n'
+	@printf 'Grafana URL (after tunnel): http://localhost:3001/d/streamclone-archive/streamclone-archive\n'
+	@printf 'Login: admin / streampulse\n'
+
+bearhost-observability-up:
+	@bash scripts/bearhost-observability.sh up
+
+bearhost-observability-down:
+	@bash scripts/bearhost-observability.sh down
+
+ifeq ($(OS),Windows_NT)
+bearhost-observability-enable:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-observability-enable-remote.ps1
+
+bearhost-observability-status:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-observability-status-remote.sh
+
+bearhost-grafana-sync:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-grafana-sync-remote.sh
+
+bearhost-grafana-tunnel-stop:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel-stop.ps1
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-grafana-tunnel-stop.sh
+
+bearhost-grafana-tunnel-start:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel-start.ps1
+
+bearhost-grafana-tunnel:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel.ps1
+
+bearhost-bronze-status:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-bronze-status-remote.ps1
+
+bearhost-rsync:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-rsync-to-vps.ps1
+
+local-vps-only:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script local-vps-only.sh
+else
+bearhost-observability-enable:
+	@bash scripts/bearhost-observability-enable-remote.sh
+
+bearhost-observability-status:
+	@bash scripts/bearhost-observability-status-remote.sh
+
+bearhost-grafana-sync:
+	@bash scripts/bearhost-grafana-sync-remote.sh
+
+bearhost-grafana-tunnel-stop:
+	@bash scripts/bearhost-grafana-tunnel-stop.sh
+
+bearhost-grafana-tunnel-start:
+	@bash scripts/bearhost-grafana-tunnel-start.sh
+
+bearhost-grafana-tunnel:
+	@bash scripts/bearhost-grafana-tunnel.sh
+
+bearhost-bronze-status:
+	@bash scripts/bearhost-bronze-status-remote.sh
 
 bearhost-rsync:
 	@python3 -c "import pathlib; f=pathlib.Path('scripts/bearhost-rsync-to-vps.sh'); f.write_text(f.read_text().replace('\r\n','\n').replace('\r','\n'), encoding='utf-8')" 2>/dev/null || true
-	bash scripts/bearhost-rsync-to-vps.sh
+	@bash scripts/bearhost-rsync-to-vps.sh
+
+local-vps-only:
+	@bash scripts/local-vps-only.sh
+endif
+
+bearhost-cron-install:
+	@bash scripts/bearhost-cron-install.sh
+
+archive-restore-drill:
+	@bash scripts/archive-restore-drill.sh
 
 check-quick: test vet frontend-test compose-config-check
 

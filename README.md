@@ -26,6 +26,7 @@ make setup
 
 ## Docs
 
+- **[Production site links](docs/site-links.md)** — BearHost URLs, login, Pulse Wire, VOD status commands
 - [Install and lifecycle](docs/install-desktop.md)
 - [Optional features](docs/options.md)
 - [Pulse Wire operator notes](docs/pulse-wire.md)
