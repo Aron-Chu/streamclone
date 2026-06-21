@@ -87,35 +87,36 @@ Verified against repo: 2026-06-21
 
 | Area | What docs say | Likely code area | Status | Verification task |
 |------|---------------|------------------|--------|-------------------|
-| Archive manifest model | Expand `archive_exports` + optional sidecars | `migrations/000030`, `internal/archive/manifest.go` | **Partial** — v1 upsert only | Confirm no `000035+` manifest expand migration |
-| `archive_exports` expansion | tier, provider, sha256, metadata JSONB | `manifest.go`, `writer.go` | **Planned** | Grep `content_sha256`, `schema_version` in repo |
-| Bronze VOD catalog | `vod_catalog/v1`, dated hive paths, Helix pagination | `bronze_indexer.go`, `writer.go` | **Partial** — legacy `channels/vod_index/{login}.jsonl.gz`, limit 80 | Inspect `bronzeHelixVODLimit` |
-| Channel identity snapshots | Helix + 7TV identity blob | *none* | **Planned** | Grep `channel_identity` |
-| Provider crosswalk | Twitch↔7TV↔FFZ↔BTTV map | *none* | **Planned** | Grep `crosswalk` |
-| Roster snapshots | `rosters/tier0/date=…` | `ExportTop500`, `ExportTopRoster` | **Partial** — `channels/top500.json.gz` only | List blob keys in writer |
-| Tombstone detection | Diff VOD catalog → tombstones | *none* | **Planned** | Grep `tombstone` |
-| Silver viewer rollup export | Hive path + `viewer_rollup/v1` | `exporter.go`, `backfill_worker.go` | **Partial** — `rollups/stream_id={id}/part-000.jsonl.gz` | Export one stream; inspect blob |
-| Raw/semi-raw TT artifact | HTML + chart JSON | `ExportTTDetail`, `sync.go` | **Partial** — HTML at `tt-detail/…` only | Grep `chart.json` |
+| Archive manifest model | Expand `archive_exports` + optional sidecars | `migrations/000035`, `internal/archive/manifest.go` | **Shipped** — tier, provider, sha256, metadata JSONB | `\d archive_exports` on dev DB |
+| `archive_exports` expansion | tier, provider, sha256, metadata JSONB | `manifest.go`, `writer.go` | **Shipped** | Grep `content_sha256`, `schema_version` |
+| Bronze VOD catalog | `vod_catalog/v1`, dated hive paths, Helix pagination | `bronze_indexer.go`, `writer.go` | **Shipped** — `bronze_export` + legacy dual-write | `bearhost-corpus-smoke.sh` |
+| Channel identity snapshots | Helix + 7TV identity blob | `directory_export.go`, exporters | **Shipped** | Grep `channel_identity` |
+| Provider crosswalk | Twitch↔7TV↔FFZ↔BTTV map | `directory_export.go` | **Shipped** | Grep `crosswalk` |
+| Roster snapshots | `rosters/tier0/date=…` | `directory_export.go`, `workers.go` | **Shipped** — hive + legacy top500 | TASK-009 blob export |
+| Tombstone detection | Diff VOD catalog → tombstones | `directory_export.go` | **Shipped** | Grep `tombstone` in archive package |
+| Silver viewer rollup export | Hive path + `viewer_rollup/v1` | `exporter.go`, `backfill_worker.go` | **Shipped** — rollups + TT chart JSON | Export one stream; inspect blob |
+| Raw/semi-raw TT artifact | HTML + chart JSON | `ExportTTDetail`, `sync.go` | **Shipped** — HTML + `chart.json` | Grep `chart.json` |
 | 7TV per-channel snapshots | Weekly roster export | `emote_exporter.go`, `workers.go` | **Shipped** | Run emote snapshot worker tick |
-| Global 7TV snapshot | `login=global` | *none* | **Planned** | Grep `login=global` in emote_exporter |
-| Emote changelog diffing | Snapshot diff → add/remove | `AppendChangelog` (EventAPI) | **Partial** — append only, no diff | Read `eventapi/subscriber.go` adapter |
+| Global 7TV snapshot | `login=global` | `emote_exporter.go` | **Shipped** | Grep `login=global` |
+| Emote changelog diffing | Snapshot diff → add/remove | `emote_exporter.go`, EventAPI | **Shipped** — diff + append | TASK-011A |
 | Optional emote media cache | One WebP per emote | *none* | **Planned** (P2) | — |
-| Gold-lite chat/emote aggregates | Minute aggregates blob | *none* | **Planned** | Grep `GOLD_LITE` |
-| Gold-full selective VOD chat | Full messages + gates | `ExportVODChat`, `gold_enqueuer.go` | **Partial** — single `gold` tier | Read `backfillSyncParams` |
-| PulseWire export | `pulsewire/*` cold paths | `ArtifactSocialItem`, storygraph store | **Partial** — retention guard hooks exist | Grep `pulsewire/` export |
-| Coverage reporting | Tier filters, verify-blobs, stale | `coverage_report.go`, `cmd/backfill` | **Partial** — `coverage report` only | Run `go run ./cmd/backfill coverage report` |
-| Postgres job progress | `archive_jobs`, items, events | *none* | **Planned** | `\d archive_jobs` on dev DB |
-| Job queue reconciliation | `archive_jobs` ↔ `backfill_jobs` | `backfill_jobs`, planned `archive_job_items` | **Gap** — two queues will drift without FK bridge | TASK-016B |
-| Natural key contract | Per-artifact `natural_key` + overwrite rules | `manifest.go` upsert on `(artifact_type, natural_key)` | **Gap** — legacy keys inconsistent (`vod_index:`, `rollups:`) | TASK-004B |
-| CLI job commands | `jobs list/show/retry/resume/cancel` | `cmd/backfill/main.go` | **Partial** — `backfill status` only | Read main.go switch |
-| Admin API | `/v1/admin/archive/*` | `internal/analytics/api.go` | **Planned** | Grep `/v1/admin` |
-| Admin UI | `/admin/archive`, jobs, coverage | `frontend/src/App.tsx` | **Planned** | Grep `/admin` routes |
-| Prometheus metrics | `streamclone_archive_*` | `internal/metrics/archive.go` | **Partial** — v1 archive/backfill gauges | `curl analytics:8080/metrics` (internal) |
-| Grafana dashboard | `streamclone-archive.json` | `deploy/grafana/dashboards/streamclone-ops.json` | **Partial** — Archive/Bronze row in ops | Open ops JSON panels |
-| Proxy routing/benchmark gates | No global proxy until sign-off | `sync.go` (`useProxy: false`), `proxy-benchmark.md` | **Partial** — benchmark done; flag **not in code** | Grep `ANALYTICS_TT_USE_PROXY` |
-| BearHost compose/deployment | Workers corpus gated; API-only analytics | `bearhost-prod.yml`, `profile-bearhost-prod.env`, `bearhost-corpus-preflight.sh` | **Partial** — TASK-003 corpus gating + preflight shipped; enable via `CORPUS_WORKERS_ENABLED=1` post-preflight | `make bearhost-config-check-local`; smoke gate 0 |
-| Caddy admin routing | `/v1/admin/archive/*` → analytics | `deploy/Caddyfile`, `deploy/Caddyfile.bearhost` | **Gap** — only `/v1/analytics/*` → analytics; `/v1/*` → metadata | Inspect Caddy `@analytics` vs `@metadata` |
-| Admin archive auth | Separate operator token, not browser config | `frontend/docker-entrypoint.d/40-streamclone-config.sh`, `docs/security.md` | **Gap** — plan initially reused `SETUP_CONTROL_TOKEN` in public `config.js` | Read security.md § Tunnels |
+| Gold-lite chat/emote aggregates | Minute aggregates blob | `exporter.go`, gold tier split | **Shipped** | Grep `GOLD_LITE` |
+| Gold-full selective VOD chat | Full messages + gates | `ExportVODChat`, `gold_enqueuer.go` | **Shipped** — gold-lite/full split | Read `backfillSyncParams` |
+| PulseWire export | `pulsewire/*` cold paths | storygraph store, archive workers | **Shipped** (P2) | TASK-032 |
+| Coverage reporting | Tier filters, verify-blobs, stale | `coverage_report.go`, `cmd/backfill` | **Partial** — `coverage report` + admin API; **verify-blobs library only** (no CLI yet) | `backfill coverage report`; `internal/archive/verify.go` |
+| Postgres job progress | `archive_jobs`, items, events | `migrations/000036`, `jobtracker` | **Shipped** | `\d archive_jobs`; `jobs list` |
+| Job queue reconciliation | `archive_jobs` ↔ `backfill_jobs` | `backfill_worker.go`, jobtracker | **Shipped** — FK bridge TASK-016B | `jobs show` vs `backfill_jobs` |
+| Natural key contract | Per-artifact `natural_key` + overwrite rules | `manifest.go` | **Shipped** — TASK-004B documented | Idempotent re-export test |
+| CLI job commands | `jobs list/show/retry/resume/cancel` | `cmd/backfill/main.go` | **Shipped** | `go run ./cmd/backfill jobs list` |
+| Admin API | `/v1/admin/archive/*` | `internal/analytics/admin_archive*.go` | **Shipped** — token middleware | `curl -H X-Admin-Archive-Token:…` |
+| Admin UI | `/admin/archive`, jobs, coverage | `frontend/src/App.tsx`, admin panels | **Shipped** — CLI-only on public HTTP BearHost | `/admin/archive` smoke |
+| Prometheus metrics | `streamclone_archive_*` | `internal/metrics/archive.go` | **Shipped** | `curl analytics:8080/metrics` (internal) |
+| Grafana dashboard | Archive panels + ops merge | `deploy/grafana/dashboards/streamclone-ops.json` | **Shipped** — optional `observability` profile | `scripts/bearhost-observability.sh up` |
+| Proxy routing/benchmark gates | No global proxy until sign-off | `sync.go`, `proxy-benchmark.md` | **Partial** — env flag exists; default **false**; TASK-030 blocked | Grep `ANALYTICS_TT_USE_PROXY` |
+| BearHost compose/deployment | Workers corpus gated; API-only analytics | `bearhost-prod.yml`, scripts | **Shipped** — smoke gates 0–10 PASS 2026-06-21 | `bearhost-smoke.sh` |
+| Caddy admin routing | `/v1/admin/archive/*` → analytics | `deploy/Caddyfile.bearhost` | **Shipped** — `@admin_archive` block | smoke gate 10 → 401 |
+| Admin archive auth | Separate operator token, not browser config | `ADMIN_ARCHIVE_TOKEN`, middleware | **Shipped** — header `X-Admin-Archive-Token`; not in `config.js` | Unauthenticated curl → 401 |
+| Production ops automation | Backup, coverage cron, restore drill, observability | `scripts/bearhost-*-cron.sh`, `bearhost-cron-install.sh` | **Shipped** — install on VPS with `bearhost-cron-install.sh` | `crontab -l`; quarterly restore drill log |
 
 ### Doc contradictions — proposed resolutions
 
@@ -1321,9 +1322,9 @@ Risks: Volume — start with one source
 | 6 | Corpus preflight | Azure secret + Twitch creds → `CORPUS_WORKERS_ENABLED=1` |
 | 7 | Archive smoke | `bash scripts/bearhost-corpus-smoke.sh` |
 | 8 | Admin token | Install `ADMIN_ARCHIVE_TOKEN` server-side only; operator paste or CLI — **not** in frontend `config.js` |
-| 9 | Observability | Optional `--profile observability` |
-| 10 | Cron | coverage report, verify-blobs, pg backup (see archive-observability.md) |
-| 11 | Backup verify | Restore drill to test DB quarterly |
+| 9 | Observability | `bash scripts/bearhost-observability.sh up` (SSH tunnel `:3000`) |
+| 10 | Cron | `bash scripts/bearhost-cron-install.sh` — pg backup, daily coverage, quarterly restore drill |
+| 11 | Backup verify | `bash scripts/bearhost-restore-drill-cron.sh` (or `STREAM_ID=… archive-restore-drill.sh`) |
 | 12 | Rollback | Local dev for 48h; `CORPUS_WORKERS_ENABLED=false`; keep Azure corpus |
 
 ---

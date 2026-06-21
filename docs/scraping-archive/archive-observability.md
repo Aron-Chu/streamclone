@@ -45,7 +45,15 @@ Grafana is **not** the source of truth for progress. Use the admin UI or CLI whe
 
 ## Enabling observability on BearHost
 
-### 1. Merge observability overlay (when shipped)
+Use the helper script (merges `docker-compose.observability.yml` + build-local overlay when configured):
+
+```bash
+bash scripts/bearhost-observability.sh up
+bash scripts/bearhost-observability.sh status
+bash scripts/bearhost-observability.sh down   # when RAM is tight
+```
+
+Or merge manually:
 
 ```bash
 docker compose \
@@ -65,10 +73,14 @@ docker compose \
 On your PC:
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_bearhost_streamclone -L 3000:127.0.0.1:3000 streamclone@141.11.243.103
+make bearhost-grafana-tunnel
+# or: ssh -i ~/.ssh/id_ed25519_bearhost_streamclone -L 3001:127.0.0.1:3000 streamclone@141.11.243.103
+# or: powershell -File scripts/bearhost-grafana-tunnel.ps1
 ```
 
-Open `http://localhost:3000` — default credentials from compose env (change on first login).
+Open **http://localhost:3001/d/streamclone-archive/streamclone-archive** — default credentials from compose env (`admin` / `streampulse`).
+
+**Do not use :3000** if local Pulse Grafana is running — it uses InfluxDB and archive panels will show no data.
 
 ### 3. Prometheus
 
@@ -177,10 +189,34 @@ Route alerts to email/Discord via Alertmanager when configured. Minimum viable: 
 
 ## Cron suggestions (VPS)
 
+Install the recommended ops crontab (idempotent — skips if already installed):
+
+```bash
+bash scripts/bearhost-cron-install.sh
+# preview only:
+bash scripts/bearhost-cron-install.sh --dry-run
+```
+
+| Schedule | Script | Purpose |
+|----------|--------|---------|
+| `0 3 * * *` | `bearhost-pg-backup.sh` | Nightly Postgres gzip dump (14-day retention) |
+| `30 5 * * *` | `bearhost-archive-coverage-cron.sh` | Daily coverage JSON + stale job snapshot |
+| `0 4 1 1,4,7,10 *` | `bearhost-restore-drill-cron.sh` | Quarterly restore drill (auto-picks `STREAM_ID`) |
+
+Logs: `/opt/streamclone/backups/cron/`. Force a drill off-schedule:
+
+```bash
+BEARHOST_RESTORE_DRILL_FORCE=1 STREAM_ID=<id> bash scripts/bearhost-restore-drill-cron.sh
+```
+
+**Note:** `coverage verify-blobs` CLI is not wired yet (`internal/archive/verify.go` exists); daily cron uses `coverage report` only until TASK-020 CLI lands.
+
+Manual one-offs (legacy):
+
 ```bash
 # /etc/cron.d/streamclone-archive-ops
 # Daily coverage snapshot + blob verify (off-peak UTC)
-30 5 * * * streamclone cd /opt/streamclone/app && docker compose exec -T analytics go run ./cmd/backfill coverage report --out=/opt/streamclone/backups/coverage-$(date +\%F).json
+30 5 * * * streamclone cd /opt/streamclone/app && BEARHOST_USE_DOCKER_GO=1 bash scripts/bearhost-archive-coverage-cron.sh
 0 6 * * * streamclone cd /opt/streamclone/app && docker compose exec -T analytics go run ./cmd/backfill coverage verify-blobs
 
 # Stale job report (no auto-resume unless operator opts in)

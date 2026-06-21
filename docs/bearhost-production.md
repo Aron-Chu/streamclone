@@ -426,23 +426,70 @@ Skip sync on empty DB: `BEARHOST_SKIP_SYNC=1 bash scripts/bearhost-smoke.sh`
 
 
 
-## Nightly backup
+## Nightly backup and cron automation
 
-
+Install all recommended production cron jobs (backup, coverage, quarterly restore drill):
 
 ```bash
-
-# crontab -u streamclone -e
-
-0 3 * * * /opt/streamclone/app/scripts/bearhost-pg-backup.sh
-
+bash scripts/bearhost-cron-install.sh
+crontab -l | grep streamclone-bearhost-ops
 ```
 
+Or add backup only:
 
+```bash
+# crontab -u streamclone -e
+0 3 * * * /opt/streamclone/app/scripts/bearhost-pg-backup.sh
+```
 
 Dumps: `/opt/streamclone/backups/streamclone-*.sql.gz` (14-day retention).
 
+Coverage snapshots: `/opt/streamclone/backups/coverage/`. Restore drill logs: `/opt/streamclone/backups/cron/`.
 
+---
+
+## Optional observability (Prometheus + Grafana)
+
+Off by default on the 8 GB VPS. When you need trend charts during a corpus backfill:
+
+```bash
+bash scripts/bearhost-observability.sh up
+# on your PC:
+ssh -i ~/.ssh/id_ed25519_bearhost_streamclone -L 3000:127.0.0.1:3000 streamclone@141.11.243.103
+# open http://localhost:3000
+bash scripts/bearhost-observability.sh down   # reclaim RAM when done
+```
+
+See [archive-observability.md](scraping-archive/archive-observability.md).
+
+---
+
+## Logins and multiple users
+
+Streamclone today is a **single shared corpus** with **per-browser Twitch sessions**, not multi-tenant SaaS.
+
+| Layer | How it works |
+|-------|----------------|
+| **Viewer login** | Twitch OAuth (or dev token import) via the **chat** service. Redis stores `auth:session:<id>`; browser cookie `streamclone_session` (30-day TTL). Each browser/profile gets its own session ID — many users can be logged in at once with different Twitch accounts. |
+| **Analytics reads** | Mostly **anonymous/public** through Caddy; no session required for channel charts and rollups. |
+| **Archive admin** | Separate **`ADMIN_ARCHIVE_TOKEN`** header (`X-Admin-Archive-Token`) — not tied to Twitch login; CLI-only on public HTTP BearHost. |
+| **PulseWire / setup** | Optional; uses setup-control token when enabled — disabled on current BearHost profile. |
+
+Logging in as user A does **not** isolate data: Postgres rollups and archive blobs are global. Follows and `/v1/me` are scoped to the Twitch user behind the session cookie.
+
+Planned multi-user personalization (saved views, job dedupe, API keys) is documented in [multi-user/requirements.md](multi-user/requirements.md) — **not implemented yet**.
+
+### Why “Sign in with Twitch” fails on the VPS
+
+The UI only implements **loopback dev auth** today (`/v1/auth/dev/*`), not a public OAuth redirect. The chat handler allows token import only when the request host/origin is **localhost** (`allowDevTokenImport` in `internal/chat/auth/handler.go`). On `141.11.243.103`, `/v1/me` returns `canImportLocalToken: false` — the frontend shows *“Local token auth is only available on localhost through the local proxy.”*
+
+**Workarounds now:** browse analytics anonymously on the VPS; sign in on **localhost:8090** for follows/VOD relay features.
+
+**Production login later:** register Twitch OAuth redirect for your HTTPS domain, set `TWITCH_DEV_TOKEN_IMPORT_ENABLED=false`, and ship public OAuth UI (tracked in multi-user requirements).
+
+### Pulse Wire on BearHost
+
+**Intentionally off** — not a stale deploy. BearHost uses a slim profile: `VITE_PULSE_WIRE_ENABLED=false`, no `storygraph` / `pulse-wire` compose services, and `deploy/nginx.bearhost.conf` has no Pulse Wire upstream. Enable locally with the `pulse-wire` profile if you need `/pulse-wire`.
 
 ---
 
