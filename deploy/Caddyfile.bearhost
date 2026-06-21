@@ -1,8 +1,7 @@
-{
-	email {$ACME_EMAIL:}
-}
+# BearHost IP-only HTTP — same routes as deploy/Caddyfile without ACME/TLS.
+# Swap to deploy/Caddyfile when APP_DOMAIN has DNS + ACME_EMAIL.
 
-{$APP_DOMAIN} {
+:80 {
 	encode zstd gzip
 
 	@chat {
