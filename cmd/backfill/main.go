@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -98,6 +100,123 @@ func main() {
 				os.Exit(2)
 			}
 			return
+		case "coverage":
+			if len(os.Args) < 3 {
+				fmt.Println("Usage: backfill coverage report")
+				os.Exit(2)
+			}
+			switch os.Args[2] {
+			case "report":
+				sinceRaw, outPath := coverageArgsFromCLI(os.Args[3:])
+				since, err := analytics.ParseCoverageSince(sinceRaw, time.Now().UTC())
+				if err != nil {
+					logger.Error("invalid --since", "err", err)
+					os.Exit(2)
+				}
+				report, err := analytics.BuildCoverageReport(ctx, pool, nil, since, cfg.Tier0RosterTopN)
+				if err != nil {
+					logger.Error("coverage report failed", "err", err)
+					os.Exit(1)
+				}
+				fmt.Println(analytics.FormatCoverageSummary(report))
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(report); err != nil {
+					logger.Error("encode coverage report failed", "err", err)
+					os.Exit(1)
+				}
+				if outPath != "" {
+					if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+						logger.Error("create output dir failed", "err", err, "path", outPath)
+						os.Exit(1)
+					}
+					f, err := os.Create(outPath)
+					if err != nil {
+						logger.Error("create output file failed", "err", err, "path", outPath)
+						os.Exit(1)
+					}
+					defer f.Close()
+					fileEnc := json.NewEncoder(f)
+					fileEnc.SetIndent("", "  ")
+					if err := fileEnc.Encode(report); err != nil {
+						logger.Error("write output file failed", "err", err, "path", outPath)
+						os.Exit(1)
+					}
+					logger.Info("coverage report written", "path", outPath)
+				}
+				return
+			default:
+				fmt.Println("Usage: backfill coverage report")
+				os.Exit(2)
+			}
+		case "jobs":
+			jobsCLI := analytics.NewJobsCLI(pool, cfg.ArchiveJobHeartbeatInterval, cfg.ArchiveJobStaleAfter, cfg.ArchiveJobEventLogEnabled)
+			if len(os.Args) < 3 {
+				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel")
+				os.Exit(2)
+			}
+			switch os.Args[2] {
+			case "list":
+				rows, err := jobsCLI.List(ctx, analytics.JobsStatusFromArgs(os.Args[3:]), analytics.JobsLimitFromArgs(os.Args[3:]))
+				if err != nil {
+					logger.Error("jobs list failed", "err", err)
+					os.Exit(1)
+				}
+				_ = analytics.PrintJobsJSON(rows)
+				return
+			case "show":
+				jobID := analytics.JobsJobIDFromArgs(os.Args[3:])
+				if jobID == "" {
+					fmt.Println("Usage: backfill jobs show --job-id=<uuid>")
+					os.Exit(2)
+				}
+				resp, err := jobsCLI.Show(ctx, jobID)
+				if err != nil {
+					logger.Error("jobs show failed", "err", err)
+					os.Exit(1)
+				}
+				_ = analytics.PrintJobsJSON(resp)
+				return
+			case "retry-failed":
+				jobID := analytics.JobsJobIDFromArgs(os.Args[3:])
+				if jobID == "" {
+					fmt.Println("Usage: backfill jobs retry-failed --job-id=<uuid>")
+					os.Exit(2)
+				}
+				if err := jobsCLI.RetryFailed(ctx, jobID); err != nil {
+					logger.Error("jobs retry-failed", "err", err)
+					os.Exit(1)
+				}
+				fmt.Println("retry-failed ok")
+				return
+			case "resume":
+				jobID := analytics.JobsJobIDFromArgs(os.Args[3:])
+				if jobID == "" {
+					fmt.Println("Usage: backfill jobs resume --job-id=<uuid>")
+					os.Exit(2)
+				}
+				if err := jobsCLI.Resume(ctx, jobID); err != nil {
+					logger.Error("jobs resume", "err", err)
+					os.Exit(1)
+				}
+				fmt.Println("resume ok")
+				return
+			case "cancel":
+				jobID := analytics.JobsJobIDFromArgs(os.Args[3:])
+				if jobID == "" {
+					fmt.Println("Usage: backfill jobs cancel --job-id=<uuid>")
+					os.Exit(2)
+				}
+				if err := jobsCLI.Cancel(ctx, jobID); err != nil {
+					logger.Error("jobs cancel", "err", err)
+					os.Exit(1)
+				}
+				fmt.Println("cancel ok")
+				return
+			default:
+				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel")
+				os.Exit(2)
+			}
 		case "gold":
 			if len(os.Args) < 3 {
 				fmt.Println("Usage: backfill gold enqueue --stream-id=<id> [--login=] | backfill gold eval --stream-id=<id>")
@@ -153,7 +272,19 @@ func main() {
 	fmt.Println("backfill worker runs inside analytics when BACKFILL_ENABLED=true")
 	fmt.Println("gold enqueuer runs inside analytics when GOLD_BACKFILL_ENABLED=true")
 	fmt.Println("bronze indexer runs inside analytics when BRONZE_ENABLED=true")
-	fmt.Println("Use: backfill status | backfill gold enqueue|eval | backfill bronze status | backfill bronze run-once | backfill sessions cleanup [--login=...]")
+	fmt.Println("Use: backfill status | backfill jobs list|show|retry-failed|resume|cancel | backfill coverage report | backfill gold enqueue|eval | backfill bronze status | backfill bronze run-once | backfill sessions cleanup [--login=...]")
+}
+
+func coverageArgsFromCLI(args []string) (sinceRaw, outPath string) {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--since=") {
+			sinceRaw = strings.TrimSpace(strings.TrimPrefix(arg, "--since="))
+		}
+		if strings.HasPrefix(arg, "--out=") {
+			outPath = strings.TrimSpace(strings.TrimPrefix(arg, "--out="))
+		}
+	}
+	return sinceRaw, outPath
 }
 
 func goldArgsFromCLI(args []string) (streamID, login string) {
@@ -193,7 +324,11 @@ func newBronzeIndexer(ctx context.Context, cfg config.Config, pool *pgxpool.Pool
 	if err != nil {
 		return nil, err
 	}
-	writer := archive.NewWriter(blob, archive.NewManifestStore(pool))
+	writer := archive.NewWriter(blob, archive.NewManifestStore(pool)).WithOptions(archive.WriterOptions{
+		ContentHashEnabled:   cfg.ArchiveContentHashEnabled,
+		WriteSidecarManifest: cfg.ArchiveWriteSidecarManifest,
+		ParserVersion:        cfg.ArchiveParserVersion,
+	})
 	helix := analytics.NewHelixClient(
 		cfg.TwitchAPIURL,
 		cfg.TwitchTokenURL,
@@ -223,5 +358,10 @@ func newBronzeIndexer(ctx context.Context, cfg config.Config, pool *pgxpool.Pool
 		allAlways,
 		cfg.BronzeHelixConcurrency,
 		cfg.BronzeTTSummaryConcurrency,
-	).WithWriter(writer), nil
+	).WithWriter(writer).WithBronzeCorpus(
+		archive.NewBronzeExporter(writer),
+		cfg.BronzeIdentityEnabled,
+		cfg.BronzeCrosswalkEnabled,
+		"https://7tv.io/v3",
+	), nil
 }

@@ -6,7 +6,7 @@ repos:
       - id: end-of-file-fixer
       - id: check-merge-conflict
       - id: check-yaml
-        exclude: ^(deploy/docker-compose\.(release|scraper-source|frontend-source|prod)\.yml|charts/.*/templates/.*)$
+        exclude: ^(deploy/docker-compose\.(release|scraper-source|frontend-source|prod|bearhost-build|bearhost-prod|observability)\.yml|charts/.*/templates/.*)$
       - id: check-json
       - id: detect-private-key
 

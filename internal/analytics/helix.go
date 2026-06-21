@@ -385,6 +385,26 @@ func (c *HelixClient) VideoDurationSeconds(ctx context.Context, videoID string) 
 	return seconds, nil
 }
 
+// ChannelProfile returns Helix user metadata for bronze identity export.
+func (c *HelixClient) ChannelProfile(ctx context.Context, login string) (channelID, displayName string, rawHelix json.RawMessage, ok bool) {
+	if !c.Enabled() || login == "" {
+		return "", "", nil, false
+	}
+	users, err := c.UsersByLogin(ctx, []string{login})
+	if err != nil {
+		return "", "", nil, false
+	}
+	profile, found := users[normalizeLogin(login)]
+	if !found || profile.ID == "" {
+		return "", "", nil, false
+	}
+	raw, err := json.Marshal(profile)
+	if err != nil {
+		return profile.ID, profile.DisplayName, nil, true
+	}
+	return profile.ID, profile.DisplayName, raw, true
+}
+
 // ArchivedVOD is one Helix archive video row for Bronze VOD index export.
 type ArchivedVOD struct {
 	StreamID        string    `json:"streamId"`

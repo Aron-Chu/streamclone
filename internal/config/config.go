@@ -166,6 +166,18 @@ type Config struct {
 	ArchiveAzureConnectionStringFile string        `env:"ARCHIVE_AZURE_CONNECTION_STRING_FILE"`
 	ArchiveExportInterval            time.Duration `env:"ARCHIVE_EXPORT_INTERVAL" envDefault:"1h"`
 	ArchivePGDumpNightly             bool          `env:"ARCHIVE_PG_DUMP_NIGHTLY" envDefault:"false"`
+	ArchiveContentHashEnabled        bool          `env:"ARCHIVE_CONTENT_HASH_ENABLED" envDefault:"true"`
+	ArchiveWriteSidecarManifest      bool          `env:"ARCHIVE_WRITE_SIDECAR_MANIFEST" envDefault:"false"`
+	ArchiveParserVersion             string        `env:"ARCHIVE_PARSER_VERSION" envDefault:"v1"`
+	CorpusWorkersEnabled             bool          `env:"CORPUS_WORKERS_ENABLED" envDefault:"false"`
+	ArchiveJobProgressEnabled        bool          `env:"ARCHIVE_JOB_PROGRESS_ENABLED" envDefault:"true"`
+	ArchiveJobHeartbeatInterval      time.Duration `env:"ARCHIVE_JOB_HEARTBEAT_INTERVAL" envDefault:"15s"`
+	ArchiveJobStaleAfter             time.Duration `env:"ARCHIVE_JOB_STALE_AFTER" envDefault:"10m"`
+	ArchiveJobEventLogEnabled        bool          `env:"ARCHIVE_JOB_EVENT_LOG_ENABLED" envDefault:"true"`
+	AdminArchiveEnabled              bool          `env:"ADMIN_ARCHIVE_ENABLED" envDefault:"false"`
+	AdminArchiveRequireToken         bool          `env:"ADMIN_ARCHIVE_REQUIRE_TOKEN" envDefault:"true"`
+	AdminArchiveToken                string        `env:"ADMIN_ARCHIVE_TOKEN"`
+	AdminArchiveTokenFile            string        `env:"ADMIN_ARCHIVE_TOKEN_FILE"`
 
 	Tier0Enabled        bool          `env:"TIER0_ENABLED" envDefault:"false"`
 	Tier0SampleInterval time.Duration `env:"TIER0_SAMPLE_INTERVAL" envDefault:"45s"`
@@ -189,6 +201,29 @@ type Config struct {
 	BronzeWorkerInterval       time.Duration `env:"BRONZE_WORKER_INTERVAL" envDefault:"5m"`
 	BronzeHelixConcurrency     int           `env:"BRONZE_HELIX_CONCURRENCY" envDefault:"2"`
 	BronzeTTSummaryConcurrency int           `env:"BRONZE_TT_SUMMARY_CONCURRENCY" envDefault:"4"`
+	BronzeVODIndexSinceDays    int           `env:"BRONZE_VOD_INDEX_SINCE_DAYS" envDefault:"365"`
+	BronzeVODIndexMaxPages     int           `env:"BRONZE_VOD_INDEX_MAX_PAGES" envDefault:"10"`
+	BronzeIdentityEnabled      bool          `env:"BRONZE_IDENTITY_ENABLED" envDefault:"true"`
+	BronzeCrosswalkEnabled     bool          `env:"BRONZE_CROSSWALK_ENABLED" envDefault:"true"`
+	BronzeTombstoneEnabled     bool          `env:"BRONZE_TOMBSTONE_ENABLED" envDefault:"true"`
+	BronzeCoverageExportEnabled bool         `env:"BRONZE_COVERAGE_EXPORT_ENABLED" envDefault:"true"`
+	EmoteGlobal7TVEnabled      bool          `env:"EMOTE_GLOBAL_7TV_ENABLED" envDefault:"true"`
+	EmoteChangelogDiffEnabled  bool          `env:"EMOTE_CHANGELOG_DIFF_ENABLED" envDefault:"true"`
+	EmoteFFZSnapshotEnabled    bool          `env:"EMOTE_FFZ_SNAPSHOT_ENABLED" envDefault:"false"`
+	EmoteBTTVSnapshotEnabled   bool          `env:"EMOTE_BTTV_SNAPSHOT_ENABLED" envDefault:"false"`
+	GoldLiteEnabled            bool          `env:"GOLD_LITE_ENABLED" envDefault:"false"`
+	GoldLiteRequireRollups     bool          `env:"GOLD_LITE_REQUIRE_ROLLUPS" envDefault:"true"`
+	GoldFullEnabled            bool          `env:"GOLD_FULL_ENABLED" envDefault:"false"`
+	GoldFullOperatorOnly       bool          `env:"GOLD_FULL_OPERATOR_ONLY" envDefault:"true"`
+	GoldFullMinPeakViewers     int           `env:"GOLD_FULL_MIN_PEAK_VIEWERS" envDefault:"5000"`
+	GoldFullMinDurationMinutes int           `env:"GOLD_FULL_MIN_DURATION_MINUTES" envDefault:"60"`
+	SilverRawTTChartJSON       bool          `env:"SILVER_RAW_TT_CHART_JSON" envDefault:"true"`
+	SilverRawTTMaxBytes        int           `env:"SILVER_RAW_TT_MAX_BYTES" envDefault:"8388608"`
+	SilverPartialMinCoverage   float64       `env:"SILVER_PARTIAL_MIN_COVERAGE" envDefault:"0.5"`
+	AnalyticsTTUseProxy        bool          `env:"ANALYTICS_TT_USE_PROXY" envDefault:"false"`
+	ViteAdminArchiveUIEnabled  bool          `env:"VITE_ADMIN_ARCHIVE_UI_ENABLED" envDefault:"false"`
+	ArchiveMetricsRefreshInterval time.Duration `env:"ARCHIVE_METRICS_REFRESH_INTERVAL" envDefault:"30s"`
+	PulsewireArchiveEnabled    bool          `env:"PULSEWIRE_ARCHIVE_ENABLED" envDefault:"false"`
 
 	EmoteImportConcurrency     int           `env:"EMOTE_IMPORT_CONCURRENCY" envDefault:"8"`
 	EmoteWorkerConcurrency     int           `env:"EMOTE_WORKER_CONCURRENCY" envDefault:"8"`

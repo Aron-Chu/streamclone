@@ -29,6 +29,7 @@ const (
 type Store struct {
 	db                      *pgxpool.Pool
 	archiveProtectRetention bool
+	modEventArchiver        ChatModEventsArchiver
 }
 
 // NewStore constructs a chat-replay Store backed by the given connection pool.
@@ -43,7 +44,17 @@ func (s *Store) WithArchiveProtectRetention(enabled bool) *Store {
 	return s
 }
 
-// Ping verifies database connectivity.
+// ChatModEventsArchiver exports mod events before retention purge.
+type ChatModEventsArchiver interface {
+	ExportPendingModEventsBeforeCutoff(ctx context.Context, cutoff time.Time) error
+}
+
+func (s *Store) WithModEventArchiver(archiver ChatModEventsArchiver) *Store {
+	if s != nil {
+		s.modEventArchiver = archiver
+	}
+	return s
+}
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.Ping(ctx)
 }

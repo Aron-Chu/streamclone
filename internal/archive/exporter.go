@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"streamclone/internal/metrics"
 )
 
 // StreamExportData is the analytics stream row exported to blob storage.
@@ -172,9 +174,10 @@ func (d *PgxAnalyticsDB) ExportVODChatMessages(ctx context.Context, streamID str
 
 // SyncExporter implements analytics.SyncArchiveExporter and analytics.VODChatExporter.
 type SyncExporter struct {
-	writer *Writer
-	db     AnalyticsDB
-	chatDB VODChatDB
+	writer        *Writer
+	db            AnalyticsDB
+	chatDB        VODChatDB
+	emoteExporter *EmoteExporter
 }
 
 func NewSyncExporter(writer *Writer, db AnalyticsDB) *SyncExporter {
@@ -183,6 +186,13 @@ func NewSyncExporter(writer *Writer, db AnalyticsDB) *SyncExporter {
 		exp.chatDB = chatDB
 	}
 	return exp
+}
+
+func (e *SyncExporter) WithEmoteExporter(emoteExporter *EmoteExporter) *SyncExporter {
+	if e != nil {
+		e.emoteExporter = emoteExporter
+	}
+	return e
 }
 
 func (e *SyncExporter) ExportSync(ctx context.Context, streamID, channel, resultMessage string) error {
@@ -253,13 +263,69 @@ func (w *Writer) ExportStream(ctx context.Context, streamID string, db Analytics
 		buf.Write(b)
 		buf.WriteByte('\n')
 	}
-	rollupRes, err := w.putGzip(ctx, RollupsBlobKey(streamID), []byte(buf.String()))
+	rollupPayload := []byte(buf.String())
+	rollupRes, err := w.putGzip(ctx, RollupsBlobKey(streamID), rollupPayload)
 	if err != nil {
 		return fmt.Errorf("upload rollups: %w", err)
 	}
 	rollupRes.RowCount = int64(len(rollups))
-	rollupKey := fmt.Sprintf("rollups:%s", streamID)
-	return w.confirmManifest(ctx, ArtifactAnalyticsRollups, rollupKey, rollupRes)
+	durationMin := 0
+	if stream.EndedAt != nil && stream.StartedAt.Before(*stream.EndedAt) {
+		durationMin = int(stream.EndedAt.Sub(stream.StartedAt).Minutes())
+	}
+	minCoverage := 0.5
+	if w != nil && w.opts.SilverPartialMinCoverage > 0 {
+		minCoverage = w.opts.SilverPartialMinCoverage
+	}
+	_, rollupStatus := ComputeSilverCoverage(rollups, durationMin, minCoverage)
+	rollupKey := ViewerRollupKey(streamID)
+	rollupRec := ExportRecord{
+		ArtifactType:          ArtifactAnalyticsRollups,
+		NaturalKey:            rollupKey,
+		GCSURI:                rollupRes.URI,
+		ETag:                  rollupRes.ETag,
+		RowCount:              rollupRes.RowCount,
+		ByteSize:              rollupRes.ByteSize,
+		Status:                rollupStatus,
+		ExportedAt:            time.Now().UTC(),
+		Tier:                  "silver",
+		StreamID:              streamID,
+		ChannelLogin:          strings.ToLower(strings.TrimSpace(stream.Login)),
+		ContentSHA256:         rollupRes.ContentSHA256,
+		UncompressedSizeBytes: rollupRes.UncompressedSizeBytes,
+	}
+	if sidecar := BuildSilverSidecar(streamID, stream.Login, rollups, durationMin, minCoverage); w != nil && w.opts.WriteSidecarManifest {
+		if raw, err := sidecar.JSON(); err == nil {
+			_, _ = w.blob.Put(ctx, SilverSidecarBlobKey(streamID), raw, "application/json")
+		}
+	}
+	if w.manifest != nil {
+		if err := w.manifest.Upsert(ctx, rollupRec); err != nil {
+			return err
+		}
+	} else if err := w.confirmManifest(ctx, ArtifactAnalyticsRollups, rollupKey, rollupRes); err != nil {
+		return err
+	}
+	if hiveRes, err := w.putGzip(ctx, HiveViewerRollupBlobKey(streamID), rollupPayload); err == nil {
+		hiveRes.RowCount = rollupRes.RowCount
+		hiveKey := fmt.Sprintf("%s:hive", streamID)
+		_ = w.confirmManifest(ctx, ArtifactAnalyticsRollups, hiveKey, hiveRes)
+	}
+	observeTier0CoverageFromRollups(rollups)
+	return nil
+}
+
+func observeTier0CoverageFromRollups(rollups []RollupExportLine) {
+	if len(rollups) == 0 {
+		return
+	}
+	withSamples := 0
+	for _, line := range rollups {
+		if line.ViewerSamples > 0 {
+			withSamples++
+		}
+	}
+	metrics.RecordTier0CoveragePct(float64(withSamples) / float64(len(rollups)) * 100)
 }
 
 func (w *Writer) ExportVODChat(ctx context.Context, streamID string, db VODChatDB) error {
@@ -292,7 +358,83 @@ func (w *Writer) ExportVODChat(ctx context.Context, streamID string, db VODChatD
 	}
 	chatRes.RowCount = int64(len(messages))
 	naturalKey := fmt.Sprintf("vod_chat:%s", streamID)
-	return w.confirmManifest(ctx, ArtifactVODChatMessage, naturalKey, chatRes)
+	if err := w.confirmManifest(ctx, ArtifactVODChatMessage, naturalKey, chatRes); err != nil {
+		return err
+	}
+	return w.exportVODChatProvenance(ctx, streamID, db)
+}
+
+func (w *Writer) exportVODChatProvenance(ctx context.Context, streamID string, db VODChatDB) error {
+	if w == nil || w.blob == nil {
+		return nil
+	}
+	login := ""
+	if rowDB, ok := db.(AnalyticsDB); ok {
+		if row, err := rowDB.ExportStreamRow(ctx, streamID); err == nil && row != nil {
+			login = row.Login
+		}
+	}
+	var prov VODChatProvenance
+	if provBuilder, ok := db.(interface {
+		BuildVODChatProvenance(context.Context, string, string) VODChatProvenance
+	}); ok {
+		prov = provBuilder.BuildVODChatProvenance(ctx, streamID, login)
+	} else {
+		prov = VODChatProvenance{
+			StreamID:              streamID,
+			Login:                 login,
+			EmoteSnapshotStrategy: defaultEmoteSnapshotStrategy,
+			ExportedAt:            time.Now().UTC(),
+		}
+	}
+	raw, err := json.Marshal(prov)
+	if err != nil {
+		return err
+	}
+	_, err = w.putGzip(ctx, VODChatProvenanceBlobKey(streamID), raw)
+	return err
+}
+
+// ExportTTChartJSON uploads semi-raw TT chart JSON for re-parse (TASK-012).
+func (w *Writer) ExportTTChartJSON(ctx context.Context, streamID string, chartJSON []byte) error {
+	if w == nil || w.blob == nil {
+		return fmt.Errorf("archive writer is not configured")
+	}
+	streamID = strings.TrimSpace(streamID)
+	if streamID == "" || len(chartJSON) == 0 {
+		return nil
+	}
+	if w.opts.SilverRawTTMaxBytes > 0 && len(chartJSON) > w.opts.SilverRawTTMaxBytes {
+		return fmt.Errorf("tt chart json exceeds max bytes (%d > %d)", len(chartJSON), w.opts.SilverRawTTMaxBytes)
+	}
+	if !json.Valid(chartJSON) {
+		return fmt.Errorf("tt chart json is not valid JSON")
+	}
+	res, err := w.putGzip(ctx, TTChartJSONBlobKey(streamID), chartJSON)
+	if err != nil {
+		return fmt.Errorf("upload tt chart json: %w", err)
+	}
+	res.RowCount = 1
+	fetchedAt := time.Now().UTC()
+	naturalKey := TTChartJSONKey(streamID, fetchedAt)
+	rec := ExportRecord{
+		ArtifactType:          ArtifactTTChartJSON,
+		NaturalKey:            naturalKey,
+		GCSURI:                res.URI,
+		ETag:                  res.ETag,
+		RowCount:              1,
+		ByteSize:              res.ByteSize,
+		Status:                StatusConfirmed,
+		ExportedAt:            fetchedAt,
+		Tier:                  "silver",
+		StreamID:              streamID,
+		ContentSHA256:         res.ContentSHA256,
+		UncompressedSizeBytes: res.UncompressedSizeBytes,
+	}
+	if w.manifest == nil {
+		return nil
+	}
+	return w.manifest.Upsert(ctx, rec)
 }
 
 // ExportTTDetail uploads optional TwitchTracker HTML (gap-fill / debug artifact).

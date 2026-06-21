@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,10 +26,12 @@ const (
 
 // BlobPutResult captures upload metadata for manifest rows.
 type BlobPutResult struct {
-	URI      string
-	ETag     string
-	ByteSize int64
-	RowCount int64
+	URI                   string
+	ETag                  string
+	ByteSize              int64
+	RowCount              int64
+	ContentSHA256         string
+	UncompressedSizeBytes int64
 }
 
 // BlobStore uploads bytes to cold storage.
@@ -169,14 +174,32 @@ type manifestUpserter interface {
 	Upsert(ctx context.Context, rec ExportRecord) error
 }
 
+// WriterOptions gates SHA-256 hashing and sidecar manifest uploads.
+type WriterOptions struct {
+	ContentHashEnabled         bool
+	WriteSidecarManifest       bool
+	ParserVersion              string
+	SilverPartialMinCoverage   float64
+	SilverRawTTChartJSON       bool
+	SilverRawTTMaxBytes        int
+}
+
 // Writer exports analytics artifacts to blob storage and records manifest rows.
 type Writer struct {
 	blob     BlobStore
 	manifest manifestUpserter
+	opts     WriterOptions
 }
 
 func NewWriter(blob BlobStore, manifest manifestUpserter) *Writer {
 	return &Writer{blob: blob, manifest: manifest}
+}
+
+func (w *Writer) WithOptions(opts WriterOptions) *Writer {
+	if w != nil {
+		w.opts = opts
+	}
+	return w
 }
 
 func Gzip(data []byte) ([]byte, error) {
@@ -247,6 +270,39 @@ func VODChatBlobKey(streamID string) string {
 	return fmt.Sprintf("vod_chat/stream_id=%s/messages.jsonl.gz", streamID)
 }
 
+func BronzeVODCatalogBlobKey(login, date string) string {
+	login = strings.ToLower(strings.TrimSpace(login))
+	date = strings.TrimSpace(date)
+	return fmt.Sprintf("vod_catalog/v1/login=%s/date=%s/part-000.jsonl.gz", login, date)
+}
+
+func ChannelIdentityBlobKey(login, date string) string {
+	login = strings.ToLower(strings.TrimSpace(login))
+	date = strings.TrimSpace(date)
+	return fmt.Sprintf("channels/identity/login=%s/date=%s/identity.json.gz", login, date)
+}
+
+func ProviderCrosswalkBlobKey(login, date string) string {
+	login = strings.ToLower(strings.TrimSpace(login))
+	date = strings.TrimSpace(date)
+	return fmt.Sprintf("channels/crosswalk/login=%s/date=%s/crosswalk.json.gz", login, date)
+}
+
+func RosterTier0BlobKey(date string) string {
+	date = strings.TrimSpace(date)
+	return fmt.Sprintf("rosters/tier0/date=%s/part-000.json.gz", date)
+}
+
+func TTChartJSONBlobKey(streamID string) string {
+	streamID = strings.TrimSpace(streamID)
+	return fmt.Sprintf("raw/twitchtracker/stream_id=%s/chart.json.gz", streamID)
+}
+
+func GoldLiteChatBlobKey(streamID string) string {
+	streamID = strings.TrimSpace(streamID)
+	return fmt.Sprintf("rollups/chat/stream_id=%s/minute.jsonl.gz", streamID)
+}
+
 func (w *Writer) putGzip(ctx context.Context, key string, raw []byte) (BlobPutResult, error) {
 	gz, err := Gzip(raw)
 	if err != nil {
@@ -257,21 +313,59 @@ func (w *Writer) putGzip(ctx context.Context, key string, raw []byte) (BlobPutRe
 		return BlobPutResult{}, err
 	}
 	res.ByteSize = int64(len(gz))
+	res.UncompressedSizeBytes = int64(len(raw))
+	if w != nil && w.opts.ContentHashEnabled {
+		sum := sha256.Sum256(gz)
+		res.ContentSHA256 = hex.EncodeToString(sum[:])
+	}
+	if w != nil && w.opts.WriteSidecarManifest {
+		_ = w.writeSidecar(ctx, key, res)
+	}
 	return res, nil
+}
+
+func (w *Writer) writeSidecar(ctx context.Context, blobKey string, res BlobPutResult) error {
+	sidecar := map[string]any{
+		"blobKey":               blobKey,
+		"uri":                   res.URI,
+		"etag":                  res.ETag,
+		"byteSize":              res.ByteSize,
+		"contentSha256":         res.ContentSHA256,
+		"uncompressedSizeBytes": res.UncompressedSizeBytes,
+		"parserVersion":         w.opts.ParserVersion,
+		"exportedAt":            time.Now().UTC(),
+	}
+	rawJSON, err := json.Marshal(sidecar)
+	if err != nil {
+		return err
+	}
+	sidecarKey := fmt.Sprintf("manifests/%s.json", strings.TrimSuffix(blobKey, ".gz"))
+	_, err = w.blob.Put(ctx, sidecarKey, rawJSON, "application/json")
+	return err
 }
 
 func (w *Writer) confirmManifest(ctx context.Context, artifactType, naturalKey string, res BlobPutResult) error {
 	if w.manifest == nil {
 		return nil
 	}
-	return w.manifest.Upsert(ctx, ExportRecord{
-		ArtifactType: artifactType,
-		NaturalKey:   naturalKey,
-		GCSURI:       res.URI,
-		ETag:         res.ETag,
-		RowCount:     res.RowCount,
-		ByteSize:     res.ByteSize,
-		Status:       StatusConfirmed,
-		ExportedAt:   time.Now().UTC(),
-	})
+	rec := ExportRecord{
+		ArtifactType:          artifactType,
+		NaturalKey:            naturalKey,
+		GCSURI:                res.URI,
+		ETag:                  res.ETag,
+		RowCount:              res.RowCount,
+		ByteSize:              res.ByteSize,
+		Status:                StatusConfirmed,
+		ExportedAt:            time.Now().UTC(),
+		ContentSHA256:         res.ContentSHA256,
+		UncompressedSizeBytes: res.UncompressedSizeBytes,
+	}
+	if w.opts.ParserVersion != "" {
+		rec.Metadata = map[string]any{"parserVersion": w.opts.ParserVersion}
+	}
+	err := w.manifest.Upsert(ctx, rec)
+	if err == nil {
+		recordArchiveExportConfirmed(artifactType)
+	}
+	return err
 }

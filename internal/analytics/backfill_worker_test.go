@@ -111,8 +111,11 @@ func TestBackfillSyncParamsSilver(t *testing.T) {
 }
 
 func TestBackfillExportLabel(t *testing.T) {
-	if backfillExportLabel("gold") != "backfill gold chat" {
+	if backfillExportLabel("gold") != "backfill gold-full chat" {
 		t.Fatal("unexpected gold export label")
+	}
+	if backfillExportLabel("gold_lite") != "backfill gold-lite aggregates" {
+		t.Fatal("unexpected gold_lite export label")
 	}
 	if backfillExportLabel("silver") != "backfill viewers-only" {
 		t.Fatal("unexpected silver export label")

@@ -85,7 +85,8 @@ type SyncService struct {
 
 	archiveExportOnSync bool
 	archiveExporter     SyncArchiveExporter
-	archiveTTExporter   ArchiveTTDetailExporter
+	archiveTTExporter   ArchiveTTExporter
+	silverRawTTChartJSON bool
 }
 
 var errTrackerAccessProtected = errors.New("tracker access protected")
@@ -94,9 +95,10 @@ type SyncArchiveExporter interface {
 	ExportSync(ctx context.Context, streamID, channel, resultMessage string) error
 }
 
-// ArchiveTTDetailExporter uploads optional TwitchTracker HTML captured during sync.
-type ArchiveTTDetailExporter interface {
+// ArchiveTTExporter uploads optional TwitchTracker HTML and chart JSON captured during sync.
+type ArchiveTTExporter interface {
 	ExportTTDetail(ctx context.Context, login, streamID string, html []byte) error
+	ExportTTChartJSON(ctx context.Context, streamID string, chartJSON []byte) error
 }
 
 func NewSyncService(
@@ -281,9 +283,16 @@ func (s *SyncService) WithArchiveExportOnSync(enabled bool, exporter SyncArchive
 	return s
 }
 
-func (s *SyncService) WithArchiveTTDetailExporter(exporter ArchiveTTDetailExporter) *SyncService {
+func (s *SyncService) WithArchiveTTDetailExporter(exporter ArchiveTTExporter) *SyncService {
 	if s != nil {
 		s.archiveTTExporter = exporter
+	}
+	return s
+}
+
+func (s *SyncService) WithSilverTTArchive(chartJSONEnabled bool) *SyncService {
+	if s != nil {
+		s.silverRawTTChartJSON = chartJSONEnabled
 	}
 	return s
 }
@@ -1160,6 +1169,13 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		if err := s.archiveTTExporter.ExportTTDetail(ctx, login, streamID, []byte(html)); err != nil {
 			s.log.Warn("archive tt-detail export failed", "stream_id", streamID, "login", login, "err", err)
 		}
+		if s.silverRawTTChartJSON {
+			if chartJSON := extractTTChartJSONFromHTML(html); len(chartJSON) > 0 {
+				if err := s.archiveTTExporter.ExportTTChartJSON(ctx, streamID, chartJSON); err != nil {
+					s.log.Warn("archive tt chart json export failed", "stream_id", streamID, "err", err)
+				}
+			}
+		}
 	}
 	return msg, nil
 }
@@ -1587,6 +1603,44 @@ func decodeBase64(s string) ([]byte, error) {
 		s += strings.Repeat("=", 4-(len(s)%4))
 	}
 	return base64.StdEncoding.DecodeString(s)
+}
+
+func extractTTChartJSONFromHTML(html string) []byte {
+	var content string
+	if match := regexp.MustCompile(`(?i)<meta\s+id="ecs"\s+content="([^"]+)"`).FindStringSubmatch(html); len(match) > 1 {
+		content = match[1]
+	} else if match := regexp.MustCompile(`(?i)<meta\s+content="([^"]+)"\s+id="ecs"`).FindStringSubmatch(html); len(match) > 1 {
+		content = match[1]
+	}
+	if content == "" {
+		return nil
+	}
+	parts := strings.Split(content, "!")
+	if len(parts) < 2 {
+		return nil
+	}
+	keysB64 := parts[len(parts)-1]
+	keysBytes, err := decodeBase64(keysB64)
+	if err != nil {
+		return nil
+	}
+	var keys []string
+	if err := json.Unmarshal(keysBytes, &keys); err != nil {
+		return nil
+	}
+	keyToIndex := make(map[string]int, len(keys))
+	for idx, key := range keys {
+		keyToIndex[key] = idx
+	}
+	idx, ok := keyToIndex["chart"]
+	if !ok || idx >= len(parts)-1 {
+		return nil
+	}
+	decoded, err := decodeBase64(parts[idx])
+	if err != nil || len(decoded) == 0 || !json.Valid(decoded) {
+		return nil
+	}
+	return decoded
 }
 
 func parseTime(tStr string) (time.Time, error) {

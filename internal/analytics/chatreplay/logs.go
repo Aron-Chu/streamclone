@@ -554,6 +554,11 @@ func (s *Store) PurgeModEventsOlderThan(ctx context.Context, cutoff time.Time) (
 	if s == nil || s.db == nil {
 		return 0, nil
 	}
+	if s.modEventArchiver != nil {
+		if err := s.modEventArchiver.ExportPendingModEventsBeforeCutoff(ctx, cutoff); err != nil {
+			return 0, err
+		}
+	}
 	if s.archiveProtectRetention {
 		var missing int64
 		err := s.db.QueryRow(ctx, `
