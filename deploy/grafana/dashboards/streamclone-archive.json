@@ -1,0 +1,46 @@
+{
+  "uid": "streamclone-archive",
+  "title": "Streamclone Archive",
+  "tags": ["streamclone", "archive"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Archive jobs running",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sum(streamclone_archive_jobs_running)", "legendFormat": "running" }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Archive jobs queued",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "sum(streamclone_archive_jobs_queued)", "legendFormat": "queued" }]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Backfill queue depth",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [{ "expr": "sum by (tier, status) (backfill_jobs_gauge)", "legendFormat": "{{tier}} {{status}}" }]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Archive coverage ratio",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [{ "expr": "streamclone_archive_coverage_ratio", "legendFormat": "{{tier}}" }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Archive uploads",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [{ "expr": "sum by (artifact_type) (rate(archive_exports_confirmed_total[5m]))", "legendFormat": "{{artifact_type}}" }]
+    }
+  ]
+}

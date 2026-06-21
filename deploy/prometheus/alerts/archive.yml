@@ -1,0 +1,19 @@
+groups:
+  - name: streamclone_archive
+    rules:
+      - alert: ArchiveJobsFailedSpike
+        expr: increase(streamclone_archive_jobs_failed_total[15m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Archive job failures elevated
+          description: More than 5 archive job failures in 15 minutes.
+
+      - alert: ArchiveCoverageLow
+        expr: streamclone_archive_coverage_ratio{tier="silver"} < 0.5
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: Silver archive coverage below 50%
