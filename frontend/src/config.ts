@@ -127,3 +127,16 @@ export const HLS_LOW_LATENCY_ENABLED = ['true', '1'].includes(
 export const ADAPTIVE_LIVE_LATENCY_ENABLED = ['true', '1'].includes(
   String(runtime.adaptiveLiveLatencyEnabled ?? viteEnv.VITE_ADAPTIVE_LIVE_LATENCY_ENABLED ?? 'false').toLowerCase(),
 )
+
+export const ADMIN_ARCHIVE_UI_ENABLED = ['true', '1'].includes(
+  String(viteEnv.VITE_ADMIN_ARCHIVE_UI_ENABLED ?? 'false').toLowerCase(),
+)
+
+/** TASK-021B: token UI only on localhost or HTTPS — public BearHost HTTP shows CLI instructions. */
+export const ADMIN_ARCHIVE_UI_ALLOWED = (() => {
+  if (ADMIN_ARCHIVE_UI_ENABLED) return true
+  if (typeof window === 'undefined') return false
+  const { protocol, hostname } = window.location
+  if (protocol === 'https:') return true
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+})()

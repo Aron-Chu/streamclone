@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ADMIN_ARCHIVE_UI_ALLOWED, ADMIN_ARCHIVE_UI_ENABLED } from '../config'
-import { getAdminArchiveToken, setAdminArchiveToken } from '../hooks/useArchiveJobs'
+import { ADMIN_ARCHIVE_UI_ALLOWED, ADMIN_ARCHIVE_UI_ENABLED } from '../../config'
+import { getAdminArchiveToken, setAdminArchiveToken } from '../../hooks/useArchiveJobs'
 
 type Props = {
   children: React.ReactNode

@@ -15,6 +15,7 @@
 services:
   analytics:
     environment:
+      ARCHIVE_ENABLED: "false"
       TIER0_ENABLED: "false"
       BRONZE_ENABLED: "false"
       BACKFILL_ENABLED: "false"

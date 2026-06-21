@@ -1,5 +1,5 @@
-import AdminTokenGate, { AdminArchiveNav } from '../components/admin/AdminTokenGate'
-import { useArchiveCoverage, useArchiveJobs } from '../hooks/useArchiveJobs'
+import AdminTokenGate, { AdminArchiveNav } from '../../components/admin/AdminTokenGate'
+import { useArchiveCoverage, useArchiveJobs } from '../../hooks/useArchiveJobs'
 
 export default function ArchiveAdminPage() {
   const jobs = useArchiveJobs()
@@ -12,8 +12,8 @@ export default function ArchiveAdminPage() {
           <h1 className="text-2xl font-bold">Archive overview</h1>
           <AdminArchiveNav />
           <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label="Active jobs" value={jobs.jobs.filter((j) => j.status === 'running').length} />
-            <StatCard label="Queued jobs" value={jobs.jobs.filter((j) => j.status === 'queued').length} />
+            <StatCard label="Active jobs" value={jobs.jobs.filter((j) => (j.status ?? '') === 'running').length} />
+            <StatCard label="Queued jobs" value={jobs.jobs.filter((j) => (j.status ?? '') === 'queued').length} />
             <StatCard label="Streams tracked" value={coverage.report?.streams?.total ?? '—'} />
           </div>
           {jobs.error ? <p className="mt-4 text-sm text-red-300">{jobs.error}</p> : null}

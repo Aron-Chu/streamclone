@@ -28,6 +28,14 @@ func main() {
 		logger.Error("config load failed", "err", err)
 		os.Exit(1)
 	}
+	if corpusWorkersExplicitlyDisabled() {
+		cfg.ArchiveEnabled = false
+		cfg.BronzeEnabled = false
+		cfg.BackfillEnabled = false
+		cfg.GoldBackfillEnabled = false
+		cfg.Tier0Enabled = false
+		logger.Info("CORPUS_WORKERS_ENABLED=false — corpus plane off for this process")
+	}
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
@@ -295,4 +303,12 @@ func main() {
 		logger.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+func corpusWorkersExplicitlyDisabled() bool {
+	v, ok := os.LookupEnv("CORPUS_WORKERS_ENABLED")
+	if !ok {
+		return false
+	}
+	return v == "0" || v == "false"
 }
