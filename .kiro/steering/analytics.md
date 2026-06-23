@@ -24,9 +24,9 @@ Analytics turns Twitch stream history, viewer data, chat rollups, emotes, VOD co
 
 **Not Pulse Wire:** the streamer news feed at `/pulse-wire` is a separate optional tier (`storygraph`, `PULSE_WIRE_ENABLED`). For Pulse Wire work, read `.kiro/steering/pulse-wire.md` — not this section. Both tiers may share `streamclone-scraper` (Reddit LSF, YouTube, TwitchTracker); scraper health affects Analytics charts and Pulse Wire ingest independently of chat sync.
 
-**Helm (recommended for Pulse dev):** `make pulse` deploys [`charts/pulse/`](../charts/pulse/) to Kubernetes (InfluxDB, Grafana, Prometheus). On WSL + Docker Desktop, Influx uses ClusterIP plus port-forward on `:18087` so Compose analytics can reach Influx via the WSL IP (`INFLUXDB_URL=http://<wsl-ip>:18087`). Wire with `make helm-pulse-wire`.
+**Helm (recommended for Pulse dev):** `make pulse` deploys [`charts/pulse/`](../../charts/pulse/) to Kubernetes (InfluxDB, Grafana, Prometheus). On WSL + Docker Desktop, Influx uses ClusterIP plus port-forward on `:18087` so Compose analytics can reach Influx via the WSL IP (`INFLUXDB_URL=http://<wsl-ip>:18087`). Wire with `make helm-pulse-wire`.
 
-**Compose `pulse` profile:** same dashboards from `deploy/grafana/` plus Prometheus in [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) — used by desktop **Start Pulse** when Helm/Grafana is not already on `:3000`/`:18086`.
+**Compose `pulse` profile:** same dashboards from `deploy/grafana/` plus Prometheus in [`deploy/docker-compose.yml`](../../deploy/docker-compose.yml) — used by desktop **Start Pulse** when Helm/Grafana is not already on `:3000`/`:18086`.
 
 Dashboards: **Emote Pulse** (Influx/Flux) and **Streamclone Ops** (Prometheus/PromQL). Influx export includes `stream_category` tag and `unique_emote_count` field. Re-sync or `TIMESERIES_BACKFILL_ON_START=true` after upgrade for historical tags.
 

@@ -1,0 +1,17 @@
+# Optional merge into ~/.codex/config.toml (user-global layer).
+# Codex CLI and IDE extension share this file.
+
+# Personal style — also set in ~/.codex/AGENTS.md
+developer_instructions = """
+Product name: Streamclone (GitHub Aron-Chu/streamclone). Do not call it twitch-7tv-clone in docs.
+Commits: sole author Aron-Chu <aroncloudchu@gmail.com>, Conventional Commits, no Co-authored-by trailers.
+Narrow diffs; no drive-by refactors. Never commit .env or tokens.
+"""
+
+project_doc_max_bytes = 65536
+
+# Example: read-only GitHub MCP (install separately; scope token read-only)
+# [mcp_servers.github]
+# url = "https://api.githubcopilot.com/mcp/"
+# bearer_token_env_var = "GITHUB_PAT"
+# enabled = false

@@ -13,6 +13,10 @@ Small index for docs, cleanup, and install bug-fix notes.
 | [docs/SERVICE_MAP.md](SERVICE_MAP.md) | Service boundaries and ports |
 | [docs/TESTING.md](TESTING.md) | Test matrix and focused commands |
 | [docs/MCP.md](MCP.md) | Local MCP setup and usage |
+| [docs/CODEX.md](CODEX.md) | Codex MCP, skills mirror, config |
+| [docs/workspace.md](workspace.md) | Two-repo layout, doc ownership, dev workflow |
+| [docs/pulse-extension/](pulse-extension/) | Redirect stubs → [streamclone-pulse extension spec](https://github.com/Aron-Chu/streamclone-pulse/tree/master/docs/pulse-extension) |
+| [packages/pulse-core/](../packages/pulse-core/) | Shared scoring/types for frontend + extension |
 | [SECURITY.md](../SECURITY.md) | Vulnerability reporting |
 | [docs/security.md](security.md) | Operator hardening |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow |
@@ -60,11 +64,11 @@ Bug fixes ship from this repo. Copying source into the release install only upda
 | 2026-06-13 | `966c6b0` | Fetch bootstrap and script overlay by GitHub commit SHA |
 | 2026-06-13 | `a67bd05` | Repair `deploy/Caddyfile.local-tunnel` when Docker creates a directory |
 | 2026-06-15 | `fc6406c` | Pin release install asset version per tag |
-| 2026-06-15 | pending | Require setup-control proxy readiness during install/start/repair and clean stale Docker resources without `.env` |
-| 2026-06-15 | pending | Repair localhost relays for IPv4 and IPv6 |
-| 2026-06-15 | pending | Repo hygiene: `make check`, CodeQL, CODEOWNERS, issue templates, `.gitignore` cleanup |
-| 2026-06-17 | pending | Install automation: Pulse Wire release defaults, ReplayForge vs clipper cleanup, release env merge on upgrade, warming UI |
-| 2026-06-19 | pending | Uninstall uses same compose profiles as start/stop (`pulse-wire`, feature flags from `.env`) on Windows and bash |
+| 2026-06-15 | `fc6406c` (assessed 2026-06-21) | Require setup-control proxy readiness during install/start/repair — `ensure-setup-control.ps1 -RequireProxy` in start/setup scripts |
+| 2026-06-15 | `fc6406c` (assessed 2026-06-21) | Repair localhost relays for IPv4 and IPv6 — `ensure-localhost-relays.ps1` |
+| 2026-06-15 | assessed 2026-06-21 | Repo hygiene (Phase 1): doc/router alignment (`AGENTS.md`, `SERVICE_MAP.md`, `docs/workspace.md`), `.gitignore` grafana PNG pattern, dead frontend shims removed, clipper profile refs cleaned — remaining: `make check`, CodeQL, CODEOWNERS, issue templates |
+| 2026-06-17 | assessed 2026-06-21 | Install automation (partial): ReplayForge vs clipper cleanup done in Makefile/skills; Pulse Wire release defaults, release env merge on upgrade, warming UI — verify and close per item |
+| 2026-06-19 | `fc6406c` (assessed 2026-06-21) | Uninstall uses same compose profiles as start/stop (`pulse-wire`, feature flags from `.env`) on Windows and bash |
 
 ## Legacy Config Aliases
 

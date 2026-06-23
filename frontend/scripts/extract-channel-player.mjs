@@ -38,7 +38,7 @@ import type {
   PlaybackLatencyMode,
   VideoFitMode,
 } from '../../settings'
-import { buildVodSeekTarget } from '../../utils/vodDeepLink'
+import { buildVodSeekTarget } from '@streamclone/pulse-core'
 import { needsVodRelayRestart, readVideoSeekableRanges, vodRelativeSeekSeconds } from '../../utils/vodSeek'
 import { usePlayheadStore } from '../../stores/playheadStore'
 import { PLAYHEAD_SYNC_INTERVAL_MS } from '../../utils/chartCursorSync'

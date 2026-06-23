@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "figma-bridge": {
-      "command": "npx",
-      "args": ["-y", "@gethopp/figma-mcp-bridge@0.0.15"]
+      "command": "node",
+      "args": ["${workspaceFolder}/scripts/.figma-bridge-deps/node_modules/@gethopp/figma-mcp-bridge/dist/index.js"]
     }
   }
 }

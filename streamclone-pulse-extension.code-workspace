@@ -1,0 +1,7 @@
+{
+  "folders": [
+    { "path": ".", "name": "streamclone" },
+    { "path": "../streamclone-pulse", "name": "streamclone-pulse" }
+  ],
+  "settings": {}
+}

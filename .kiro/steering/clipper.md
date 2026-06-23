@@ -1,6 +1,6 @@
 # Clip Studio Steering
 
-**Active Clip Studio lives in [ReplayForge](../replayforge)** (sibling repo). The in-repo `clipper/` stub and compose profile are **deprecated** — Streamclone proxies to `host.docker.internal:8095` when ReplayForge is running.
+**Active Clip Studio lives in [ReplayForge](../../../replayforge)** (sibling repo checkout). The in-repo `clipper/` stub and compose **clipper** profile are **deprecated** — Streamclone proxies to `host.docker.internal:8095` when ReplayForge is running.
 
 See [docs/agents-streamclone-and-replayforge.md](../../docs/agents-streamclone-and-replayforge.md) for install and integration.
 

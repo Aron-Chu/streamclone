@@ -1301,7 +1301,7 @@ Risks: Volume — start with one source
 2. **TASK-029:** Re-run budget `tt_list`; document pass/fail.
 3. **Sign-off criteria for any proxy enablement:** Premium TT detail ≥95% pass; budget tt_list pass OR explicit waiver; Cloudflare flag false on completed probes; operator written approval in `proxy-benchmark.md`.
 4. **Routing policy:** Default **direct** on BearHost; premium residential for Silver bulk only when TASK-030 enabled on that host; never global env in shared `.env` committed.
-5. **Silver defaults:** `SCRAPER_MAX_CONCURRENT=1`, `BACKFILL` one stream at a time on 8 GB VPS.
+5. **Silver defaults:** `SCRAPER_MAX_CONCURRENT=1`, one silver worker on 8 GB VPS, continuous drain between claimable jobs, and BearHost corpus feed caps of `SILVER_ENQUEUE_MAX_PER_RUN=40` every `5m`.
 6. **Fallback:** Document home-PC egress (`ARCHIVE_EGRESS_SLOT=home` — planned env) for TT if VPS fails smoke gate 3.
 7. **Metrics:** scraper failure rate, CF detection counter, TT scrape duration p95 — wire in TASK-026/030.
 

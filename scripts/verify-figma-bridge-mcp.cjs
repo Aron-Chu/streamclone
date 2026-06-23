@@ -1,12 +1,26 @@
 #!/usr/bin/env node
 /** MCP stdio smoke test for @gethopp/figma-mcp-bridge. */
 const { spawn } = require("child_process");
+const path = require("path");
 
-const PACKAGE = "@gethopp/figma-mcp-bridge@0.0.15";
-const isWin = process.platform === "win32";
-const child = isWin
-  ? spawn("cmd.exe", ["/c", "npx", "-y", PACKAGE], { stdio: ["pipe", "pipe", "pipe"] })
-  : spawn("npx", ["-y", PACKAGE], { stdio: ["pipe", "pipe", "pipe"] });
+const ROOT = path.join(__dirname, "..");
+const BRIDGE_ENTRY = path.join(
+  ROOT,
+  "scripts",
+  ".figma-bridge-deps",
+  "node_modules",
+  "@gethopp",
+  "figma-mcp-bridge",
+  "dist",
+  "index.js",
+);
+
+require("./ensure-figma-bridge-deps.cjs").ensureDeps();
+
+const child = spawn(process.execPath, [BRIDGE_ENTRY], {
+  stdio: ["pipe", "pipe", "pipe"],
+  windowsHide: true,
+});
 
 let nextId = 1;
 let stdout = "";

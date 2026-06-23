@@ -40,7 +40,7 @@ import { useThemeEffect, useUiSettings, type BottomDensityMode, type ClipPeriod,
 import { autoHighStableQuality, defaultQualityOptions, requestQuality } from '../streamQuality'
 import { emoteLoadPercent, formatEmoteProviderProgress, sortChannelEmotesByUsage } from '../emoteUtils'
 import { normalizeVodId } from '../utils/vodId'
-import { buildVodDeepLink, buildVodSeekTarget, estimateVodPlayerSeekTarget, parseVodAnalyticsContext, preferTwitchEmbedReview } from '../utils/vodDeepLink'
+import { buildVodDeepLink, buildVodSeekTarget, estimateVodPlayerSeekTarget, parseVodAnalyticsContext, preferTwitchEmbedReview } from '@streamclone/pulse-core'
 import {
   defaultAnalyticsVodSidebarTab,
   isEmbedAnalyticsVodReview,
