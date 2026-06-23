@@ -59,6 +59,7 @@ type SyncService struct {
 	trackerScrapeTimeoutMS        int
 	ttSyncTimeoutMS               int
 	ttBackgroundRetryEnabled      bool
+	ttScrapeBackoffEnabled        bool
 	passTTMaxAge                  bool
 	ttMaxAgeMSDefault             int
 	ttStaleMaxAgeMS               int
@@ -83,9 +84,9 @@ type SyncService struct {
 	chatReplayCfg     chatreplay.SanitizeConfig
 	chatReplayEnabled bool
 
-	archiveExportOnSync bool
-	archiveExporter     SyncArchiveExporter
-	archiveTTExporter   ArchiveTTExporter
+	archiveExportOnSync  bool
+	archiveExporter      SyncArchiveExporter
+	archiveTTExporter    ArchiveTTExporter
 	silverRawTTChartJSON bool
 }
 
@@ -132,6 +133,7 @@ func NewSyncService(
 	trackerScrapeTimeoutMS int,
 	ttSyncTimeoutMS int,
 	ttBackgroundRetryEnabled bool,
+	ttScrapeBackoffEnabled bool,
 	passTTMaxAge bool,
 	ttMaxAgeMSDefault int,
 	ttStaleMaxAgeMS int,
@@ -255,7 +257,8 @@ func NewSyncService(
 		trackerScrapeTimeoutMS:        trackerScrapeTimeoutMS,
 		ttSyncTimeoutMS:               ttSyncTimeoutMS,
 		ttBackgroundRetryEnabled:      ttBackgroundRetryEnabled,
-		passTTMaxAge:                  passTTMaxAge,
+		ttScrapeBackoffEnabled:          ttScrapeBackoffEnabled,
+		passTTMaxAge:                    passTTMaxAge,
 		ttMaxAgeMSDefault:             ttMaxAgeMSDefault,
 		ttStaleMaxAgeMS:               ttStaleMaxAgeMS,
 		ttPrefetchEnabled:             ttPrefetchEnabled,
@@ -457,14 +460,13 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 				}
 			}
 		}
-		if err := s.store.UpsertStreamPlaceholder(ctx, streamID, broadcasterID, login, title, startedAt); err != nil {
-			s.log.Warn("failed to upsert placeholder stream record", "stream_id", streamID, "err", err)
-		} else {
-			if canon, resolveErr := s.store.ResolveCanonicalStreamID(ctx, streamID); resolveErr == nil && canon != "" {
-				streamID = canon
-			}
-			s.log.Info("upserted placeholder stream record for sync", "stream_id", streamID, "login", login)
+		canonID, err := s.ensureAnalyticsStreamRow(ctx, streamID, broadcasterID, login, title, startedAt)
+		if err != nil {
+			return "", fmt.Errorf("ensure analytics stream row: %w", err)
 		}
+		streamID = canonID
+		hasStreamRecord = true
+		s.log.Info("upserted placeholder stream record for sync", "stream_id", streamID, "login", login)
 	}
 
 	skipTracker := !viewersOnly && hasStreamRecord && stream != nil && s.shouldSkipTracker(ctx, stream)
@@ -597,11 +599,6 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 			time.Sleep(2 * time.Second)
 			html, err = s.scrapeTwitchTrackerCoalesced(ctx, streamID, trackerURL, stream, viewersOnly, firstTimeoutMS)
 		}
-		if err != nil {
-			metrics.AnalyticsScraperRequests.WithLabelValues("twitchtracker", "error").Inc()
-		} else {
-			metrics.AnalyticsScraperRequests.WithLabelValues("twitchtracker", "success").Inc()
-		}
 		trackerScrapeMS = time.Since(trackerStart).Milliseconds()
 		s.updateTrackerProgress(ctx, streamID, func(tp *SyncTrackerProgress) {
 			tp.Active = false
@@ -623,17 +620,40 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 			}
 			viewerStatus = "failed"
 			existingRollups, rollErr := s.store.RollupsByStream(ctx, streamID)
-			hasLiveViewers := rollErr == nil && (hasAnyViewerRollups(existingRollups) || (stream != nil && stream.ViewerSamples > 0))
+			hasExistingViewers := rollErr == nil && hasAnyViewerRollups(existingRollups)
+			hasLiveViewers := hasExistingViewers || (stream != nil && stream.ViewerSamples > 0)
 			if hasLiveViewers || s.ttBackgroundRetryEnabled {
 				viewerStatus = "pending_backfill"
 			}
 			s.log.Warn("TwitchTracker scrape failed; continuing chat sync", "stream_id", streamID, "err", err, "viewer_status", viewerStatus)
-			trackerMsg := "Viewer chart unavailable — chat sync continues. Run scripts/scraper-preflight.ps1 or Re-sync viewers after scraper recovery."
+			trackerMsg := "Viewer chart unavailable — chat and emote Pulse still sync."
 			if viewerStatus == "pending_backfill" {
-				if hasLiveViewers {
-					trackerMsg = "Using live-collected viewer data — TwitchTracker backfill pending in background."
+				if hasExistingViewers {
+					trackerMsg = "Using live-collected viewer data — TwitchTracker backfill pending."
+				} else if hasLiveViewers {
+					trackerMsg = "Using partial viewer samples — TwitchTracker backfill pending."
 				} else {
-					trackerMsg = "TwitchTracker backfill pending in background — chat sync continues."
+					trackerMsg = "TwitchTracker backfill pending — chat and emote Pulse still sync."
+				}
+				if hasExistingViewers && hasStreamRecord && stream != nil {
+					var dbErr error
+					tracker, dbErr = s.trackerDataFromDB(ctx, stream)
+					if dbErr == nil && len(tracker.ViewerPoints) > 0 {
+						if !tracker.ChartStartedAt.IsZero() {
+							setSharedRollupStart(tracker.ChartStartedAt)
+						} else if !startedAt.IsZero() {
+							setSharedRollupStart(startedAt)
+						} else if !stream.StartedAt.IsZero() {
+							setSharedRollupStart(stream.StartedAt)
+						}
+						startVODCommentsFetch(cachedVodID, tracker.ViewerPoints, tracker.Games)
+						s.log.Info("loaded viewer rollups from DB after TwitchTracker failure",
+							"stream_id", streamID,
+							"points", len(tracker.ViewerPoints),
+						)
+					} else if dbErr != nil {
+						s.log.Warn("failed to load viewer rollups from DB after TwitchTracker failure", "stream_id", streamID, "err", dbErr)
+					}
 				}
 				if s.ttBackgroundRetryEnabled {
 					s.spawnTrackerBackgroundRetry(streamID, login, stream, trackerURL, startedAt)
@@ -752,21 +772,6 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		}
 	}
 
-	if !hasStreamRecord {
-		// Insert placeholder stream record
-		_, err = s.store.db.Exec(ctx, `
-			INSERT INTO analytics_streams (
-				stream_id, broadcaster_id, login, display_name, title, category, started_at, last_seen_at, tags, peak_viewers
-			)
-			VALUES ($1, $2, $3, $3, $4, $5, $6, $6, '[]'::jsonb, $7)
-			ON CONFLICT (stream_id) DO NOTHING`,
-			streamID, broadcasterID, login, title, category, startedAt, peakViewers,
-		)
-		if err != nil {
-			s.log.Error("failed to insert placeholder stream record in DB", "err", err)
-		}
-	}
-
 	// Fallback to DB duration if parsing failed
 	durationSeconds := durationMinutes * 60
 	if durationSeconds <= 0 && hasStreamRecord && stream != nil && stream.EndedAt != nil {
@@ -834,7 +839,12 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		}
 	}
 	if !viewersOnly {
-		s.preloadChannelEmotes(ctx, login, broadcasterID)
+		if err := NewEmoteEnsureClient(s.emoteURL, s.log).RequireReadyForGold(ctx, login, broadcasterID, s.enricher); err != nil {
+			return "", err
+		}
+		if s.log != nil {
+			s.log.Info("preloaded channel emotes for historical sync", "login", login)
+		}
 	}
 
 	if broadcasterID != "" {
@@ -1049,6 +1059,16 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		for i := range segments {
 			segments[i].StreamID = streamID
 		}
+		if login != "" {
+			canonID, ensureErr := s.ensureAnalyticsStreamRow(ctx, streamID, broadcasterID, login, title, startedAt)
+			if ensureErr != nil {
+				return "", fmt.Errorf("ensure stream row before game segments: %w", ensureErr)
+			}
+			streamID = canonID
+			for i := range segments {
+				segments[i].StreamID = streamID
+			}
+		}
 		if err = s.store.SaveGameSegments(ctx, streamID, segments); err != nil {
 			return "", fmt.Errorf("failed to save game segments to DB: %w", err)
 		}
@@ -1113,11 +1133,13 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		}
 	} else if len(viewerPoints) == 0 {
 		if vodID == "" {
-			msg = "Stream synced (chat skipped — VOD not found). Viewer chart blocked by TwitchTracker."
+			msg = "Chat/emotes synced where available — VOD not found. Viewer chart blocked by TwitchTracker."
 		} else if chatComments == 0 {
-			msg = "Stream synced (chat unavailable). Viewer chart blocked by TwitchTracker."
+			msg = "Stream synced — chat unavailable. Viewer chart blocked by TwitchTracker."
+		} else if viewerStatus == "pending_backfill" || viewerStatus == "backfilling" {
+			msg = "Chat/emotes synced — viewer timeline uses live rollups; TwitchTracker backfill pending."
 		} else {
-			msg = "Chat/emotes synced. Viewer chart incomplete — Re-sync viewers."
+			msg = "Chat/emotes synced. Viewer chart incomplete — Re-sync viewers after scraper recovery."
 		}
 	} else if vodID == "" {
 		if NormalizeBroadcasterID(broadcasterID) == "" {
@@ -1127,6 +1149,9 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		}
 	} else if chatComments == 0 {
 		msg = "Viewer timeline synced; Twitch VOD comments are unavailable right now."
+	}
+	if (viewerStatus == "pending_backfill" || viewerStatus == "backfilling") && len(viewerPoints) > 0 && chatComments > 0 && !viewersOnly {
+		msg = fmt.Sprintf("Chat/emotes synced (%s comments) — viewer timeline from live rollups; TwitchTracker backfill pending.", strconv.Itoa(chatComments))
 	}
 	if skipTracker && !viewersOnly && chatComments > 0 {
 		msg = fmt.Sprintf("Chat/emotes synced (%s comments); viewer timeline unchanged", strconv.Itoa(chatComments))
@@ -1399,7 +1424,27 @@ func (s *SyncService) scrapeTwitchTrackerCoalesced(ctx context.Context, streamID
 	})
 }
 
-func (s *SyncService) doScrapeTwitchTracker(ctx context.Context, streamID, url string, stream *StreamRecord, viewersOnly bool, timeoutMS int) (string, error) {
+func (s *SyncService) doScrapeTwitchTracker(ctx context.Context, streamID, url string, stream *StreamRecord, viewersOnly bool, timeoutMS int) (html string, err error) {
+	start := time.Now()
+	path := ttScrapePathUnknown
+	cacheHit := false
+	defer func() {
+		reason := ClassifyTTScrapeError(err)
+		metrics.RecordTTScrapeAttempt("twitchtracker", path, reason, cacheHit, time.Since(start))
+		if err != nil {
+			recordCtx := context.Background()
+			if ctx.Err() == nil {
+				recordCtx = ctx
+			}
+			s.recordTTScrapeBackoff(recordCtx, streamID, reason)
+		}
+	}()
+
+	if blocked, backoffReason := s.checkTTScrapeBackoff(ctx, streamID); blocked {
+		path = ttScrapePathBrowser
+		return "", fmt.Errorf("%w (%s)", errTTScrapeBackoff, backoffReason)
+	}
+
 	tryDirect := s.shouldTryDirectHTTP(stream) && s.directHTTP.allowed()
 	if tryDirect {
 		s.updateTrackerProgress(ctx, streamID, func(tp *SyncTrackerProgress) {
@@ -1411,6 +1456,7 @@ func (s *SyncService) doScrapeTwitchTracker(ctx context.Context, streamID, url s
 		if directErr == nil {
 			s.directHTTP.record(true)
 			s.log.Info("fetched TwitchTracker page via direct HTTP", "url", url)
+			path = ttScrapePathDirectHTTP
 			return htmlBody, nil
 		}
 		s.directHTTP.record(false)
@@ -1421,6 +1467,7 @@ func (s *SyncService) doScrapeTwitchTracker(ctx context.Context, streamID, url s
 		s.log.Debug("direct TwitchTracker fetch temporarily disabled due to low success rate", "url", url)
 	}
 
+	path = ttScrapePathBrowser
 	s.updateTrackerProgress(ctx, streamID, func(tp *SyncTrackerProgress) {
 		tp.Phase = "browser"
 		tp.Message = "Browser scrape for viewer chart (meta#ecs) — Camoufox / Cloudflare"
@@ -1478,7 +1525,13 @@ func (s *SyncService) doScrapeTwitchTracker(ctx context.Context, streamID, url s
 				State string `json:"state"`
 			} `json:"protection"`
 		} `json:"data"`
-		Error string `json:"error"`
+		Error    string `json:"error"`
+		Timing   *struct {
+			CacheHit bool `json:"cacheHit"`
+		} `json:"timing"`
+		Metadata *struct {
+			CacheHit bool `json:"cacheHit"`
+		} `json:"metadata"`
 	}
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
@@ -1488,6 +1541,12 @@ func (s *SyncService) doScrapeTwitchTracker(ctx context.Context, streamID, url s
 	syncNetRecord(ctx, netmeter.OpTracker, int64(len(respBody)))
 	if err := json.Unmarshal(respBody, &fcResp); err != nil {
 		return "", err
+	}
+	if fcResp.Timing != nil && fcResp.Timing.CacheHit {
+		cacheHit = true
+	}
+	if fcResp.Metadata != nil && fcResp.Metadata.CacheHit {
+		cacheHit = true
 	}
 
 	if !fcResp.Success {
@@ -1540,6 +1599,11 @@ func (s *SyncService) spawnTrackerBackgroundRetry(streamID, login string, stream
 		defer s.trackerPrefetch.finish(retryKey)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.trackerScrapeTimeoutMS)*time.Millisecond+60*time.Second)
 		defer cancel()
+
+		if blocked, reason := s.checkTTScrapeBackoff(ctx, streamID); blocked {
+			s.log.Info("skipping tracker background retry during scrape backoff", "stream_id", streamID, "reason", reason)
+			return
+		}
 
 		s.updateViewerStatus(ctx, streamID, "backfilling", "Retrying TwitchTracker viewer backfill in background")
 
@@ -2296,6 +2360,15 @@ func (s *SyncService) persistEarlyViewerChart(
 		return
 	}
 	writeStart := time.Now()
+	login := s.syncChannel(streamID)
+	if login != "" {
+		canonID, err := s.ensureAnalyticsStreamRow(ctx, streamID, "", login, "", rollupStart)
+		if err != nil {
+			s.log.Warn("early viewer rollup bootstrap failed", "stream_id", streamID, "err", err)
+		} else {
+			streamID = canonID
+		}
+	}
 	if err := s.store.BulkPatchViewerRollups(ctx, streamID, rollups); err != nil {
 		s.log.Warn("early viewer rollup write failed", "stream_id", streamID, "err", err)
 		return
@@ -2305,6 +2378,17 @@ func (s *SyncService) persistEarlyViewerChart(
 		segments[i].StreamID = streamID
 	}
 	if len(segments) > 0 {
+		if login != "" {
+			canonID, err := s.ensureAnalyticsStreamRow(ctx, streamID, "", login, "", rollupStart)
+			if err != nil {
+				s.log.Warn("early game segment bootstrap failed", "stream_id", streamID, "err", err)
+			} else {
+				streamID = canonID
+				for i := range segments {
+					segments[i].StreamID = streamID
+				}
+			}
+		}
 		if err := s.store.SaveGameSegments(ctx, streamID, segments); err != nil {
 			s.log.Warn("early game segment write failed", "stream_id", streamID, "err", err)
 		}
@@ -2338,87 +2422,6 @@ func (s *SyncService) persistEarlyViewerChart(
 		st.Tracker.Active = false
 		st.Tracker.Message = "Viewer chart available in UI"
 	})
-}
-
-type emoteEnsureResponse struct {
-	State     string `json:"state"`
-	Count     int    `json:"count"`
-	Pending   int    `json:"pending"`
-	Providers []struct {
-		Provider string `json:"provider"`
-		State    string `json:"state"`
-		Count    int    `json:"count"`
-		Error    string `json:"error"`
-	} `json:"providers"`
-}
-
-func (s *SyncService) preloadChannelEmotes(ctx context.Context, login, broadcasterID string) {
-	if s.emoteURL == "" || login == "" || broadcasterID == "" {
-		return
-	}
-	body, err := json.Marshal(map[string]any{
-		"twitch_id": broadcasterID,
-		"providers": []string{"seventv", "twitch", "ffz"},
-	})
-	if err != nil {
-		return
-	}
-	url := fmt.Sprintf("%s/v1/channels/%s/emotes/ensure", s.emoteURL, login)
-	deadline := time.Now().Add(2 * time.Minute)
-	var last emoteEnsureResponse
-	for attempt := 0; attempt < 60 && time.Now().Before(deadline); attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(2 * time.Second):
-			}
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := s.client.Do(req)
-		if err != nil {
-			s.log.Warn("emote ensure request failed", "login", login, "err", err)
-			return
-		}
-		respBody, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if readErr != nil {
-			s.log.Warn("emote ensure read failed", "login", login, "err", readErr)
-			return
-		}
-		syncNetRecord(ctx, netmeter.OpEmote, int64(len(respBody)))
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			s.log.Warn("emote ensure returned non-success status", "login", login, "status", resp.StatusCode)
-			return
-		}
-		last = emoteEnsureResponse{}
-		_ = json.Unmarshal(respBody, &last)
-		if last.State == "ready" && last.Count > 0 {
-			s.enricher.Invalidate(login)
-			s.log.Info("preloaded channel emotes for historical sync", "login", login, "count", last.Count)
-			return
-		}
-		if last.State == "failed" || (last.State == "ready" && last.Count == 0 && last.Pending == 0) {
-			break
-		}
-	}
-	var providerErrors []string
-	for _, p := range last.Providers {
-		if p.Error != "" {
-			providerErrors = append(providerErrors, p.Provider+": "+p.Error)
-		}
-	}
-	s.log.Warn("emote dictionary not ready before chat tokenize",
-		"login", login,
-		"state", last.State,
-		"count", last.Count,
-		"pending", last.Pending,
-		"provider_errors", providerErrors,
-	)
 }
 
 func (s *SyncService) extractVodID(html string) string {

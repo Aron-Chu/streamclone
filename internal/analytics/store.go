@@ -192,6 +192,12 @@ func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup 
 	defer func() {
 		metrics.AnalyticsRollupWriteDuration.WithLabelValues("upsert", result).Observe(time.Since(started).Seconds())
 	}()
+	resolvedStreamID, err := s.ResolveStreamIDForWrite(ctx, streamID)
+	if err != nil {
+		result = "error"
+		return err
+	}
+	streamID = resolvedStreamID
 	if rollup.Emotes == nil {
 		rollup.Emotes = map[string]int{}
 	}
@@ -378,10 +384,14 @@ func (s *Store) StreamByID(ctx context.Context, streamID string) (*StreamRecord,
 }
 
 func (s *Store) GetStreamUpdatedAt(ctx context.Context, streamID string) (time.Time, error) {
+	canonicalID, err := s.ResolveCanonicalStreamID(ctx, streamID)
+	if err != nil {
+		return time.Time{}, err
+	}
 	var updatedAt time.Time
-	err := s.db.QueryRow(ctx,
+	err = s.db.QueryRow(ctx,
 		`SELECT updated_at FROM analytics_streams WHERE stream_id = $1`,
-		streamID,
+		canonicalID,
 	).Scan(&updatedAt)
 	return updatedAt, err
 }
@@ -417,12 +427,16 @@ func (s *Store) StreamsByLogin(ctx context.Context, login string, limit int) ([]
 }
 
 func (s *Store) RollupsByStream(ctx context.Context, streamID string) ([]MinuteRollup, error) {
+	canonicalID, err := s.ResolveCanonicalStreamID(ctx, streamID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Query(ctx, `
 		SELECT minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
 			chat_count, total_emote_count, seventv_emote_count, emotes_json
 		FROM analytics_minute_rollups
 		WHERE stream_id=$1
-		ORDER BY minute_ts ASC`, streamID)
+		ORDER BY minute_ts ASC`, canonicalID)
 	if err != nil {
 		return nil, err
 	}
@@ -449,15 +463,20 @@ func (s *Store) SetStreamVodID(ctx context.Context, streamID, vodID, source stri
 	if streamID == "" || vodID == "" {
 		return nil
 	}
+	canonicalID, err := s.ResolveStreamIDForWrite(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	streamID = canonicalID
 	source = strings.TrimSpace(source)
 	if source == "" {
-		_, err := s.db.Exec(ctx, `
+		_, err = s.db.Exec(ctx, `
 			UPDATE analytics_streams
 			SET vod_id=$2, updated_at=now()
 			WHERE stream_id=$1`, streamID, vodID)
 		return err
 	}
-	_, err := s.db.Exec(ctx, `
+	_, err = s.db.Exec(ctx, `
 		UPDATE analytics_streams
 		SET vod_id=$2, vod_source=$3, updated_at=now()
 		WHERE stream_id=$1`, streamID, vodID, source)
@@ -573,8 +592,13 @@ func (s *Store) GetSyncCheckpoint(ctx context.Context, streamID, videoID string)
 	if streamID == "" || videoID == "" {
 		return nil, nil
 	}
+	canonicalID, err := s.ResolveCanonicalStreamID(ctx, streamID)
+	if err != nil {
+		return nil, err
+	}
+	streamID = canonicalID
 	var cp SyncCheckpoint
-	err := s.db.QueryRow(ctx, `
+	err = s.db.QueryRow(ctx, `
 		SELECT stream_id, video_id, COALESCE(cursor, ''), offset_seconds, comments_fetched,
 		       COALESCE(segments_json, ''), COALESCE(fetch_mode, ''), updated_at
 		FROM analytics_sync_checkpoints
@@ -595,7 +619,12 @@ func (s *Store) UpsertSyncCheckpoint(ctx context.Context, cp SyncCheckpoint) err
 	if cp.StreamID == "" || cp.VideoID == "" {
 		return nil
 	}
-	_, err := s.db.Exec(ctx, `
+	canonicalID, err := s.ResolveStreamIDForWrite(ctx, cp.StreamID)
+	if err != nil {
+		return err
+	}
+	cp.StreamID = canonicalID
+	_, err = s.db.Exec(ctx, `
 		INSERT INTO analytics_sync_checkpoints (
 			stream_id, video_id, cursor, offset_seconds, comments_fetched, segments_json, fetch_mode, updated_at
 		)
@@ -616,7 +645,12 @@ func (s *Store) DeleteSyncCheckpoint(ctx context.Context, streamID, videoID stri
 	if streamID == "" || videoID == "" {
 		return nil
 	}
-	_, err := s.db.Exec(ctx, `
+	canonicalID, err := s.ResolveCanonicalStreamID(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	streamID = canonicalID
+	_, err = s.db.Exec(ctx, `
 		DELETE FROM analytics_sync_checkpoints
 		WHERE stream_id=$1 AND video_id=$2`, streamID, videoID)
 	return err
@@ -761,6 +795,48 @@ func emoteImageURL(provider, id string) string {
 	return emoteimage.URL(provider, id, "1x")
 }
 
+// LookupSevenTVProviderEmoteIDs maps synced emote-service UUIDs to 7TV provider ids.
+func (s *Store) LookupSevenTVProviderEmoteIDs(ctx context.Context, localIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	if s == nil || s.db == nil || len(localIDs) == 0 {
+		return out, nil
+	}
+	unique := make([]string, 0, len(localIDs))
+	seen := map[string]struct{}{}
+	for _, id := range localIDs {
+		id = strings.TrimSpace(id)
+		if !emoteimage.IsLocalEmoteID(id) {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT id::text, provider_emote_id
+		FROM emotes
+		WHERE provider IN ('seventv', '7tv')
+		  AND id = ANY($1::uuid[])
+		  AND COALESCE(provider_emote_id, '') <> ''`, unique)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var localID, providerID string
+		if err := rows.Scan(&localID, &providerID); err != nil {
+			return nil, err
+		}
+		out[localID] = providerID
+	}
+	return out, rows.Err()
+}
+
 func isNoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
@@ -815,6 +891,11 @@ func (s *Store) SaveGameSegments(ctx context.Context, streamID string, segments 
 	if streamID == "" {
 		return nil
 	}
+	canonicalID, err := s.ResolveStreamIDForWrite(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	streamID = canonicalID
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -840,12 +921,16 @@ func (s *Store) SaveGameSegments(ctx context.Context, streamID string, segments 
 }
 
 func (s *Store) GetGameSegments(ctx context.Context, streamID string) ([]GameSegment, error) {
+	canonicalID, err := s.ResolveCanonicalStreamID(ctx, streamID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Query(ctx, `
 		SELECT id, stream_id, game_name, COALESCE(box_art_url, ''), offset_seconds, duration_seconds, created_at
 		FROM stream_game_segments
 		WHERE stream_id = $1
 		ORDER BY offset_seconds ASC
-	`, streamID)
+	`, canonicalID)
 	if err != nil {
 		return nil, err
 	}
@@ -876,6 +961,12 @@ func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, ro
 	defer func() {
 		metrics.AnalyticsRollupWriteDuration.WithLabelValues("bulk_upsert", result).Observe(time.Since(started).Seconds())
 	}()
+	resolvedStreamID, err := s.ResolveStreamIDForWrite(ctx, streamID)
+	if err != nil {
+		result = "error"
+		return err
+	}
+	streamID = resolvedStreamID
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -956,6 +1047,12 @@ func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollu
 	defer func() {
 		metrics.AnalyticsRollupWriteDuration.WithLabelValues("bulk_patch_chat", result).Observe(time.Since(started).Seconds())
 	}()
+	resolvedStreamID, err := s.ResolveStreamIDForWrite(ctx, streamID)
+	if err != nil {
+		result = "error"
+		return err
+	}
+	streamID = resolvedStreamID
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -1031,6 +1128,12 @@ func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rol
 	defer func() {
 		metrics.AnalyticsRollupWriteDuration.WithLabelValues("bulk_patch_viewer", result).Observe(time.Since(started).Seconds())
 	}()
+	resolvedStreamID, err := s.ResolveStreamIDForWrite(ctx, streamID)
+	if err != nil {
+		result = "error"
+		return err
+	}
+	streamID = resolvedStreamID
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {

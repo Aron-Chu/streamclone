@@ -41,3 +41,22 @@ func TestURLEmptyID(t *testing.T) {
 		t.Fatalf("expected empty url, got %q", got)
 	}
 }
+
+func TestExtensionBrowserURLPrefersSevenTVCDN(t *testing.T) {
+	localID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
+	providerID := "62a3bf572b964d6cc2766004"
+	got := ExtensionBrowserURL("seventv", localID, providerID)
+	want := "https://cdn.7tv.app/emote/62a3bf572b964d6cc2766004/4x.webp"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestExtensionBrowserURLWithoutProviderIDFallsBack(t *testing.T) {
+	localID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
+	got := ExtensionBrowserURL("seventv", localID, "")
+	want := "/emotes/" + localID + "/1x.webp"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}

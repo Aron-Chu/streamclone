@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -150,7 +151,16 @@ func main() {
 		cfg.AnalyticsPollInterval,
 		time.Duration(cfg.AnalyticsRetentionDays)*24*time.Hour,
 		cfg.AnalyticsTopEmotesPerMinute,
-	).WithAlwaysTracked(allAlways)
+	).WithAlwaysTracked(allAlways).WithLiveEmoteEnsurer(
+		analytics.NewLiveEmoteEnsurer(analytics.LiveEmoteEnsurerConfig{
+			EmoteURL:       cfg.EmoteServiceURL,
+			Enricher:       enricher,
+			Resolver:       helix,
+			Redis:          rdb,
+			Logger:         logger,
+			EventAPIActive: strings.EqualFold(strings.TrimSpace(os.Getenv("SEVENTV_EVENTAPI_ENABLED")), "true"),
+		}),
+	)
 	collector.Start(ctx)
 	defer collector.Stop()
 
@@ -210,6 +220,7 @@ func main() {
 		cfg.AnalyticsTrackerScrapeMS,
 		cfg.AnalyticsTTSyncTimeoutMS,
 		cfg.AnalyticsTTBackgroundRetryEnabled,
+		cfg.AnalyticsTTScrapeBackoffEnabled,
 		cfg.AnalyticsPassTTMaxAge,
 		cfg.AnalyticsTTMaxAgeMS,
 		cfg.AnalyticsTTStaleMaxAgeMS,
@@ -307,10 +318,10 @@ func main() {
 		}
 	}
 
-	handler := analytics.NewHandler(store, collector, helix, syncService)
 	heatmapCache := heatmap.NewCache(rdb, logger)
-	handler.WithHeatmapCache(heatmapCache)
-	handler.WithTimeseries(tsWriter)
+	pulseBackfill := analytics.NewPulseBackfillManager(syncService, store, helix, rdb, heatmapCache)
+	handler := analytics.NewHandler(store, collector, helix, syncService)
+	handler.WithHeatmapCache(heatmapCache).WithTimeseries(tsWriter).WithRedis(rdb).WithPulseBackfill(pulseBackfill)
 	adminArchiveHandler := analytics.NewAdminArchiveHandler(pool, cfg)
 	chatReplayStore := chatreplay.NewStore(pool).WithArchiveProtectRetention(cfg.ArchiveProtectRetention)
 	chatReplayHandler := chatreplay.NewHandler(chatReplayStore).WithLogger(logger).WithIngestEnabled(func() bool {

@@ -22,12 +22,14 @@ import (
 var loginRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{2,24}$`)
 
 type Handler struct {
-	store        *Store
-	collector    *Collector
-	helix        *HelixClient
-	syncService  *SyncService
-	heatmapCache *heatmap.Cache
-	timeseries   timeseries.Writer
+	store         *Store
+	collector     *Collector
+	helix         *HelixClient
+	syncService   *SyncService
+	pulseBackfill *PulseBackfillManager
+	heatmapCache  *heatmap.Cache
+	timeseries    timeseries.Writer
+	rdb           *redis.Client
 }
 
 func NewHandler(store *Store, collector *Collector, helix *HelixClient, syncService *SyncService) *Handler {
@@ -45,7 +47,8 @@ func (h *Handler) WithTimeseries(writer timeseries.Writer) *Handler {
 }
 
 func (h *Handler) Routes(r chi.Router) {
-	 h.PulseRoutes(r)
+	h.ExtensionRoutes(r)
+	h.PulseRoutes(r)
 	r.Route("/v1/analytics", func(r chi.Router) {
 		r.Get("/always-tracked", h.getAlwaysTracked)
 		r.Post("/always-tracked", h.setAlwaysTracked)

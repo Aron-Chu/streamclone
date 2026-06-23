@@ -61,6 +61,7 @@ type Collector struct {
 	startOnce     sync.Once
 	stopOnce      sync.Once
 	alwaysTracked map[string]bool
+	liveEmote     *LiveEmoteEnsurer
 }
 
 type trackedChannel struct {
@@ -145,6 +146,27 @@ func (c *Collector) WithAlwaysTracked(logins []string) *Collector {
 	return c
 }
 
+func (c *Collector) WithLiveEmoteEnsurer(ensurer *LiveEmoteEnsurer) *Collector {
+	if c != nil {
+		c.liveEmote = ensurer
+	}
+	return c
+}
+
+func (c *Collector) EmoteSyncSnapshot(ctx context.Context, login string) EmoteSyncSnapshot {
+	if c == nil || c.liveEmote == nil {
+		return emoteSyncSnapshotForState(EmoteSyncUnavailable, false, "", nil)
+	}
+	return c.liveEmote.Snapshot(ctx, login, c.IsTracking(login))
+}
+
+func (c *Collector) kickoffLiveEmoteEnsure(login string) {
+	if c == nil || c.liveEmote == nil {
+		return
+	}
+	c.liveEmote.Kickoff(c.runCtx, login)
+}
+
 func (c *Collector) Start(ctx context.Context) {
 	c.startOnce.Do(func() {
 		c.mu.Lock()
@@ -159,6 +181,7 @@ func (c *Collector) Start(ctx context.Context) {
 
 		for _, login := range alwaysLogins {
 			c.irc.Join(ctx, login)
+			c.kickoffLiveEmoteEnsure(login)
 		}
 
 		go c.loop(ctx)
@@ -177,6 +200,7 @@ func (c *Collector) Watch(ctx context.Context, login string) WatchResponse {
 	if _, ok := c.tracked[login]; ok {
 		active := len(c.tracked)
 		c.mu.Unlock()
+		c.kickoffLiveEmoteEnsure(login)
 		return WatchResponse{
 			Channel:  login,
 			Tracking: true,
@@ -203,6 +227,7 @@ func (c *Collector) Watch(ctx context.Context, login string) WatchResponse {
 	ircCtx := c.runCtx
 	c.mu.Unlock()
 	c.irc.Join(ircCtx, login)
+	c.kickoffLiveEmoteEnsure(login)
 	return WatchResponse{
 		Channel:  login,
 		Tracking: true,
@@ -233,6 +258,9 @@ func (c *Collector) SetAlwaysTracked(ctx context.Context, login string, always b
 	}
 	active := len(c.tracked)
 	c.mu.Unlock()
+	if always {
+		c.kickoffLiveEmoteEnsure(login)
+	}
 
 	return WatchResponse{
 		Channel:  login,
@@ -242,6 +270,17 @@ func (c *Collector) SetAlwaysTracked(ctx context.Context, login string, always b
 		Message:  fmt.Sprintf("always tracked set to %v", always),
 		Sources:  []SourceStatus{{Source: "analytics_collector", State: "ready"}},
 	}
+}
+
+func (c *Collector) IsTracking(login string) bool {
+	if c == nil {
+		return false
+	}
+	login = normalizeLogin(login)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.tracked[login]
+	return ok
 }
 
 func (c *Collector) GetAlwaysTracked() []string {

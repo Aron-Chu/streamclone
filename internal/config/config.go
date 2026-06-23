@@ -44,7 +44,7 @@ type Config struct {
 	TwitchClientID       string        `env:"TWITCH_CLIENT_ID" envDefault:"kimne78kx3ncx6brgo4mv6wki5h1ko"`
 	EmoteServiceURL      string        `env:"EMOTE_SERVICE_URL"`
 
-	StreamIdleTimeout    time.Duration `env:"STREAM_IDLE_TIMEOUT" envDefault:"60s"`
+	StreamIdleTimeout    time.Duration `env:"STREAM_IDLE_TIMEOUT" envDefault:"3m"`
 	MaxConcurrentStreams int           `env:"MAX_CONCURRENT_STREAMS" envDefault:"20"`
 	MaxConcurrentRelays  int           `env:"MAX_CONCURRENT_RELAYS" envDefault:"0"`
 	StreamWorkerBackends string        `env:"STREAM_WORKER_BACKENDS" envDefault:"direct_hls,streamlink"`
@@ -92,6 +92,7 @@ type Config struct {
 	AnalyticsTTDirectHTTPTimeoutMS         int           `env:"ANALYTICS_TT_DIRECT_HTTP_TIMEOUT_MS" envDefault:"1200"`
 	AnalyticsTTSyncTimeoutMS               int           `env:"ANALYTICS_TT_SYNC_TIMEOUT_MS" envDefault:"45000"`
 	AnalyticsTTBackgroundRetryEnabled      bool          `env:"ANALYTICS_TT_BACKGROUND_RETRY_ENABLED" envDefault:"true"`
+	AnalyticsTTScrapeBackoffEnabled        bool          `env:"ANALYTICS_TT_SCRAPE_BACKOFF_ENABLED" envDefault:"true"`
 	AnalyticsTTViewerSmoothWindow          int           `env:"ANALYTICS_TT_VIEWER_SMOOTH_WINDOW" envDefault:"0"`
 	AnalyticsVODGQLQuietSegmentSeconds     int           `env:"ANALYTICS_VOD_GQL_QUIET_SEGMENT_SECONDS" envDefault:"900"`
 	AlwaysTrackedChannels                  []string      `env:"ALWAYS_TRACKED_CHANNELS" envSeparator:","`
@@ -184,8 +185,11 @@ type Config struct {
 	Tier0RosterInterval time.Duration `env:"TIER0_ROSTER_INTERVAL" envDefault:"5m"`
 	Tier0RosterTopN     int           `env:"TIER0_ROSTER_TOP_N" envDefault:"200"`
 
-	BackfillEnabled        bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
-	BackfillWorkerInterval time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`
+	BackfillEnabled             bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
+	BackfillWorkerInterval      time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`
+	BackfillStaleRunningAfter   time.Duration `env:"BACKFILL_STALE_RUNNING_AFTER" envDefault:"2h"`
+	BackfillHeartbeatInterval   time.Duration `env:"BACKFILL_HEARTBEAT_INTERVAL" envDefault:"60s"`
+	BackfillGoldWorkerEnabled   bool          `env:"BACKFILL_GOLD_WORKER_ENABLED"`
 	SilverAutoEnqueueEnabled bool        `env:"SILVER_AUTO_ENQUEUE_ENABLED" envDefault:"false"`
 	SilverEnqueueSinceDays   int         `env:"SILVER_ENQUEUE_SINCE_DAYS" envDefault:"60"`
 	SilverEnqueueTopN        int         `env:"SILVER_ENQUEUE_TOP_N" envDefault:"200"`
@@ -262,6 +266,9 @@ func Load() (Config, error) {
 	}
 	if len(c.StorygraphYTKeywords) == 0 && len(c.AlwaysTrackedChannels) > 0 {
 		c.StorygraphYTKeywords = append([]string(nil), c.AlwaysTrackedChannels...)
+	}
+	if strings.TrimSpace(os.Getenv("BACKFILL_GOLD_WORKER_ENABLED")) == "" {
+		c.BackfillGoldWorkerEnabled = c.GoldBackfillEnabled
 	}
 	return c, nil
 }

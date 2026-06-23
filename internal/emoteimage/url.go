@@ -15,6 +15,11 @@ const (
 
 var localEmoteID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
+// IsLocalEmoteID reports whether id is a synced emote-service UUID.
+func IsLocalEmoteID(id string) bool {
+	return localEmoteID.MatchString(strings.TrimSpace(id))
+}
+
 // LocalPath returns the emote-service proxy path for a synced emote id.
 func LocalPath(id, scale string) string {
 	if scale == "" {
@@ -63,4 +68,16 @@ func URL(provider, id, scale string) string {
 	}
 
 	return out
+}
+
+// ExtensionBrowserURL returns an HTTPS URL suitable for the Pulse Chrome extension on
+// twitch.tv. Synced 7TV emotes use local UUID ids in rollups; when providerEmoteID is
+// known, prefer the public 7TV CDN so the extension never proxies localhost images.
+func ExtensionBrowserURL(provider, localID, providerEmoteID string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	providerEmoteID = strings.TrimSpace(providerEmoteID)
+	if (provider == "seventv" || provider == "7tv") && providerEmoteID != "" {
+		return fmt.Sprintf(sevenTVCDNTemplate, providerEmoteID)
+	}
+	return URL(provider, localID, "1x")
 }
