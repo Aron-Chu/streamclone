@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { buildMomentScoreModel } from '../src/utils/momentScore.ts'
-import type { ReplayHeatmapDetailPoint, ReplayHeatmapPoint } from '../src/types/heatmap.ts'
+import { buildMomentScoreModel } from '@streamclone/pulse-core'
+import type { ReplayHeatmapDetailPoint, ReplayHeatmapPoint } from '@streamclone/pulse-core'
 
 const backendPoint: ReplayHeatmapPoint = {
   offsetSeconds: 120,

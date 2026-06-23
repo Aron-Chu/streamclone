@@ -11,7 +11,7 @@ import {
   type LiveStats,
   type LiveStatsInput,
   type TrendDirection,
-} from '../../utils/liveStats.ts'
+} from '@streamclone/pulse-core'
 
 /**
  * LiveStatsBand renders the compact real-time activity band on a live stream's
@@ -21,7 +21,7 @@ import {
  * error/timeout retains the last successfully received values behind a
  * stale-data indicator while retrying on the next cycle.
  *
- * All derivation lives in ../../utils/liveStats.ts so it can be unit-tested
+ * All derivation lives in @streamclone/pulse-core so it can be unit-tested
  * without rendering (task 15.2).
  */
 

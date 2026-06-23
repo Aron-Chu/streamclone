@@ -1,5 +1,13 @@
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const root = dirname(fileURLToPath(import.meta.url))
+
 export default {
-  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  content: [
+    join(root, 'index.html'),
+    join(root, 'src/**/*.{ts,tsx}'),
+  ],
   theme: {
     extend: {},
   },

@@ -2,7 +2,7 @@ import type { AnalyticsStreamDetail } from '../../api.ts'
 import type { ReplayHeatmapPoint } from '../../types/heatmap.ts'
 import { Link } from 'react-router-dom'
 import { useAnalyticsLive } from '../../hooks/useAnalyticsLive.ts'
-import { buildMomentJumpLink } from '../../utils/vodDeepLink.ts'
+import { buildMomentJumpLink } from '@streamclone/pulse-core'
 import {
   LIVE_HEAT_COLLECTING_LABEL,
   LIVE_HEAT_MAX_EMOTES,
@@ -12,7 +12,7 @@ import {
   deriveLiveHeat,
   formatHeatOffset,
   type LiveHeatPoint,
-} from '../../utils/liveHeat.ts'
+} from '@streamclone/pulse-core'
 
 /**
  * MostReactedLive renders the "Most Reacted So Far" section on a live stream's
@@ -23,7 +23,7 @@ import {
  * minute is rendered muted and labeled "Collecting" to signal its score may
  * change once the minute closes.
  *
- * All ranking lives in ../../utils/liveHeat.ts so it can be unit-tested without
+ * All ranking lives in @streamclone/pulse-core so it can be unit-tested without
  * rendering.
  */
 

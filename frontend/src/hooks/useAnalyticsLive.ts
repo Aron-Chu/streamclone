@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { getAnalyticsLive, type AnalyticsStreamDetail } from '../api.ts'
-import { LIVE_REQUEST_TIMEOUT_MS } from '../utils/liveStats.ts'
+import { LIVE_REQUEST_TIMEOUT_MS } from '@streamclone/pulse-core'
 
 export function analyticsLiveQueryKey(login: string) {
   return ['analytics-live', login] as const

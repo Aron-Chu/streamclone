@@ -1346,7 +1346,7 @@ function AnalyticsChart({
 
         {/* Viewer line (split when tail is estimated/incomplete) */}
         {viewersItem && viewerLineSegments.map((segment, segmentIndex) => {
-          const pathD = linePath(segment.values, viewerAxis.max, width, height, padLeft, padRight, padTop, padBottom, true, 'viewer', viewerAxis.min)
+          const pathD = linePath(segment.values, viewerAxis.max, width, height, padLeft, padRight, padTop, padBottom, false, 'viewer', viewerAxis.min)
           if (!pathD) return null
           return (
             <path
