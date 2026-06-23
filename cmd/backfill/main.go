@@ -94,16 +94,16 @@ func main() {
 			}
 		case "sessions":
 			if len(os.Args) < 3 || os.Args[2] != "cleanup" {
-				fmt.Println("Usage: backfill sessions cleanup [--login=ohnepixel]")
+				fmt.Println("Usage: backfill sessions cleanup [--dry-run] [--login=ohnepixel]")
 				os.Exit(2)
 			}
-			explicit := sessionCleanupLoginsFromArgs(os.Args[3:])
+			explicit, dryRun := sessionCleanupArgsFromCLI(os.Args[3:])
 			logins, err := store.ResolveSessionCleanupLogins(ctx, explicit, cfg.AlwaysTrackedChannels)
 			if err != nil {
 				logger.Error("resolve cleanup logins failed", "err", err)
 				os.Exit(1)
 			}
-			report, err := store.CleanupSessionStubs(ctx, logins)
+			report, err := store.CleanupSessionStubsWithOptions(ctx, logins, analytics.SessionCleanupOptions{DryRun: dryRun})
 			if err != nil {
 				logger.Error("session cleanup failed", "err", err)
 				os.Exit(1)
@@ -167,7 +167,7 @@ func main() {
 		case "jobs":
 			jobsCLI := analytics.NewJobsCLI(pool, cfg.ArchiveJobHeartbeatInterval, cfg.ArchiveJobStaleAfter, cfg.ArchiveJobEventLogEnabled)
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel")
+				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel|reclaim-stale")
 				os.Exit(2)
 			}
 			switch os.Args[2] {
@@ -228,8 +228,16 @@ func main() {
 				}
 				fmt.Println("cancel ok")
 				return
+			case "reclaim-stale":
+				failed, requeued, err := analytics.ReclaimStaleRunningJobs(ctx, pool, cfg.BackfillStaleRunningAfter)
+				if err != nil {
+					logger.Error("reclaim-stale failed", "err", err)
+					os.Exit(1)
+				}
+				fmt.Printf("reclaim-stale ok failed=%d requeued=%d stale_after=%s\n", failed, requeued, cfg.BackfillStaleRunningAfter)
+				return
 			default:
-				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel")
+				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel|reclaim-stale")
 				os.Exit(2)
 			}
 		case "silver":
@@ -322,7 +330,7 @@ func main() {
 	fmt.Println("backfill worker runs inside analytics when BACKFILL_ENABLED=true")
 	fmt.Println("gold enqueuer runs inside analytics when GOLD_BACKFILL_ENABLED=true")
 	fmt.Println("bronze indexer runs inside analytics when BRONZE_ENABLED=true")
-	fmt.Println("Use: backfill status | backfill jobs list|show|retry-failed|resume|cancel | backfill coverage report | backfill silver enqueue-from-bronze | backfill gold enqueue|eval | backfill bronze status | backfill bronze run-once | backfill bronze vod-range --login=<channel> | backfill sessions cleanup [--login=...]")
+	fmt.Println("Use: backfill status | backfill jobs list|show|retry-failed|resume|cancel|reclaim-stale | backfill coverage report | backfill silver enqueue-from-bronze | backfill gold enqueue|eval | backfill bronze status | backfill bronze run-once | backfill bronze vod-range --login=<channel> | backfill sessions cleanup [--dry-run] [--login=...]")
 }
 
 func newArchiveBlobStore(cfg config.Config) (archive.BlobStore, error) {
@@ -338,12 +346,12 @@ func newArchiveBlobStore(cfg config.Config) (archive.BlobStore, error) {
 }
 
 type bronzeVODRangeResult struct {
-	Login      string    `json:"login"`
-	RowCount   int       `json:"rowCount"`
-	NewestAt   time.Time `json:"newestAt,omitempty"`
-	OldestAt   time.Time `json:"oldestAt,omitempty"`
-	SpanDays   float64   `json:"spanDays,omitempty"`
-	BlobKey    string    `json:"blobKey,omitempty"`
+	Login    string    `json:"login"`
+	RowCount int       `json:"rowCount"`
+	NewestAt time.Time `json:"newestAt,omitempty"`
+	OldestAt time.Time `json:"oldestAt,omitempty"`
+	SpanDays float64   `json:"spanDays,omitempty"`
+	BlobKey  string    `json:"blobKey,omitempty"`
 }
 
 func bronzeLoginFromArgs(args []string) string {
@@ -431,14 +439,18 @@ func goldArgsFromCLI(args []string) (streamID, login string) {
 	return streamID, login
 }
 
-func sessionCleanupLoginsFromArgs(args []string) []string {
+func sessionCleanupArgsFromCLI(args []string) ([]string, bool) {
 	var out []string
+	var dryRun bool
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "--login=") {
 			out = append(out, strings.TrimSpace(strings.TrimPrefix(arg, "--login=")))
 		}
+		if arg == "--dry-run" {
+			dryRun = true
+		}
 	}
-	return out
+	return out, dryRun
 }
 
 func newBronzeIndexer(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, logger interface {

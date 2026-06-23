@@ -182,7 +182,10 @@ func main() {
 		archiveBlob = blob
 		manifest := archive.NewManifestStore(pool)
 		archiveWriter = archive.NewWriter(blob, manifest)
-		archiveSyncExporter = archive.NewSyncExporter(archiveWriter, archive.NewPgxAnalyticsDB(pool))
+		pgxArchiveDB := archive.NewPgxAnalyticsDB(pool)
+		emoteExporter := archive.NewEmoteExporter(archiveWriter, archive.NewPgxEmoteSnapshotDB(pool))
+		vodChatDB := archive.NewVODChatDBWithProvenance(pgxArchiveDB, emoteExporter)
+		archiveSyncExporter = archive.NewSyncExporter(archiveWriter, vodChatDB)
 		archiveExporter = archiveSyncExporter
 		logger.Info("archive export enabled", "account", cfg.ArchiveAzureStorageAccount, "container", cfg.ArchiveAzureContainer)
 	} else if cfg.ArchiveExportOnSync {
@@ -253,17 +256,33 @@ func main() {
 		)
 	}
 	if cfg.BackfillEnabled {
-		worker := analytics.NewBackfillWorker(pool, syncService, archiveExporter, cfg.BackfillWorkerInterval)
-		if cfg.GoldBackfillEnabled {
-			worker = worker.WithGoldSyncTimeout(time.Duration(cfg.GoldSyncTimeoutMS) * time.Millisecond)
-			if archiveSyncExporter != nil {
-				worker = worker.WithVODChatExporter(archiveSyncExporter)
+		staleLease := cfg.BackfillStaleRunningAfter
+		heartbeat := cfg.BackfillHeartbeatInterval
+		workerOpts := func(name string, tiers []string) analytics.BackfillWorkerOptions {
+			return analytics.BackfillWorkerOptions{
+				Name:              name,
+				TierFilter:        tiers,
+				StaleRunningAfter: staleLease,
+				HeartbeatInterval: heartbeat,
 			}
 		}
-		analytics.StartBackfillWorker(ctx, worker, logger)
-		logger.Info("backfill worker started",
+		silverWorker := analytics.NewBackfillWorker(pool, syncService, archiveExporter, cfg.BackfillWorkerInterval).
+			WithWorkerOptions(workerOpts("silver", []string{"silver"}))
+		analytics.StartBackfillWorker(ctx, silverWorker, logger)
+		if cfg.GoldBackfillEnabled && cfg.BackfillGoldWorkerEnabled {
+			goldWorker := analytics.NewBackfillWorker(pool, syncService, archiveExporter, cfg.BackfillWorkerInterval).
+				WithWorkerOptions(workerOpts("gold", []string{"gold", "gold_full", "gold_lite"})).
+				WithGoldSyncTimeout(time.Duration(cfg.GoldSyncTimeoutMS) * time.Millisecond)
+			if archiveSyncExporter != nil {
+				goldWorker = goldWorker.WithVODChatExporter(archiveSyncExporter)
+			}
+			analytics.StartBackfillWorker(ctx, goldWorker, logger)
+		}
+		analytics.StartStaleBackfillReclaimer(ctx, pool, staleLease, 5*time.Minute, logger)
+		logger.Info("backfill workers started",
 			"interval", cfg.BackfillWorkerInterval.String(),
-			"gold_enabled", cfg.GoldBackfillEnabled,
+			"gold_worker", cfg.GoldBackfillEnabled && cfg.BackfillGoldWorkerEnabled,
+			"stale_after", staleLease.String(),
 		)
 		if cfg.SilverAutoEnqueueEnabled && archiveBlob != nil {
 			silverEnqueuer := analytics.NewSilverEnqueuer(

@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"streamclone/internal/canonicalstream"
 )
 
 const (
@@ -60,6 +63,9 @@ type sessionCandidate struct {
 	Title          string
 	IsPlaceholder  bool
 }
+
+type canonicalQuerier = canonicalstream.Querier
+type canonicalResolution = canonicalstream.Resolution
 
 func windowsOverlap(aStart time.Time, aEnd *time.Time, bStart time.Time, bEnd *time.Time) bool {
 	if aStart.IsZero() || bStart.IsZero() {
@@ -151,7 +157,12 @@ func sessionCandidateScore(c sessionCandidate) int {
 }
 
 func pickCanonicalSession(existing, incoming sessionCandidate) sessionCandidate {
-	if sessionCandidateScore(incoming) > sessionCandidateScore(existing) {
+	incomingScore := sessionCandidateScore(incoming)
+	existingScore := sessionCandidateScore(existing)
+	if incomingScore > existingScore {
+		return incoming
+	}
+	if incomingScore == existingScore && incoming.StreamID != "" && (existing.StreamID == "" || incoming.StreamID < existing.StreamID) {
 		return incoming
 	}
 	return existing
@@ -353,6 +364,8 @@ func (s *Store) updateSession(ctx context.Context, canonicalID string, c session
 }
 
 func (s *Store) linkSessionAlias(ctx context.Context, aliasID, canonicalID string) error {
+	aliasID = strings.TrimSpace(aliasID)
+	canonicalID = strings.TrimSpace(canonicalID)
 	if aliasID == "" || canonicalID == "" || aliasID == canonicalID {
 		return nil
 	}
@@ -362,43 +375,70 @@ func (s *Store) linkSessionAlias(ctx context.Context, aliasID, canonicalID strin
 	}
 	defer tx.Rollback(ctx)
 
-	var canonicalExists bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM analytics_streams WHERE stream_id = $1)`, canonicalID,
-	).Scan(&canonicalExists); err != nil {
-		return err
-	}
-	if !canonicalExists {
-		return fmt.Errorf("canonical stream row %s missing from analytics_streams", canonicalID)
-	}
-
-	if err := s.rekeyStreamChildRows(ctx, tx, aliasID, canonicalID); err != nil {
+	if err := lockSessionAliasIDs(ctx, tx, aliasID, canonicalID); err != nil {
 		return err
 	}
 
-	_, err = tx.Exec(ctx, `
-		INSERT INTO analytics_stream_aliases (alias_stream_id, canonical_stream_id, alias_kind)
-		VALUES ($1, $2, 'dedupe')
-		ON CONFLICT (alias_stream_id) DO UPDATE SET canonical_stream_id = EXCLUDED.canonical_stream_id`,
-		aliasID, canonicalID,
-	)
+	aliasResolved, err := resolveCanonicalStream(ctx, tx, aliasID)
+	if err != nil {
+		return err
+	}
+	canonicalResolved, err := resolveCanonicalStream(ctx, tx, canonicalID)
+	if err != nil {
+		return err
+	}
+	lockIDs := uniqueStrings(append(append([]string{}, aliasResolved.Path...), canonicalResolved.Path...))
+	lockIDs = append(lockIDs, aliasResolved.CanonicalID, canonicalResolved.CanonicalID)
+	if err := lockSessionAliasIDs(ctx, tx, lockIDs...); err != nil {
+		return err
+	}
+
+	aliasResolved, err = resolveCanonicalStream(ctx, tx, aliasID)
+	if err != nil {
+		return err
+	}
+	canonicalResolved, err = resolveCanonicalStream(ctx, tx, canonicalID)
 	if err != nil {
 		return err
 	}
 
-	_, err = tx.Exec(ctx, `
-		UPDATE analytics_streams
-		SET canonical_stream_id = $2, updated_at = now()
-		WHERE stream_id = $1`, aliasID, canonicalID)
-	if err != nil {
-		return err
+	if aliasResolved.CycleDetected || canonicalResolved.CycleDetected {
+		cycleIDs := append([]string{}, aliasResolved.Cycle...)
+		cycleIDs = append(cycleIDs, canonicalResolved.Cycle...)
+		targetID := canonicalResolved.CanonicalID
+		if targetID == "" || canonicalResolved.CycleDetected {
+			var err error
+			targetID, err = s.pickCanonicalStreamID(ctx, tx, uniqueStrings(cycleIDs), canonicalID)
+			if err != nil {
+				return err
+			}
+		}
+		if err := s.repairSessionAliasCycleTx(ctx, tx, uniqueStrings(cycleIDs), targetID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 
-	_, err = tx.Exec(ctx, `DELETE FROM analytics_streams WHERE stream_id = $1 AND stream_id <> $2`, aliasID, canonicalID)
-	if err != nil {
+	targetID := canonicalResolved.CanonicalID
+	if targetID == "" {
+		targetID = canonicalID
+	}
+	losingIDs := uniqueStrings(append(aliasResolved.Path, aliasResolved.CanonicalID))
+	var filtered []string
+	for _, id := range losingIDs {
+		if id != "" && id != targetID {
+			filtered = append(filtered, id)
+		}
+	}
+	if len(filtered) == 0 {
+		if err := s.flattenSessionAliasTx(ctx, tx, aliasID, targetID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	if err := s.mergeSessionAliasesTx(ctx, tx, filtered, targetID); err != nil {
 		return err
 	}
-
 	return tx.Commit(ctx)
 }
 
@@ -446,7 +486,42 @@ func (s *Store) rekeyStreamChildRows(ctx context.Context, tx pgx.Tx, fromID, toI
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE analytics_sync_checkpoints SET stream_id = $2 WHERE stream_id = $1`, fromID, toID)
+	_, err = tx.Exec(ctx, `
+		INSERT INTO analytics_sync_checkpoints (
+			stream_id, video_id, cursor, offset_seconds, comments_fetched, segments_json, fetch_mode, updated_at
+		)
+		SELECT $2, video_id, cursor, offset_seconds, comments_fetched, segments_json, fetch_mode, updated_at
+		FROM analytics_sync_checkpoints
+		WHERE stream_id = $1
+		ON CONFLICT (stream_id, video_id) DO UPDATE SET
+			cursor = CASE
+				WHEN EXCLUDED.comments_fetched > analytics_sync_checkpoints.comments_fetched THEN EXCLUDED.cursor
+				WHEN EXCLUDED.comments_fetched = analytics_sync_checkpoints.comments_fetched
+				 AND EXCLUDED.offset_seconds >= analytics_sync_checkpoints.offset_seconds THEN EXCLUDED.cursor
+				ELSE analytics_sync_checkpoints.cursor END,
+			offset_seconds = GREATEST(analytics_sync_checkpoints.offset_seconds, EXCLUDED.offset_seconds),
+			comments_fetched = GREATEST(analytics_sync_checkpoints.comments_fetched, EXCLUDED.comments_fetched),
+			segments_json = CASE
+				WHEN EXCLUDED.segments_json <> ''
+				 AND (EXCLUDED.comments_fetched > analytics_sync_checkpoints.comments_fetched
+				  OR (EXCLUDED.comments_fetched = analytics_sync_checkpoints.comments_fetched
+				   AND EXCLUDED.offset_seconds >= analytics_sync_checkpoints.offset_seconds))
+				THEN EXCLUDED.segments_json
+				ELSE analytics_sync_checkpoints.segments_json END,
+			fetch_mode = CASE
+				WHEN EXCLUDED.fetch_mode <> ''
+				 AND (EXCLUDED.comments_fetched > analytics_sync_checkpoints.comments_fetched
+				  OR (EXCLUDED.comments_fetched = analytics_sync_checkpoints.comments_fetched
+				   AND EXCLUDED.offset_seconds >= analytics_sync_checkpoints.offset_seconds))
+				THEN EXCLUDED.fetch_mode
+				ELSE analytics_sync_checkpoints.fetch_mode END,
+			updated_at = GREATEST(analytics_sync_checkpoints.updated_at, EXCLUDED.updated_at)`,
+		fromID, toID,
+	)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM analytics_sync_checkpoints WHERE stream_id = $1`, fromID)
 	return err
 }
 
@@ -454,23 +529,14 @@ func (s *Store) ResolveCanonicalStreamID(ctx context.Context, streamID string) (
 	if s == nil || s.db == nil || strings.TrimSpace(streamID) == "" {
 		return streamID, nil
 	}
-	var canonical string
-	err := s.db.QueryRow(ctx, `
-		SELECT COALESCE(
-			(SELECT canonical_stream_id FROM analytics_stream_aliases WHERE alias_stream_id = $1),
-			(SELECT NULLIF(canonical_stream_id,'') FROM analytics_streams WHERE stream_id = $1),
-			$1
-		)`, streamID).Scan(&canonical)
+	resolved, err := resolveCanonicalStream(ctx, s.db, streamID)
 	if err != nil {
-		if isNoRows(err) {
-			return streamID, nil
-		}
 		return streamID, err
 	}
-	if canonical == "" {
+	if resolved.CanonicalID == "" {
 		return streamID, nil
 	}
-	return canonical, nil
+	return resolved.CanonicalID, nil
 }
 
 func (s *Store) SetStreamViewerSource(ctx context.Context, streamID, source string) error {
@@ -506,4 +572,221 @@ func (s *Store) ResolveStreamIDForWrite(ctx context.Context, streamID string) (s
 		return streamID, fmt.Errorf("resolve canonical stream: %w", err)
 	}
 	return canonical, nil
+}
+
+func resolveCanonicalStream(ctx context.Context, q canonicalQuerier, streamID string) (canonicalResolution, error) {
+	return canonicalstream.Resolve(ctx, q, streamID)
+}
+
+func stableCanonicalID(ids []string) string {
+	return canonicalstream.StableID(ids)
+}
+
+func uniqueStrings(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func lockSessionAliasIDs(ctx context.Context, tx pgx.Tx, ids ...string) error {
+	ids = uniqueStrings(ids)
+	sort.Strings(ids)
+	for _, id := range ids {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) pickCanonicalStreamID(ctx context.Context, q canonicalQuerier, ids []string, preferred string) (string, error) {
+	ids = uniqueStrings(ids)
+	if len(ids) == 0 {
+		return strings.TrimSpace(preferred), nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT
+			stream_id,
+			COALESCE(NULLIF(canonical_stream_id,''), stream_id),
+			login,
+			CASE WHEN broadcaster_id <> 'pending' THEN stream_id ELSE '' END,
+			COALESCE(vod_id, ''),
+			started_at,
+			ended_at,
+			COALESCE(viewer_source, 'unknown'),
+			COALESCE(broadcaster_id, ''),
+			viewer_samples,
+			chat_messages,
+			peak_viewers,
+			COALESCE(title, ''),
+			CASE WHEN broadcaster_id = 'pending' AND viewer_samples = 0 AND chat_messages = 0 THEN true ELSE false END
+		FROM analytics_streams
+		WHERE stream_id = ANY($1)`, ids)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var winner *sessionCandidate
+	for rows.Next() {
+		var c sessionCandidate
+		var endedAt *time.Time
+		if err := rows.Scan(
+			&c.StreamID, &c.CanonicalID, &c.Login, &c.TwitchStreamID, &c.VodID,
+			&c.StartedAt, &endedAt, &c.ViewerSource, &c.BroadcasterID,
+			&c.ViewerSamples, &c.ChatMessages, &c.PeakViewers, &c.Title, &c.IsPlaceholder,
+		); err != nil {
+			return "", err
+		}
+		c.EndedAt = endedAt
+		c.TTStreamID = c.StreamID
+		if winner == nil {
+			copy := c
+			winner = &copy
+			continue
+		}
+		picked := pickCanonicalSession(*winner, c)
+		*winner = picked
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if winner != nil && winner.StreamID != "" {
+		return winner.StreamID, nil
+	}
+	return stableCanonicalID(append(ids, preferred)), nil
+}
+
+func (s *Store) repairSessionAliasCycleTx(ctx context.Context, tx pgx.Tx, cycleIDs []string, targetID string) error {
+	cycleIDs = uniqueStrings(cycleIDs)
+	targetID = strings.TrimSpace(targetID)
+	if len(cycleIDs) == 0 || targetID == "" {
+		return nil
+	}
+	if err := s.ensureSessionForStreamTx(ctx, tx, targetID); err != nil {
+		return err
+	}
+	var losing []string
+	for _, id := range cycleIDs {
+		if id != targetID {
+			losing = append(losing, id)
+		}
+	}
+	return s.mergeSessionAliasesTx(ctx, tx, losing, targetID)
+}
+
+func (s *Store) mergeSessionAliasesTx(ctx context.Context, tx pgx.Tx, losingIDs []string, targetID string) error {
+	losingIDs = uniqueStrings(losingIDs)
+	targetID = strings.TrimSpace(targetID)
+	if len(losingIDs) == 0 || targetID == "" {
+		return nil
+	}
+	if err := s.ensureSessionForStreamTx(ctx, tx, targetID); err != nil {
+		return err
+	}
+	for _, losingID := range losingIDs {
+		if losingID == targetID {
+			continue
+		}
+		if err := s.rekeyStreamChildRows(ctx, tx, losingID, targetID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE analytics_stream_aliases
+			SET canonical_stream_id = $2
+			WHERE canonical_stream_id = $1`, losingID, targetID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM analytics_stream_aliases
+			WHERE alias_stream_id = $1 OR (alias_stream_id = $2 AND canonical_stream_id = $1)`,
+			targetID, losingID,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO analytics_stream_aliases (alias_stream_id, canonical_stream_id, alias_kind)
+			VALUES ($1, $2, 'dedupe')
+			ON CONFLICT (alias_stream_id) DO UPDATE SET canonical_stream_id = EXCLUDED.canonical_stream_id`,
+			losingID, targetID,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE analytics_streams
+			SET canonical_stream_id = $2, updated_at = now()
+			WHERE stream_id = $1`, losingID, targetID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM analytics_streams WHERE stream_id = $1 AND stream_id <> $2`, losingID, targetID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) flattenSessionAliasTx(ctx context.Context, tx pgx.Tx, aliasID, targetID string) error {
+	aliasID = strings.TrimSpace(aliasID)
+	targetID = strings.TrimSpace(targetID)
+	if aliasID == "" || targetID == "" || aliasID == targetID {
+		return nil
+	}
+	if err := s.ensureSessionForStreamTx(ctx, tx, targetID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO analytics_stream_aliases (alias_stream_id, canonical_stream_id, alias_kind)
+		VALUES ($1, $2, 'dedupe')
+		ON CONFLICT (alias_stream_id) DO UPDATE SET canonical_stream_id = EXCLUDED.canonical_stream_id`,
+		aliasID, targetID,
+	)
+	return err
+}
+
+func (s *Store) ensureSessionForStreamTx(ctx context.Context, tx pgx.Tx, streamID string) error {
+	streamID = strings.TrimSpace(streamID)
+	if streamID == "" {
+		return nil
+	}
+	var canonicalExists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM analytics_streams WHERE stream_id = $1)`, streamID,
+	).Scan(&canonicalExists); err != nil {
+		return err
+	}
+	if !canonicalExists {
+		return fmt.Errorf("canonical stream row %s missing from analytics_streams", streamID)
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO analytics_stream_sessions (
+			canonical_stream_id, login, twitch_stream_id, tt_stream_id, vod_id,
+			started_at, ended_at, title, category, viewer_source, source_confidence
+		)
+		SELECT
+			stream_id,
+			login,
+			CASE WHEN broadcaster_id <> 'pending' THEN stream_id ELSE '' END,
+			CASE WHEN broadcaster_id = 'pending' THEN stream_id ELSE '' END,
+			COALESCE(vod_id, ''),
+			started_at,
+			ended_at,
+			title,
+			category,
+			COALESCE(viewer_source, 'unknown'),
+			'alias_repair'
+		FROM analytics_streams
+		WHERE stream_id = $1
+		ON CONFLICT (canonical_stream_id) DO NOTHING`, streamID)
+	return err
 }

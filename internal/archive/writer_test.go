@@ -2,6 +2,7 @@ package archive
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -102,6 +103,38 @@ func TestWriterExportStream(t *testing.T) {
 		}
 		if rec.GCSURI == "" {
 			t.Fatal("manifest gcs_uri is empty")
+		}
+	}
+}
+
+func TestWriterExportStreamUsesCanonicalReturnedStreamID(t *testing.T) {
+	blob := newMockBlob()
+	manifest := newMockManifest()
+	writer := NewWriter(blob, manifest)
+	db := &mockAnalyticsDB{
+		stream: &StreamExportData{StreamID: "canonical-stream", Login: "ohnepixel"},
+		rollups: []RollupExportLine{
+			{ViewerAvg: 100, ViewerMax: 100, ViewerLatest: 100, ViewerSamples: 1},
+		},
+	}
+	if err := writer.ExportStream(context.Background(), "alias-stream", db); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := blob.data[RollupsBlobKey("canonical-stream")]; !ok {
+		t.Fatal("expected canonical rollups blob key")
+	}
+	if _, ok := blob.data[RollupsBlobKey("alias-stream")]; ok {
+		t.Fatal("did not expect alias rollups blob key")
+	}
+	if _, ok := blob.data[StreamSessionBlobKey("canonical-stream")]; !ok {
+		t.Fatal("expected canonical session blob key")
+	}
+	if _, ok := blob.data[StreamChannelBlobKey("ohnepixel", "canonical-stream")]; !ok {
+		t.Fatal("expected canonical channel index blob key")
+	}
+	for _, rec := range manifest.records {
+		if strings.Contains(rec.NaturalKey, "alias-stream") || rec.StreamID == "alias-stream" {
+			t.Fatalf("manifest used alias stream id: %+v", rec)
 		}
 	}
 }
@@ -225,7 +258,15 @@ func TestWriterBronzeExports(t *testing.T) {
 }
 
 type mockVODChatDB struct {
-	messages []VODChatExportLine
+	canonical string
+	messages  []VODChatExportLine
+}
+
+func (m *mockVODChatDB) ResolveCanonicalStreamID(_ context.Context, streamID string) (string, error) {
+	if m.canonical != "" {
+		return m.canonical, nil
+	}
+	return streamID, nil
 }
 
 func (m *mockVODChatDB) ExportVODChatMessages(_ context.Context, streamID string) ([]VODChatExportLine, error) {
@@ -269,6 +310,29 @@ func TestWriterExportVODChat(t *testing.T) {
 	}
 	if rec.RowCount != 1 {
 		t.Fatalf("row count = %d", rec.RowCount)
+	}
+}
+
+func TestWriterExportVODChatUsesCanonicalStreamID(t *testing.T) {
+	blob := newMockBlob()
+	manifest := newMockManifest()
+	writer := NewWriter(blob, manifest)
+	chatDB := &mockVODChatDB{canonical: "canonical-stream"}
+	if err := writer.ExportVODChat(context.Background(), "alias-stream", chatDB); err != nil {
+		t.Fatal(err)
+	}
+	key := VODChatBlobKey("canonical-stream")
+	if _, ok := blob.data[key]; !ok {
+		t.Fatalf("expected vod chat blob at %q", key)
+	}
+	if _, ok := blob.data[VODChatBlobKey("alias-stream")]; ok {
+		t.Fatal("did not expect alias vod chat blob key")
+	}
+	if len(manifest.records) != 1 {
+		t.Fatalf("expected 1 manifest upsert, got %d", len(manifest.records))
+	}
+	if manifest.records[0].NaturalKey != "vod_chat:canonical-stream" {
+		t.Fatalf("natural key = %q", manifest.records[0].NaturalKey)
 	}
 }
 

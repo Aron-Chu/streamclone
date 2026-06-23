@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"streamclone/internal/canonicalstream"
 	"streamclone/internal/metrics"
 )
 
@@ -51,6 +52,11 @@ type AnalyticsDB interface {
 	ExportRollups(ctx context.Context, streamID string) ([]RollupExportLine, error)
 }
 
+// CanonicalStreamResolver maps alias stream IDs to their canonical stream ID.
+type CanonicalStreamResolver interface {
+	ResolveCanonicalStreamID(ctx context.Context, streamID string) (string, error)
+}
+
 // VODChatExportLine is one JSONL row for archived VOD chat messages.
 type VODChatExportLine struct {
 	ID             int64           `json:"id"`
@@ -80,13 +86,32 @@ func NewPgxAnalyticsDB(db *pgxpool.Pool) *PgxAnalyticsDB {
 	return &PgxAnalyticsDB{db: db}
 }
 
+func (d *PgxAnalyticsDB) ResolveCanonicalStreamID(ctx context.Context, streamID string) (string, error) {
+	if d == nil || d.db == nil || strings.TrimSpace(streamID) == "" {
+		return streamID, nil
+	}
+	resolved, err := canonicalstream.Resolve(ctx, d.db, streamID)
+	if err != nil {
+		return streamID, err
+	}
+	if resolved.CanonicalID == "" {
+		return streamID, nil
+	}
+	return resolved.CanonicalID, nil
+}
+
 func (d *PgxAnalyticsDB) ExportStreamRow(ctx context.Context, streamID string) (*StreamExportData, error) {
 	if d == nil || d.db == nil {
 		return nil, fmt.Errorf("archive export: db unavailable")
 	}
+	canonicalID, resolveErr := d.ResolveCanonicalStreamID(ctx, strings.TrimSpace(streamID))
+	if resolveErr != nil {
+		canonicalID = strings.TrimSpace(streamID)
+	}
+	streamID = canonicalID
 	var row StreamExportData
 	var endedAt *time.Time
-	var canonicalID, viewerSource string
+	var rowCanonicalID, viewerSource string
 	err := d.db.QueryRow(ctx, `
 		SELECT stream_id, COALESCE(broadcaster_id,''), login, COALESCE(display_name,''),
 			COALESCE(title,''), COALESCE(category,''), started_at, ended_at,
@@ -98,7 +123,7 @@ func (d *PgxAnalyticsDB) ExportStreamRow(ctx context.Context, streamID string) (
 	).Scan(
 		&row.StreamID, &row.BroadcasterID, &row.Login, &row.DisplayName,
 		&row.Title, &row.Category, &row.StartedAt, &endedAt,
-		&row.VodID, &viewerSource, &canonicalID,
+		&row.VodID, &viewerSource, &rowCanonicalID,
 		&row.AvgViewers, &row.PeakViewers, &row.ViewerSamples,
 	)
 	if err != nil {
@@ -106,7 +131,7 @@ func (d *PgxAnalyticsDB) ExportStreamRow(ctx context.Context, streamID string) (
 	}
 	row.EndedAt = endedAt
 	row.ViewerSource = viewerSource
-	row.CanonicalStreamID = canonicalID
+	row.CanonicalStreamID = rowCanonicalID
 	row.ExportedAt = time.Now().UTC()
 	return &row, nil
 }
@@ -114,6 +139,9 @@ func (d *PgxAnalyticsDB) ExportStreamRow(ctx context.Context, streamID string) (
 func (d *PgxAnalyticsDB) ExportRollups(ctx context.Context, streamID string) ([]RollupExportLine, error) {
 	if d == nil || d.db == nil {
 		return nil, fmt.Errorf("archive export: db unavailable")
+	}
+	if canonicalID, err := d.ResolveCanonicalStreamID(ctx, streamID); err == nil && canonicalID != "" {
+		streamID = canonicalID
 	}
 	rows, err := d.db.Query(ctx, `
 		SELECT minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
@@ -146,6 +174,9 @@ func (d *PgxAnalyticsDB) ExportRollups(ctx context.Context, streamID string) ([]
 func (d *PgxAnalyticsDB) ExportVODChatMessages(ctx context.Context, streamID string) ([]VODChatExportLine, error) {
 	if d == nil || d.db == nil {
 		return nil, fmt.Errorf("archive export: db unavailable")
+	}
+	if canonicalID, err := d.ResolveCanonicalStreamID(ctx, streamID); err == nil && canonicalID != "" {
+		streamID = canonicalID
 	}
 	rows, err := d.db.Query(ctx, `
 		SELECT id, stream_id, minute_ts, message_id, display_name, COALESCE(commenter_login,''),
@@ -225,32 +256,36 @@ func (w *Writer) ExportStream(ctx context.Context, streamID string, db Analytics
 	if err != nil {
 		return fmt.Errorf("export stream row: %w", err)
 	}
+	exportStreamID := strings.TrimSpace(stream.StreamID)
+	if exportStreamID == "" {
+		exportStreamID = strings.TrimSpace(streamID)
+	}
 	sessionRaw, err := json.Marshal(stream)
 	if err != nil {
 		return err
 	}
-	sessionRes, err := w.putGzip(ctx, StreamSessionBlobKey(streamID), sessionRaw)
+	sessionRes, err := w.putGzip(ctx, StreamSessionBlobKey(exportStreamID), sessionRaw)
 	if err != nil {
 		return fmt.Errorf("upload stream session: %w", err)
 	}
 	sessionRes.RowCount = 1
-	if err := w.confirmManifest(ctx, ArtifactAnalyticsStream, streamID, sessionRes); err != nil {
+	if err := w.confirmManifest(ctx, ArtifactAnalyticsStream, exportStreamID, sessionRes); err != nil {
 		return err
 	}
 
 	if login := strings.ToLower(strings.TrimSpace(stream.Login)); login != "" {
-		channelRes, err := w.putGzip(ctx, StreamChannelBlobKey(login, streamID), sessionRaw)
+		channelRes, err := w.putGzip(ctx, StreamChannelBlobKey(login, exportStreamID), sessionRaw)
 		if err != nil {
 			return fmt.Errorf("upload stream channel index: %w", err)
 		}
 		channelRes.RowCount = 1
-		channelKey := fmt.Sprintf("streams:%s:%s", login, streamID)
+		channelKey := fmt.Sprintf("streams:%s:%s", login, exportStreamID)
 		if err := w.confirmManifest(ctx, ArtifactAnalyticsStream, channelKey, channelRes); err != nil {
 			return err
 		}
 	}
 
-	rollups, err := db.ExportRollups(ctx, streamID)
+	rollups, err := db.ExportRollups(ctx, exportStreamID)
 	if err != nil {
 		return fmt.Errorf("export rollups: %w", err)
 	}
@@ -264,7 +299,7 @@ func (w *Writer) ExportStream(ctx context.Context, streamID string, db Analytics
 		buf.WriteByte('\n')
 	}
 	rollupPayload := []byte(buf.String())
-	rollupRes, err := w.putGzip(ctx, RollupsBlobKey(streamID), rollupPayload)
+	rollupRes, err := w.putGzip(ctx, RollupsBlobKey(exportStreamID), rollupPayload)
 	if err != nil {
 		return fmt.Errorf("upload rollups: %w", err)
 	}
@@ -278,7 +313,7 @@ func (w *Writer) ExportStream(ctx context.Context, streamID string, db Analytics
 		minCoverage = w.opts.SilverPartialMinCoverage
 	}
 	_, rollupStatus := ComputeSilverCoverage(rollups, durationMin, minCoverage)
-	rollupKey := ViewerRollupKey(streamID)
+	rollupKey := ViewerRollupKey(exportStreamID)
 	rollupRec := ExportRecord{
 		ArtifactType:          ArtifactAnalyticsRollups,
 		NaturalKey:            rollupKey,
@@ -289,14 +324,14 @@ func (w *Writer) ExportStream(ctx context.Context, streamID string, db Analytics
 		Status:                rollupStatus,
 		ExportedAt:            time.Now().UTC(),
 		Tier:                  "silver",
-		StreamID:              streamID,
+		StreamID:              exportStreamID,
 		ChannelLogin:          strings.ToLower(strings.TrimSpace(stream.Login)),
 		ContentSHA256:         rollupRes.ContentSHA256,
 		UncompressedSizeBytes: rollupRes.UncompressedSizeBytes,
 	}
-	if sidecar := BuildSilverSidecar(streamID, stream.Login, rollups, durationMin, minCoverage); w != nil && w.opts.WriteSidecarManifest {
+	if sidecar := BuildSilverSidecar(exportStreamID, stream.Login, rollups, durationMin, minCoverage); w != nil && w.opts.WriteSidecarManifest {
 		if raw, err := sidecar.JSON(); err == nil {
-			_, _ = w.blob.Put(ctx, SilverSidecarBlobKey(streamID), raw, "application/json")
+			_, _ = w.blob.Put(ctx, SilverSidecarBlobKey(exportStreamID), raw, "application/json")
 		}
 	}
 	if w.manifest != nil {
@@ -306,9 +341,9 @@ func (w *Writer) ExportStream(ctx context.Context, streamID string, db Analytics
 	} else if err := w.confirmManifest(ctx, ArtifactAnalyticsRollups, rollupKey, rollupRes); err != nil {
 		return err
 	}
-	if hiveRes, err := w.putGzip(ctx, HiveViewerRollupBlobKey(streamID), rollupPayload); err == nil {
+	if hiveRes, err := w.putGzip(ctx, HiveViewerRollupBlobKey(exportStreamID), rollupPayload); err == nil {
 		hiveRes.RowCount = rollupRes.RowCount
-		hiveKey := fmt.Sprintf("%s:hive", streamID)
+		hiveKey := fmt.Sprintf("%s:hive", exportStreamID)
 		_ = w.confirmManifest(ctx, ArtifactAnalyticsRollups, hiveKey, hiveRes)
 	}
 	observeTier0CoverageFromRollups(rollups)
@@ -338,6 +373,11 @@ func (w *Writer) ExportVODChat(ctx context.Context, streamID string, db VODChatD
 	streamID = strings.TrimSpace(streamID)
 	if streamID == "" {
 		return fmt.Errorf("archive export: stream id is required")
+	}
+	if resolver, ok := db.(CanonicalStreamResolver); ok {
+		if canonicalID, err := resolver.ResolveCanonicalStreamID(ctx, streamID); err == nil && canonicalID != "" {
+			streamID = canonicalID
+		}
 	}
 	messages, err := db.ExportVODChatMessages(ctx, streamID)
 	if err != nil {
