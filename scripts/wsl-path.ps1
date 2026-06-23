@@ -25,3 +25,16 @@ function Get-RepoWslPath {
         WslRepo = (Get-WslLinuxPath $repo)
     }
 }
+
+# Run bash -lc in WSL without spawning a visible console (Task Scheduler / background).
+function Invoke-WslBashLcSilent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Command
+    )
+    $proc = Start-Process -FilePath 'wsl.exe' `
+        -ArgumentList @('bash', '-lc', $Command) `
+        -Wait -PassThru `
+        -WindowStyle Hidden
+    return [int]$proc.ExitCode
+}

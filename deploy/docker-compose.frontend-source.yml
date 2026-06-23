@@ -3,5 +3,5 @@ services:
   frontend:
     image: !reset null
     build:
-      context: ../frontend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: frontend/Dockerfile

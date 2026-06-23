@@ -1,14 +1,11 @@
-# DEPRECATED — in-repo clipper compose profile is retired; use ReplayForge (../replayforge).
+# DEPRECATED — Clip Studio runs in ReplayForge (../replayforge on host :8095), not Streamclone compose.
 # See docs/agents-streamclone-and-replayforge.md. Kept for legacy callers only; do not add new references.
 #
-# Validate clipper Twitch token, auto-refresh when possible, recreate clipper if env drifted.
-# docker compose restart does NOT reload env_file — only --force-recreate does.
+# Validate clipper Twitch token in .env and auto-refresh when possible.
+# After refresh, restart ReplayForge so it picks up CLIPPER_TWITCH_* from .env.
 param(
     [string]$EnvFile = '.env',
-    [string]$ComposeFile = 'deploy/docker-compose.yml',
-    [string]$ComposeTunnelFile = 'deploy/docker-compose.local-tunnel.yml',
-    [string]$CliConfig = "$env:APPDATA\twitch-cli\.twitch-cli.env",
-    [switch]$SkipRecreate
+    [string]$CliConfig = "$env:APPDATA\twitch-cli\.twitch-cli.env"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,26 +76,6 @@ function Invoke-TwitchRefresh {
     }
 }
 
-function Get-ContainerEnvValue {
-    param([string]$Container, [string]$Key)
-    $state = docker inspect -f '{{.State.Status}}' $Container 2>$null
-    if ($LASTEXITCODE -ne 0 -or $state -ne 'running') { return $null }
-    $lines = docker inspect $Container --format '{{range .Config.Env}}{{println .}}{{end}}' 2>$null
-    if ($LASTEXITCODE -ne 0) { return $null }
-    $prefix = "$Key="
-    foreach ($line in $lines) {
-        if ($line.StartsWith($prefix)) {
-            return $line.Substring($prefix.Length)
-        }
-    }
-    return ''
-}
-
-function Test-ClipperRunning {
-    $state = docker inspect -f '{{.State.Status}}' 'streamclone-clipper-1' 2>$null
-    return ($LASTEXITCODE -eq 0 -and $state -eq 'running')
-}
-
 if (-not (Test-Path $EnvFile)) {
     Write-Host "ensure-clipper-auth: missing $EnvFile"
     exit 1
@@ -159,30 +136,8 @@ if (-not $before.ok) {
     exit 1
 }
 
-if ($SkipRecreate -or -not (Test-ClipperRunning)) {
-    Write-Host "ensure-clipper-auth: token valid in $EnvFile"
-    Complete-EnsureClipperAuth -ExitCode 0
+Write-Host "ensure-clipper-auth: token valid in $EnvFile"
+if ($tokenChanged) {
+    Write-Host "ensure-clipper-auth: restart ReplayForge (../replayforge on host :8095) to load the updated token." -ForegroundColor Yellow
 }
-
-$containerToken = Get-ContainerEnvValue -Container 'streamclone-clipper-1' -Key 'CLIPPER_TWITCH_USER_ACCESS_TOKEN'
-$containerValid = (Test-TwitchToken -Token $containerToken).ok
-$needsRecreate = $tokenChanged -or ($containerToken -ne $token) -or (-not $containerValid)
-
-if (-not $needsRecreate) {
-    Write-Host "ensure-clipper-auth: clipper container token matches valid .env"
-    Complete-EnsureClipperAuth -ExitCode 0
-}
-
-Write-Host "ensure-clipper-auth: recreating clipper to load updated token..."
-docker compose --env-file $EnvFile -f $ComposeFile -f $ComposeTunnelFile --profile clipper `
-    up -d --no-deps --force-recreate clipper
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ensure-clipper-auth: clipper recreate failed (exit $LASTEXITCODE)" -ForegroundColor Red
-    exit $LASTEXITCODE
-}
-
-$afterContainer = Get-ContainerEnvValue -Container 'streamclone-clipper-1' -Key 'CLIPPER_TWITCH_USER_ACCESS_TOKEN'
-$afterValid = (Test-TwitchToken -Token $afterContainer).ok
-
-Write-Host "ensure-clipper-auth: clipper recreated (container_valid=$afterValid)"
-Complete-EnsureClipperAuth -ExitCode $(if ($afterValid) { 0 } else { 1 })
+Complete-EnsureClipperAuth -ExitCode 0
