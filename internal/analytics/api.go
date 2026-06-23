@@ -45,6 +45,7 @@ func (h *Handler) WithTimeseries(writer timeseries.Writer) *Handler {
 }
 
 func (h *Handler) Routes(r chi.Router) {
+	 h.PulseRoutes(r)
 	r.Route("/v1/analytics", func(r chi.Router) {
 		r.Get("/always-tracked", h.getAlwaysTracked)
 		r.Post("/always-tracked", h.setAlwaysTracked)
