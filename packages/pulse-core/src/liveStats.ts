@@ -6,12 +6,6 @@
 // current viewers + 5-minute delta, chat/min (1-minute and 5-minute average
 // with a trend arrow), emotes/min split by provider, the top emotes, a data
 // confidence state, and a 60-point sparkline series.
-//
-// These helpers are intentionally kept out of the React component so they can
-// be unit-tested (task 15.2) without rendering. They define their own minimal
-// input shapes (mirroring AnalyticsMinuteRollup / AnalyticsTopEmote from
-// api.ts) so the module stays free of runtime imports and is importable by the
-// node --experimental-strip-types test runner.
 
 /** Refresh cadence for the Live_Stats_Band (Req 18.1). */
 export const LIVE_REFRESH_MS = 15000
@@ -185,14 +179,6 @@ export function splitEmoteProviderRates(rollup: LiveStatsRollup | undefined): Em
 
 /**
  * Determine the data-confidence state for the band (Req 18.1).
- *
- *  - "Waiting for first minute": collecting but no completed rollup minute yet.
- *  - "Collecting": live stream still warming up (some minutes, below the
- *     synced threshold).
- *  - "Synced": enough completed chat-bearing minutes (or a synced historical
- *     stream) that the numbers are trustworthy.
- *  - "Stats only": only stream-level averages exist, with no minute-level
- *     chat/viewer rollups to derive live activity from.
  */
 export function liveConfidenceState(input: LiveStatsInput): LiveConfidenceState {
   const rollups = input.rollups ?? []

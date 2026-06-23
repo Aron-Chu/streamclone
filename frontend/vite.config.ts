@@ -1,6 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const cssEntry =
+  process.env.STREAMCLONE_CSS_ENTRY === '.streamclone.css'
+    ? './.streamclone.css'
+    : './src/index.css'
+
 const usePollingWatch = Boolean(
   (globalThis as typeof globalThis & {
     process?: {
@@ -11,6 +16,15 @@ const usePollingWatch = Boolean(
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      'streamclone-global-css': cssEntry,
+    },
+  },
+  css: {
+    // Dev uses src/index.css (@tailwind). Production build precompiles via tailwind CLI.
+    transformer: process.env.STREAMCLONE_CSS_ENTRY ? undefined : 'postcss',
+  },
   server: {
     watch: usePollingWatch
       ? {

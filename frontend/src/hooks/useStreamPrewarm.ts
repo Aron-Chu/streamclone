@@ -5,9 +5,8 @@ import { requestQuality } from '../streamQuality'
 
 // Hover-intent delay before firing the relay start. Casual mouse passes are free.
 const hoverIntentMs = 300
-// Don't re-prewarm the same channel inside this window. The video service
-// reaps listenerless sessions after STREAM_IDLE_TIMEOUT (60s default), so a
-// shorter TTL keeps the relay warm across repeated hovers without stacking calls.
+// Don't re-prewarm the same channel inside this window. Relays idle out after
+// STREAM_IDLE_TIMEOUT (3m default) when nothing touches the session.
 const prewarmTtlMs = 45_000
 
 const recentPrewarms = new Map<string, number>()
@@ -16,9 +15,9 @@ const recentPrewarms = new Map<string, number>()
  * Prewarm the HLS relay for a channel when the user shows intent (hover/focus
  * on a card) so playback is near-instant when they actually navigate.
  *
- * Fire-and-forget: the prewarm session never sends keepalives, so if the user
- * never opens the channel the orchestrator's reaper kills the relay after the
- * idle timeout. If they do navigate, the channel page joins the warm relay.
+ * Fire-and-forget: prewarm does not register a playback listener and never
+ * sends keepalives. The orchestrator reaper stops the relay after the idle
+ * timeout unless the user opens the channel (which joins the warm relay).
  */
 export function useStreamPrewarm() {
   const settings = useUiSettings(state => state.settings)
@@ -47,7 +46,7 @@ export function useStreamPrewarm() {
       if (last && now - last < prewarmTtlMs) return
       recentPrewarms.set(login, now)
       const { preferredQuality, playbackLatencyMode } = settingsRef.current
-      startStream(login, requestQuality(preferredQuality || 'best'), playbackLatencyMode)
+      startStream(login, requestQuality(preferredQuality || 'best'), playbackLatencyMode, { prewarm: true })
         .catch(() => {
           // Offline channel or relay cap reached — let the next hover retry after TTL.
           recentPrewarms.delete(login)

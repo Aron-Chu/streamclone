@@ -8,7 +8,7 @@ import {
   buildVodStartRequestBody,
   parseVodAnalyticsContext,
   preferTwitchEmbedReview,
-} from '../src/utils/vodDeepLink.ts'
+} from '@streamclone/pulse-core'
 
 // Feature: moment-timeline, Task 3.3: VOD deep link smoke test
 // **Validates: Requirements 25.1, 25.2, 25.3, 25.4**

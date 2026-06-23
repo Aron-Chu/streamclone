@@ -1,30 +1,4 @@
-// Live heat ("Most Reacted So Far") derivation for the live analytics page
-// (Requirement 19.1, 19.2).
-//
-// Pure, dependency-free helpers that rank the most reacted moments of an
-// in-progress stream from its live minute rollups (the response of
-// GET /v1/analytics/channels/{login}/live). The ranking is a simple
-// chat + emote activity score consistent with the Most_Reacted glossary
-// label, NOT the YouTube-style Most_Replayed watch-replay metric.
-//
-// Behaviour (Req 19.1, 19.2):
-//   - The "Most Reacted So Far" section is only shown once at least 5
-//     completed (closed) minute rollups exist for the current stream.
-//   - Up to 10 scored moment points are returned, ranked by reaction score.
-//   - The trailing incomplete minute (the most recent, still-collecting
-//     bucket while the stream is live) is surfaced separately, flagged so the
-//     UI can mute it and label it "Collecting" because its score may change
-//     once the minute closes.
-//   - The subtitle communicates that scores are based on chat and emote
-//     activity.
-//
-// These helpers are intentionally kept out of the React component (mirroring
-// utils/liveStats.ts) so they can be unit-tested without rendering and stay
-// importable by the node --experimental-strip-types test runner. They define
-// their own minimal input shapes (mirroring AnalyticsMinuteRollup /
-// AnalyticsTopEmote from api.ts).
-
-import type { ReplayHeatmapPoint } from '../types/heatmap.ts'
+import type { ReplayHeatmapPoint } from './types/heatmap.ts'
 import { resolveEmoteImageUrl } from './emoteImageUrl.ts'
 import { buildMomentScoreModel } from './momentScore.ts'
 import {
@@ -34,34 +8,17 @@ import {
   type StreamBaselines,
 } from './momentScoring.ts'
 
-/** Refresh cadence for the live heat section (Req 19.1). */
 export const LIVE_HEAT_REFRESH_MS = 30000
-
-/** Minimum completed rollups before the section is shown (Req 19.1). */
 export const LIVE_HEAT_MIN_COMPLETED_ROLLUPS = 5
-
-/** Maximum scored moment points returned (Req 19.1). */
 export const LIVE_HEAT_MAX_POINTS = 10
-
-/** Maximum top-emote images attached to a point. */
 export const LIVE_HEAT_MAX_EMOTES = 3
-
-/** Subtitle copy clarifying the score source (Req 19.1). */
 export const LIVE_HEAT_SUBTITLE = 'based on chat and emote activity'
-
-/** VOD moments list ordering hint. */
 export const LIVE_HEAT_RANKED_SUBTITLE = 'Ranked by reaction score'
-
-/** Section heading copy — honest "Most Reacted", never "Most Replayed" (Req 19.1). */
 export const LIVE_HEAT_TITLE = 'Most Reacted So Far'
-
-/** Label for the trailing incomplete minute bucket (Req 19.2). */
 export const LIVE_HEAT_COLLECTING_LABEL = 'Collecting'
 
-/** Collection state of the stream detail response. Mirrors AnalyticsStreamDetail.state. */
 export type LiveHeatStreamState = 'live' | 'historical' | 'not_collected' | 'syncing'
 
-/** Minimal rollup shape needed for live heat. Mirrors AnalyticsMinuteRollup. */
 export interface LiveHeatRollup {
   minuteTs?: string
   viewerSamples?: number
@@ -72,7 +29,6 @@ export interface LiveHeatRollup {
   missing?: boolean
 }
 
-/** Minimal top-emote catalog shape. Mirrors AnalyticsTopEmote. */
 export interface LiveHeatCatalogEmote {
   key?: string
   name: string
@@ -82,7 +38,6 @@ export interface LiveHeatCatalogEmote {
   count: number
 }
 
-/** A top emote attached to a moment point. */
 export interface LiveHeatEmote {
   key: string
   name: string
@@ -102,20 +57,15 @@ export type LiveHeatReason =
   | 'manual'
 
 export interface LiveHeatPoint {
-  /** Minute bucket timestamp (ISO 8601) of the rollup. */
   minuteTs: string
-  /** Whole-second offset from the first available rollup minute. */
   offsetSeconds: number
-  /** Reaction score in [0, 100]. */
   score: number
-  /** True when score is estimated from rollups (no backend heatmap point). */
   estimated: boolean
   reason: LiveHeatReason
   reasonLabel: string
   chatCount: number
   emoteCount: number
   topEmotes: LiveHeatEmote[]
-  /** True for the trailing incomplete minute (muted "Collecting"). */
   collecting: boolean
 }
 
@@ -123,22 +73,15 @@ export interface LiveHeatInput {
   state: LiveHeatStreamState
   rollups: LiveHeatRollup[]
   topEmotes?: LiveHeatCatalogEmote[]
-  /** Backend replay heatmap points keyed by minuteTs when available. */
   heatmapPoints?: ReplayHeatmapPoint[]
-  /** When set, offsets are absolute seconds from stream start (VOD seek). */
   streamStartedAt?: string
 }
 
 export interface LiveHeatResult {
-  /** Whether the section should render (Req 19.1: >= 5 completed rollups). */
   visible: boolean
-  /** Number of completed (closed, data-bearing) rollup minutes. */
   completedRollupCount: number
-  /** Up to LIVE_HEAT_MAX_POINTS scored points, ranked by score descending. */
   points: LiveHeatPoint[]
-  /** The trailing incomplete minute, muted + labeled "Collecting" (Req 19.2). */
   collectingPoint: LiveHeatPoint | null
-  /** Subtitle copy (Req 19.1). */
   subtitle: string
 }
 
@@ -152,7 +95,6 @@ const REASON_LABELS: Record<LiveHeatReason, string> = {
   manual: 'Moment',
 }
 
-/** Reaction-bearing rollup (not a synthetic gap-fill row). */
 function isDataRollup(r: LiveHeatRollup): boolean {
   if (r.missing) return false
   return (
@@ -162,7 +104,6 @@ function isDataRollup(r: LiveHeatRollup): boolean {
   )
 }
 
-/** Total emote count for a minute, falling back to the emotes map when needed. */
 function emoteTotalOf(r: LiveHeatRollup): number {
   const total = r.totalEmoteCount ?? 0
   if (total > 0) return total
@@ -172,7 +113,6 @@ function emoteTotalOf(r: LiveHeatRollup): number {
   return 0
 }
 
-/** Parse an emote rollup key of the form "provider:id:name" (best effort). */
 function parseEmoteKey(key: string): { provider?: string; id?: string; name: string } {
   const parts = key.split(':')
   if (parts.length >= 3) {
@@ -260,7 +200,6 @@ function parseMinuteMs(minuteTs: string | undefined): number {
   return Date.parse(minuteTs)
 }
 
-/** Keep peak-relative moments so obvious spikes surface on flat streams. */
 function filterRankedHeatPoints(points: LiveHeatPoint[]): LiveHeatPoint[] {
   if (!points.length) return []
   const maxScore = Math.max(...points.map(point => point.score))
@@ -306,15 +245,6 @@ function buildPoint(
   }
 }
 
-/**
- * Derive the "Most Reacted So Far" live heat from a live stream detail payload
- * (Req 19.1, 19.2). Pure and deterministic: identical input yields identical
- * output, with a stable tie-break (higher score, then earlier offset).
- *
- * The trailing incomplete minute is the most recent data-bearing rollup while
- * the stream is live; it is excluded from the completed-rollup count and the
- * ranked points, and returned separately as `collectingPoint`.
- */
 export function deriveLiveHeat(input: LiveHeatInput): LiveHeatResult {
   const isLive = input.state === 'live' || input.state === 'syncing'
   const catalog = new Map<string, LiveHeatCatalogEmote>(
@@ -324,14 +254,11 @@ export function deriveLiveHeat(input: LiveHeatInput): LiveHeatResult {
     (input.topEmotes ?? []).map(e => [e.name.toLowerCase(), e]),
   )
 
-  // Data-bearing rollups, sorted oldest first by minute timestamp.
   const dataRollups = (input.rollups ?? [])
     .filter(isDataRollup)
     .slice()
     .sort((a, b) => parseMinuteMs(a.minuteTs) - parseMinuteMs(b.minuteTs))
 
-  // The trailing incomplete minute (newest bucket) is still collecting while
-  // the stream is live. It is not a "completed" rollup (Req 19.2).
   let completed = dataRollups
   let collectingRollup: LiveHeatRollup | null = null
   if (isLive && dataRollups.length > 0) {
@@ -391,7 +318,6 @@ export function deriveLiveHeat(input: LiveHeatInput): LiveHeatResult {
   }
 }
 
-/** Format whole seconds as HH:MM:SS for offset labels. */
 export function formatHeatOffset(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds))
   const hh = Math.floor(s / 3600)

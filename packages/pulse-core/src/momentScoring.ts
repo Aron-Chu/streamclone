@@ -1,6 +1,5 @@
-import type { AnalyticsTopEmote } from '../api.ts'
-import type { HeatmapEmote } from '../types/heatmap.ts'
-import { parseEmoteKey } from '../emoteUtils.ts'
+import type { HeatmapEmote } from './types/heatmap.ts'
+import { parseEmoteKey } from './emoteKey.ts'
 import { resolveEmoteImageUrl } from './emoteImageUrl.ts'
 import { clampMomentScore } from './momentScore.ts'
 
@@ -14,6 +13,15 @@ export type MomentScoringRollup = {
   chatCount?: number
   totalEmoteCount?: number
   emotes?: Record<string, number>
+}
+
+export type CatalogTopEmote = {
+  key: string
+  name: string
+  id?: string
+  provider?: string
+  imageUrl?: string
+  count: number
 }
 
 function viewerValue(point: MomentScoringRollup) {
@@ -78,7 +86,7 @@ export function computeStreamBaselines(rollups: MomentScoringRollup[]): StreamBa
 export function topEmotesFromRollup(
   rollup: MomentScoringRollup,
   limit = 5,
-  catalog?: AnalyticsTopEmote[],
+  catalog?: CatalogTopEmote[],
 ): RollupEmoteHit[] {
   if (!rollup.emotes) return []
   const byKey = new Map(catalog?.map(item => [item.key, item]) ?? [])
@@ -104,7 +112,7 @@ export function topEmotesFromRollup(
 export function detectPickReason(
   rollup: MomentScoringRollup,
   baselines: StreamBaselines,
-  catalog?: AnalyticsTopEmote[],
+  catalog?: CatalogTopEmote[],
 ): MomentReason {
   const chatMult = (rollup.chatCount ?? 0) / baselines.chat
   const emoteMult = minuteEmoteTotal(rollup) / baselines.emotes
@@ -165,7 +173,6 @@ function computeMomentScore(
   return weighted * 10
 }
 
-/** Whole-number score in [0, 100] for local rollup fallback scoring. */
 export function computeMomentScore100(
   rollup: MomentScoringRollup,
   baselines: StreamBaselines,
@@ -174,7 +181,6 @@ export function computeMomentScore100(
   return clampMomentScore(computeMomentScore(rollup, baselines, rollups) * 10)
 }
 
-/** P95-normalized reaction score when heatmap backend scores are unavailable. */
 export function computeP95ReactionScore100(
   rollup: MomentScoringRollup,
   rollups: MomentScoringRollup[],
@@ -189,11 +195,6 @@ export function computeP95ReactionScore100(
   return Math.round(clampMomentScore(weighted * 100))
 }
 
-/**
- * Local fallback for live heat / moment ranking when no backend heatmap point
- * exists. Uses the multi-signal formula, capped by P95 spread so active streams
- * do not cluster every peak at 100.
- */
 export function fallbackMomentScore100(
   rollup: MomentScoringRollup,
   baselines: StreamBaselines,
@@ -207,7 +208,7 @@ export function fallbackMomentScore100(
 export function heatmapEmotesFromRollup(
   rollup: MomentScoringRollup,
   limit = 5,
-  catalog?: AnalyticsTopEmote[],
+  catalog?: CatalogTopEmote[],
 ): HeatmapEmote[] {
   return topEmotesFromRollup(rollup, limit, catalog).map(emote => ({
     id: emote.key,

@@ -10,7 +10,7 @@ import {
   formatHeatOffset,
   type LiveHeatInput,
   type LiveHeatRollup,
-} from '../src/utils/liveHeat.ts'
+} from '@streamclone/pulse-core'
 
 // Unit coverage for the "Most Reacted So Far" live heat derivation
 // (Requirements 19.1, 19.2).

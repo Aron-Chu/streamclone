@@ -12,7 +12,7 @@ import {
   trendArrowGlyph,
   type LiveStatsInput,
   type LiveStatsRollup,
-} from '../src/utils/liveStats.ts'
+} from '@streamclone/pulse-core'
 
 // Unit coverage for the Live_Stats_Band pure helpers (Requirements 18.1, 18.5).
 //

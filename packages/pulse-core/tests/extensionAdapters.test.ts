@@ -1,0 +1,120 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
+import {
+  aggregateTopEmotesFromExtensionRollups,
+  toLiveHeatInputFromExtension,
+  toLiveStatsInputFromExtension,
+  type ExtensionPulseLike,
+} from '../src/extensionAdapters.ts'
+import { deriveLiveHeat, deriveLiveStats, splitEmoteProviderRates } from '../src/index.ts'
+
+const STARTED_AT = '2026-06-11T12:00:00.000Z'
+
+function makeExtensionPayload(rollupCount: number, overrides: Partial<ExtensionPulseLike> = {}): ExtensionPulseLike {
+  return {
+    isLive: true,
+    startedAt: STARTED_AT,
+    rollups: Array.from({ length: rollupCount }, (_, i) => ({
+      offsetSeconds: i * 60,
+      chatCount: i + 1,
+      sevenTvEmoteCount: i,
+      totalEmoteCount: i + 1,
+      viewerCount: i % 3 === 0 ? 300 + i : 0,
+    })),
+    ...overrides,
+  }
+}
+
+describe('toLiveStatsInputFromExtension', () => {
+  it('returns empty input for null payload', () => {
+    const input = toLiveStatsInputFromExtension(null)
+    assert.equal(input.state, 'historical')
+    assert.deepEqual(input.rollups, [])
+  })
+
+  it('maps extension rollups to live stats derivation', () => {
+    const stats = deriveLiveStats(toLiveStatsInputFromExtension(makeExtensionPayload(10)))
+    assert.equal(stats.chatPerMin1m, 10)
+    assert.equal(stats.confidence, 'Synced')
+    assert.equal(stats.sparkline.length, 10)
+  })
+
+  it('uses stream topEmotes when present', () => {
+    const payload = makeExtensionPayload(2, {
+      topEmotes: [{ name: 'KEKW', count: 50, provider: 'seventv', id: 'e1' }],
+    })
+    const stats = deriveLiveStats(toLiveStatsInputFromExtension(payload))
+    assert.equal(stats.topEmotes[0]?.name, 'KEKW')
+    assert.equal(stats.topEmotes[0]?.provider, '7TV')
+  })
+
+  it('aggregates rollup top emotes when stream list is empty', () => {
+    const payload = makeExtensionPayload(2, {
+      rollups: [
+        {
+          offsetSeconds: 0,
+          chatCount: 5,
+          sevenTvEmoteCount: 2,
+          totalEmoteCount: 4,
+          topEmotes: [{ name: 'KEKW', count: 3, provider: 'seventv', id: 'abc123' }],
+        },
+        {
+          offsetSeconds: 60,
+          chatCount: 8,
+          sevenTvEmoteCount: 4,
+          totalEmoteCount: 6,
+          topEmotes: [{ name: 'KEKW', count: 2, provider: 'seventv', id: 'abc123' }],
+        },
+      ],
+    })
+    const merged = aggregateTopEmotesFromExtensionRollups(payload.rollups)
+    assert.equal(merged[0]?.count, 5)
+  })
+
+  it('ignores trailing empty live minute', () => {
+    const payload = makeExtensionPayload(3, {
+      rollups: [
+        { offsetSeconds: 0, chatCount: 5, sevenTvEmoteCount: 1, totalEmoteCount: 2 },
+        { offsetSeconds: 60, chatCount: 10, sevenTvEmoteCount: 2, totalEmoteCount: 4 },
+        { offsetSeconds: 120, chatCount: 0, sevenTvEmoteCount: 0, totalEmoteCount: 0 },
+      ],
+    })
+    const stats = deriveLiveStats(toLiveStatsInputFromExtension(payload))
+    assert.equal(stats.chatPerMin1m, 10)
+  })
+})
+
+describe('splitEmoteProviderRates via extension mapping', () => {
+  it('maps sevenTvEmoteCount field name', () => {
+    const input = toLiveStatsInputFromExtension({
+      isLive: true,
+      rollups: [{ offsetSeconds: 0, chatCount: 3, sevenTvEmoteCount: 2, totalEmoteCount: 4 }],
+    })
+    assert.deepEqual(splitEmoteProviderRates(input.rollups[0]), [
+      { provider: '7TV', perMinute: 2 },
+      { provider: 'Other', perMinute: 2 },
+    ])
+  })
+
+  it('falls back to fullRollups when recent rollups are empty', () => {
+    const payload = makeExtensionPayload(0, {
+      fullRollups: Array.from({ length: 7 }, (_, i) => ({
+        offsetSeconds: i * 60,
+        chatCount: i + 2,
+        totalEmoteCount: i + 1,
+      })),
+    })
+    const stats = deriveLiveStats(toLiveStatsInputFromExtension(payload))
+    assert.equal(stats.completedRollupCount, 7)
+    assert.notEqual(stats.confidence, 'Waiting for first minute')
+  })
+})
+
+describe('toLiveHeatInputFromExtension', () => {
+  it('produces visible heat once enough completed minutes exist', () => {
+    const heat = deriveLiveHeat(toLiveHeatInputFromExtension(makeExtensionPayload(7)))
+    assert.equal(heat.visible, true)
+    assert.ok(heat.collectingPoint?.collecting)
+  })
+})

@@ -1,6 +1,6 @@
 import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN, SETUP_CONTROL_BASE, SETUP_CONTROL_TOKEN } from './config'
 import type { ClipPeriod, PlaybackLatencyMode, StatsPeriod } from './settings'
-import { buildVodStartRequestBody } from './utils/vodDeepLink'
+import { buildVodStartRequestBody } from '@streamclone/pulse-core'
 import type { HeatmapDetailResponse, HeatmapResponse } from './types/heatmap'
 
 export class ApiError extends Error {
@@ -87,6 +87,71 @@ export interface AnalyticsStream {
   vodSource?: string
   canonicalStreamId?: string
   viewerSource?: 'live' | 'tt' | 'merged' | 'restored' | 'unknown' | string
+}
+
+export interface PulseBookmark {
+  id: string
+  userId?: string
+  login: string
+  streamId?: string
+  vodId?: string
+  offsetSeconds: number
+  label: string
+  notes: string
+  score?: number
+  source: 'web' | 'extension'
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PulseBookmarkListResponse {
+  items: PulseBookmark[]
+  nextCursor?: string
+}
+
+export interface CreatePulseBookmarkInput {
+  login?: string
+  streamId?: string
+  vodId?: string
+  offsetSeconds: number
+  label?: string
+  notes?: string
+  score?: number
+  source: 'web' | 'extension'
+}
+
+export interface PulseRecapEmote {
+  code: string
+  count: number
+  provider?: string
+}
+
+export interface PulseRecapMoment {
+  offsetSeconds: number
+  score: number
+  reasons: string[]
+  topEmotes?: PulseRecapEmote[]
+}
+
+export interface PulseStreamRecap {
+  streamId: string
+  login: string
+  vodId?: string
+  durationSeconds: number
+  totalMessages: number
+  peakChatPerMin: number
+  topMoments: PulseRecapMoment[]
+  topEmotes: PulseRecapEmote[]
+  biggestChatSpike?: {
+    offsetSeconds: number
+    chatPerMin: number
+  }
+  funniestEmoteBurst?: {
+    offsetSeconds: number
+    code?: string
+    count: number
+  }
+  clipCandidates: PulseRecapMoment[]
 }
 
 export interface AnalyticsMinuteRollup {
@@ -895,6 +960,48 @@ export const getAnalyticsStreamSummary = (
   return fetch(`${ANALYTICS}/v1/analytics/streams/${encodeURIComponent(streamId)}/summary${suffix}`).then(r => json<AnalyticsStreamSummary>(r))
 }
 
+export const getPulseBookmarks = (params: {
+  login?: string
+  streamId?: string
+  vodId?: string
+  limit?: number
+  cursor?: string
+} = {}): Promise<PulseBookmarkListResponse> => {
+  const qs = new URLSearchParams()
+  if (params.login) qs.set('login', params.login)
+  if (params.streamId) qs.set('streamId', params.streamId)
+  if (params.vodId) qs.set('vodId', params.vodId)
+  if (params.limit) qs.set('limit', String(params.limit))
+  if (params.cursor) qs.set('cursor', params.cursor)
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return fetch(`${ANALYTICS}/v1/pulse/bookmarks${suffix}`).then(r => json<PulseBookmarkListResponse>(r))
+}
+
+export const createPulseBookmark = (input: CreatePulseBookmarkInput): Promise<PulseBookmark> =>
+  fetch(`${ANALYTICS}/v1/pulse/bookmarks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }).then(r => json<PulseBookmark>(r))
+
+export const updatePulseBookmark = (id: string, input: { label?: string; notes?: string }): Promise<PulseBookmark> =>
+  fetch(`${ANALYTICS}/v1/pulse/bookmarks/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }).then(r => json<PulseBookmark>(r))
+
+export const deletePulseBookmark = async (id: string): Promise<void> => {
+  const res = await fetch(`${ANALYTICS}/v1/pulse/bookmarks/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!res.ok) throw new ApiError(`Request failed: ${res.status}`, res.status)
+}
+
+export const getPulseStreamRecap = async (streamId: string): Promise<PulseStreamRecap | null> => {
+  const res = await fetch(`${ANALYTICS}/v1/pulse/streams/${encodeURIComponent(streamId)}/recap`)
+  if (res.status === 404) return null
+  return json<PulseStreamRecap>(res)
+}
+
 export const getTimeseriesStatus = (): Promise<TimeseriesStatus> =>
   fetch(`${ANALYTICS}/v1/analytics/timeseries/status`).then(r => json<TimeseriesStatus>(r))
 
@@ -1052,11 +1159,16 @@ export const getTwitchDayClips = (login: string, startedAt: string, endedAt: str
 }
 
 
-export const startStream = (channel: string, quality?: string, latencyMode?: PlaybackLatencyMode): Promise<StartResponse> =>
+export const startStream = (
+  channel: string,
+  quality?: string,
+  latencyMode?: PlaybackLatencyMode,
+  options?: { prewarm?: boolean },
+): Promise<StartResponse> =>
   fetch(`${VIDEO}/v1/stream/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ channel, quality, latency_mode: latencyMode }),
+    body: JSON.stringify({ channel, quality, latency_mode: latencyMode, prewarm: options?.prewarm === true }),
   }).then(r => json<StartResponse>(r))
 
 export const startVodPlayback = (

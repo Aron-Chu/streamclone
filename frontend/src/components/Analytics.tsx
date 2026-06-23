@@ -6,7 +6,11 @@ import {
   ensureChannelEmotes,
   getAnalyticsStream,
   getAnalyticsStreams,
+  getPulseBookmarks,
+  getPulseStreamRecap,
   getTimeseriesStatus,
+  createPulseBookmark,
+  deletePulseBookmark,
   prefetchAnalyticsTracker,
   getChannel,
   getChannelStreamHistory,
@@ -34,6 +38,8 @@ import {
   type AnalyticsStream,
   type AnalyticsStreamDetail,
   type AnalyticsTopEmote,
+  type PulseBookmark,
+  type PulseStreamRecap,
   type SourceStatus,
   type AnalyticsMinuteRollup,
   type ClipperJob,
@@ -42,7 +48,7 @@ import TierIndicator from './analytics/TierIndicator'
 import ClipsTabEmptyState from './analytics/ClipsTabEmptyState'
 import AnalyticsChart, { type AnalyticsViewMode, type RightPanelTab } from './analytics/AnalyticsChart.tsx'
 import type { ReplayHeatmapDetailPoint, ReplayHeatmapPoint } from '../types/heatmap'
-import { formatHeatOffset, LIVE_HEAT_RANKED_SUBTITLE } from '../utils/liveHeat.ts'
+import { formatHeatOffset, LIVE_HEAT_RANKED_SUBTITLE } from '@streamclone/pulse-core'
 import { syncCtaLabel, type SyncStreamState } from '../utils/syncLabel'
 import {
   analyticsStreamPathSlug,
@@ -62,15 +68,15 @@ import {
 
 import { coreMinuteChartsNeedScraper } from '../setupProfile'
 import { buildTwitchVodUrl, resolveAnalyticsVodId } from '../utils/twitchVodUrl'
-import { buildVodDeepLink } from '../utils/vodDeepLink'
-import { buildMomentScoreModel } from '../utils/momentScore'
+import { buildVodDeepLink } from '@streamclone/pulse-core'
+import { buildMomentScoreModel } from '@streamclone/pulse-core'
 import {
   computeMomentScore100,
   computeStreamBaselines,
   detectPickReason,
   heatmapEmotesFromRollup,
   topEmotesFromRollup,
-} from '../utils/momentScoring'
+} from '@streamclone/pulse-core'
 import {
   analyzeViewerCoverage,
   computeRollupChatStats,
@@ -703,7 +709,7 @@ function SyncProgressPanel({
       : viewerStepState === 'pending'
         ? 'Waiting for TwitchTracker viewer minutes'
         : viewerFailed
-          ? (status.tracker?.message || 'Viewer chart unavailable — check scraper health')
+          ? (status.tracker?.message || 'Viewer chart unavailable — chat and emote Pulse still sync')
           : viewerTracker.detail
 
   const chatStepState: 'done' | 'active' | 'pending' = chatFetchDone
@@ -1435,10 +1441,19 @@ function SelectedMomentPanel({
   isLiveView?: boolean
   channelLive?: boolean
 }) {
+  const queryClient = useQueryClient()
   const [clipStatus, setClipStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [clipError, setClipError] = useState('')
   const [createdJobId, setCreatedJobId] = useState<string | null>(null)
+  const [bookmarkStatus, setBookmarkStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [bookmarkError, setBookmarkError] = useState('')
   const baselines = useMemo(() => computeStreamBaselines(rollups), [rollups])
+  const bookmarkQueryKey = ['pulse-bookmarks', channel, streamId ?? '', vodId ?? '']
+  const bookmarksQuery = useQuery({
+    queryKey: bookmarkQueryKey,
+    queryFn: () => getPulseBookmarks({ login: channel, streamId, vodId, limit: 20 }),
+    enabled: Boolean(channel),
+  })
 
   if (!rollup) {
     return (
@@ -1470,6 +1485,38 @@ function SelectedMomentPanel({
   const streamcloneVodUrl = vodId ? buildVodDeepLink(channel, vodId, offsetSeconds, streamId) : undefined
   const canClipLive = isLiveView && channelLive !== false
   const canExportVod = !isLiveView && Boolean(vodId)
+
+  const refreshBookmarks = () => {
+    void queryClient.invalidateQueries({ queryKey: bookmarkQueryKey })
+  }
+
+  const handleSaveMoment = async () => {
+    setBookmarkStatus('loading')
+    setBookmarkError('')
+    try {
+      await createPulseBookmark({
+        login: channel,
+        streamId,
+        vodId,
+        offsetSeconds,
+        label: `${scoreModel.reasonLabel} at ${formatHeatOffset(offsetSeconds)}`,
+        notes: '',
+        score: Math.round(scoreModel.score),
+        source: 'web',
+      })
+      setBookmarkStatus('success')
+      refreshBookmarks()
+      setTimeout(() => setBookmarkStatus('idle'), 1800)
+    } catch (err: any) {
+      setBookmarkStatus('error')
+      setBookmarkError(err.message || 'Could not save this moment.')
+    }
+  }
+
+  const handleDeleteBookmark = async (id: string) => {
+    await deletePulseBookmark(id)
+    refreshBookmarks()
+  }
 
   const handleCreateClip = async () => {
     if (!rollup) return
@@ -1625,6 +1672,19 @@ function SelectedMomentPanel({
           ) : null}
 
           <div>
+            <button
+              type="button"
+              onClick={() => void handleSaveMoment()}
+              disabled={bookmarkStatus === 'loading'}
+              className={`mr-3 rounded border px-4 py-2 text-xs font-black transition ${
+                bookmarkStatus === 'success'
+                  ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100'
+                  : 'border-violet-400/30 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20 disabled:cursor-wait disabled:opacity-60'
+              }`}
+              title="Save a private Pulse bookmark. This never creates a public clip."
+            >
+              {bookmarkStatus === 'loading' ? 'Saving...' : bookmarkStatus === 'success' ? 'Saved' : 'Save Moment'}
+            </button>
             {canClipLive ? (
               <button
                 type="button"
@@ -1683,6 +1743,16 @@ function SelectedMomentPanel({
           ) : null}
         </div>
       )}
+      {bookmarkStatus === 'error' && (
+        <div className="mt-3 rounded border border-red-500/10 bg-red-500/5 p-2.5 text-xs font-semibold text-red-400">
+          Bookmark error: {bookmarkError}
+        </div>
+      )}
+      <SavedMomentsPanel
+        bookmarks={bookmarksQuery.data?.items ?? []}
+        loading={bookmarksQuery.isLoading}
+        onDelete={id => void handleDeleteBookmark(id)}
+      />
       {clipStatus === 'success' && (
         <div className="mt-3 text-xs font-semibold text-emerald-400 rounded border border-emerald-500/10 bg-emerald-500/5 p-2.5 flex justify-between items-center">
           <span>
@@ -1698,6 +1768,134 @@ function SelectedMomentPanel({
         </div>
       )}
     </div>
+  )
+}
+
+function SavedMomentsPanel({
+  bookmarks,
+  loading,
+  onDelete,
+}: {
+  bookmarks: PulseBookmark[]
+  loading: boolean
+  onDelete: (id: string) => void
+}) {
+  return (
+    <section className="mt-4 rounded border border-white/10 bg-white/[0.025] p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div>
+          <h3 className="text-[11px] font-black uppercase text-zinc-400">Saved Moments</h3>
+          <p className="text-[10px] font-semibold text-zinc-600">Private markers · never auto-create public clips</p>
+        </div>
+        <span className="rounded-full bg-violet-500/15 px-2 py-1 text-[10px] font-black text-violet-200">
+          {bookmarks.length} saved
+        </span>
+      </div>
+      {loading ? (
+        <p className="text-xs font-semibold text-zinc-500">Loading saved moments...</p>
+      ) : bookmarks.length === 0 ? (
+        <p className="text-xs font-semibold text-zinc-500">No saved moments for this stream yet.</p>
+      ) : (
+        <div className="flex max-h-48 flex-col gap-2 overflow-y-auto">
+          {bookmarks.map(bookmark => (
+            <div key={bookmark.id} className="grid grid-cols-[4.75rem_minmax(0,1fr)_auto] items-center gap-2 rounded bg-black/20 px-2.5 py-2 text-xs">
+              <span className="font-mono font-bold text-violet-200">{formatHeatOffset(bookmark.offsetSeconds)}</span>
+              <span className="min-w-0">
+                <span className="block truncate font-bold text-zinc-200">{bookmark.label}</span>
+                <span className="text-[10px] font-semibold uppercase text-zinc-600">{bookmark.source}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => onDelete(bookmark.id)}
+                className="rounded border border-white/10 px-2 py-1 text-[10px] font-black uppercase text-zinc-500 transition hover:border-red-400/30 hover:text-red-200"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function StreamRecapPanel({
+  recap,
+}: {
+  recap: PulseStreamRecap
+}) {
+  const topMoment = recap.topMoments[0]
+  return (
+    <section className="rounded border border-emerald-500/15 bg-emerald-500/[0.04] p-3">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-xs font-black uppercase text-emerald-100">Stream Recap</h3>
+          <p className="text-[10px] font-semibold text-emerald-200/60">Derived from Pulse rollups and heatmap scoring</p>
+        </div>
+        {topMoment ? (
+          <span className="rounded bg-emerald-400/15 px-2 py-1 text-[10px] font-black text-emerald-100">
+            Top {topMoment.score}
+          </span>
+        ) : null}
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded bg-black/20 p-2">
+          <div className="text-[10px] font-black uppercase text-zinc-500">Messages</div>
+          <div className="mt-1 font-black text-zinc-100">{count(recap.totalMessages)}</div>
+        </div>
+        <div className="rounded bg-black/20 p-2">
+          <div className="text-[10px] font-black uppercase text-zinc-500">Peak Chat</div>
+          <div className="mt-1 font-black text-zinc-100">{count(recap.peakChatPerMin)}/min</div>
+        </div>
+      </div>
+      {recap.biggestChatSpike || recap.funniestEmoteBurst ? (
+        <div className="mt-2 grid gap-2 text-xs">
+          {recap.biggestChatSpike ? (
+            <div className="rounded bg-black/20 px-2 py-1.5 font-semibold text-zinc-300">
+              Biggest spike at <strong className="text-emerald-100">{formatHeatOffset(recap.biggestChatSpike.offsetSeconds)}</strong>
+              {' '}({count(recap.biggestChatSpike.chatPerMin)}/min)
+            </div>
+          ) : null}
+          {recap.funniestEmoteBurst ? (
+            <div className="rounded bg-black/20 px-2 py-1.5 font-semibold text-zinc-300">
+              Emote burst at <strong className="text-emerald-100">{formatHeatOffset(recap.funniestEmoteBurst.offsetSeconds)}</strong>
+              {recap.funniestEmoteBurst.code ? ` · ${recap.funniestEmoteBurst.code}` : ''} ({count(recap.funniestEmoteBurst.count)})
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {recap.topEmotes.length > 0 ? (
+        <div className="mt-3">
+          <div className="mb-1 text-[10px] font-black uppercase text-zinc-500">Top 7TV</div>
+          <div className="flex flex-wrap gap-1.5">
+            {recap.topEmotes.slice(0, 5).map(emote => (
+              <span key={emote.code} className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-bold text-zinc-300">
+                {emote.code} <span className="text-zinc-500">{count(emote.count)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {recap.topMoments.length > 0 ? (
+        <div className="mt-3">
+          <div className="mb-1 text-[10px] font-black uppercase text-zinc-500">Top Moments</div>
+          <div className="flex max-h-40 flex-col gap-1.5 overflow-y-auto">
+            {recap.topMoments.slice(0, 5).map(moment => (
+              <div key={`${moment.offsetSeconds}-${moment.score}`} className="grid grid-cols-[4.25rem_1fr_auto] items-center gap-2 rounded bg-black/20 px-2 py-1.5 text-xs">
+                <span className="font-mono font-bold text-emerald-100">{formatHeatOffset(moment.offsetSeconds)}</span>
+                <span className="truncate text-zinc-400">{moment.reasons[0]?.replace(/_/g, ' ') || 'moment'}</span>
+                <span className="font-black text-emerald-200">{moment.score}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {recap.clipCandidates.length > 0 ? (
+        <p className="mt-3 text-[10px] font-semibold text-zinc-500">
+          {recap.clipCandidates.length} clip candidates ranked from the same Pulse scores.
+        </p>
+      ) : null}
+    </section>
   )
 }
 
@@ -1978,6 +2176,14 @@ export default function Analytics() {
     queryKey: ['replay-heatmap-detail', targetQueryStreamId, login],
     queryFn: () => targetQueryStreamId ? getReplayHeatmapDetail(targetQueryStreamId, 60, login) : Promise.resolve(null),
     enabled: Boolean(targetQueryStreamId && selectedRollup),
+    staleTime: 120_000,
+    retry: 1,
+  })
+
+  const recapQuery = useQuery({
+    queryKey: ['pulse-stream-recap', targetQueryStreamId],
+    queryFn: () => targetQueryStreamId ? getPulseStreamRecap(targetQueryStreamId) : Promise.resolve(null),
+    enabled: Boolean(targetQueryStreamId && !isLiveRoute),
     staleTime: 120_000,
     retry: 1,
   })
@@ -2694,6 +2900,9 @@ export default function Analytics() {
             </div>
           </section>
           <aside className="order-2 space-y-4 xl:order-none">
+            {recapQuery.data ? (
+              <StreamRecapPanel recap={recapQuery.data} />
+            ) : null}
             <div className="rounded border border-white/10 bg-white/[0.035] overflow-hidden">
               <div className="flex border-b border-white/10 text-[10px] font-black uppercase bg-white/[0.015]">
                 {(['moments', 'emotes', 'clips', 'sync'] as const).map(tab => (
