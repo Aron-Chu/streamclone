@@ -25,7 +25,7 @@
 	reverse_proxy @emote_assets minio:9000
 
 	@analytics {
-		path /v1/analytics /v1/analytics/*
+		path /v1/analytics /v1/analytics/* /v1/extension /v1/extension/* /v1/pulse /v1/pulse/*
 	}
 	reverse_proxy @analytics analytics:8080 {
 		transport http {

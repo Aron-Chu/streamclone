@@ -281,3 +281,22 @@ func ComputeHeatmapDetail(rollups []MinuteRollup, config ScoringConfig) HeatmapD
 	detail.Points = out
 	return detail
 }
+
+// AlignedDetailPoints returns one heatmap detail point per rollup (same length as
+// rollups). Extension BFF code must use this instead of decimated
+// ComputeHeatmapDetail.Points when slicing rollups and points together.
+func AlignedDetailPoints(rollups []MinuteRollup, config ScoringConfig) []ReplayHeatmapDetailPoint {
+	if len(rollups) == 0 {
+		return nil
+	}
+	points, windowConfs := computeWindowPoints(rollups, config)
+	normalized, raw := extractSignals(rollups)
+	out := make([]ReplayHeatmapDetailPoint, len(rollups))
+	for i := range rollups {
+		out[i] = ReplayHeatmapDetailPoint{
+			ReplayHeatmapPoint: points[i],
+			Components:         signalComponents(normalized[i], windowConfs[i], config.Weights, raw[i].missing),
+		}
+	}
+	return out
+}

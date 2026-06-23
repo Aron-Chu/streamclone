@@ -11,6 +11,7 @@ import (
 
 type fakeProvider struct {
 	streams map[string]LiveStream
+	users   map[string]UserProfile
 	vodID   string
 	vodErr  error
 }
@@ -19,8 +20,17 @@ func (f fakeProvider) StreamsByLogin(context.Context, []string) (map[string]Live
 	return f.streams, nil
 }
 
-func (f fakeProvider) UsersByLogin(context.Context, []string) (map[string]UserProfile, error) {
-	return map[string]UserProfile{}, nil
+func (f fakeProvider) UsersByLogin(_ context.Context, logins []string) (map[string]UserProfile, error) {
+	if len(f.users) == 0 {
+		return map[string]UserProfile{}, nil
+	}
+	out := make(map[string]UserProfile, len(logins))
+	for _, login := range logins {
+		if p, ok := f.users[login]; ok {
+			out[login] = p
+		}
+	}
+	return out, nil
 }
 
 func (f fakeProvider) VideoIDByStreamID(context.Context, string, string) (string, error) {
