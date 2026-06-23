@@ -4,90 +4,268 @@
   "tags": ["streamclone", "archive", "bearhost"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 6,
   "refresh": "30s",
+  "description": "BearHost VPS corpus progress — bronze roster, silver/gold backfill, scraper health.",
   "panels": [
     {
       "id": 1,
-      "type": "stat",
-      "title": "Archive jobs running",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
-      "targets": [{ "expr": "sum(streamclone_archive_jobs_running)", "legendFormat": "running", "refId": "A" }]
+      "type": "text",
+      "title": "About",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "## BearHost corpus pipeline\n**Bronze** — Helix VOD index + TwitchTracker channel summary per roster channel.\n**Silver** — per-stream viewer charts (Camoufox scraper, dedicated silver worker).\n**Gold** — selective GQL VOD chat → Azure (dedicated gold worker, runs concurrently with silver).\n\nCompletion **%** = roster indexed ÷ target (bronze) or **confirmed Azure exports** ÷ total jobs (silver/gold). All metrics from `analytics-workers`."
+      }
     },
     {
       "id": 2,
-      "type": "stat",
-      "title": "Archive jobs queued",
+      "type": "row",
+      "title": "Completion",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 3 },
+      "collapsed": false
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "Bronze roster",
+      "description": "Distinct channels in bronze_index_state vs roster target",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
-      "targets": [{ "expr": "sum(streamclone_archive_jobs_queued)", "legendFormat": "queued", "refId": "A" }]
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 40 },
+              { "color": "yellow", "value": 70 },
+              { "color": "green", "value": 90 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [{
+        "expr": "100 * max(bronze_channels_roster_gauge{job=\"analytics-workers\"}) / clamp_min(max(bronze_channels_target{job=\"analytics-workers\"}), 1)",
+        "legendFormat": "bronze %",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "Silver exports",
+      "description": "Silver backfill jobs with confirmed Azure export",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 5 },
+              { "color": "yellow", "value": 25 },
+              { "color": "green", "value": 60 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [{
+        "expr": "100 * max(corpus_tier_completion_ratio{job=\"analytics-workers\",tier=\"silver\",measure=\"export_confirmed\"})",
+        "legendFormat": "silver confirmed %",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 5,
+      "type": "gauge",
+      "title": "Gold exports",
+      "description": "Gold backfill jobs with confirmed Azure export",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
+          "noValue": "0%",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "text", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 25 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [{
+        "expr": "100 * max(corpus_tier_completion_ratio{job=\"analytics-workers\",tier=\"gold\",measure=\"export_confirmed\"})",
+        "legendFormat": "gold confirmed %",
+        "refId": "A"
+      }]
     },
     {
       "id": 6,
-      "type": "stat",
-      "title": "Bronze channels indexed",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
-      "targets": [{ "expr": "bronze_channels_indexed_total", "legendFormat": "indexed", "refId": "A" }]
+      "type": "row",
+      "title": "Queue snapshot",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 },
+      "collapsed": false
     },
     {
       "id": 7,
       "type": "stat",
-      "title": "Bronze roster target",
+      "title": "Bronze channels",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
-      "targets": [{ "expr": "bronze_channels_target", "legendFormat": "target", "refId": "A" }]
-    },
-    {
-      "id": 3,
-      "type": "timeseries",
-      "title": "Backfill queue depth",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "targets": [{ "expr": "sum by (tier, status) (backfill_jobs_gauge)", "legendFormat": "{{tier}} {{status}}", "refId": "A" }]
-    },
-    {
-      "id": 4,
-      "type": "timeseries",
-      "title": "Archive coverage ratio by tier",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "targets": [{ "expr": "streamclone_archive_coverage_ratio", "legendFormat": "{{tier}}", "refId": "A" }]
-    },
-    {
-      "id": 5,
-      "type": "timeseries",
-      "title": "Archive uploads (rate)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-      "targets": [{ "expr": "sum by (artifact_type) (rate(archive_exports_confirmed_total[5m]))", "legendFormat": "{{artifact_type}}", "refId": "A" }]
-    },
-    {
-      "id": 8,
-      "type": "timeseries",
-      "title": "Bronze index progress",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 11 },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value"
+      },
       "targets": [
-        { "expr": "bronze_channels_indexed_total", "legendFormat": "indexed total", "refId": "A" },
-        { "expr": "bronze_channels_target", "legendFormat": "target", "refId": "B" }
+        {
+          "expr": "max(bronze_channels_roster_gauge{job=\"analytics-workers\"})",
+          "legendFormat": "indexed",
+          "refId": "A"
+        },
+        {
+          "expr": "max(bronze_channels_target{job=\"analytics-workers\"})",
+          "legendFormat": "target",
+          "refId": "B"
+        }
       ]
     },
     {
-      "id": 100,
-      "type": "row",
-      "title": "Scraper & workers (BearHost VPS)",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
-      "collapsed": false
+      "id": 8,
+      "type": "stat",
+      "title": "Silver queued",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 11 },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 200 },
+              { "color": "red", "value": 400 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [{
+        "expr": "sum(backfill_jobs_gauge{job=\"analytics-workers\",tier=\"silver\",status=\"queued\"})",
+        "legendFormat": "queued",
+        "refId": "A"
+      }]
     },
     {
       "id": 9,
       "type": "stat",
-      "title": "Workers metrics up",
-      "description": "Prometheus can scrape analytics-workers /metrics",
+      "title": "Silver running",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 21 },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 11 },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 2 },
+              { "color": "red", "value": 4 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [{
+        "expr": "sum(backfill_jobs_gauge{job=\"analytics-workers\",tier=\"silver\",status=\"running\"})",
+        "legendFormat": "running",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Silver failed",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 11 },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 20 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [{
+        "expr": "sum(backfill_jobs_gauge{job=\"analytics-workers\",tier=\"silver\",status=\"failed\"})",
+        "legendFormat": "failed",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Gold queued",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 11 },
+      "fieldConfig": { "defaults": { "decimals": 0 } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [{
+        "expr": "sum(backfill_jobs_gauge{job=\"analytics-workers\",tier=\"gold\",status=\"queued\"}) or vector(0)",
+        "legendFormat": "queued",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Workers",
+      "description": "Prometheus scrape of analytics-workers /metrics",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 11 },
       "fieldConfig": {
         "defaults": {
           "mappings": [
@@ -96,15 +274,128 @@
           "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
         }
       },
-      "targets": [{ "expr": "max(up{job=\"analytics-workers\"})", "legendFormat": "up", "refId": "A" }]
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [{
+        "expr": "max(up{job=\"analytics-workers\"})",
+        "legendFormat": "workers",
+        "refId": "A"
+      }]
     },
     {
-      "id": 10,
-      "type": "stat",
-      "title": "TT scraper error rate (15m)",
-      "description": "Share of TwitchTracker scraper calls failing (via analytics-workers)",
+      "id": 13,
+      "type": "row",
+      "title": "Trends",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "collapsed": false
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Backfill queue by tier",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 21 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "stacking": { "mode": "normal", "group": "A" }, "fillOpacity": 25 },
+          "decimals": 0
+        }
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [{
+        "expr": "sum by (tier, status) (backfill_jobs_gauge{job=\"analytics-workers\"})",
+        "legendFormat": "{{tier}} {{status}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Bronze roster growth",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "decimals": 0 } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "max(bronze_channels_roster_gauge{job=\"analytics-workers\"})",
+          "legendFormat": "channels indexed",
+          "refId": "A"
+        },
+        {
+          "expr": "max(bronze_channels_target{job=\"analytics-workers\"})",
+          "legendFormat": "target",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "Scraper & gold health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "collapsed": true
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Gold oldest queued age",
+      "description": "Primary gold health signal — age of oldest queued gold job",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 25 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1800 },
+              { "color": "red", "value": 3600 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [{
+        "expr": "max(backfill_oldest_queued_age_seconds{job=\"analytics-workers\",tier=\"gold\"}) or vector(0)",
+        "legendFormat": "age",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Stale running jobs",
+      "description": "Running jobs older than BACKFILL_STALE_RUNNING_AFTER lease",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 25 },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [{
+        "expr": "sum(backfill_stale_running_gauge{job=\"analytics-workers\"}) or vector(0)",
+        "legendFormat": "stale",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "TT scraper error % (15m)",
+      "description": "Legacy aggregate; see TT scrape health row below for failure reason breakdown",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 25 },
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
@@ -119,55 +410,219 @@
           }
         }
       },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
       "targets": [{
-        "expr": "100 * sum(rate(analytics_scraper_requests_total{result=\"error\"}[15m])) / clamp_min(sum(rate(analytics_scraper_requests_total[15m])), 0.001)",
+        "expr": "100 * sum(rate(analytics_scraper_requests_total{job=\"analytics-workers\",result=\"error\"}[15m])) / clamp_min(sum(rate(analytics_scraper_requests_total{job=\"analytics-workers\"}[15m])), 0.001)",
         "legendFormat": "error %",
         "refId": "A"
       }]
     },
     {
-      "id": 11,
+      "id": 18,
       "type": "stat",
-      "title": "Active sync jobs",
+      "title": "TT success / min",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 21 },
-      "targets": [{ "expr": "sum(analytics_sync_active)", "legendFormat": "active", "refId": "A" }]
-    },
-    {
-      "id": 12,
-      "type": "stat",
-      "title": "TT scraper success / min",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 21 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 25 },
       "fieldConfig": { "defaults": { "unit": "cpm", "decimals": 1 } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [{
-        "expr": "60 * sum(rate(analytics_scraper_requests_total{result=\"success\"}[5m]))",
+        "expr": "60 * sum(rate(analytics_scraper_requests_total{job=\"analytics-workers\",result=\"success\"}[5m]))",
         "legendFormat": "success/min",
         "refId": "A"
       }]
     },
     {
-      "id": 13,
-      "type": "timeseries",
-      "title": "Scraper requests / sec",
+      "id": 19,
+      "type": "stat",
+      "title": "Active sync jobs",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 25 },
+      "fieldConfig": { "defaults": { "decimals": 0 } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [{
-        "expr": "sum by (source, result) (rate(analytics_scraper_requests_total[5m]))",
-        "legendFormat": "{{source}} {{result}}",
+        "expr": "sum(analytics_sync_active{job=\"analytics-workers\"})",
+        "legendFormat": "active",
         "refId": "A"
       }]
     },
     {
-      "id": 14,
-      "type": "timeseries",
-      "title": "VOD GQL throttles / sec",
-      "description": "Twitch rate limits during chat/VOD backfill (indirect pipeline health)",
+      "id": 20,
+      "type": "stat",
+      "title": "GQL pages / min",
+      "description": "Gold-tier VOD chat fetch rate",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 25 },
+      "fieldConfig": { "defaults": { "unit": "cpm", "decimals": 1, "noValue": "0" } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [{
-        "expr": "sum by (status) (rate(analytics_vod_gql_throttle_total[5m]))",
-        "legendFormat": "{{status}}",
+        "expr": "60 * sum(rate(analytics_vod_gql_pages_fetched_total{job=\"analytics-workers\"}[5m]))",
+        "legendFormat": "pages/min",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Backfill worker ticks",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 29 },
+      "fieldConfig": { "defaults": { "unit": "dateTimeFromNow" } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [{
+        "expr": "backfill_worker_last_tick_timestamp{job=\"analytics-workers\"} * 1000",
+        "legendFormat": "{{worker}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Oldest queued age by tier",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 29 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 0 } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [{
+        "expr": "max by (tier) (backfill_oldest_queued_age_seconds{job=\"analytics-workers\"})",
+        "legendFormat": "{{tier}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Scraper requests / sec",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 36 },
+      "targets": [{
+        "expr": "sum by (result) (rate(analytics_scraper_requests_total{job=\"analytics-workers\",source=\"twitchtracker\"}[5m]))",
+        "legendFormat": "{{result}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Archive uploads / min",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 36 },
+      "targets": [{
+        "expr": "60 * sum by (artifact_type) (rate(archive_exports_confirmed_total{job=\"analytics-workers\"}[5m]))",
+        "legendFormat": "{{artifact_type}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 27,
+      "type": "row",
+      "title": "TT scrape health (taxonomy)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 },
+      "collapsed": false
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "TT failures by reason / min",
+      "description": "Classified failure reasons from analytics_tt_scrape_failures_total",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "stacking": { "mode": "normal", "group": "A" }, "fillOpacity": 30 },
+          "unit": "cpm",
+          "decimals": 2
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] } },
+      "targets": [{
+        "expr": "60 * sum by (reason) (rate(analytics_tt_scrape_failures_total{job=\"analytics-workers\",source=\"twitchtracker\"}[5m]))",
+        "legendFormat": "{{reason}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "TT success rate %",
+      "description": "Success vs all classified attempts (success + failures counters)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "green", "value": 75 }
+            ]
+          }
+        }
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [{
+        "expr": "100 * sum(rate(analytics_tt_scrape_success_total{job=\"analytics-workers\",source=\"twitchtracker\"}[15m])) / clamp_min(sum(rate(analytics_tt_scrape_success_total{job=\"analytics-workers\",source=\"twitchtracker\"}[15m])) + sum(rate(analytics_tt_scrape_failures_total{job=\"analytics-workers\",source=\"twitchtracker\"}[15m])), 0.001)",
+        "legendFormat": "success %",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "TT scrape duration p95 (s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 52 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 1 } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (le, path, outcome) (rate(analytics_tt_scrape_duration_seconds_bucket{job=\"analytics-workers\",source=\"twitchtracker\"}[15m])))",
+        "legendFormat": "{{path}} {{outcome}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "TT cache hit rate (15m)",
+      "description": "Browser scrapes served from scraper cache vs fresh navigation",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 52 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 20 },
+              { "color": "green", "value": 40 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [{
+        "expr": "100 * sum(rate(analytics_tt_scrape_success_total{job=\"analytics-workers\",source=\"twitchtracker\",path=\"browser\",cache_hit=\"true\"}[15m])) / clamp_min(sum(rate(analytics_tt_scrape_success_total{job=\"analytics-workers\",source=\"twitchtracker\",path=\"browser\"}[15m])), 0.001)",
+        "legendFormat": "cache %",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "TT success by path / min",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 52 },
+      "fieldConfig": { "defaults": { "unit": "cpm", "decimals": 2 } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [{
+        "expr": "60 * sum by (path) (rate(analytics_tt_scrape_success_total{job=\"analytics-workers\",source=\"twitchtracker\"}[5m]))",
+        "legendFormat": "{{path}}",
         "refId": "A"
       }]
     }

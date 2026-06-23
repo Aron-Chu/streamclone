@@ -18,7 +18,7 @@ bearhost_ssh "cd '${BEARHOST_REMOTE_APP}' && \
     --profile scraper up -d --build analytics-workers"
 
 echo ""
-echo "Grafana ready on VPS localhost:3000 — tunnel from your PC:"
-echo "  powershell -File scripts/bearhost-grafana-tunnel.ps1"
+echo "Grafana ready on VPS — tunnel from your PC:"
+echo "  make grafana-up"
 echo "  open http://localhost:3001/d/streamclone-archive/streamclone-archive"
 echo "  login: admin / streampulse (change on first visit)"

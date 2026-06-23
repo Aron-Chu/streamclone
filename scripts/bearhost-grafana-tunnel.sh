@@ -18,4 +18,9 @@ bearhost_grafana_warn_local_pulse
 echo "==> Grafana tunnel: http://localhost:${LOCAL_PORT} (Ctrl+C to stop)"
 echo "    Dashboard: ${DASH_URL}"
 echo "    Login: admin / streampulse"
-exec ssh -i "${BEARHOST_SSH_KEY}" -N -L "${LOCAL_PORT}:127.0.0.1:3000" "${BEARHOST_USER}@${BEARHOST_HOST}"
+exec ssh -i "${BEARHOST_SSH_KEY}" \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=6 \
+  -o TCPKeepAlive=yes \
+  -N -L "${LOCAL_PORT}:127.0.0.1:3000" \
+  "${BEARHOST_USER}@${BEARHOST_HOST}"

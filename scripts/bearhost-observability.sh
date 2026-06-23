@@ -20,7 +20,7 @@ case "${ACTION}" in
     echo "bearhost-observability: Grafana (SSH tunnel required)"
     echo "  dashboard: http://localhost:3001/d/streamclone-archive/streamclone-archive"
     echo "  login:     admin / streampulse"
-    echo "  tunnel:    powershell -File scripts/bearhost-grafana-tunnel.ps1"
+    echo "  tunnel:    make grafana-up"
     bearhost_compose_obs ps prometheus-obs grafana-obs
     ;;
   down)
