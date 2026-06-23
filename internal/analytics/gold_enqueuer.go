@@ -11,8 +11,8 @@ import (
 
 // GoldEnqueuer scans silver-complete streams and inserts gold-tier backfill jobs.
 type GoldEnqueuer struct {
-	db     *pgxpool.Pool
-	rules  *GoldRulesEngine
+	db       *pgxpool.Pool
+	rules    *GoldRulesEngine
 	interval time.Duration
 }
 
@@ -55,31 +55,69 @@ func (e *GoldEnqueuer) RunOnce(ctx context.Context) (int, error) {
 
 func (e *GoldEnqueuer) listCandidates(ctx context.Context) ([]goldCandidate, error) {
 	rows, err := e.db.Query(ctx, `
-		SELECT s.stream_id, s.login, s.peak_viewers, s.started_at, s.ended_at
+		SELECT silver.stream_id, silver.login
 		FROM backfill_jobs silver
-		JOIN analytics_streams s ON s.stream_id = silver.stream_id
 		WHERE silver.tier = 'silver'
 		  AND silver.status = 'done'
-		  AND silver.export_status = 'confirmed'
-		  AND NOT EXISTS (
-			SELECT 1 FROM backfill_jobs gold
-			WHERE gold.stream_id = silver.stream_id
-			  AND gold.tier = 'gold'
-			  AND gold.status IN ('queued', 'running', 'done')
-		  )`)
+		  AND silver.export_status = 'confirmed'`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+
+	store := NewStore(e.db)
+	seen := map[string]bool{}
 	var out []goldCandidate
 	for rows.Next() {
-		var c goldCandidate
-		if err := rows.Scan(&c.StreamID, &c.Login, &c.PeakViewers, &c.StartedAt, &c.EndedAt); err != nil {
+		var silverStreamID, fallbackLogin string
+		if err := rows.Scan(&silverStreamID, &fallbackLogin); err != nil {
 			return nil, err
+		}
+		stream, err := store.StreamByID(ctx, silverStreamID)
+		if err != nil {
+			continue
+		}
+		canonicalID := strings.TrimSpace(stream.StreamID)
+		if canonicalID == "" || seen[canonicalID] {
+			continue
+		}
+		exists, err := goldBackfillJobExists(ctx, e.db, canonicalID, silverStreamID)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			continue
+		}
+		seen[canonicalID] = true
+		c := goldCandidate{
+			StreamID:    canonicalID,
+			Login:       normalizeLogin(stream.Login),
+			PeakViewers: stream.PeakViewers,
+			StartedAt:   stream.StartedAt,
+			EndedAt:     stream.EndedAt,
+		}
+		if c.Login == "" {
+			c.Login = normalizeLogin(fallbackLogin)
 		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func goldBackfillJobExists(ctx context.Context, db *pgxpool.Pool, streamIDs ...string) (bool, error) {
+	ids := uniqueStrings(streamIDs)
+	if len(ids) == 0 {
+		return false, nil
+	}
+	var exists bool
+	err := db.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM backfill_jobs
+			WHERE stream_id = ANY($1)
+			  AND tier = 'gold'
+			  AND status IN ('queued', 'running', 'done')
+		)`, ids).Scan(&exists)
+	return exists, err
 }
 
 func insertGoldBackfillJob(ctx context.Context, db *pgxpool.Pool, streamID, login string) error {
@@ -91,15 +129,22 @@ func insertGoldBackfillJob(ctx context.Context, db *pgxpool.Pool, streamID, logi
 	if streamID == "" || login == "" {
 		return fmt.Errorf("stream id and login are required")
 	}
+	store := NewStore(db)
+	duplicateIDs := []string{streamID}
+	if canonicalID, err := store.ResolveCanonicalStreamID(ctx, streamID); err == nil && canonicalID != "" {
+		streamID = canonicalID
+		duplicateIDs = append(duplicateIDs, canonicalID)
+	}
+	duplicateIDs = uniqueStrings(duplicateIDs)
 	tag, err := db.Exec(ctx, `
 		INSERT INTO backfill_jobs (tier, stream_id, login, status, export_status, next_run_at)
 		SELECT 'gold', $1, $2, 'queued', 'pending', now()
 		WHERE NOT EXISTS (
 			SELECT 1 FROM backfill_jobs
-			WHERE stream_id = $1
+			WHERE stream_id = ANY($3)
 			  AND tier = 'gold'
 			  AND status IN ('queued', 'running', 'done')
-		)`, streamID, login)
+		)`, streamID, login, duplicateIDs)
 	if err != nil {
 		return err
 	}
