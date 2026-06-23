@@ -107,6 +107,30 @@ func TestStartDedupe(t *testing.T) {
 	}
 }
 
+func TestPrewarmDoesNotHoldListener(t *testing.T) {
+	var spawned int32
+	h := newOrch(5, &spawned)
+	if rec := post(h, "/v1/stream/start", `{"channel":"ninja","prewarm":true}`); rec.Code != 200 {
+		t.Fatalf("prewarm start code %d", rec.Code)
+	}
+	s, ok := h.o.Registry.Get("ninja")
+	if !ok {
+		t.Fatal("expected warm session")
+	}
+	if s.Listeners() != 0 {
+		t.Fatalf("prewarm must not register listeners, got %d", s.Listeners())
+	}
+	if rec := post(h, "/v1/stream/start", `{"channel":"ninja"}`); rec.Code != 200 {
+		t.Fatalf("join start code %d", rec.Code)
+	}
+	if s.Listeners() != 1 {
+		t.Fatalf("expected 1 listener after join, got %d", s.Listeners())
+	}
+	if spawned != 1 {
+		t.Fatalf("expected 1 spawn, got %d", spawned)
+	}
+}
+
 func TestStartCapacity(t *testing.T) {
 	var spawned int32
 	h := newOrch(1, &spawned)

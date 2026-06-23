@@ -219,14 +219,12 @@ func (r *Registry) Reap(now time.Time, idle time.Duration) []*Session {
 	defer r.mu.Unlock()
 	var reaped []*Session
 	for ch, s := range r.sessions {
-		if s.Listeners() != 0 {
+		if now.Sub(s.LastSeen()) <= idle {
 			continue
 		}
-		if now.Sub(s.LastSeen()) > idle {
-			s.stopped.Store(true)
-			delete(r.sessions, ch)
-			reaped = append(reaped, s)
-		}
+		s.stopped.Store(true)
+		delete(r.sessions, ch)
+		reaped = append(reaped, s)
 	}
 	return reaped
 }

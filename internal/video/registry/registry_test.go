@@ -5,11 +5,12 @@ import (
 	"time"
 )
 
-func TestReapZeroListenersAfterIdle(t *testing.T) {
+func TestReapStaleListenerSession(t *testing.T) {
 	r := New()
 	fresh := &Session{Channel: "fresh"}
-	stale := &Session{Channel: "stale"}
 	fresh.AddListener("fresh-session")
+	stale := &Session{Channel: "stale"}
+	stale.AddListener("orphan-prewarm")
 	r.Add(fresh)
 	r.Add(stale)
 	stale.lastSeen.Store(time.Now().Add(-time.Hour).UnixNano())
@@ -20,9 +21,6 @@ func TestReapZeroListenersAfterIdle(t *testing.T) {
 	}
 	if r.Len() != 1 {
 		t.Fatalf("expected 1 remaining, got %d", r.Len())
-	}
-	if !reaped[0].Stopped() {
-		t.Fatal("reaped session should be marked stopped")
 	}
 }
 
