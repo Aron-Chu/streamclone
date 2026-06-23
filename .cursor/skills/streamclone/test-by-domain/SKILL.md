@@ -16,6 +16,7 @@ Read `AGENTS.md` and `.kiro/steering/tech.md`.
 | Compose/env/deploy | `make compose-config-check`, `make security-scan` |
 | Playback | `make test-video`, frontend build |
 | Analytics | `make test-analytics`, frontend build |
+| Pulse emote ensure / gold gate / extension BFF | `make test-pulse-emote`, `make smoke-pulse-emote`, `make smoke-pulse-emote-gold LOGIN=… STREAM_ID=…` |
 | Pulse Wire | `make test-storygraph` |
 | Emotes | `make test-emote` |
 | Metadata / directory | `make test-metadata` |

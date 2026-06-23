@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 
 import type { AnalyticsStream, SourceStatus, StreamStat } from '../../api'
-import { buildVodDeepLink } from '../../utils/vodDeepLink'
+import { buildVodDeepLink } from '@streamclone/pulse-core'
 import { buildTwitchVodUrl } from '../../utils/twitchVodUrl'
 import { vodThumbnailUrl } from '../../utils/vodThumbnail'
 import {

@@ -178,6 +178,8 @@ Default base URL: `http://localhost:8090`.
 
    - Merge into `.cursor/mcp.json` (gitignored) or Cursor UI.
 
+   **Codex:** run `make codex-setup` (writes `.codex/config.toml`, syncs skills). Trust the repo in Codex. See [`docs/CODEX.md`](CODEX.md).
+
 
 
 3. **Preflight**

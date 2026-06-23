@@ -15,12 +15,14 @@ node_modules/
 memories/
 frontend/test-results/
 frontend/dist/
+frontend/.streamclone.css
 clipper/.venv/
 clipper-data/
 **/__pycache__/
 *.py[cod]
 benchmark-*.json
 benchmark-*.log
+/grafana-archive-*.png
 .docker-cli-config/
 feed.json
 frontend/debug.log
@@ -35,8 +37,10 @@ cookies.txt
 *.tsbuildinfo
 .cursor/debug-*.log
 .cursor/mcp.json
+.codex/config.toml
 .cursor/hooks/__pycache__/
 .cursor/plans/
+scripts/.figma-bridge-deps/
 scratch/
 weppy-project-sync/
 .tmp/

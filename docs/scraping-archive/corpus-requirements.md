@@ -74,7 +74,7 @@ flowchart TB
 | Worker | Host process | Trigger | Status |
 |--------|--------------|---------|--------|
 | Bronze indexer | `cmd/analytics` | `BRONZE_WORKER_INTERVAL` | **Shipped** (partial artifacts) |
-| Backfill / Silver | `cmd/analytics` | `BACKFILL_WORKER_INTERVAL` | **Shipped** |
+| Backfill / Silver | `cmd/analytics` | `BACKFILL_WORKER_INTERVAL`; drains continuously while jobs are claimable | **Shipped** |
 | Gold enqueuer + worker | `cmd/analytics` | `GOLD_ENQUEUER_INTERVAL` | **Shipped** (single Gold tier today) |
 | Sync export on completion | `cmd/analytics` | `ARCHIVE_EXPORT_ON_SYNC` | **Shipped** |
 | Emote snapshot worker | `cmd/analytics` | weekly tick | **Shipped** (per-channel 7TV only) |
@@ -84,6 +84,8 @@ flowchart TB
 | **Corpus orchestrator v2** | `cmd/archive run` or extended workers | unified tick | **Planned** |
 
 v1 continues embedded workers in analytics; v2 may add `cmd/archive run` as a thin supervisor that only coordinates export ticks and coverage snapshots without duplicating sync logic.
+
+BearHost corpus uses the conservative one-browser scraper profile, but feeds the queue more often than the generic archive profile: `BACKFILL_WORKER_INTERVAL=5s`, `SILVER_ENQUEUE_MAX_PER_RUN=40`, and `SILVER_ENQUEUE_INTERVAL=5m`. Keep `SCRAPER_MAX_CONCURRENT=1` on the 8 GB VPS unless scraper error rate and memory headroom prove a larger browser pool is stable.
 
 ---
 

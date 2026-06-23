@@ -1,0 +1,51 @@
+# Streamclone Codex exec policies (project layer). Starlark — see https://developers.openai.com/codex/rules
+
+# Destructive / irreversible
+prefix_rule(
+    pattern = ["git", "push", "--force"],
+    decision = "forbidden",
+    justification = "Never force-push master without explicit user request",
+)
+
+prefix_rule(
+    pattern = ["make", "nuke"],
+    decision = "forbidden",
+    justification = "make nuke deletes volumes and shared data",
+)
+
+prefix_rule(
+    pattern = ["make", "down-clean"],
+    decision = "prompt",
+    justification = "Removes compose volumes",
+)
+
+prefix_rule(
+    pattern = ["docker", "volume", "rm"],
+    decision = "prompt",
+    justification = "Docker volume removal is destructive",
+)
+
+# Safe dev loops
+prefix_rule(
+    pattern = ["make", "up"],
+    decision = "allow",
+    justification = "Start local stack",
+)
+
+prefix_rule(
+    pattern = ["make", "check-quick"],
+    decision = "allow",
+    justification = "Fast PR gate",
+)
+
+prefix_rule(
+    pattern = ["make", "test"],
+    decision = "allow",
+    justification = "Go unit tests",
+)
+
+prefix_rule(
+    pattern = ["go", "test"],
+    decision = "allow",
+    justification = "Go tests",
+)

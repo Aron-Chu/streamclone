@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
-import './index.css'
+import 'streamclone-global-css'
 
 const DEFAULT_QUERY_STALE_TIME_MS = 30_000
 const DEFAULT_QUERY_GC_TIME_MS = 5 * 60_000

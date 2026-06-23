@@ -5,7 +5,7 @@ ENV_FILE ?= .env
 COMPOSE_FEATURE_PROFILES ?= $(shell bash -c 'source scripts/lib/env.sh 2>/dev/null; env_feature_compose_profiles "$(ENV_FILE)"' | awk '{for (i=1;i<=NF;i++) printf " --profile %s", $$i}')
 COMPOSE_CORE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml$(COMPOSE_FEATURE_PROFILES)
 COMPOSE_SCRAPER ?= $(COMPOSE_CORE) --profile scraper
-COMPOSE_FULL ?= $(COMPOSE_CORE) --profile scraper --profile clipper
+COMPOSE_FULL ?= $(COMPOSE_CORE) --profile scraper
 HELM ?= helm
 HELM_RELEASE ?= streamclone-pulse
 HELM_CHART ?= charts/pulse
@@ -36,13 +36,17 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 	pulse pulse-on pulse-off pulse-check pulse-down pulse-watch \
 	test vet build tidy integration-up integration-down integration-test \
 	test-video test-analytics test-emote test-storygraph test-metadata \
+	test-pulse-emote rebuild-analytics-emote restart-analytics \
+	smoke-pulse-emote pulse-emote-pick-stream smoke-pulse-emote-gold smoke-pulse-emote-gold-fail \
 	go-test-docker go-vet-docker go-build-docker \
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
-	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp mcp-setup \
+	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp mcp-setup codex-setup codex-sync-skills \
 	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
-	frontend-restart frontend-refresh frontend-logs compose-config-check azure-scraper-config-check azure-archive-plane-config-check bearhost-config-check bearhost-config-check-local bearhost-config-check-release bearhost-rsync bearhost bearhost-help bearhost-bronze-status bearhost-grafana-tunnel bearhost-grafana-tunnel-start bearhost-grafana-tunnel-stop bearhost-grafana-sync bearhost-observability-enable bearhost-observability-status bearhost-observability-up bearhost-observability-down local-vps-only check check-quick \
+	frontend-restart frontend-refresh frontend-logs compose-config-check azure-scraper-config-check azure-archive-plane-config-check bearhost-config-check bearhost-config-check-local bearhost-config-check-release bearhost-rsync bearhost bearhost-help bearhost-bronze-status bearhost-corpus-only grafana grafana-up grafana-stop grafana-setup grafana-sync grafana-watch grafana-archive-status grafana-watch-install grafana-watch-install-cron grafana-watch-uninstall grafana-watch-uninstall-cron bearhost-grafana bearhost-grafana-up bearhost-grafana-stop bearhost-grafana-setup bearhost-grafana-tunnel bearhost-grafana-tunnel-start bearhost-grafana-tunnel-stop bearhost-grafana-sync bearhost-observability-enable bearhost-observability-status bearhost-observability-up bearhost-observability-down local-vps-only check check-quick \
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
-	preflight-deps start stop-user ensure-localhost agent-smoke coverage-report
+	preflight-deps start stop-user ensure-localhost agent-smoke coverage-report \
+	rebuild-analytics-emote restart-analytics test-pulse-emote \
+	smoke-pulse-emote pulse-emote-pick-stream smoke-pulse-emote-gold smoke-pulse-emote-gold-fail
 
 help:
 	@printf 'Streamclone — common targets\n\n'
@@ -68,7 +72,9 @@ help:
 	@printf '  make pulse-off       Stop port-forwards only\n'
 	@printf '  make pulse-down      Stop forwards + uninstall k8s release\n\n'
 	@printf 'Quality: make check-quick | make check | test | vet | build | clipper-test | smoke | agent-smoke\n'
-	@printf 'Agent MCP: make mcp-setup | codegraph | bash scripts/mcp-preflight.sh\n'
+	@printf 'Pulse emote (A+ path): make rebuild-analytics-emote | test-pulse-emote | smoke-pulse-emote\n'
+	@printf '  make pulse-emote-pick-stream | smoke-pulse-emote-gold LOGIN=... STREAM_ID=...\n'
+	@printf 'Agent MCP: make mcp-setup | make codex-setup | codegraph | bash scripts/mcp-preflight.sh\n'
 	@printf '          make test-video | test-analytics | test-emote | test-storygraph | test-metadata\n'
 	@printf '          make frontend-test | frontend-audit | compose-config-check\n'
 	@printf '          make frontend-refresh  Build + migrate + restart frontend/chat/analytics\n'
@@ -77,12 +83,10 @@ help:
 	@printf '  make bearhost-help              List BearHost make targets\n'
 	@printf '  make local-vps-only             Stop local scraper; VPS owns scrape\n'
 	@printf '  make bearhost-bronze-status     Bronze/VOD job summary (SSH to VPS)\n'
-	@printf '  make bearhost-grafana-tunnel-start Background tunnel → :3001 (VPS Grafana)\n'
-	@printf '  make bearhost-grafana-tunnel-stop  Stop :3000/:3001 SSH tunnels\n'
-	@printf '  make bearhost-grafana-tunnel       Foreground tunnel → :3001 (Ctrl+C to stop)\n'
-	@printf '  make bearhost-observability-enable  Rsync + start Prometheus/Grafana on VPS\n'
-	@printf '  make bearhost-grafana-sync      Rsync dashboard/provisioning + reload Grafana\n'
-	@printf '  make bearhost-observability-status  Prometheus/Grafana container status on VPS\n'
+	@printf '  make grafana-setup              First time: start Prometheus/Grafana on VPS\n'
+	@printf '  make grafana-up                 SSH tunnel → http://localhost:3001\n'
+	@printf '  make grafana-stop               Stop Grafana SSH tunnel\n'
+	@printf '  make grafana-sync               Push dashboard edits to VPS\n'
 	@printf '  make bearhost-rsync             Push repo checkout to VPS\n'
 
 env:
@@ -289,6 +293,33 @@ test-video:
 test-analytics:
 	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/analytics/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/analytics/...
 
+test-pulse-emote:
+	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/analytics/... -run 'TestRequireReadyForGold|TestCollectorStartKicks|TestWatchReturns|TestLiveEmote|TestEmoteSync' -count=1 || \
+		docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/analytics/... -run 'TestRequireReadyForGold|TestCollectorStartKicks|TestWatchReturns|TestLiveEmote|TestEmoteSync' -count=1
+
+rebuild-analytics-emote: env
+	$(COMPOSE_CORE) build analytics emote
+	$(COMPOSE_CORE) up -d --no-deps analytics emote
+	@$(MAKE) ensure-localhost PORTS=8090
+
+restart-analytics: env
+	$(COMPOSE_CORE) restart analytics
+	@$(MAKE) ensure-localhost PORTS=8090
+
+smoke-pulse-emote: env
+	@bash scripts/pulse-emote-smoke.sh
+
+pulse-emote-pick-stream: env
+	@bash scripts/pulse-emote-smoke.sh --pick-stream
+
+smoke-pulse-emote-gold: env
+	@test -n "$(STREAM_ID)" || (echo "smoke-pulse-emote-gold: set STREAM_ID= (see make pulse-emote-pick-stream)" >&2; exit 1)
+	@bash scripts/pulse-emote-smoke.sh --gold
+
+smoke-pulse-emote-gold-fail: env
+	@test -n "$(STREAM_ID)" || (echo "smoke-pulse-emote-gold-fail: set STREAM_ID= (see make pulse-emote-pick-stream)" >&2; exit 1)
+	@bash scripts/pulse-emote-smoke.sh --gold-fail
+
 coverage-report:
 	@command -v $(GO) >/dev/null 2>&1 && $(GO) run ./cmd/backfill coverage report || docker run --rm -v "$(CURDIR):/src" -w /src --env-file .env $(GO_DOCKER_IMAGE) go run ./cmd/backfill coverage report
 
@@ -341,6 +372,13 @@ codegraph-mcp:
 mcp-setup: codegraph-install codegraph
 	@bash scripts/mcp-preflight.sh
 	@printf '\nNext: copy .cursor/mcp.recommended.json.example → .cursor/mcp.json (gitignored)\n'
+	@printf 'Codex: make codex-setup — see docs/CODEX.md\n'
+
+codex-sync-skills:
+	@bash scripts/codex-sync-skills.sh
+
+codex-setup:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/codex-setup.ps1
 
 twitch: env
 	@if [ "$(TWITCH_ACTION)" = "sync" ]; then \
@@ -352,7 +390,7 @@ twitch: env
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action local-auth -Scopes "$(TWITCH_SCOPES)" -ChatHttp "$(TWITCH_LOCAL_AUTH_URL)"; \
 	elif [ "$(TWITCH_ACTION)" = "refresh-clipper-token" ]; then \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action refresh-clipper-token -EnvFile $(ENV_FILE); \
-		$(COMPOSE_FULL) up -d --force-recreate clipper; \
+		echo "Clip Studio runs in ReplayForge (../replayforge on host :8095) — restart ReplayForge to load the refreshed token."; \
 	else \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action $(TWITCH_ACTION) -EnvFile $(ENV_FILE) -Scopes "$(TWITCH_SCOPES)" -ChatHttp "$(TWITCH_LOCAL_AUTH_URL)"; \
 	fi
@@ -446,17 +484,23 @@ bearhost-corpus-smoke:
 
 bearhost-help bearhost:
 	@printf 'BearHost VPS — common targets (see docs/site-links.md)\n\n'
-	@printf '  make local-vps-only                 Disable local Tier-0/Bronze/scraper\n'
-	@printf '  make bearhost-bronze-status         Bronze indexer + backfill summary\n'
-	@printf '  make bearhost-grafana-tunnel-start    Background tunnel → localhost:3001\n'
-	@printf '  make bearhost-grafana-tunnel-stop     Stop SSH tunnels on :3000/:3001\n'
-	@printf '  make bearhost-grafana-tunnel          Foreground tunnel → localhost:3001\n'
-	@printf '  make bearhost-observability-enable  First-time: rsync + metrics + Grafana up\n'
-	@printf '  make bearhost-grafana-sync          After dashboard edits: rsync + reload\n'
-	@printf '  make bearhost-observability-status  Check prometheus-obs / grafana-obs on VPS\n'
-	@printf '  make bearhost-rsync                 Sync app + scraper trees to VPS\n\n'
-	@printf 'Grafana URL (after tunnel): http://localhost:3001/d/streamclone-archive/streamclone-archive\n'
-	@printf 'Login: admin / streampulse\n'
+	@printf 'Grafana (VPS archive dashboard):\n'
+	@printf '  make grafana-setup    First time only — rsync + Prometheus/Grafana on VPS\n'
+	@printf '  make grafana-up       Daily — background SSH tunnel → localhost:3001\n'
+	@printf '  make grafana-watch-install      Windows Task Scheduler (every 5 min)\n'
+	@printf '  make grafana-watch-install-cron WSL cron fallback (every 5 min)\n'
+	@printf '  make grafana-watch              One health check (restart if dead)\n'
+	@printf '  make grafana-stop     Stop SSH tunnel on :3000/:3001\n'
+	@printf '  make grafana-sync     After editing deploy/grafana/ — push + reload\n'
+	@printf '  URL: http://localhost:3001/d/streamclone-archive/streamclone-archive\n'
+	@printf '  Login: admin / streampulse\n\n'
+	@printf 'Corpus / deploy:\n'
+	@printf '  make local-vps-only           Disable local Tier-0/Bronze/scraper\n'
+	@printf '  make bearhost-corpus-only     VPS: stop playback/UI; bronze+silver+scraper only\n'
+	@printf '  make bearhost-bronze-status   Bronze indexer + backfill summary\n'
+	@printf '  make bearhost-rsync           Sync app + scraper trees to VPS\n'
+	@printf '  make bearhost-observability-status  Check prometheus-obs / grafana-obs on VPS\n\n'
+	@printf 'Legacy aliases still work: bearhost-grafana-tunnel-start, bearhost-observability-enable, …\n'
 
 bearhost-observability-up:
 	@bash scripts/bearhost-observability.sh up
@@ -465,21 +509,40 @@ bearhost-observability-down:
 	@bash scripts/bearhost-observability.sh down
 
 ifeq ($(OS),Windows_NT)
-bearhost-observability-enable:
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-observability-enable-remote.ps1
+grafana grafana-up bearhost-grafana bearhost-grafana-up bearhost-grafana-tunnel-start:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel-start.ps1
 
-bearhost-observability-status:
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-observability-status-remote.sh
-
-bearhost-grafana-sync:
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-grafana-sync-remote.sh
-
-bearhost-grafana-tunnel-stop:
+grafana-stop bearhost-grafana-stop bearhost-grafana-tunnel-stop:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel-stop.ps1
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-grafana-tunnel-stop.sh
 
-bearhost-grafana-tunnel-start:
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel-start.ps1
+grafana-setup bearhost-grafana-setup bearhost-observability-enable:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-observability-enable-remote.ps1
+
+grafana-sync bearhost-grafana-sync:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-grafana-sync-remote.sh
+
+grafana-watch:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel-watch.ps1
+
+grafana-archive-status:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel-watch.ps1
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-archive-status-via-grafana.sh
+
+grafana-watch-install:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel-watch-install.ps1
+
+grafana-watch-uninstall:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel-watch-uninstall.ps1
+
+grafana-watch-install-cron:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-grafana-tunnel-watch-install-cron.sh
+
+grafana-watch-uninstall-cron:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-grafana-tunnel-watch-uninstall-cron.sh
+
+bearhost-observability-status:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script bearhost-observability-status-remote.sh
 
 bearhost-grafana-tunnel:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-grafana-tunnel.ps1
@@ -487,32 +550,58 @@ bearhost-grafana-tunnel:
 bearhost-bronze-status:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-bronze-status-remote.ps1
 
+bearhost-corpus-only:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-corpus-only-remote.ps1
+
 bearhost-rsync:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-rsync-to-vps.ps1
 
 local-vps-only:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script local-vps-only.sh
 else
-bearhost-observability-enable:
+grafana grafana-up bearhost-grafana bearhost-grafana-up bearhost-grafana-tunnel-start:
+	@bash scripts/bearhost-grafana-tunnel-start.sh
+
+grafana-stop bearhost-grafana-stop bearhost-grafana-tunnel-stop:
+	@bash scripts/bearhost-grafana-tunnel-stop.sh
+
+grafana-setup bearhost-grafana-setup bearhost-observability-enable:
 	@bash scripts/bearhost-observability-enable-remote.sh
+
+grafana-sync bearhost-grafana-sync:
+	@bash scripts/bearhost-grafana-sync-remote.sh
+
+grafana-watch:
+	@bash scripts/bearhost-grafana-tunnel-watch.sh
+
+grafana-archive-status:
+	@bash scripts/bearhost-grafana-tunnel-watch.sh
+	@bash scripts/bearhost-archive-status-via-grafana.sh
+
+grafana-watch-install:
+	@printf 'grafana-watch-install: Windows Task Scheduler only.\n'
+	@printf 'Use: make grafana-watch-install-cron   (WSL cron, every 5 min)\n'
+
+grafana-watch-uninstall:
+	@bash scripts/bearhost-grafana-tunnel-watch-uninstall-cron.sh
+
+grafana-watch-install-cron:
+	@bash scripts/bearhost-grafana-tunnel-watch-install-cron.sh
+
+grafana-watch-uninstall-cron:
+	@bash scripts/bearhost-grafana-tunnel-watch-uninstall-cron.sh
 
 bearhost-observability-status:
 	@bash scripts/bearhost-observability-status-remote.sh
-
-bearhost-grafana-sync:
-	@bash scripts/bearhost-grafana-sync-remote.sh
-
-bearhost-grafana-tunnel-stop:
-	@bash scripts/bearhost-grafana-tunnel-stop.sh
-
-bearhost-grafana-tunnel-start:
-	@bash scripts/bearhost-grafana-tunnel-start.sh
 
 bearhost-grafana-tunnel:
 	@bash scripts/bearhost-grafana-tunnel.sh
 
 bearhost-bronze-status:
 	@bash scripts/bearhost-bronze-status-remote.sh
+
+bearhost-corpus-only:
+	@bash scripts/bearhost-corpus-only-remote.sh
 
 bearhost-rsync:
 	@python3 -c "import pathlib; f=pathlib.Path('scripts/bearhost-rsync-to-vps.sh'); f.write_text(f.read_text().replace('\r\n','\n').replace('\r','\n'), encoding='utf-8')" 2>/dev/null || true

@@ -9,7 +9,7 @@ import {
   deriveLiveHeat,
   formatHeatOffset,
   type LiveHeatPoint,
-} from '../../utils/liveHeat.ts'
+} from '@streamclone/pulse-core'
 import { nearestMomentIndex } from '../../utils/vodSeek.ts'
 
 export interface VodMomentsPanelProps {

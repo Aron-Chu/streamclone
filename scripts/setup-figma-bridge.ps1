@@ -15,11 +15,19 @@ if (-not (Test-Path $PluginManifest)) {
 }
 Write-Host "ok plugin manifest: $PluginManifest"
 
+$BridgeEntry = Join-Path $Root "scripts\.figma-bridge-deps\node_modules\@gethopp\figma-mcp-bridge\dist\index.js"
+$EnsureScript = Join-Path $Root "scripts\ensure-figma-bridge-deps.cjs"
+
+Write-Host ""
+Write-Host "Installing figma-mcp-bridge (node, no npx/cmd flash)..."
+node $EnsureScript
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 $desired = @{
   mcpServers = @{
     "figma-bridge" = @{
-      command = "npx"
-      args    = @("-y", "@gethopp/figma-mcp-bridge@0.0.15")
+      command = "node"
+      args    = @("${workspaceFolder}/scripts/.figma-bridge-deps/node_modules/@gethopp/figma-mcp-bridge/dist/index.js")
     }
   }
 }
@@ -46,8 +54,8 @@ if (Test-Path $CodexConfig) {
     @'
 
 [mcp_servers.figma-bridge]
-command = "cmd.exe"
-args = ["/c", "npx", "-y", "@gethopp/figma-mcp-bridge@0.0.15"]
+command = "node"
+args = ["$($Root -replace '\\','\\')\\scripts\\.figma-bridge-deps\\node_modules\\@gethopp\\figma-mcp-bridge\\dist\\index.js"]
 startup_timeout_sec = 60
 '@ | Add-Content -Encoding utf8 $CodexConfig
     Write-Host "ok added figma-bridge to Codex config: $CodexConfig"
@@ -65,7 +73,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "=== Figma plugin (manual one-time step) ==="
-Write-Host "1. Open Figma desktop - Pulse Wire file (YDMQSWrJHyA7g5D5pIfruH)"
+Write-Host "1. Open Figma desktop — Streamclone Pulse — Chrome Extension (or Pulse Wire YDMQSWrJHyA7g5D5pIfruH)"
 Write-Host "2. Plugins - Development - Import plugin from manifest..."
 Write-Host "3. Select: $PluginManifest"
 Write-Host "4. Run plugin: Plugins - Development - Figma MCP Bridge"

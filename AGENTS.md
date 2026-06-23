@@ -2,7 +2,7 @@
 
 Product name: **Streamclone** (GitHub: `Aron-Chu/streamclone`). The local checkout folder may still be named `twitch-7tv-clone`; the release install lives at `%USERPROFILE%\streamclone` and is usually **not** this git repo. Do not refer to the product as `twitch-7tv-clone` in docs or commits.
 
-**Deep references:** [Service map](docs/SERVICE_MAP.md) · [Testing](docs/TESTING.md) · [MCP](docs/MCP.md) · [Environment](docs/ENVIRONMENT.md)
+**Deep references:** [Service map](docs/SERVICE_MAP.md) · [Testing](docs/TESTING.md) · [MCP](docs/MCP.md) · [Codex](docs/CODEX.md) · [Environment](docs/ENVIRONMENT.md) · [Workspace layout](docs/workspace.md)
 
 ---
 
@@ -35,6 +35,7 @@ Windows localhost issues → `.kiro/steering/windows-dev.md`.
 make check-quick     # fast pre-PR gate (Go + frontend tests + compose config)
 make check           # full gate (adds security-scan, audit, clipper, build)
 make mcp-setup       # codegraph + mcp preflight (see docs/MCP.md)
+make codex-setup     # Codex: .codex/config.toml + .agents/skills sync (see docs/CODEX.md)
 bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 ```
 
@@ -49,6 +50,7 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 | Roadmap / backlog | `README.md`, `.kiro/steering/product.md` | As needed |
 | **Playback / HLS** | `.kiro/steering/playback.md`, `docs/low-latency-relay/requirements.md` | `get_ast_chunk("Channel")`, `playback_probe` |
 | **Analytics / VOD / rollups** | `.kiro/steering/analytics.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("SyncProgressPanel")` |
+| **Pulse extension / pulse-core / BFF** | [docs/workspace.md](docs/workspace.md), `docs/pulse-extension/` (redirect), sibling [streamclone-pulse `docs/pulse-extension/`](https://github.com/Aron-Chu/streamclone-pulse/tree/master/docs/pulse-extension), `internal/analytics/extension_api.go`, `packages/pulse-core/` | `get_ast_chunk("ExtensionRoutes")`, `curl :8090/v1/extension/health` |
 | **Scraper / Cloudflare / proxy** | `.kiro/steering/analytics.md`, `docs/scraper-cloudflare-and-proxy.md`, `docs/scraping-archive/requirements.md` | `scraper_probe`, `make scraper-preflight` |
 | **Pulse Wire / storygraph** | `.kiro/steering/pulse-wire.md`, `docs/options.md`, `docs/tiers-scraper-and-social-spread.md` | `get_ast_chunk("PulseWirePage")`, `get_blast_radius("ingestAll")` |
 | **Emotes / 7TV / FFZ** | `.kiro/steering/emote-pipeline.md` | `emote_jobs`, `redis_channel_emotes` |
@@ -65,7 +67,7 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 
 ## Skills router
 
-Load the matching skill from `.cursor/skills/streamclone/` when the task fits (read skill **before** broad file reads).
+Load the matching skill from `.cursor/skills/streamclone/` when the task fits (read skill **before** broad file reads). Codex uses the mirror under `.agents/skills/streamclone/` (`make codex-sync-skills` after edits).
 
 | Task | Skill |
 |------|-------|
@@ -79,6 +81,7 @@ Load the matching skill from `.cursor/skills/streamclone/` when the task fits (r
 | Clip Studio / ReplayForge | `clipper-local/SKILL.md` |
 | Windows install / Setup.exe / release bundle | `release-windows/SKILL.md` |
 | Choosing tests by domain | `test-by-domain/SKILL.md` |
+| Pulse extension (Chrome MV3) | Cross-read [streamclone-pulse `AGENTS.md`](https://github.com/Aron-Chu/streamclone-pulse/blob/master/AGENTS.md) and [docs/workspace.md](docs/workspace.md) |
 
 ---
 
@@ -126,6 +129,8 @@ Load the matching skill from `.cursor/skills/streamclone/` when the task fits (r
 | Auth | `internal/chat/auth*`, Twitch OAuth env | Session cookies, token import |
 | Scraper | `deploy/docker-compose.yml` profile `scraper`, sibling `streamclone-scraper` | Browser pool locks; ephemeral mode on Windows |
 | Pulse Wire ingest | `cmd/storygraph`, `internal/storygraph/`, `internal/social/` | Long-running ingest; optional profiles |
+| Pulse extension BFF | `internal/analytics/extension_api.go`, bookmarks, recap | Caddy routes `/v1/extension/*`, `/v1/pulse/*` |
+| pulse-core | `packages/pulse-core/` | Shared types/scoring; imported by frontend and extension |
 | Release | `VERSION`, `.github/workflows/release-images.yml` | Tag push triggers GHCR + Setup.exe |
 | Agent config | `.cursor/mcp.json` | Gitignored; use `*.example` only |
 
@@ -173,9 +178,9 @@ Detail: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), [docs/SERVICE_MAP.md](docs/S
 | `pulse` | InfluxDB, Prometheus, Grafana | Live stats time series |
 | `pulse-wire` | storygraph ingest UI/API, media-matcher, x-ingest | Pulse Wire edition |
 | `pulse-wire-semantic` | `migrate-semantic` optional PG extensions | Semantic search experiments |
-| `clipper` | *(removed — use ReplayForge on host :8095)* | Clip Studio |
+| `clipper` | *(no compose service — Clip Studio = ReplayForge on host :8095)* | Not a compose profile; `profile-clipper.env` is legacy |
 
-Env overlays: `deploy/env/profile-{core,scraper,pulse,full,clipper}.env`. Feature profiles are merged from `.env` via `scripts/lib/env.sh`.
+Env overlays: `deploy/env/profile-{core,scraper,pulse,full}.env` (+ legacy `profile-clipper.env`). Feature profiles are merged from `.env` via `scripts/lib/env.sh`.
 
 ---
 
@@ -205,6 +210,7 @@ Database: `.codegraph/streamclone.kuzu` (gitignored).
 - User docs: `README.md`, `docs/`
 - Go services: `cmd/*`, `internal/*` (Pulse Wire: `cmd/storygraph`, `internal/storygraph/`, `internal/social/`)
 - Frontend: `frontend/src/` (Pulse Wire UI: `frontend/src/components/pulsewire/`)
-- Clipper (legacy stub): `clipper/` — active stack in sibling **ReplayForge** (`../replayforge`)
+- Clipper (legacy stub): `clipper/` — active Clip Studio in sibling **ReplayForge** (`../replayforge`); see [docs/workspace.md](docs/workspace.md)
+- Pulse extension spec: sibling **streamclone-pulse** (`../streamclone-pulse`); BFF and `packages/pulse-core/` in this repo
 - Compose: `deploy/docker-compose*.yml`
 - Agent steering: `.kiro/steering/`

@@ -7,7 +7,7 @@ Read `AGENTS.md` first. Use codegraph before broad source reads.
 - Go services: `cmd/*`, `internal/*`, `net/http`, chi, websocket, pgx, Redis, slog.
 - Frontend: Vite, React, TypeScript, Tailwind, hls.js, Zustand.
 - Infra: Docker Compose, Caddy, MediaMTX, PostgreSQL, Redis, MinIO.
-- Optional: scraper profile, Clip Studio worker, Pulse dashboards.
+- Optional: scraper profile, Pulse dashboards (Grafana/Influx). Clip Studio = sibling **ReplayForge** on host (`:8095` API), not a compose worker.
 
 Use `http://localhost:8090` as the browser/API boundary.
 

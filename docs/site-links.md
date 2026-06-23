@@ -37,11 +37,15 @@ Run `make bearhost-help` for the full list. Common ops:
 | Task | Command |
 |------|---------|
 | Disable local scrape (VPS owns corpus) | `make local-vps-only` |
+| **VPS corpus-only** (stop playback/UI) | `make bearhost-corpus-only` |
 | Bronze / VOD job summary | `make bearhost-bronze-status` |
-| First-time Grafana on VPS | `make bearhost-observability-enable` |
-| SSH tunnel → VPS Grafana | `make bearhost-grafana-tunnel-start` → **http://localhost:3001** |
-| Stop Grafana tunnel | `make bearhost-grafana-tunnel-stop` |
-| Push dashboard edits to VPS | `make bearhost-grafana-sync` |
+| First-time Grafana on VPS | `make grafana-setup` |
+| SSH tunnel → VPS Grafana | `make grafana-up` → **http://localhost:3001** |
+| Keep tunnel alive (Windows) | `make grafana-watch-install` (Task Scheduler) or `make grafana-watch-install-cron` (WSL cron) |
+| One tunnel health check | `make grafana-watch` |
+| Stop tunnel watchdog | `make grafana-watch-uninstall` |
+| Stop Grafana tunnel | `make grafana-stop` |
+| Push dashboard edits to VPS | `make grafana-sync` |
 | Check Prometheus/Grafana on VPS | `make bearhost-observability-status` |
 | Rsync repo to VPS | `make bearhost-rsync` |
 
@@ -82,21 +86,20 @@ Optional on BearHost (~200 MB RAM). **Not a full Grafana revamp** — `observabi
 **First time** (rsync, rebuild workers metrics, start Prometheus + Grafana):
 
 ```bash
-make bearhost-observability-enable
+make grafana-setup
 ```
 
-**View locally** (SSH tunnel — blocks until Ctrl+C):
+**View locally** (SSH tunnel in background):
 
 ```bash
-make bearhost-grafana-tunnel-start   # background; use stop target to end
-# or foreground: make bearhost-grafana-tunnel
+make grafana-up
 ```
 
 Open **http://localhost:3001/d/streamclone-archive/streamclone-archive** (login `admin` / `streampulse`).
 
 **Important:** local Pulse Grafana also uses **http://localhost:3000** (InfluxDB). That instance does **not** have VPS archive metrics — use **:3001** after the tunnel, not :3000.
 
-If **everything** on `:3001` is blank, the SSH tunnel probably stopped — run `make bearhost-grafana-tunnel-start` again.
+If **everything** on `:3001` is blank, the SSH tunnel probably stopped — run `make grafana-up` again, or install the watchdog: `make grafana-watch-install` (checks every 5 minutes and restarts the tunnel). Log: `~/.streamclone/grafana-tunnel-watch.log` in WSL.
 
 ### Which dashboards work where?
 
@@ -114,8 +117,8 @@ Audit what's actually queryable: `bash scripts/bearhost-grafana-dashboard-audit.
 **After editing dashboards** in git:
 
 ```bash
-make bearhost-grafana-sync
-make bearhost-grafana-tunnel
+make grafana-sync
+make grafana-up
 ```
 
 Panels: archive jobs, backfill queue, coverage by tier, bronze index vs target, upload rate, plus **Scraper & workers (BearHost VPS)** — workers `up`, TT error rate, success/min, active syncs, GQL throttles.
