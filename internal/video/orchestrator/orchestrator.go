@@ -154,6 +154,7 @@ type startReq struct {
 	Channel     string `json:"channel"`
 	Quality     string `json:"quality"`
 	LatencyMode string `json:"latency_mode"`
+	Prewarm     bool   `json:"prewarm,omitempty"`
 }
 
 type sessionReq struct {
@@ -266,11 +267,7 @@ func (h *Orchestrator) start(w http.ResponseWriter, r *http.Request) {
 			qualityRestarted = true
 			h.stopExistingForQualityChange(s)
 		} else {
-			sessionID := newSessionID()
-			s.AddListener(sessionID)
-			metrics.StreamListeners.WithLabelValues(req.Channel).Set(float64(s.Listeners()))
-			metrics.StreamStartDuration.WithLabelValues("ok", s.WorkerBackend).Observe(time.Since(started).Seconds())
-			writeJSON(w, http.StatusOK, toResp(s, sessionID))
+			h.finishStart(w, started, s, req.Prewarm)
 			return
 		}
 	}
@@ -286,9 +283,18 @@ func (h *Orchestrator) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s := v.(*registry.Session)
-	sessionID := newSessionID()
-	s.AddListener(sessionID)
-	metrics.StreamListeners.WithLabelValues(req.Channel).Set(float64(s.Listeners()))
+	h.finishStart(w, started, s, req.Prewarm)
+}
+
+func (h *Orchestrator) finishStart(w http.ResponseWriter, started time.Time, s *registry.Session, prewarm bool) {
+	var sessionID string
+	if prewarm {
+		s.Touch()
+	} else {
+		sessionID = newSessionID()
+		s.AddListener(sessionID)
+	}
+	metrics.StreamListeners.WithLabelValues(s.Channel).Set(float64(s.Listeners()))
 	metrics.StreamStartDuration.WithLabelValues("ok", s.WorkerBackend).Observe(time.Since(started).Seconds())
 	writeJSON(w, http.StatusOK, toResp(s, sessionID))
 }
