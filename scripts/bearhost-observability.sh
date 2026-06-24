@@ -14,8 +14,8 @@ shift || true
 
 case "${ACTION}" in
   up)
-    echo "bearhost-observability: starting Prometheus + Grafana (profile observability)"
-    bearhost_compose_obs up -d prometheus-obs grafana-obs
+    echo "bearhost-observability: starting Prometheus + Grafana + node-exporter (profile observability)"
+    bearhost_compose_obs up -d prometheus-obs node-exporter-obs grafana-obs
     echo ""
     echo "bearhost-observability: Grafana (SSH tunnel required)"
     echo "  dashboard: http://localhost:3001/d/streamclone-archive/streamclone-archive"
