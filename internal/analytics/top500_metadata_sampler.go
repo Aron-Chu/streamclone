@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"streamclone/internal/metrics"
 )
 
 const (
@@ -140,15 +142,22 @@ func normalizeTop500SamplerConfig(cfg Top500SamplerConfig) Top500SamplerConfig {
 func (s *Top500MetadataSampler) RunTick(ctx context.Context, now time.Time) (result Top500SamplerTickResult, err error) {
 	if s == nil {
 		result.addClass(Top500SamplerClassSamplerDisabled)
+		recordTop500SamplerConfigMetrics(Top500SamplerConfig{})
+		recordTop500SamplerRollback(Top500SamplerClassSamplerDisabled, top500SamplerMode(Top500SamplerConfig{}))
 		return result, nil
 	}
 	cfg := normalizeTop500SamplerConfig(s.cfg)
+	mode := top500SamplerMode(cfg)
+	recordTop500SamplerConfigMetrics(cfg)
+	resetTop500SamplerRollbackState(mode)
 	if !cfg.Enabled {
 		result.addClass(Top500SamplerClassSamplerDisabled)
+		recordTop500SamplerRollback(Top500SamplerClassSamplerDisabled, mode)
 		return result, nil
 	}
 	if !cfg.DryRun && cfg.WriteEnabled && s.locker == nil {
 		result.addClass(Top500SamplerClassLockUnavailable)
+		recordTop500SamplerLockUnavailable("missing_locker", mode)
 		return result, nil
 	}
 
@@ -156,10 +165,12 @@ func (s *Top500MetadataSampler) RunTick(ctx context.Context, now time.Time) (res
 		lock, acquired, err := s.locker.TryTop500MetadataSamplerLock(ctx)
 		if err != nil {
 			result.addClass(Top500SamplerClassLockUnavailable)
+			recordTop500SamplerLockUnavailable("lock_error", mode)
 			return result, err
 		}
 		if !acquired {
 			result.addClass(Top500SamplerClassLockUnavailable)
+			recordTop500SamplerLockUnavailable(Top500SamplerClassLockUnavailable, mode)
 			return result, nil
 		}
 		result.LockAcquired = true
@@ -177,28 +188,38 @@ func (s *Top500MetadataSampler) RunTick(ctx context.Context, now time.Time) (res
 	}
 	result.Planned = plan.Planned
 	result.SkippedNotDue = plan.SkippedNotDue
+	metrics.Top500MetadataRosterSize.Set(float64(len(result.Planned) + len(result.SkippedNotDue)))
+	metrics.Top500MetadataChannelsPlannedTotal.WithLabelValues("planned", mode).Add(float64(len(result.Planned)))
 	if len(result.Planned) == 0 {
 		result.addWriteModeClass(cfg)
 		return result, nil
 	}
 	if s.provider == nil {
 		result.addClass(Top500SamplerClassProviderUnavailable)
+		recordTop500SamplerRollback(Top500SamplerClassProviderUnavailable, mode)
 		return result, nil
 	}
 
 	streams, err := s.provider.FetchStreams(ctx, result.Planned)
 	if err != nil {
-		result.addClass(classifyTop500ProviderError(err))
+		classification := classifyTop500ProviderError(err)
+		result.addClass(classification)
+		recordTop500ProviderError("fetch_streams", classification, mode)
 		return result, nil
 	}
 	result.StreamsFetched = len(streams)
+	metrics.Top500MetadataProviderCallsTotal.WithLabelValues("fetch_streams", "success", "helix").Inc()
 
 	users, err := s.provider.FetchUsers(ctx, result.Planned)
 	if err != nil {
-		result.addClass(classifyTop500ProviderError(err))
+		classification := classifyTop500ProviderError(err)
+		result.addClass(classification)
+		recordTop500ProviderError("fetch_users", classification, mode)
 		return result, nil
 	}
 	result.UsersFetched = len(users)
+	metrics.Top500MetadataProviderCallsTotal.WithLabelValues("fetch_users", "success", "helix").Inc()
+	metrics.Top500MetadataChannelsSampledTotal.WithLabelValues("success", mode).Add(float64(len(result.Planned)))
 	if cfg.DryRun || !cfg.WriteEnabled {
 		result.addWriteModeClass(cfg)
 		return result, nil
@@ -206,9 +227,18 @@ func (s *Top500MetadataSampler) RunTick(ctx context.Context, now time.Time) (res
 
 	samples := buildTop500MetadataSamples(result.Planned, streams, users, now)
 	result.WritesAttempted = len(samples)
+	writeStarted := time.Now()
 	if err := s.store.WriteTop500MetadataSamples(ctx, samples); err != nil {
+		recordTop500SamplerWrite("error", mode, len(samples), time.Since(writeStarted))
+		metrics.Top500MetadataSnapshotWritesTotal.WithLabelValues("error", mode).Add(float64(len(samples)))
+		metrics.Top500MetadataCurrentUpsertsTotal.WithLabelValues("error", mode).Add(float64(len(samples)))
+		recordTop500SamplerRollback("store_error", mode)
 		return result, err
 	}
+	recordTop500SamplerWrite("success", mode, len(samples), time.Since(writeStarted))
+	metrics.Top500MetadataFreshnessSeconds.Set(top500MetadataMaxFreshnessSeconds(samples, now))
+	metrics.Top500MetadataSnapshotWritesTotal.WithLabelValues("success", mode).Add(float64(len(samples)))
+	metrics.Top500MetadataCurrentUpsertsTotal.WithLabelValues("success", mode).Add(float64(len(samples)))
 	result.addWriteModeClass(cfg)
 	return result, nil
 }
@@ -415,11 +445,100 @@ func firstNonEmpty(values ...string) string {
 func (r *Top500SamplerTickResult) addWriteModeClass(cfg Top500SamplerConfig) {
 	if cfg.DryRun {
 		r.addClass(Top500SamplerClassDryRun)
+		recordTop500SamplerRollback(Top500SamplerClassDryRun, top500SamplerMode(cfg))
 		return
 	}
 	if !cfg.WriteEnabled {
 		r.addClass(Top500SamplerClassWriteDisabled)
+		recordTop500SamplerRollback(Top500SamplerClassWriteDisabled, top500SamplerMode(cfg))
 	}
+}
+
+func recordTop500SamplerConfigMetrics(cfg Top500SamplerConfig) {
+	metrics.Top500MetadataSamplerEnabled.Set(boolFloat(cfg.Enabled))
+	metrics.Top500MetadataDryRun.Set(boolFloat(cfg.DryRun))
+	metrics.Top500MetadataWriteEnabled.Set(boolFloat(cfg.WriteEnabled))
+	metrics.Top500MetadataTopNConfigured.Set(float64(normalizeTop500SamplerConfig(cfg).TopN))
+}
+
+func recordTop500ProviderError(operation, classification, mode string) {
+	metrics.Top500MetadataProviderCallsTotal.WithLabelValues(operation, "error", "helix").Inc()
+	metrics.Top500MetadataProviderErrorsTotal.WithLabelValues(operation, classification, "helix").Inc()
+	if classification == Top500SamplerClassHelixRateLimited {
+		metrics.Top500MetadataProviderRateLimitsTotal.WithLabelValues(operation, "helix").Inc()
+	}
+	recordTop500SamplerRollback(classification, mode)
+}
+
+func recordTop500SamplerWrite(result, mode string, batchSize int, duration time.Duration) {
+	metrics.Top500MetadataWriteBatchSize.WithLabelValues(result, mode, "write_samples").Set(float64(batchSize))
+	metrics.Top500MetadataWriteLatencySeconds.WithLabelValues(result, mode, "write_samples").Set(duration.Seconds())
+}
+
+func recordTop500SamplerLockUnavailable(reason, mode string) {
+	metrics.Top500MetadataLockUnavailableTotal.WithLabelValues(reason, mode).Inc()
+	recordTop500SamplerRollback(reason, mode)
+}
+
+func recordTop500SamplerRollback(reason, mode string) {
+	metrics.Top500MetadataSamplesDegradedTotal.WithLabelValues(reason, mode).Inc()
+	metrics.Top500MetadataRollbackState.WithLabelValues(reason, mode).Set(1)
+}
+
+func resetTop500SamplerRollbackState(mode string) {
+	for _, reason := range []string{
+		Top500SamplerClassSamplerDisabled,
+		Top500SamplerClassWriteDisabled,
+		Top500SamplerClassDryRun,
+		Top500SamplerClassLockUnavailable,
+		Top500SamplerClassHelixRateLimited,
+		Top500SamplerClassHelixAuthMissing,
+		Top500SamplerClassHelixTransientError,
+		Top500SamplerClassHelixNotFound,
+		Top500SamplerClassProviderUnavailable,
+		"missing_locker",
+		"lock_error",
+		"store_error",
+	} {
+		metrics.Top500MetadataRollbackState.WithLabelValues(reason, mode).Set(0)
+	}
+}
+
+func top500MetadataMaxFreshnessSeconds(samples []Top500MetadataSample, now time.Time) float64 {
+	var max float64
+	for _, sample := range samples {
+		if sample.Current.SampledAt.IsZero() {
+			continue
+		}
+		seconds := now.Sub(sample.Current.SampledAt).Seconds()
+		if seconds < 0 {
+			seconds = 0
+		}
+		if seconds > max {
+			max = seconds
+		}
+	}
+	return max
+}
+
+func top500SamplerMode(cfg Top500SamplerConfig) string {
+	switch {
+	case !cfg.Enabled:
+		return "disabled"
+	case cfg.DryRun:
+		return "dry_run"
+	case !cfg.WriteEnabled:
+		return "write_disabled"
+	default:
+		return "write_enabled"
+	}
+}
+
+func boolFloat(value bool) float64 {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func (r *Top500SamplerTickResult) addClass(classification string) {

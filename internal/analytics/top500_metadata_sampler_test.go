@@ -9,6 +9,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"streamclone/internal/metrics"
 )
 
 func TestTop500MetadataSamplerDisabledNoop(t *testing.T) {
@@ -401,12 +405,23 @@ func TestTop500MetadataSamplerIntegrationWritePath(t *testing.T) {
 		},
 	}
 	sampler := NewTop500MetadataSampler(Top500SamplerConfig{Enabled: true, DryRun: false, WriteEnabled: true, TopN: 2, BatchSize: 2}, store, provider, &fakeTop500SamplerLocker{acquire: true})
+	snapshotWritesBefore := testutil.ToFloat64(metrics.Top500MetadataSnapshotWritesTotal.WithLabelValues("success", "write_enabled"))
+	currentUpsertsBefore := testutil.ToFloat64(metrics.Top500MetadataCurrentUpsertsTotal.WithLabelValues("success", "write_enabled"))
 	result, err := sampler.RunTick(ctx, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.WritesAttempted != 2 {
 		t.Fatalf("writes attempted = %d, want 2", result.WritesAttempted)
+	}
+	if delta := testutil.ToFloat64(metrics.Top500MetadataSnapshotWritesTotal.WithLabelValues("success", "write_enabled")) - snapshotWritesBefore; delta != 2 {
+		t.Fatalf("snapshot write metric delta = %v, want 2", delta)
+	}
+	if delta := testutil.ToFloat64(metrics.Top500MetadataCurrentUpsertsTotal.WithLabelValues("success", "write_enabled")) - currentUpsertsBefore; delta != 2 {
+		t.Fatalf("current upsert metric delta = %v, want 2", delta)
+	}
+	if got := testutil.ToFloat64(metrics.Top500MetadataWriteBatchSize.WithLabelValues("success", "write_enabled", "write_samples")); got != 2 {
+		t.Fatalf("write batch size metric = %v, want 2", got)
 	}
 
 	var snapshots, currents int
