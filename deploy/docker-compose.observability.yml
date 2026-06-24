@@ -23,7 +23,7 @@ services:
 
   alertmanager-obs:
     profiles: [observability]
-    image: prom/alertmanager:v0.27.0
+    image: prom/alertmanager:v0.28.1
     restart: unless-stopped
     ports:
       - "127.0.0.1:9093:9093"
