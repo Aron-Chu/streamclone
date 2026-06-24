@@ -13,13 +13,13 @@ const coverageStartToleranceSec = 120
 
 // Pulse coverage states exposed to the Pulse extension.
 const (
-	CoverageStateFullStreamTracked    = "full_stream_tracked"
-	CoverageStatePartialTracking      = "partial_tracking"
-	CoverageStateMissingRanges        = "missing_ranges_detected"
-	CoverageStateWaitingForVOD        = "waiting_for_vod"
-	CoverageStateVODUnavailable       = "vod_unavailable"
-	CoverageStateBackfillRunning      = "backfill_running"
-	CoverageStateBackfillFailed       = "backfill_failed"
+	CoverageStateFullStreamTracked = "full_stream_tracked"
+	CoverageStatePartialTracking   = "partial_tracking"
+	CoverageStateMissingRanges     = "missing_ranges_detected"
+	CoverageStateWaitingForVOD     = "waiting_for_vod"
+	CoverageStateVODUnavailable    = "vod_unavailable"
+	CoverageStateBackfillRunning   = "backfill_running"
+	CoverageStateBackfillFailed    = "backfill_failed"
 )
 
 type ExtensionCoverageRange struct {
@@ -32,10 +32,14 @@ type ExtensionCoverage struct {
 	CoverageStartOffsetSeconds int                      `json:"coverageStartOffsetSeconds"`
 	CoverageEndOffsetSeconds   int                      `json:"coverageEndOffsetSeconds"`
 	HasFullStreamCoverage      bool                     `json:"hasFullStreamCoverage"`
+	TrackedFromStart           bool                     `json:"trackedFromStart"`
 	HasGaps                    bool                     `json:"hasGaps"`
 	MissingRanges              []ExtensionCoverageRange `json:"missingRanges,omitempty"`
 	CanBackfill                bool                     `json:"canBackfill"`
 	BackfillReason             string                   `json:"backfillReason,omitempty"`
+	VODStatus                  string                   `json:"vodStatus,omitempty"`
+	ManualRetryAllowed         bool                     `json:"manualRetryAllowed,omitempty"`
+	CopyKey                    string                   `json:"copyKey,omitempty"`
 	Message                    string                   `json:"message"`
 }
 
@@ -131,17 +135,76 @@ func computePulseCoverage(
 		}
 	}
 
-	return ExtensionCoverage{
+	return decoratePulseCoverage(ExtensionCoverage{
 		State:                      state,
 		CoverageStartOffsetSeconds: coverageStart,
 		CoverageEndOffsetSeconds:   coverageEnd,
 		HasFullStreamCoverage:      hasFull,
+		TrackedFromStart:           hasFull,
 		HasGaps:                    hasGaps,
 		MissingRanges:              missingRanges,
 		CanBackfill:                canBackfill,
 		BackfillReason:             backfillReason,
 		Message:                    message,
+	}, vodID)
+}
+
+func decoratePulseCoverage(c ExtensionCoverage, vodID string) ExtensionCoverage {
+	c.TrackedFromStart = c.HasFullStreamCoverage || c.CoverageStartOffsetSeconds <= coverageStartToleranceSec && c.CoverageEndOffsetSeconds > 0
+	if strings.TrimSpace(vodID) != "" {
+		c.VODStatus = "available"
+	} else {
+		switch c.State {
+		case CoverageStateWaitingForVOD:
+			c.VODStatus = "waiting"
+		case CoverageStateVODUnavailable:
+			c.VODStatus = "unavailable"
+			c.ManualRetryAllowed = true
+		}
 	}
+	if c.CopyKey == "" {
+		c.CopyKey = c.State
+	}
+	return c
+}
+
+// enrichExtensionCoverage aligns nested coverage with rollup-based stream start when
+// computePulseCoverage missed a late-tracking prefix (sparse rollups).
+func enrichExtensionCoverage(c ExtensionCoverage, rollupStart int, vodID string, isLive bool) ExtensionCoverage {
+	if rollupStart <= coverageStartToleranceSec {
+		return c
+	}
+	if c.HasFullStreamCoverage {
+		return c
+	}
+	if rollupStart > c.CoverageStartOffsetSeconds {
+		c.CoverageStartOffsetSeconds = rollupStart
+	}
+	if c.CanBackfill {
+		return c
+	}
+	if strings.TrimSpace(vodID) != "" {
+		c.CanBackfill = true
+		c.BackfillReason = "vod_available"
+		c.HasGaps = true
+		if len(c.MissingRanges) == 0 {
+			c.MissingRanges = []ExtensionCoverageRange{{
+				FromOffsetSeconds: 0,
+				ToOffsetSeconds:   rollupStart - 60,
+			}}
+		}
+		if c.State == CoverageStatePartialTracking || c.State == "" {
+			c.State = CoverageStateMissingRanges
+		}
+		c.Message = formatMissingPrefixMessage(c.MissingRanges)
+		return decoratePulseCoverage(c, vodID)
+	}
+	if isLive && c.State != CoverageStateBackfillRunning && c.State != CoverageStateBackfillFailed {
+		c.State = CoverageStateWaitingForVOD
+		c.Message = "VOD chat not available yet — archive publishes after the stream ends"
+		c.BackfillReason = "waiting_vod"
+	}
+	return decoratePulseCoverage(c, vodID)
 }
 
 func completedChatOffsets(rollups []heatmap.MinuteRollup, streamStart time.Time) []int {

@@ -19,6 +19,8 @@ import (
 type PulseBookmark struct {
 	ID            string    `json:"id"`
 	UserID        *string   `json:"userId,omitempty"`
+	PrincipalID   *string   `json:"principalId,omitempty"`
+	PrincipalKind *string   `json:"principalKind,omitempty"`
 	Login         string    `json:"login"`
 	StreamID      *string   `json:"streamId,omitempty"`
 	VodID         *string   `json:"vodId,omitempty"`
@@ -53,15 +55,20 @@ type UpdatePulseBookmarkRequest struct {
 }
 
 type ListPulseBookmarksFilter struct {
-	Login    string
-	StreamID string
-	VodID    string
-	Limit    int
-	Before   time.Time
+	Login       string
+	StreamID    string
+	VodID       string
+	PrincipalID string
+	Limit       int
+	Before      time.Time
 }
 
 func (h *Handler) PulseRoutes(r chi.Router) {
 	r.Route("/v1/pulse", func(r chi.Router) {
+		if h.pulseHosted.Hosted {
+			r.Use(h.pulseHostedAuthMiddleware)
+		}
+		h.registerPulseWatchlistRoutes(r)
 		r.Get("/bookmarks", h.listPulseBookmarks)
 		r.Post("/bookmarks", h.createPulseBookmark)
 		r.Patch("/bookmarks/{id}", h.updatePulseBookmark)
@@ -91,6 +98,14 @@ func (h *Handler) listPulseBookmarks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if h.pulseHosted.Hosted {
+		principal, ok := pulsePrincipalFromContext(r.Context())
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		filter.PrincipalID = principal.ID
+	}
 	items, nextCursor, err := h.store.ListPulseBookmarks(r.Context(), filter)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -100,6 +115,9 @@ func (h *Handler) listPulseBookmarks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createPulseBookmark(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePulseWrite(w) {
+		return
+	}
 	var req CreatePulseBookmarkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
@@ -110,6 +128,15 @@ func (h *Handler) createPulseBookmark(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if h.pulseHosted.Hosted {
+		principal, ok := pulsePrincipalFromContext(r.Context())
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		bookmark.PrincipalID = &principal.ID
+		bookmark.PrincipalKind = &principal.Kind
+	}
 	created, err := h.store.CreatePulseBookmark(r.Context(), bookmark)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -119,6 +146,9 @@ func (h *Handler) createPulseBookmark(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) updatePulseBookmark(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePulseWrite(w) {
+		return
+	}
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_id"})
@@ -134,7 +164,7 @@ func (h *Handler) updatePulseBookmark(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	updated, err := h.store.UpdatePulseBookmark(r.Context(), id, label, notes)
+	updated, err := h.store.UpdatePulseBookmark(r.Context(), id, label, notes, scopedPrincipalID(r, h))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "bookmark_not_found"})
@@ -147,12 +177,15 @@ func (h *Handler) updatePulseBookmark(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deletePulseBookmark(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePulseWrite(w) {
+		return
+	}
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_id"})
 		return
 	}
-	if err := h.store.DeletePulseBookmark(r.Context(), id); err != nil {
+	if err := h.store.DeletePulseBookmark(r.Context(), id, scopedPrincipalID(r, h)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -203,6 +236,16 @@ func (h *Handler) preparePulseBookmark(ctx context.Context, req CreatePulseBookm
 	}, nil
 }
 
+func scopedPrincipalID(r *http.Request, h *Handler) string {
+	if h == nil || !h.pulseHosted.Hosted {
+		return ""
+	}
+	if p, ok := pulsePrincipalFromContext(r.Context()); ok {
+		return p.ID
+	}
+	return ""
+}
+
 func (s *Store) ListPulseBookmarks(ctx context.Context, filter ListPulseBookmarksFilter) ([]PulseBookmark, string, error) {
 	if filter.Limit <= 0 || filter.Limit > 100 {
 		filter.Limit = 50
@@ -221,13 +264,17 @@ func (s *Store) ListPulseBookmarks(ctx context.Context, filter ListPulseBookmark
 		args = append(args, filter.VodID)
 		clauses = append(clauses, "vod_id=$"+strconv.Itoa(len(args)))
 	}
+	if filter.PrincipalID != "" {
+		args = append(args, filter.PrincipalID)
+		clauses = append(clauses, "principal_id=$"+strconv.Itoa(len(args)))
+	}
 	if !filter.Before.IsZero() {
 		args = append(args, filter.Before)
 		clauses = append(clauses, "created_at<$"+strconv.Itoa(len(args)))
 	}
 	args = append(args, filter.Limit+1)
 	query := `
-		SELECT id, user_id, login, stream_id, vod_id, offset_seconds, label, notes, score, source, created_at, updated_at
+		SELECT id, user_id, principal_id, principal_kind, login, stream_id, vod_id, offset_seconds, label, notes, score, source, created_at, updated_at
 		FROM pulse_bookmarks
 		WHERE ` + strings.Join(clauses, " AND ") + `
 		ORDER BY created_at DESC, id DESC
@@ -258,27 +305,43 @@ func (s *Store) ListPulseBookmarks(ctx context.Context, filter ListPulseBookmark
 
 func (s *Store) CreatePulseBookmark(ctx context.Context, bookmark PulseBookmark) (PulseBookmark, error) {
 	row := s.db.QueryRow(ctx, `
-		INSERT INTO pulse_bookmarks (id, login, stream_id, vod_id, offset_seconds, label, notes, score, source)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		RETURNING id, user_id, login, stream_id, vod_id, offset_seconds, label, notes, score, source, created_at, updated_at`,
-		bookmark.ID, bookmark.Login, bookmark.StreamID, bookmark.VodID, bookmark.OffsetSeconds,
+		INSERT INTO pulse_bookmarks (id, principal_id, principal_kind, login, stream_id, vod_id, offset_seconds, label, notes, score, source)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		RETURNING id, user_id, principal_id, principal_kind, login, stream_id, vod_id, offset_seconds, label, notes, score, source, created_at, updated_at`,
+		bookmark.ID, bookmark.PrincipalID, bookmark.PrincipalKind, bookmark.Login, bookmark.StreamID, bookmark.VodID, bookmark.OffsetSeconds,
 		bookmark.Label, bookmark.Notes, bookmark.Score, bookmark.Source)
 	return scanPulseBookmark(row)
 }
 
-func (s *Store) UpdatePulseBookmark(ctx context.Context, id string, label, notes *string) (PulseBookmark, error) {
-	row := s.db.QueryRow(ctx, `
+func (s *Store) UpdatePulseBookmark(ctx context.Context, id string, label, notes *string, principalID string) (PulseBookmark, error) {
+	args := []any{id, label, notes}
+	query := `
 		UPDATE pulse_bookmarks
 		SET label=COALESCE($2, label),
 			notes=COALESCE($3, notes),
 			updated_at=now()
-		WHERE id=$1
-		RETURNING id, user_id, login, stream_id, vod_id, offset_seconds, label, notes, score, source, created_at, updated_at`,
-		id, label, notes)
+		WHERE id=$1`
+	if principalID != "" {
+		args = append(args, principalID)
+		query += ` AND principal_id=$` + strconv.Itoa(len(args))
+	}
+	query += `
+		RETURNING id, user_id, principal_id, principal_kind, login, stream_id, vod_id, offset_seconds, label, notes, score, source, created_at, updated_at`
+	row := s.db.QueryRow(ctx, query, args...)
 	return scanPulseBookmark(row)
 }
 
-func (s *Store) DeletePulseBookmark(ctx context.Context, id string) error {
+func (s *Store) DeletePulseBookmark(ctx context.Context, id string, principalID string) error {
+	if principalID != "" {
+		tag, err := s.db.Exec(ctx, `DELETE FROM pulse_bookmarks WHERE id=$1 AND principal_id=$2`, id, principalID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return pgx.ErrNoRows
+		}
+		return nil
+	}
 	_, err := s.db.Exec(ctx, `DELETE FROM pulse_bookmarks WHERE id=$1`, id)
 	return err
 }
@@ -290,12 +353,16 @@ type pulseBookmarkScanner interface {
 func scanPulseBookmark(row pulseBookmarkScanner) (PulseBookmark, error) {
 	var item PulseBookmark
 	var userID pgtype.Text
+	var principalID pgtype.Text
+	var principalKind pgtype.Text
 	var streamID pgtype.Text
 	var vodID pgtype.Text
 	var score pgtype.Int4
 	if err := row.Scan(
 		&item.ID,
 		&userID,
+		&principalID,
+		&principalKind,
 		&item.Login,
 		&streamID,
 		&vodID,
@@ -310,6 +377,8 @@ func scanPulseBookmark(row pulseBookmarkScanner) (PulseBookmark, error) {
 		return PulseBookmark{}, err
 	}
 	item.UserID = textPtr(userID)
+	item.PrincipalID = textPtr(principalID)
+	item.PrincipalKind = textPtr(principalKind)
 	item.StreamID = textPtr(streamID)
 	item.VodID = textPtr(vodID)
 	if score.Valid {

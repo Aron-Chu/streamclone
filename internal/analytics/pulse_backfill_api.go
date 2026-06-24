@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -15,6 +16,12 @@ func (h *Handler) WithPulseBackfill(m *PulseBackfillManager) *Handler {
 }
 
 func (h *Handler) extensionPulseBackfill(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePulseWrite(w) {
+		return
+	}
+	if !h.enforceBackfillRateLimit(w, r) {
+		return
+	}
 	login, ok := validLogin(chi.URLParam(r, "login"))
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_channel"})
@@ -24,9 +31,16 @@ func (h *Handler) extensionPulseBackfill(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "pulse_backfill_unavailable"})
 		return
 	}
+	if runtime := h.pulseRuntimeConfig(); !runtime.BackfillEnabled || !runtime.GQLCommentsEnabled {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "pulse_backfill_disabled",
+		})
+		return
+	}
 
 	var req struct {
 		StreamID          string `json:"streamId"`
+		VodID             string `json:"vodId"`
 		Mode              string `json:"mode"`
 		FromOffsetSeconds int    `json:"fromOffsetSeconds"`
 		ToOffsetSeconds   int    `json:"toOffsetSeconds"`
@@ -50,14 +64,34 @@ func (h *Handler) extensionPulseBackfill(w http.ResponseWriter, r *http.Request)
 		Mode:              req.Mode,
 		FromOffsetSeconds: req.FromOffsetSeconds,
 		ToOffsetSeconds:   req.ToOffsetSeconds,
+		VodID:             req.VodID,
 	})
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err == ErrPulseBackfillNoStream {
 			status = http.StatusNotFound
+		} else if err == ErrPulseBackfillAtCapacity {
+			retryAfter := int(pulseBackfillCooldown.Seconds())
+			w.Header().Set("Retry-After", "45")
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"error":             "backfill_at_capacity",
+				"scope":             "backfill",
+				"retryAfterSeconds": retryAfter,
+			})
+			return
+		} else if errors.Is(err, ErrPulseInvalidVODID) ||
+			errors.Is(err, ErrPulseVODStreamMismatch) ||
+			errors.Is(err, ErrPulseVODValidationUnavailable) {
+			status, code := pulseVodValidationHTTPError(err)
+			writeJSON(w, status, map[string]string{"error": code})
+			return
 		}
 		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
+	}
+
+	if strings.TrimSpace(req.VodID) != "" {
+		h.invalidateExtensionPulseCache(r.Context(), login)
 	}
 
 	statusCode := http.StatusAccepted
@@ -86,12 +120,26 @@ func (h *Handler) extensionPulseBackfillStatus(w http.ResponseWriter, r *http.Re
 }
 
 func (h *Handler) invalidateExtensionPulseCache(ctx context.Context, login string) {
-	if h == nil || h.rdb == nil {
+	if h == nil {
 		return
 	}
 	login = normalizeLogin(login)
 	if login == "" {
 		return
 	}
-	_ = h.rdb.Del(ctx, extPulseCachePrefix+login).Err()
+	InvalidatePulseCaches(ctx, h.rdb, nil, login, "", nil)
+}
+
+func (h *Handler) invalidatePulseBFFCache(ctx context.Context, login string) {
+	if h == nil {
+		return
+	}
+	InvalidatePulseBFFCache(ctx, h.rdb, login, nil)
+}
+
+func (h *Handler) invalidatePulseCaches(ctx context.Context, login, streamID string) {
+	if h == nil {
+		return
+	}
+	InvalidatePulseCaches(ctx, h.rdb, h.heatmapCache, login, streamID, nil)
 }
