@@ -1,0 +1,14 @@
+# Cloudflare Tunnel — example config (install via Zero Trust dashboard token).
+# After `cloudflared service install <TOKEN>`, optional local config reference:
+#
+#   /etc/cloudflared/config.yml
+#
+# Prefer dashboard-managed ingress for most setups; this file documents the route only.
+
+tunnel: streampulse-bearhost
+credentials-file: /etc/cloudflared/streampulse-bearhost.json
+
+ingress:
+  - hostname: api.streampulse.stream
+    service: http://127.0.0.1:8090
+  - service: http_status:404
