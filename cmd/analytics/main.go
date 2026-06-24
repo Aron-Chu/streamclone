@@ -272,15 +272,25 @@ func main() {
 	top500SamplerCfg := analytics.Top500SamplerConfigFromApp(cfg)
 	analytics.InitTop500MetadataSamplerMetrics(top500SamplerCfg)
 	if cfg.Top500MetadataEnabled {
-		top500Provider := analytics.NewHelixTop500MetadataProvider(helix)
+		top500Provider := analytics.NewTop500MetadataProvider(cfg.Top500MetadataFixtureProvider, helix)
 		top500Sampler := analytics.NewTop500MetadataSampler(top500SamplerCfg, store, top500Provider, store)
 		analytics.StartTop500MetadataSampler(ctx, top500Sampler, cfg.Top500MetadataLiveInterval, logger)
-		logger.Info("top500 metadata sampler started",
-			"dry_run", cfg.Top500MetadataDryRun,
-			"write_enabled", cfg.Top500MetadataWriteEnabled,
-			"top_n", top500SamplerCfg.TopN,
-			"live_interval", cfg.Top500MetadataLiveInterval.String(),
-		)
+		if cfg.Top500MetadataFixtureProvider {
+			logger.Info("top500 metadata sampler started",
+				"provider", "fixture",
+				"dry_run", cfg.Top500MetadataDryRun,
+				"write_enabled", cfg.Top500MetadataWriteEnabled,
+				"top_n", top500SamplerCfg.TopN,
+				"live_interval", cfg.Top500MetadataLiveInterval.String(),
+			)
+		} else {
+			logger.Info("top500 metadata sampler started",
+				"dry_run", cfg.Top500MetadataDryRun,
+				"write_enabled", cfg.Top500MetadataWriteEnabled,
+				"top_n", top500SamplerCfg.TopN,
+				"live_interval", cfg.Top500MetadataLiveInterval.String(),
+			)
+		}
 	} else {
 		logger.Info("top500 metadata sampler disabled", "flag", "TOP500_METADATA_ENABLED")
 	}
