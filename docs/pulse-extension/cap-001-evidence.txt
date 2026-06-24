@@ -1,0 +1,35 @@
+# CAP-001 — active channel cap raise evidence gate
+
+**Status:** Evidence bundle **PASS** — production cap remains **10** until operator sets `CAP001_APPROVED=1` and runs cap raise + redeploy.
+
+## Prerequisites checklist
+
+| Item | Evidence | Status |
+|------|----------|--------|
+| OPS-000 archive preflight | Batch Q §4.6 | PASS |
+| INFRA-005/006b hosted smoke | `deploy/smoke/bearhost-pulse-api.sh` v0.3.0-rc4 | PASS |
+| OPS-001 Grafana dashboard | `docs/pulse-extension/ops-001-evidence.txt` | PASS |
+| LOAD-001a dry-run + smoke | `load-001-*-evidence.txt` | PASS |
+| LOAD-001b staging-25 | `load-001b-staging-evidence.txt` | PASS 2026-06-24 |
+| 24h soak | `soak-24h-evidence.txt` | **PASS** 2026-06-24 (finish script + smokes) |
+| TEST-013b hosted security | `deploy/smoke/test-013b-hosted.sh` | PASS (post-soak) |
+| ADMIN-001–004 | Go + portal tests | see §4.6 Batch S |
+
+## Rollback plan
+
+1. Set `PULSE_MAX_ACTIVE_CHANNELS=10` and `MAX_CONCURRENT_TRACKED_CHANNELS=10` in `deploy/env/profile-bearhost-pulse.env`
+2. `bash scripts/bearhost-pulse-redeploy-remote.sh`
+3. Re-run `PULSE_SMOKE_BASE_URL=https://api.streampulse.stream bash deploy/smoke/bearhost-pulse-api.sh`
+
+## Post-raise canary (when approved)
+
+- Watch 1–2 real channels for 30m; confirm rollups + no eviction storms
+- Grafana: active ≤25, backfill ≤1, no sustained 5xx
+
+## Operator sign-off
+
+Approved by: __________  Date: __________
+
+**Cap raise:** run `CAP001_APPROVED=1 bash scripts/load/cap-001-raise.sh`, rsync, `bearhost-pulse-redeploy-remote.sh`, then 30m canary.
+
+**Do not commit raised cap without sign-off above.**

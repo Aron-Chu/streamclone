@@ -1,0 +1,28 @@
+# LOAD-001b — isolated staging-25 evidence (127.0.0.1:8091)
+
+Date (UTC): 2026-06-24
+Outcome: **PASS**
+
+Command: `bash scripts/load/pulse-load-staging-25-vps.sh` on BearHost VPS
+
+## Harness summary
+
+- target: http://127.0.0.1:8091
+- mode: staging-25
+- channels_attempted: 25
+- watches_ok: 24
+- watches_rejected: 1
+- polls_ok: 25
+- auth_failures: 0
+- server_errors_5xx: 0
+- watch_active_max: 25
+- watch_cap_max: 25
+- up_analytics: 1
+
+## docker stats (staging analytics peak sample)
+
+streamclone-pulse-staging-analytics — CPU ~0.95%, MEM ~11.5MiB / 7.7GiB (~0.15%)
+
+## Abort?
+
+No

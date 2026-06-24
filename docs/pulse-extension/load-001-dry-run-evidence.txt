@@ -1,0 +1,36 @@
+# LOAD-001 dry-run evidence — 2026-06-24 (Batch R1)
+
+## Agent machine (WSL) — production URL, no mutations
+
+Command:
+```bash
+PULSE_LOAD_TARGET=https://api.streampulse.stream PULSE_LOAD_MODE=dry-run \
+  PULSE_LOAD_EVIDENCE_FILE=docs/pulse-extension/load-001-dry-run-evidence.txt \
+  bash scripts/load/pulse-25-channel-harness.sh
+```
+
+Result: **PARTIAL** — roster 25 channels validated; health HTTP 403 from off-VPS curl (Cloudflare/geo); no beta key on agent (expected).
+
+## BearHost VPS — localhost dry-run + Prometheus
+
+Command:
+```bash
+PULSE_LOAD_TARGET=http://127.0.0.1:8090 PULSE_LOAD_MODE=dry-run \
+  PULSE_LOAD_PROMETHEUS_URL=http://127.0.0.1:9090 \
+  bash scripts/load/pulse-25-channel-harness.sh
+```
+
+Result: **PASS**
+- health: HTTP 200, version=v0.3.0-rc4, hostedMode=true
+- roster: 25 channels
+- prometheus: reachable (gauge values may lag scrape interval)
+
+## staging-25 guardrail self-test
+
+Production host `api.streampulse.stream` refused for staging-25 (by design).
+
+Grafana (operator, SSH tunnel): `http://localhost:3001/d/streamclone-pulse-capacity`
+
+## Verdict
+
+Dry-run **PASS** on VPS localhost. Agent-side public dry-run partial (403) — use VPS or tunnel for health validation.

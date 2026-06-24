@@ -1,0 +1,16 @@
+---
+description: TwitchTracker scraper profile, Cloudflare, proxy caps, sibling scraper repo
+globs: deploy/docker-compose*.yml,deploy/env/profile-scraper.env,docs/scraper*.md,docs/scraping-archive/**,scripts/scraper*
+alwaysApply: false
+---
+
+# Scraper / workers
+
+Read `.kiro/steering/analytics.md`, `docs/scraper-cloudflare-and-proxy.md`, `docs/scraping-archive/requirements.md`.
+
+- Scraper image builds from sibling **streamclone-scraper** (`--profile scraper`). Do not raise `SCRAPER_MAX_CONCURRENT` blindly.
+- Camoufox / Cloudflare / proxy issues → `make scraper-preflight`, MCP `scraper_probe`.
+- Analytics workers: `backfill_jobs` table (silver/gold tiers) — see `scripts/context/backfill_status.sh` when stack is up.
+- Verify scraper: `curl http://localhost:8000/health` (profile `scraper` only).
+
+Never bypass Cloudflare observably; keep scrape debugging legitimate and logged.

@@ -40,7 +40,8 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 	smoke-pulse-emote pulse-emote-pick-stream smoke-pulse-emote-gold smoke-pulse-emote-gold-fail \
 	go-test-docker go-vet-docker go-build-docker \
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
-	clipper-test clipper-restart codegraph-install codegraph codegraph-mcp mcp-setup codex-setup codex-sync-skills \
+	clipper-test clipper-restart codegraph-install codegraph codegraph-full codegraph-smoke codegraph-incremental codegraph-mcp mcp-setup codex-setup codex-sync-skills \
+	context-snapshots context-verify \
 	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
 	frontend-restart frontend-refresh frontend-logs compose-config-check azure-scraper-config-check azure-archive-plane-config-check bearhost-config-check bearhost-config-check-local bearhost-config-check-release bearhost-rsync bearhost bearhost-help bearhost-bronze-status bearhost-corpus-only grafana grafana-up grafana-stop grafana-setup grafana-sync grafana-watch grafana-archive-status grafana-watch-install grafana-watch-install-cron grafana-watch-uninstall grafana-watch-uninstall-cron bearhost-grafana bearhost-grafana-up bearhost-grafana-stop bearhost-grafana-setup bearhost-grafana-tunnel bearhost-grafana-tunnel-start bearhost-grafana-tunnel-stop bearhost-grafana-sync bearhost-observability-enable bearhost-observability-status bearhost-observability-up bearhost-observability-down local-vps-only check check-quick \
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
@@ -364,15 +365,31 @@ codegraph-install:
 
 codegraph:
 	@test -x $(CODEGRAPH_PY) || $(MAKE) codegraph-install
-	$(CODEGRAPH_PY) tools/codegraph/codegraph_ingest.py --repo . --db $(CODEGRAPH_DB)
+	PYTHONPATH=. $(CODEGRAPH_PY) tools/codegraph/codegraph_ingest.py --repo . --db $(CODEGRAPH_DB)
+
+codegraph-full: codegraph
+
+codegraph-smoke:
+	@test -x $(CODEGRAPH_PY) || $(MAKE) codegraph-install
+	PYTHONPATH=. $(CODEGRAPH_PY) tools/codegraph/smoke.py
+
+codegraph-incremental:
+	@test -x $(CODEGRAPH_PY) || $(MAKE) codegraph-install
+	PYTHONPATH=. $(CODEGRAPH_PY) tools/codegraph/incremental.py --repo . --db $(CODEGRAPH_DB)
 
 codegraph-mcp:
-	$(CODEGRAPH_PY) tools/codegraph/codegraph_mcp.py --repo "$(CURDIR)" --db "$(CURDIR)/$(CODEGRAPH_DB)"
+	PYTHONPATH=. $(CODEGRAPH_PY) tools/codegraph/codegraph_mcp.py --repo "$(CURDIR)" --db "$(CURDIR)/$(CODEGRAPH_DB)"
 
 mcp-setup: codegraph-install codegraph
 	@bash scripts/mcp-preflight.sh
 	@printf '\nNext: copy .cursor/mcp.recommended.json.example → .cursor/mcp.json (gitignored)\n'
 	@printf 'Codex: make codex-setup — see docs/CODEX.md\n'
+
+context-snapshots:
+	@bash scripts/context/all.sh
+
+context-verify:
+	@bash scripts/context/verify-agent-stack.sh
 
 codex-sync-skills:
 	@bash scripts/codex-sync-skills.sh

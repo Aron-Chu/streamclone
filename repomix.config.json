@@ -1,0 +1,41 @@
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "output": {
+    "filePath": "runtime/context/repomix-output.xml",
+    "style": "xml",
+    "removeComments": false,
+    "removeEmptyLines": true,
+    "showLineNumbers": true,
+    "topFilesLength": 20
+  },
+  "include": [
+    "AGENTS.md",
+    "cmd/**",
+    "internal/**",
+    "frontend/src/**",
+    "packages/pulse-core/**",
+    "deploy/Caddyfile",
+    "deploy/docker-compose.yml",
+    "migrations/*.up.sql",
+    "docs/SERVICE_MAP.md",
+    "docs/MCP.md"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "customPatterns": [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/.codegraph/**",
+      "**/runtime/**",
+      "**/*.kuzu",
+      "**/frontend/tests/playwright/**",
+      "**/testdata/**",
+      "**/*.png",
+      "**/*.webp",
+      "**/go.sum",
+      "**/package-lock.json",
+      "**/.cursor/debug*.log",
+      "**/clipper/**"
+    ]
+  }
+}

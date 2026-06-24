@@ -49,3 +49,46 @@ prefix_rule(
     decision = "allow",
     justification = "Go tests",
 )
+
+# Pulse live-coverage review probes (read-only)
+prefix_rule(
+    pattern = ["curl"],
+    decision = "allow",
+    justification = "Health and pulse BFF probes",
+)
+
+prefix_rule(
+    pattern = ["python"],
+    decision = "allow",
+    justification = "Pulse skill smoke scripts",
+)
+
+prefix_rule(
+    pattern = ["make", "context-snapshots"],
+    decision = "allow",
+    justification = "Offline runtime context summaries",
+)
+
+prefix_rule(
+    pattern = ["make", "codex-sync-skills"],
+    decision = "allow",
+    justification = "Refresh .agents/skills mirrors",
+)
+
+prefix_rule(
+    pattern = ["bash", "scripts/mcp-preflight.sh"],
+    decision = "allow",
+    justification = "MCP stdio verification",
+)
+
+prefix_rule(
+    pattern = ["git", "commit"],
+    decision = "prompt",
+    justification = "Commits need explicit user intent",
+)
+
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "prompt",
+    justification = "Push requires explicit user intent",
+)

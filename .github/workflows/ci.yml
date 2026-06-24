@@ -104,6 +104,8 @@ jobs:
         run: |
           make codegraph-install
           make codegraph
+          make codegraph-smoke
+          make codegraph-smoke
       - if: steps.changes.outputs.code == 'true'
         uses: actions/upload-artifact@v4
         with:
