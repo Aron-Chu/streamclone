@@ -17,6 +17,22 @@ services:
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
       - --web.enable-lifecycle
+    depends_on:
+      alertmanager-obs:
+        condition: service_started
+
+  alertmanager-obs:
+    profiles: [observability]
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - /etc/streamclone/secrets/alertmanager-webhook-url:/etc/alertmanager/secrets/webhook_url:ro
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
 
   node-exporter-obs:
     profiles: [observability]
