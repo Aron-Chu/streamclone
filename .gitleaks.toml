@@ -1,17 +1,24 @@
 title = "streamclone gitleaks config"
 
+[[rules]]
+id = "discord-webhook-url"
+description = "Discord webhook URL"
+regex = '''https://(discord|discordapp)\.com/api/webhooks/[0-9]{17,20}/[A-Za-z0-9._-]{40,}'''
+keywords = ["discord.com/api/webhooks", "discordapp.com/api/webhooks"]
+
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Known dev templates and Twitch public web client ID (not a private secret). Do not put real webhooks or tokens in .env.example — use ~/.streamclone/ (see docs/operator-secrets.md)."
+description = "Known non-secret source templates and public client IDs. Env templates are intentionally not path-allowlisted; real webhooks or tokens in .env.example/.env.dev must fail scanning."
 paths = [
-  '''(?i)\.env\.example$''',
-  '''(?i)\.env\.dev$''',
   '''(?i)internal/config/config\.go$''',
   '''(?i)internal/upstream/upstream\.go$''',
   '''(?i)deploy/docker-compose\.yml$''',
   '''(?i)deploy/docker-compose\.observability\.yml$''',
   '''(?i)deploy/FREE_DEPLOYMENT\.md$''',
   '''(?i)tools/data/data_mcp\.py$''',
+]
+regexes = [
+  '''kimne78kx3ncx6brgo4mv6wki5h1ko''',
 ]
