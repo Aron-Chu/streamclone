@@ -119,6 +119,10 @@ func (h *Handler) extensionPulseBackfillStatus(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, job)
 }
 
+func (h *Handler) invalidateExtensionCoverageCache(ctx context.Context, login string) {
+	InvalidateExtensionCoverageCache(ctx, h.rdb, login)
+}
+
 func (h *Handler) invalidateExtensionPulseCache(ctx context.Context, login string) {
 	if h == nil {
 		return

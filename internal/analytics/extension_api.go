@@ -51,6 +51,7 @@ type ExtensionHealthDegraded struct {
 
 type ExtensionHealthRoutes struct {
 	PulseChannel bool `json:"pulseChannel"`
+	PulseCoverage bool `json:"pulseCoverage"`
 	VodHint      bool `json:"vodHint"`
 	Backfill     bool `json:"backfill"`
 }
@@ -138,6 +139,7 @@ func (h *Handler) ExtensionRoutes(r chi.Router) {
 			}
 			r.Get("/me", h.extensionMe)
 			r.Get("/pulse/channels/{login}", h.extensionPulseChannel)
+			r.Get("/pulse/channels/{login}/coverage", h.extensionPulseChannelCoverage)
 			r.Post("/pulse/channels/{login}/vod-hint", h.extensionPulseVodHint)
 			r.Post("/pulse/channels/{login}/vod-retry", h.extensionPulseVodRetry)
 			r.Post("/pulse/channels/{login}/backfill", h.extensionPulseBackfill)
@@ -188,9 +190,10 @@ func (h *Handler) extensionHealthPayload() ExtensionHealthResponse {
 			ActionsPaused: runtime.ReadOnlyMode,
 		},
 		Routes: ExtensionHealthRoutes{
-			PulseChannel: true,
-			VodHint:      true,
-			Backfill:     true,
+			PulseChannel:  true,
+			PulseCoverage: true, // read-only GET /pulse/channels/{login}/coverage route exists; not Phase 1B sampler
+			VodHint:       true,
+			Backfill:      true,
 		},
 		Capabilities: ExtensionHealthCapabilities{
 			LiveTracking:          liveTracking,
