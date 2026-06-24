@@ -1,0 +1,66 @@
+# BearHost overlay — Pulse extension API (Cloudflare Tunnel → :8090).
+# Merge:
+#   --env-file deploy/env/profile-bearhost-prod.env
+#   --env-file deploy/env/profile-bearhost-pulse.env
+#   -f deploy/docker-compose.bearhost-pulse.yml
+
+services:
+  analytics:
+    environment:
+      TIER0_ENABLED: "true"
+      BACKFILL_ENABLED: "false"
+      BRONZE_ENABLED: "false"
+      ARCHIVE_ENABLED: "false"
+      GOLD_BACKFILL_ENABLED: "false"
+      PULSE_HOSTED_MODE: ${PULSE_HOSTED_MODE:-true}
+      PULSE_BETA_KEYS: ${PULSE_BETA_KEYS:-}
+      PULSE_MAX_ACTIVE_CHANNELS: ${PULSE_MAX_ACTIVE_CHANNELS:-10}
+      PULSE_MAX_BACKFILLS: ${PULSE_MAX_BACKFILLS:-1}
+      MAX_CONCURRENT_TRACKED_CHANNELS: ${PULSE_MAX_ACTIVE_CHANNELS:-10}
+      STREAMCLONE_VERSION: ${STREAMCLONE_VERSION:-dev}
+      EMOTE_SERVICE_URL: http://emote:8080
+
+  analytics-workers:
+    profiles: ["corpus"]
+
+  scraper:
+    profiles: ["corpus"]
+
+  caddy:
+    profiles: ["full-ui"]
+
+  pulse-caddy:
+    image: caddy:2
+    restart: unless-stopped
+    container_name: streamclone-pulse-caddy
+    ports:
+      - "8090:80"
+    volumes:
+      - ./Caddyfile.pulse-api:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      analytics:
+        condition: service_healthy
+      emote:
+        condition: service_healthy
+      metadata:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  emote:
+    environment:
+      CDN_PUBLIC_BASE: ${PUBLIC_ORIGIN:-https://api.streampulse.stream}/emotes
+
+  video:
+    profiles: ["playback"]
+
+  chat:
+    profiles: ["playback"]
+
+  frontend:
+    profiles: ["ui"]
+
+  mediamtx:
+    profiles: ["playback"]

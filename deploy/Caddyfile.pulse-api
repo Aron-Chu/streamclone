@@ -1,0 +1,49 @@
+# Minimal Caddy routes for Streamclone Pulse extension API (no frontend/HLS).
+# Listens on :80 inside the container; host maps 8090:80 for cloudflared.
+
+:80 {
+	encode zstd gzip
+
+	@emote {
+		path /v1/channels/*/emotes /v1/channels/*/emotes/* /v1/emotes* /v1/sets* /v1/seed*
+	}
+	reverse_proxy @emote emote:8080
+
+	@emote_assets {
+		path /emotes/*
+	}
+	reverse_proxy @emote_assets minio:9000
+
+	@admin_pulse {
+		path /v1/admin/pulse /v1/admin/pulse/*
+	}
+	reverse_proxy @admin_pulse analytics:8080
+
+	@admin_blocked {
+		path /v1/admin/archive /v1/admin/archive/* /v1/admin/system /v1/admin/system/*
+	}
+	respond @admin_blocked 404
+
+	@analytics {
+		path_regexp analytics ^/v1/(analytics|extension|pulse|public|portal)(/|$)
+	}
+	reverse_proxy @analytics analytics:8080 {
+		transport http {
+			read_timeout 15m
+			write_timeout 15m
+		}
+	}
+
+	@metadata {
+		path /v1/channels/* /v1/metadata /v1/metadata/*
+	}
+	reverse_proxy @metadata metadata:8080
+
+	@health {
+		path /healthz /readyz /metrics
+	}
+	reverse_proxy @health analytics:8080
+
+	@root path /
+	respond @root "Streamclone Pulse API" 200
+}
