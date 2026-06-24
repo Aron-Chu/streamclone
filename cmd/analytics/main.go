@@ -294,6 +294,20 @@ func main() {
 	} else {
 		logger.Info("top500 metadata sampler disabled", "flag", "TOP500_METADATA_ENABLED")
 	}
+	silverGateCfg := analytics.SilverGateConfigFromApp(cfg)
+	analytics.InitTop500SilverGateMetrics(silverGateCfg)
+	if cfg.Top500SilverGateEnabled {
+		logger.Info("top500 silver gate started",
+			"dry_run", cfg.Top500SilverGateDryRun,
+			"write_enabled", cfg.Top500SilverGateWriteEnabled,
+			"max_candidates", silverGateCfg.MaxCandidates,
+			"max_enqueue_per_run", silverGateCfg.MaxEnqueuePerRun,
+			"interval", cfg.Top500SilverGateInterval.String(),
+		)
+		analytics.StartTop500SilverGate(ctx, silverGateCfg, logger)
+	} else {
+		logger.Info("top500 silver gate disabled", "flag", "TOP500_SILVER_GATE_ENABLED")
+	}
 	if cfg.BackfillEnabled {
 		staleLease := cfg.BackfillStaleRunningAfter
 		heartbeat := cfg.BackfillHeartbeatInterval

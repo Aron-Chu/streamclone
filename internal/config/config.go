@@ -197,6 +197,13 @@ type Config struct {
 	Top500MetadataRollbackDBP95MS         int           `env:"TOP500_METADATA_ROLLBACK_DB_P95_MS" envDefault:"200"`
 	Top500MetadataRollbackDiskFreePercent int           `env:"TOP500_METADATA_ROLLBACK_DISK_FREE_PERCENT" envDefault:"15"`
 
+	Top500SilverGateEnabled          bool          `env:"TOP500_SILVER_GATE_ENABLED" envDefault:"false"`
+	Top500SilverGateDryRun           bool          `env:"TOP500_SILVER_GATE_DRY_RUN" envDefault:"true"`
+	Top500SilverGateWriteEnabled     bool          `env:"TOP500_SILVER_GATE_WRITE_ENABLED" envDefault:"false"`
+	Top500SilverGateMaxCandidates    int           `env:"TOP500_SILVER_GATE_MAX_CANDIDATES" envDefault:"5"`
+	Top500SilverGateMaxEnqueuePerRun int           `env:"TOP500_SILVER_GATE_MAX_ENQUEUE_PER_RUN" envDefault:"1"`
+	Top500SilverGateInterval         time.Duration `env:"TOP500_SILVER_GATE_INTERVAL" envDefault:"10m"`
+
 	PulseHostedMode              bool   `env:"PULSE_HOSTED_MODE" envDefault:"false"`
 	PulseBetaKeys                string `env:"PULSE_BETA_KEYS"`
 	PulseMaxActiveChannels       int    `env:"PULSE_MAX_ACTIVE_CHANNELS" envDefault:"0"`
@@ -298,6 +305,15 @@ func Load() (Config, error) {
 	}
 	if c.Top500MetadataBatchSize <= 0 || c.Top500MetadataBatchSize > 100 {
 		c.Top500MetadataBatchSize = 100
+	}
+	if c.Top500SilverGateMaxCandidates <= 0 || c.Top500SilverGateMaxCandidates > 100 {
+		c.Top500SilverGateMaxCandidates = 5
+	}
+	if c.Top500SilverGateMaxEnqueuePerRun <= 0 || c.Top500SilverGateMaxEnqueuePerRun > 10 {
+		c.Top500SilverGateMaxEnqueuePerRun = 1
+	}
+	if c.Top500SilverGateInterval <= 0 {
+		c.Top500SilverGateInterval = 10 * time.Minute
 	}
 	return c, nil
 }

@@ -112,3 +112,82 @@ func clearTop500Env(t *testing.T) {
 		}
 	})
 }
+
+func TestTop500SilverGateConfigDefaultsDisabled(t *testing.T) {
+	clearTop500SilverGateEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Top500SilverGateEnabled {
+		t.Fatal("Top500SilverGateEnabled default = true, want false")
+	}
+	if !cfg.Top500SilverGateDryRun {
+		t.Fatal("Top500SilverGateDryRun default = false, want true")
+	}
+	if cfg.Top500SilverGateWriteEnabled {
+		t.Fatal("Top500SilverGateWriteEnabled default = true, want false")
+	}
+	if cfg.Top500SilverGateMaxCandidates != 5 {
+		t.Fatalf("Top500SilverGateMaxCandidates = %d, want 5", cfg.Top500SilverGateMaxCandidates)
+	}
+	if cfg.Top500SilverGateMaxEnqueuePerRun != 1 {
+		t.Fatalf("Top500SilverGateMaxEnqueuePerRun = %d, want 1", cfg.Top500SilverGateMaxEnqueuePerRun)
+	}
+	if cfg.Top500SilverGateInterval != 10*time.Minute {
+		t.Fatalf("Top500SilverGateInterval = %s, want 10m", cfg.Top500SilverGateInterval)
+	}
+}
+
+func TestTop500SilverGateConfigValidationCapsUnsafeValues(t *testing.T) {
+	clearTop500SilverGateEnv(t)
+	t.Setenv("TOP500_SILVER_GATE_MAX_CANDIDATES", "500")
+	t.Setenv("TOP500_SILVER_GATE_MAX_ENQUEUE_PER_RUN", "99")
+	t.Setenv("TOP500_SILVER_GATE_INTERVAL", "0")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Top500SilverGateMaxCandidates != 5 {
+		t.Fatalf("MaxCandidates = %d, want cap 5", cfg.Top500SilverGateMaxCandidates)
+	}
+	if cfg.Top500SilverGateMaxEnqueuePerRun != 1 {
+		t.Fatalf("MaxEnqueuePerRun = %d, want cap 1", cfg.Top500SilverGateMaxEnqueuePerRun)
+	}
+	if cfg.Top500SilverGateInterval != 10*time.Minute {
+		t.Fatalf("Interval = %s, want default 10m", cfg.Top500SilverGateInterval)
+	}
+}
+
+func clearTop500SilverGateEnv(t *testing.T) {
+	t.Helper()
+	keys := []string{
+		"TOP500_SILVER_GATE_ENABLED",
+		"TOP500_SILVER_GATE_DRY_RUN",
+		"TOP500_SILVER_GATE_WRITE_ENABLED",
+		"TOP500_SILVER_GATE_MAX_CANDIDATES",
+		"TOP500_SILVER_GATE_MAX_ENQUEUE_PER_RUN",
+		"TOP500_SILVER_GATE_INTERVAL",
+	}
+	previous := make(map[string]string, len(keys))
+	present := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		value, ok := os.LookupEnv(key)
+		if ok {
+			previous[key] = value
+			present[key] = true
+			if err := os.Unsetenv(key); err != nil {
+				t.Fatalf("unset %s: %v", key, err)
+			}
+		}
+	}
+	t.Cleanup(func() {
+		for _, key := range keys {
+			if present[key] {
+				_ = os.Setenv(key, previous[key])
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		}
+	})
+}
