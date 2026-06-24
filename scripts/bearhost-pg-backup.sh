@@ -31,3 +31,14 @@ echo "bearhost-pg-backup: pruning backups older than ${RETENTION_DAYS} days"
 find "${BACKUP_DIR}" -name 'streamclone-*.sql.gz' -type f -mtime +"${RETENTION_DAYS}" -delete
 
 echo "bearhost-pg-backup: done ($(du -h "${OUT}" | awk '{print $1}'))"
+
+if [[ "${BEARHOST_PG_BACKUP_SKIP_AZURE_UPLOAD:-0}" != "1" ]]; then
+  # shellcheck source=scripts/lib/bearhost-azure-pg-backup-upload.sh
+  source "${ROOT}/scripts/lib/bearhost-azure-pg-backup-upload.sh"
+  if ! bearhost_upload_pg_backup_to_azure "${OUT}"; then
+    echo "bearhost-pg-backup: offsite upload failed (local dump retained at ${OUT})" >&2
+    exit 1
+  fi
+else
+  echo "bearhost-pg-backup: offsite upload skipped (BEARHOST_PG_BACKUP_SKIP_AZURE_UPLOAD=1)"
+fi
