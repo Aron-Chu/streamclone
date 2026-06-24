@@ -27,13 +27,14 @@ const (
 	CoverageTierBudgetLimited        = "budget_limited"
 	CoverageTierUnknownOrUnsupported = "unknown_or_unsupported"
 
-	reasonHostedCapFull       = "hosted_cap_full"
-	reasonNoStreamRecord      = "no_stream_record"
-	reasonMetadataWithoutChat = "metadata_without_active_chat"
-	reasonMetadataStale       = "metadata_stale"
-	reasonMetadataOffline     = "metadata_offline_not_live"
-	reasonHistoricalAvailable = "historical_analytics_available"
-	reasonActiveCollector     = "active_collector_attached"
+	reasonHostedCapFull           = "hosted_cap_full"
+	reasonNoStreamRecord          = "no_stream_record"
+	reasonMetadataWithoutChat     = "metadata_without_active_chat"
+	reasonTop500MetadataAvailable = "top500_metadata_available"
+	reasonMetadataStale           = "metadata_stale"
+	reasonMetadataOffline         = "metadata_offline_not_live"
+	reasonHistoricalAvailable     = "historical_analytics_available"
+	reasonActiveCollector         = "active_collector_attached"
 )
 
 // ExtensionCoverageTierResponse is the read-only Top 500 coverage contract for the extension.
@@ -73,14 +74,14 @@ type ExtensionCoverageLiveMetadata struct {
 }
 
 type ExtensionDataAvailability struct {
-	Rollups            bool `json:"rollups"`
-	Peaks              bool `json:"peaks"`
-	Moments            bool `json:"moments"`
-	Heatmap            bool `json:"heatmap"`
-	VodBackfill        bool `json:"vodBackfill"`
-	SevenTvSet         bool `json:"sevenTvSet"`
-	HistoricalSilver   bool `json:"historicalSilver"`
-	HistoricalGold     bool `json:"historicalGold"`
+	Rollups          bool `json:"rollups"`
+	Peaks            bool `json:"peaks"`
+	Moments          bool `json:"moments"`
+	Heatmap          bool `json:"heatmap"`
+	VodBackfill      bool `json:"vodBackfill"`
+	SevenTvSet       bool `json:"sevenTvSet"`
+	HistoricalSilver bool `json:"historicalSilver"`
+	HistoricalGold   bool `json:"historicalGold"`
 }
 
 type ExtensionCoverageActions struct {
@@ -91,17 +92,18 @@ type ExtensionCoverageActions struct {
 }
 
 type extensionCoverageInputs struct {
-	login              string
-	stream             *StreamRecord
-	isLive             bool
-	tracking           bool
-	rollups            []MinuteRollup
-	historicalChat     bool
-	historicalGold     bool
-	emoteSync          EmoteSyncSnapshot
-	hostedCap          ExtensionHostedCapStatus
-	hasChatRollups     bool
-	hasViewerRollups   bool
+	login            string
+	stream           *StreamRecord
+	isLive           bool
+	tracking         bool
+	rollups          []MinuteRollup
+	top500Current    *Top500Current
+	historicalChat   bool
+	historicalGold   bool
+	emoteSync        EmoteSyncSnapshot
+	hostedCap        ExtensionHostedCapStatus
+	hasChatRollups   bool
+	hasViewerRollups bool
 }
 
 func (h *Handler) extensionPulseChannelCoverage(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +144,7 @@ func (h *Handler) extensionPulseChannelCoverage(w http.ResponseWriter, r *http.R
 
 func (h *Handler) buildExtensionCoverageTier(ctx context.Context, login string) (ExtensionCoverageTierResponse, error) {
 	inputs := extensionCoverageInputs{
-		login:    login,
+		login:     login,
 		emoteSync: defaultExtensionEmoteSync(false),
 	}
 
@@ -155,6 +157,12 @@ func (h *Handler) buildExtensionCoverageTier(ctx context.Context, login string) 
 	}
 
 	if h.store != nil {
+		top500Current, err := h.store.GetTop500CurrentByLogin(ctx, login)
+		if err != nil {
+			return ExtensionCoverageTierResponse{}, err
+		}
+		inputs.top500Current = top500Current
+
 		stream, err := h.store.LatestStreamByLogin(ctx, login)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return ExtensionCoverageTierResponse{}, err
@@ -260,6 +268,20 @@ func assembleExtensionCoverageResponse(in extensionCoverageInputs) ExtensionCove
 			displayName = &login
 		}
 	}
+	if in.top500Current != nil {
+		if channelID == nil {
+			if id := strings.TrimSpace(in.top500Current.ChannelID); id != "" {
+				channelID = &id
+			}
+		}
+		if displayName == nil {
+			if name := strings.TrimSpace(in.top500Current.DisplayName); name != "" {
+				displayName = &name
+			} else if login := strings.TrimSpace(in.top500Current.Login); login != "" {
+				displayName = &login
+			}
+		}
+	}
 
 	return ExtensionCoverageTierResponse{
 		Login:            in.login,
@@ -283,26 +305,35 @@ func mapExtensionCoverageTier(in extensionCoverageInputs) (string, []string) {
 	}
 
 	capFull := !in.hostedCap.ActiveAvailable && in.hostedCap.ActiveLimit > 0
-	if capFull {
-		reasons = append(reasons, reasonHostedCapFull)
-		return CoverageTierBudgetLimited, reasons
-	}
-
 	if hasFreshLiveMetadataSnapshot(in) {
 		reasons = append(reasons, reasonMetadataWithoutChat)
+		if hasTop500Metadata(in) {
+			reasons = append(reasons, reasonTop500MetadataAvailable)
+		}
+		if capFull {
+			reasons = append(reasons, reasonHostedCapFull)
+		}
 		return CoverageTierTop500MetadataOnly, reasons
 	}
 
 	if in.historicalChat || in.historicalGold {
 		reasons = append(reasons, reasonHistoricalAvailable)
+		if capFull {
+			reasons = append(reasons, reasonHostedCapFull)
+		}
 		return CoverageTierHistoricalEnriched, reasons
 	}
 
-	if in.stream != nil {
+	if capFull {
+		reasons = append(reasons, reasonHostedCapFull)
+		return CoverageTierBudgetLimited, reasons
+	}
+
+	if in.stream != nil || in.top500Current != nil {
 		if hasLiveMetadataSnapshot(in) {
-			if !in.isLive {
+			if !coverageMetadataLive(in) {
 				reasons = append(reasons, reasonMetadataOffline)
-			} else if age, ok := metadataSnapshotAgeSeconds(in.stream); ok && age > int(extensionMetadataFreshnessMax.Seconds()) {
+			} else if !metadataSnapshotFresh(in) {
 				reasons = append(reasons, reasonMetadataStale)
 			}
 		}
@@ -347,14 +378,14 @@ func buildExtensionDataAvailability(in extensionCoverageInputs) ExtensionDataAva
 	vodBackfill := in.stream != nil && strings.TrimSpace(in.stream.VodID) != "" && in.tracking
 
 	return ExtensionDataAvailability{
-		Rollups:            hasRollups,
-		Peaks:              hasPeaks,
-		Moments:            hasMoments,
-		Heatmap:            hasHeatmap,
-		VodBackfill:        vodBackfill,
-		SevenTvSet:         sevenTv,
-		HistoricalSilver:   in.historicalChat,
-		HistoricalGold:     in.historicalGold,
+		Rollups:          hasRollups,
+		Peaks:            hasPeaks,
+		Moments:          hasMoments,
+		Heatmap:          hasHeatmap,
+		VodBackfill:      vodBackfill,
+		SevenTvSet:       sevenTv,
+		HistoricalSilver: in.historicalChat,
+		HistoricalGold:   in.historicalGold,
 	}
 }
 
@@ -364,15 +395,51 @@ func buildExtensionLiveMetadata(in extensionCoverageInputs) ExtensionCoverageLiv
 		Source:    "none",
 		Tags:      []string{},
 	}
-	if in.stream == nil {
+	if in.stream == nil && in.top500Current == nil {
 		return out
 	}
 
-	stream := in.stream
 	out.Available = hasLiveMetadataSnapshot(in)
 	if !out.Available {
 		return out
 	}
+	if !in.tracking && in.top500Current != nil && metadataSourceForTop500Current(in.top500Current) != "none" {
+		current := in.top500Current
+		out.Source = metadataSourceForTop500Current(current)
+		isLive := current.IsLive
+		out.IsLive = &isLive
+		if sid := strings.TrimSpace(ptrStringValue(current.StreamID)); sid != "" {
+			out.StreamID = &sid
+		}
+		if title := strings.TrimSpace(current.Title); title != "" {
+			out.Title = &title
+		}
+		if cat := strings.TrimSpace(current.CategoryName); cat != "" {
+			out.Category = &cat
+		}
+		if current.StartedAt != nil && !current.StartedAt.IsZero() {
+			started := current.StartedAt.UTC().Format(time.RFC3339)
+			out.StartedAt = &started
+		}
+		if current.ViewerCount != nil {
+			vc := *current.ViewerCount
+			out.ViewerCount = &vc
+		}
+		if lang := strings.TrimSpace(current.Language); lang != "" {
+			out.Language = &lang
+		}
+		if len(current.Tags) > 0 {
+			out.Tags = append([]string(nil), current.Tags...)
+		}
+		if !current.SampledAt.IsZero() {
+			snap := current.SampledAt.UTC().Format(time.RFC3339)
+			out.SnapshotTime = &snap
+			out.FreshnessSeconds = current.FreshnessSeconds(time.Now().UTC())
+		}
+		return out
+	}
+
+	stream := in.stream
 
 	out.Source = metadataSourceForStream(stream, in.tracking)
 	isLive := in.isLive
@@ -417,6 +484,9 @@ func buildExtensionLiveMetadata(in extensionCoverageInputs) ExtensionCoverageLiv
 }
 
 func hasLiveMetadataSnapshot(in extensionCoverageInputs) bool {
+	if hasTop500Metadata(in) {
+		return true
+	}
 	if in.stream == nil {
 		return false
 	}
@@ -448,22 +518,64 @@ func metadataSnapshotAgeSeconds(stream *StreamRecord) (int, bool) {
 	return age, true
 }
 
-func hasFreshLiveMetadataSnapshot(in extensionCoverageInputs) bool {
-	if in.stream == nil || !in.isLive || in.tracking {
-		return false
-	}
-	if !hasLiveMetadataSnapshot(in) {
-		return false
+func metadataSnapshotFresh(in extensionCoverageInputs) bool {
+	if hasTop500Metadata(in) {
+		if !in.top500Current.StaleAfter.IsZero() {
+			return time.Now().UTC().Before(in.top500Current.StaleAfter)
+		}
+		if in.top500Current.SampledAt.IsZero() {
+			return false
+		}
+		return time.Since(in.top500Current.SampledAt) <= extensionMetadataFreshnessMax
 	}
 	age, ok := metadataSnapshotAgeSeconds(in.stream)
-	if !ok || age > int(extensionMetadataFreshnessMax.Seconds()) {
+	return ok && age <= int(extensionMetadataFreshnessMax.Seconds())
+}
+
+func coverageMetadataLive(in extensionCoverageInputs) bool {
+	if hasTop500Metadata(in) {
+		return in.top500Current.IsLive
+	}
+	return in.isLive
+}
+
+func hasFreshLiveMetadataSnapshot(in extensionCoverageInputs) bool {
+	if in.tracking {
+		return false
+	}
+	if !hasLiveMetadataSnapshot(in) || !coverageMetadataLive(in) || !metadataSnapshotFresh(in) {
+		return false
+	}
+	if hasTop500Metadata(in) {
+		return true
+	}
+	if in.stream == nil {
 		return false
 	}
 	source := metadataSourceForStream(in.stream, in.tracking)
-	if source == "none" && in.stream.CurrentViewers <= 0 && strings.TrimSpace(in.stream.Title) == "" {
-		return false
+	return source != "none" || in.stream.CurrentViewers > 0 || strings.TrimSpace(in.stream.Title) != ""
+}
+
+func hasTop500Metadata(in extensionCoverageInputs) bool {
+	return !in.tracking && in.top500Current != nil && metadataSourceForTop500Current(in.top500Current) != "none"
+}
+
+func metadataSourceForTop500Current(current *Top500Current) string {
+	if current == nil {
+		return "none"
 	}
-	return true
+	source := strings.TrimSpace(current.CoverageSource)
+	if source == "" {
+		return Top500CoverageSourceMetadata
+	}
+	return source
+}
+
+func ptrStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func metadataSourceForStream(stream *StreamRecord, tracking bool) string {
