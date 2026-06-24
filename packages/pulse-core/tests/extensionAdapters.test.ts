@@ -9,8 +9,8 @@ import {
   toLiveStatsInputFromExtension,
   type ExtensionPeakLike,
   type ExtensionPulseLike,
-} from '../src/extensionAdapters'
-import { deriveLiveHeat, deriveLiveStats, splitEmoteProviderRates } from '../src/index'
+} from '../src/extensionAdapters.ts'
+import { deriveLiveHeat, deriveLiveStats, splitEmoteProviderRates } from '../src/index.ts'
 
 const STARTED_AT = '2026-06-11T12:00:00.000Z'
 
@@ -98,6 +98,24 @@ describe('splitEmoteProviderRates via extension mapping', () => {
       { provider: '7TV', perMinute: 2 },
       { provider: 'Other', perMinute: 2 },
     ])
+  })
+
+  it('infers emote counts from rollup topEmotes when totals are zero', () => {
+    const input = toLiveStatsInputFromExtension({
+      isLive: true,
+      rollups: [
+        {
+          offsetSeconds: 60,
+          chatCount: 12,
+          sevenTvEmoteCount: 0,
+          totalEmoteCount: 0,
+          topEmotes: [{ name: 'KEKW', count: 9, provider: '7TV' }],
+        },
+      ],
+    })
+    assert.equal(input.rollups[0]?.totalEmoteCount, 9)
+    assert.equal(input.rollups[0]?.seventvEmoteCount, 9)
+    assert.deepEqual(splitEmoteProviderRates(input.rollups[0]), [{ provider: '7TV', perMinute: 9 }])
   })
 
   it('falls back to fullRollups when recent rollups are empty', () => {

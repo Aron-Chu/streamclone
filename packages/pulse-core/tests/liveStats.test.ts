@@ -12,7 +12,7 @@ import {
   trendArrowGlyph,
   type LiveStatsInput,
   type LiveStatsRollup,
-} from '../src/liveStats'
+} from '../src/liveStats.ts'
 
 const MINUTE_MS = 60_000
 
