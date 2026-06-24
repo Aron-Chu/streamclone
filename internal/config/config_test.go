@@ -159,6 +159,38 @@ func TestTop500SilverGateConfigValidationCapsUnsafeValues(t *testing.T) {
 	}
 }
 
+func TestTop500SilverGateConfigAllowsMaxBoundaries(t *testing.T) {
+	clearTop500SilverGateEnv(t)
+	t.Setenv("TOP500_SILVER_GATE_MAX_CANDIDATES", "100")
+	t.Setenv("TOP500_SILVER_GATE_MAX_ENQUEUE_PER_RUN", "10")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Top500SilverGateMaxCandidates != 100 {
+		t.Fatalf("MaxCandidates = %d, want 100", cfg.Top500SilverGateMaxCandidates)
+	}
+	if cfg.Top500SilverGateMaxEnqueuePerRun != 10 {
+		t.Fatalf("MaxEnqueuePerRun = %d, want 10", cfg.Top500SilverGateMaxEnqueuePerRun)
+	}
+}
+
+func TestTop500SilverGateConfigRejectsAboveMaxBoundaries(t *testing.T) {
+	clearTop500SilverGateEnv(t)
+	t.Setenv("TOP500_SILVER_GATE_MAX_CANDIDATES", "101")
+	t.Setenv("TOP500_SILVER_GATE_MAX_ENQUEUE_PER_RUN", "11")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Top500SilverGateMaxCandidates != 5 {
+		t.Fatalf("MaxCandidates = %d, want reset to 5", cfg.Top500SilverGateMaxCandidates)
+	}
+	if cfg.Top500SilverGateMaxEnqueuePerRun != 1 {
+		t.Fatalf("MaxEnqueuePerRun = %d, want reset to 1", cfg.Top500SilverGateMaxEnqueuePerRun)
+	}
+}
+
 func clearTop500SilverGateEnv(t *testing.T) {
 	t.Helper()
 	keys := []string{

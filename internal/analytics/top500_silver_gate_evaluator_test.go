@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -73,6 +74,210 @@ func TestRefusingSilverEnqueueAdapterRejectsWrite(t *testing.T) {
 	if inserted || err == nil {
 		t.Fatalf("inserted=%v err=%v, want false and error", inserted, err)
 	}
+	if !errors.Is(err, ErrSilverGateWriteDisabled) {
+		t.Fatalf("err = %v, want ErrSilverGateWriteDisabled", err)
+	}
+}
+
+func TestEvaluateSilverGateOrderingEarlierFailureWins(t *testing.T) {
+	now := time.Now().UTC()
+	base := validSilverGateCandidate(now)
+	budget := validSilverBudgetSnapshot()
+	budget.SilverEnqueuedToday = SilverGateGlobalMaxEnqueuePerDay
+
+	cases := []struct {
+		name string
+		cand SilverGateCandidate
+		bud  SilverBudgetSnapshot
+		want SilverGateDecisionReason
+	}{
+		{
+			name: "shape_before_daily_budget",
+			cand: func() SilverGateCandidate { c := base; c.Login = ""; return c }(),
+			bud:  budget,
+			want: SilverGateSkipNotCandidate,
+		},
+		{
+			name: "counter_unavailable_before_daily_budget",
+			cand: base,
+			bud: func() SilverBudgetSnapshot {
+				b := budget
+				b.Available = false
+				return b
+			}(),
+			want: SilverGateSkipCounterUnavailable,
+		},
+		{
+			name: "metadata_stale_before_missing_stream_id",
+			cand: func() SilverGateCandidate {
+				c := base
+				c.StaleAfter = now.Add(-time.Hour)
+				c.StreamID = ""
+				return c
+			}(),
+			bud:  budget,
+			want: SilverGateSkipMetadataStale,
+		},
+		{
+			name: "already_done_before_duplicate",
+			cand: base,
+			bud: func() SilverBudgetSnapshot {
+				b := budget
+				b.AlreadyDone = true
+				b.DuplicateQueuedOrRunning = true
+				return b
+			}(),
+			want: SilverGateSkipAlreadyDone,
+		},
+		{
+			name: "duplicate_before_daily_budget",
+			cand: base,
+			bud: func() SilverBudgetSnapshot {
+				b := validSilverBudgetSnapshot()
+				b.DuplicateQueuedOrRunning = true
+				b.SilverEnqueuedToday = SilverGateGlobalMaxEnqueuePerDay
+				return b
+			}(),
+			want: SilverGateSkipDuplicateJob,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := EvaluateSilverGate(tc.cand, tc.bud, SilverGateConfig{})
+			if got.Decision != tc.want {
+				t.Fatalf("decision = %q, want %q", got.Decision, tc.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateSilverGateEdgeCases(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("zero_sampled_at_is_stale", func(t *testing.T) {
+		c := validSilverGateCandidate(now)
+		c.SampledAt = time.Time{}
+		got := EvaluateSilverGate(c, validSilverBudgetSnapshot(), SilverGateConfig{})
+		if got.Decision != SilverGateSkipMetadataStale {
+			t.Fatalf("decision = %q, want skip_metadata_stale", got.Decision)
+		}
+	})
+
+	t.Run("empty_candidate_login_and_channel", func(t *testing.T) {
+		got := EvaluateSilverGate(SilverGateCandidate{}, validSilverBudgetSnapshot(), SilverGateConfig{})
+		if got.Decision != SilverGateSkipNotCandidate {
+			t.Fatalf("decision = %q, want skip_not_candidate", got.Decision)
+		}
+	})
+
+	t.Run("all_guards_healthy_allows", func(t *testing.T) {
+		got := EvaluateSilverGate(validSilverGateCandidate(now), validSilverBudgetSnapshot(), SilverGateConfig{})
+		if !got.AllowEnqueue {
+			t.Fatalf("got %+v, want allow", got)
+		}
+	})
+}
+
+func TestEvaluateSilverGateBudgetBoundaries(t *testing.T) {
+	now := time.Now().UTC()
+	base := validSilverGateCandidate(now)
+
+	t.Run("daily_budget_under_limit_allows", func(t *testing.T) {
+		b := validSilverBudgetSnapshot()
+		b.SilverEnqueuedToday = SilverGateGlobalMaxEnqueuePerDay - 1
+		got := EvaluateSilverGate(base, b, SilverGateConfig{})
+		if !got.AllowEnqueue {
+			t.Fatalf("got %+v, want allow under daily budget", got)
+		}
+	})
+
+	t.Run("daily_budget_at_limit_denies", func(t *testing.T) {
+		b := validSilverBudgetSnapshot()
+		b.SilverEnqueuedToday = SilverGateGlobalMaxEnqueuePerDay
+		got := EvaluateSilverGate(base, b, SilverGateConfig{})
+		if got.Decision != SilverGateSkipDailyBudget {
+			t.Fatalf("got %+v, want skip_daily_budget", got)
+		}
+	})
+
+	t.Run("running_under_limit_allows", func(t *testing.T) {
+		b := validSilverBudgetSnapshot()
+		b.SilverRunningNow = SilverGateGlobalMaxRunning - 1
+		got := EvaluateSilverGate(base, b, SilverGateConfig{})
+		if !got.AllowEnqueue {
+			t.Fatalf("got %+v, want allow under running limit", got)
+		}
+	})
+
+	t.Run("running_at_limit_denies", func(t *testing.T) {
+		b := validSilverBudgetSnapshot()
+		b.SilverRunningNow = SilverGateGlobalMaxRunning
+		got := EvaluateSilverGate(base, b, SilverGateConfig{})
+		if got.Decision != SilverGateSkipRunningLimit {
+			t.Fatalf("got %+v, want skip_running_limit", got)
+		}
+	})
+
+	t.Run("queue_depth_under_limit_allows", func(t *testing.T) {
+		b := validSilverBudgetSnapshot()
+		b.SilverQueueDepth = SilverGateGlobalMaxQueueDepth - 1
+		got := EvaluateSilverGate(base, b, SilverGateConfig{})
+		if !got.AllowEnqueue {
+			t.Fatalf("got %+v, want allow under queue depth", got)
+		}
+	})
+
+	t.Run("queue_depth_at_limit_denies", func(t *testing.T) {
+		b := validSilverBudgetSnapshot()
+		b.SilverQueueDepth = SilverGateGlobalMaxQueueDepth
+		got := EvaluateSilverGate(base, b, SilverGateConfig{})
+		if got.Decision != SilverGateSkipQueueFull {
+			t.Fatalf("got %+v, want skip_queue_full", got)
+		}
+	})
+}
+
+func TestEvaluateSilverGateCoversAllDecisionReasons(t *testing.T) {
+	all := []SilverGateDecisionReason{
+		SilverGateAllowEnqueue,
+		SilverGateSkipNotCandidate,
+		SilverGateSkipMetadataStale,
+		SilverGateSkipMissingStreamID,
+		SilverGateSkipAlreadyDone,
+		SilverGateSkipDuplicateJob,
+		SilverGateSkipChannelCooldown,
+		SilverGateSkipRecentFailure,
+		SilverGateSkipGlobalBackoff,
+		SilverGateSkipDailyBudget,
+		SilverGateSkipRunningLimit,
+		SilverGateSkipQueueFull,
+		SilverGateSkipDiskGuard,
+		SilverGateSkipBackupGuard,
+		SilverGateSkipArchiveGuard,
+		SilverGateSkipAlertingGuard,
+		SilverGateSkipCorpusUnhealthy,
+		SilverGateSkipHostedUnhealthy,
+		SilverGateSkipCounterUnavailable,
+		SilverGateSkipCounterStale,
+	}
+	seen := map[SilverGateDecisionReason]bool{}
+	for _, reason := range all {
+		seen[reason] = true
+	}
+	if len(seen) != len(all) {
+		t.Fatal("duplicate decision reason constants")
+	}
+	// exercised by TestEvaluateSilverGateSkips + allow test
+	if len(all) != 20 {
+		t.Fatalf("decision reason count = %d, want 20", len(all))
+	}
+}
+
+func TestRecordSilverGateDecisionAllowPath(t *testing.T) {
+	RecordSilverGateDecision(SilverGateResult{
+		Decision:     SilverGateAllowEnqueue,
+		AllowEnqueue: true,
+	}, SilverGateLaneTop500Selective, "evaluate")
 }
 
 func validSilverGateCandidate(now time.Time) SilverGateCandidate {

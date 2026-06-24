@@ -2,10 +2,14 @@ package analytics
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"streamclone/internal/config"
+	"streamclone/internal/metrics"
 )
 
 func TestShouldStartTop500SilverGateDefaultOff(t *testing.T) {
@@ -50,4 +54,62 @@ func TestSilverGateConfigFromAppDefaults(t *testing.T) {
 
 func TestRecordSilverGateDecisionIncrementsMetric(t *testing.T) {
 	RecordSilverGateDecision(SilverGateResult{Decision: SilverGateSkipDailyBudget}, SilverGateLaneTop500Selective, "evaluate")
+}
+
+func TestInitTop500SilverGateMetricsDisabledState(t *testing.T) {
+	InitTop500SilverGateMetrics(SilverGateConfig{Enabled: false, DryRun: true, WriteEnabled: false})
+	if got := testutil.ToFloat64(metrics.Top500SilverGateEnabled); got != 0 {
+		t.Fatalf("enabled gauge = %v, want 0", got)
+	}
+	if got := testutil.ToFloat64(metrics.Top500SilverGateDryRun); got != 1 {
+		t.Fatalf("dry_run gauge = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(metrics.Top500SilverGateWriteEnabled); got != 0 {
+		t.Fatalf("write_enabled gauge = %v, want 0", got)
+	}
+}
+
+func TestInitTop500SilverGateMetricsEnabledState(t *testing.T) {
+	InitTop500SilverGateMetrics(SilverGateConfig{Enabled: true, DryRun: false, WriteEnabled: false})
+	if got := testutil.ToFloat64(metrics.Top500SilverGateEnabled); got != 1 {
+		t.Fatalf("enabled gauge = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(metrics.Top500SilverGateWriteEnabled); got != 0 {
+		t.Fatalf("write_enabled gauge = %v, want 0", got)
+	}
+}
+
+func TestWriteEnabledWithoutEnabledDoesNotStartRuntime(t *testing.T) {
+	cfg := config.Config{Top500SilverGateEnabled: false, Top500SilverGateWriteEnabled: true}
+	if ShouldStartTop500SilverGate(cfg) {
+		t.Fatal("write-enabled without TOP500_SILVER_GATE_ENABLED must not start runtime")
+	}
+}
+
+func TestStartTop500SilverGateEnabledScaffoldTicksWithoutEnqueue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	before := testutil.ToFloat64(metrics.Top500SilverGateCandidatesTotal.WithLabelValues(SilverGateLaneTop500Selective, "tick"))
+	StartTop500SilverGate(ctx, SilverGateConfig{
+		Enabled:  true,
+		DryRun:   true,
+		Interval: 5 * time.Millisecond,
+	}, nil)
+	time.Sleep(25 * time.Millisecond)
+	cancel()
+	time.Sleep(5 * time.Millisecond)
+
+	after := testutil.ToFloat64(metrics.Top500SilverGateCandidatesTotal.WithLabelValues(SilverGateLaneTop500Selective, "tick"))
+	if after <= before {
+		t.Fatalf("candidate tick metric unchanged: before=%v after=%v", before, after)
+	}
+}
+
+func TestEnabledScaffoldWithWriteDisabledUsesRefusingAdapter(t *testing.T) {
+	adapter := RefusingSilverEnqueueAdapter{WriteEnabled: false}
+	inserted, err := adapter.EnqueueSilver(context.Background(), SilverEnqueueRequest{Tier: "silver"})
+	if inserted || !errors.Is(err, ErrSilverGateWriteDisabled) {
+		t.Fatalf("inserted=%v err=%v, want refuse write", inserted, err)
+	}
 }
