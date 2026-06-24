@@ -192,6 +192,7 @@ type Config struct {
 	Top500MetadataLiveInterval            time.Duration `env:"TOP500_METADATA_LIVE_INTERVAL" envDefault:"60s"`
 	Top500MetadataOfflineInterval         time.Duration `env:"TOP500_METADATA_OFFLINE_INTERVAL" envDefault:"10m"`
 	Top500MetadataBatchSize               int           `env:"TOP500_METADATA_BATCH_SIZE" envDefault:"100"`
+	Top500MetadataFixtureProvider         bool          `env:"TOP500_METADATA_FIXTURE_PROVIDER" envDefault:"false"`
 	Top500MetadataDBP95HoldMS             int           `env:"TOP500_METADATA_DB_P95_HOLD_MS" envDefault:"50"`
 	Top500MetadataRollbackDBP95MS         int           `env:"TOP500_METADATA_ROLLBACK_DB_P95_MS" envDefault:"200"`
 	Top500MetadataRollbackDiskFreePercent int           `env:"TOP500_METADATA_ROLLBACK_DISK_FREE_PERCENT" envDefault:"15"`

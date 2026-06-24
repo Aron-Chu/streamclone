@@ -33,6 +33,9 @@ func TestTop500MetadataConfigDefaultsDisabled(t *testing.T) {
 	if cfg.Top500MetadataBatchSize != 100 {
 		t.Fatalf("Top500MetadataBatchSize default = %d, want 100", cfg.Top500MetadataBatchSize)
 	}
+	if cfg.Top500MetadataFixtureProvider {
+		t.Fatal("Top500MetadataFixtureProvider default = true, want false")
+	}
 }
 
 func TestTop500MetadataConfigOverridesAndCaps(t *testing.T) {
@@ -82,6 +85,7 @@ func clearTop500Env(t *testing.T) {
 		"TOP500_METADATA_LIVE_INTERVAL",
 		"TOP500_METADATA_OFFLINE_INTERVAL",
 		"TOP500_METADATA_BATCH_SIZE",
+		"TOP500_METADATA_FIXTURE_PROVIDER",
 		"TOP500_METADATA_DB_P95_HOLD_MS",
 		"TOP500_METADATA_ROLLBACK_DB_P95_MS",
 		"TOP500_METADATA_ROLLBACK_DISK_FREE_PERCENT",
