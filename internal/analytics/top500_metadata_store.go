@@ -243,6 +243,26 @@ func (s *Store) UpsertTop500LiveSnapshots(ctx context.Context, snapshots []Top50
 	return tx.Commit(ctx)
 }
 
+func (s *Store) WriteTop500MetadataSamples(ctx context.Context, samples []Top500MetadataSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	for _, sample := range samples {
+		if err := upsertTop500LiveSnapshotTx(ctx, tx, sample.Snapshot); err != nil {
+			return err
+		}
+		if err := upsertTop500CurrentTx(ctx, tx, sample.Current); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 func upsertTop500LiveSnapshotTx(ctx context.Context, tx pgx.Tx, snapshot Top500LiveSnapshot) error {
 	if err := validateTop500LiveSnapshot(snapshot); err != nil {
 		return err
@@ -283,11 +303,26 @@ func (s *Store) UpsertTop500Current(ctx context.Context, current Top500Current) 
 	if err := validateTop500Current(current); err != nil {
 		return err
 	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := upsertTop500CurrentTx(ctx, tx, current); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func upsertTop500CurrentTx(ctx context.Context, tx pgx.Tx, current Top500Current) error {
+	if err := validateTop500Current(current); err != nil {
+		return err
+	}
 	tags, err := marshalTop500Tags(current.Tags)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		INSERT INTO top500_current (
 			channel_id, login, display_name, rank, coverage_source, is_live, stream_id,
 			title, category_id, category_name, started_at, viewer_count, language, tags,

@@ -174,6 +174,42 @@ func TestTop500StoreUpsertsCurrentAndSnapshot(t *testing.T) {
 	}
 }
 
+func TestTop500StoreWriteSamplesRollsBackCurrentWhenSnapshotFails(t *testing.T) {
+	ctx, store := setupTop500Store(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	err := store.WriteTop500MetadataSamples(ctx, []Top500MetadataSample{{
+		Snapshot: Top500LiveSnapshot{
+			ChannelID:    "rollback-1",
+			Login:        "rollbackchan",
+			IsLive:       true,
+			SampleTickAt: now,
+			SampledAt:    now,
+			Source:       "invalid_source",
+		},
+		Current: Top500Current{
+			ChannelID:      "rollback-1",
+			Login:          "rollbackchan",
+			DisplayName:    "RollbackChan",
+			Rank:           1,
+			CoverageSource: Top500CoverageSourceMetadata,
+			IsLive:         true,
+			SampledAt:      now,
+			StaleAfter:     now.Add(15 * time.Minute),
+			LastSuccessAt:  &now,
+		},
+	}})
+	if err == nil {
+		t.Fatal("expected invalid snapshot source error")
+	}
+	var currentRows int
+	if err := store.db.QueryRow(ctx, `SELECT COUNT(*) FROM top500_current WHERE channel_id='rollback-1'`).Scan(&currentRows); err != nil {
+		t.Fatalf("count current rows: %v", err)
+	}
+	if currentRows != 0 {
+		t.Fatalf("current rows after failed snapshot write = %d, want 0", currentRows)
+	}
+}
+
 func setupTop500Store(t *testing.T) (context.Context, *Store) {
 	t.Helper()
 	if testing.Short() {

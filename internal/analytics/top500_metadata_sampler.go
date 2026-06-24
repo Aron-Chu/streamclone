@@ -15,6 +15,7 @@ const (
 	DefaultTop500MetadataBatchSize       = 100
 	DefaultTop500MetadataLiveInterval    = 60 * time.Second
 	DefaultTop500MetadataOfflineInterval = 10 * time.Minute
+	DefaultTop500MetadataStaleAfter      = 15 * time.Minute
 
 	Top500SamplerClassHelixRateLimited    = "helix_rate_limited"
 	Top500SamplerClassHelixAuthMissing    = "helix_auth_missing"
@@ -46,6 +47,7 @@ type Top500MetadataProvider interface {
 type Top500MetadataStore interface {
 	ListEnabledTop500Channels(ctx context.Context, limit int) ([]Top500Channel, error)
 	GetTop500CurrentByChannelID(ctx context.Context, channelID string) (*Top500Current, error)
+	WriteTop500MetadataSamples(ctx context.Context, samples []Top500MetadataSample) error
 }
 
 type Top500MetadataSamplerLocker interface {
@@ -84,6 +86,12 @@ type Top500UserMetadata struct {
 	ChannelID   string
 	Login       string
 	DisplayName string
+}
+
+type Top500MetadataSample struct {
+	Channel  Top500Channel
+	Snapshot Top500LiveSnapshot
+	Current  Top500Current
 }
 
 type Top500SamplerTickResult struct {
@@ -139,6 +147,10 @@ func (s *Top500MetadataSampler) RunTick(ctx context.Context, now time.Time) (res
 		result.addClass(Top500SamplerClassSamplerDisabled)
 		return result, nil
 	}
+	if !cfg.DryRun && cfg.WriteEnabled && s.locker == nil {
+		result.addClass(Top500SamplerClassLockUnavailable)
+		return result, nil
+	}
 
 	if s.locker != nil {
 		lock, acquired, err := s.locker.TryTop500MetadataSamplerLock(ctx)
@@ -187,6 +199,16 @@ func (s *Top500MetadataSampler) RunTick(ctx context.Context, now time.Time) (res
 		return result, nil
 	}
 	result.UsersFetched = len(users)
+	if cfg.DryRun || !cfg.WriteEnabled {
+		result.addWriteModeClass(cfg)
+		return result, nil
+	}
+
+	samples := buildTop500MetadataSamples(result.Planned, streams, users, now)
+	result.WritesAttempted = len(samples)
+	if err := s.store.WriteTop500MetadataSamples(ctx, samples); err != nil {
+		return result, err
+	}
 	result.addWriteModeClass(cfg)
 	return result, nil
 }
@@ -279,12 +301,125 @@ func classifyTop500ProviderError(err error) string {
 	}
 }
 
+func buildTop500MetadataSamples(channels []Top500Channel, streams []Top500StreamMetadata, users []Top500UserMetadata, sampleTickAt time.Time) []Top500MetadataSample {
+	if sampleTickAt.IsZero() {
+		sampleTickAt = time.Now().UTC()
+	}
+	streamByChannel := make(map[string]Top500StreamMetadata, len(streams))
+	for _, stream := range streams {
+		channelID := strings.TrimSpace(stream.ChannelID)
+		if channelID == "" {
+			continue
+		}
+		streamByChannel[channelID] = stream
+	}
+	userByChannel := make(map[string]Top500UserMetadata, len(users))
+	for _, user := range users {
+		channelID := strings.TrimSpace(user.ChannelID)
+		if channelID == "" {
+			continue
+		}
+		userByChannel[channelID] = user
+	}
+
+	samples := make([]Top500MetadataSample, 0, len(channels))
+	for _, channel := range channels {
+		channelID := strings.TrimSpace(channel.ChannelID)
+		if channelID == "" {
+			continue
+		}
+		user := userByChannel[channelID]
+		login := firstNonEmpty(user.Login, channel.Login)
+		displayName := firstNonEmpty(user.DisplayName, channel.DisplayName, login)
+		sampledAt := sampleTickAt
+		snapshot := Top500LiveSnapshot{
+			ChannelID:    channelID,
+			Login:        login,
+			IsLive:       false,
+			SampleTickAt: sampleTickAt,
+			SampledAt:    sampledAt,
+			Source:       Top500SnapshotSourceHelixUsers,
+		}
+		current := Top500Current{
+			ChannelID:      channelID,
+			Login:          login,
+			DisplayName:    displayName,
+			Rank:           channel.Rank,
+			CoverageSource: Top500CoverageSourceMetadata,
+			IsLive:         false,
+			SampledAt:      sampledAt,
+			StaleAfter:     sampledAt.Add(DefaultTop500MetadataStaleAfter),
+			LastSuccessAt:  &sampledAt,
+		}
+
+		if stream, ok := streamByChannel[channelID]; ok {
+			if !stream.SampledAt.IsZero() {
+				sampledAt = stream.SampledAt
+			}
+			login = firstNonEmpty(stream.Login, login)
+			displayName = firstNonEmpty(user.DisplayName, channel.DisplayName, login)
+			streamID := strings.TrimSpace(stream.StreamID)
+			snapshot = Top500LiveSnapshot{
+				ChannelID:    channelID,
+				Login:        login,
+				IsLive:       true,
+				Title:        stream.Title,
+				CategoryID:   stream.CategoryID,
+				CategoryName: stream.CategoryName,
+				StartedAt:    stream.StartedAt,
+				ViewerCount:  stream.ViewerCount,
+				Language:     stream.Language,
+				Tags:         stream.Tags,
+				SampleTickAt: sampleTickAt,
+				SampledAt:    sampledAt,
+				Source:       Top500SnapshotSourceHelixStreams,
+			}
+			current = Top500Current{
+				ChannelID:      channelID,
+				Login:          login,
+				DisplayName:    displayName,
+				Rank:           channel.Rank,
+				CoverageSource: Top500CoverageSourceMetadata,
+				IsLive:         true,
+				Title:          stream.Title,
+				CategoryID:     stream.CategoryID,
+				CategoryName:   stream.CategoryName,
+				StartedAt:      stream.StartedAt,
+				ViewerCount:    stream.ViewerCount,
+				Language:       stream.Language,
+				Tags:           stream.Tags,
+				SampledAt:      sampledAt,
+				StaleAfter:     sampledAt.Add(DefaultTop500MetadataStaleAfter),
+				LastSuccessAt:  &sampledAt,
+			}
+			if streamID != "" {
+				snapshot.StreamID = &streamID
+				current.StreamID = &streamID
+			}
+		}
+
+		samples = append(samples, Top500MetadataSample{Channel: channel, Snapshot: snapshot, Current: current})
+	}
+	return samples
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
 func (r *Top500SamplerTickResult) addWriteModeClass(cfg Top500SamplerConfig) {
 	if cfg.DryRun {
 		r.addClass(Top500SamplerClassDryRun)
 		return
 	}
-	r.addClass(Top500SamplerClassWriteDisabled)
+	if !cfg.WriteEnabled {
+		r.addClass(Top500SamplerClassWriteDisabled)
+	}
 }
 
 func (r *Top500SamplerTickResult) addClass(classification string) {
