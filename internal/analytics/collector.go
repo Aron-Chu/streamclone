@@ -47,6 +47,12 @@ type Collector struct {
 	pollInterval time.Duration
 	retention    time.Duration
 	topEmotes    int
+	idleTTL      time.Duration
+	pulseCacheInvalidator func(ctx context.Context, login, streamID string, includeHeatmap bool)
+	// nowClock supports fake-clock VOD finalization tests; defaults to time.Now().UTC.
+	nowClock func() time.Time
+	goLiveByStream      sync.Map // streamID -> pulseGoLiveObservation
+	firstRollupRecorded sync.Map // streamID -> struct{}
 
 	// vodResolveOffsets are the post-close offsets (relative to stream close)
 	// at which the live collector attempts to resolve the VOD id via Helix.
@@ -70,6 +76,10 @@ type trackedChannel struct {
 	offlinePolls    int
 	addedAt         time.Time
 	lastPollAt      time.Time
+	lastViewedAt    time.Time
+	refCounts       map[string]int
+	poolAlwaysTrack bool
+	watchPriority   int
 }
 
 type minuteAccumulator struct {
@@ -118,15 +128,51 @@ func NewCollector(
 		pollInterval:  pollInterval,
 		retention:     retention,
 		topEmotes:     topEmotes,
+		idleTTL:       15 * time.Minute,
 		tracked:       map[string]*trackedChannel{},
 		buckets:       map[string]*minuteAccumulator{},
 		runCtx:        context.Background(),
 		stop:          make(chan struct{}),
 		alwaysTracked: map[string]bool{},
-		// Resolve the VOD id at close, then at 30s / 2m / 5m after close; the
-		// 5m offset is the upper bound of the resolution window (Req 19.3/19.4).
-		vodResolveOffsets: []time.Duration{0, 30 * time.Second, 2 * time.Minute, 5 * time.Minute},
+		// Resolve the VOD id at close, then at 30s / 2m / 5m / 15m / 60m after
+		// close. The final offset is the auto-retry upper bound (Req 19.3/19.4).
+		vodResolveOffsets: []time.Duration{0, 30 * time.Second, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute, 60 * time.Minute},
 	}
+}
+
+func (c *Collector) WithIdleTTL(d time.Duration) *Collector {
+	if c != nil && d > 0 {
+		c.idleTTL = d
+	}
+	return c
+}
+
+func (c *Collector) WithMaxTracked(max int) *Collector {
+	if c != nil && max > 0 {
+		c.maxTracked = max
+	}
+	return c
+}
+
+func (c *Collector) WithPulseCacheInvalidator(fn func(ctx context.Context, login, streamID string, includeHeatmap bool)) *Collector {
+	if c != nil {
+		c.pulseCacheInvalidator = fn
+	}
+	return c
+}
+
+func (c *Collector) WithNowClock(fn func() time.Time) *Collector {
+	if c != nil && fn != nil {
+		c.nowClock = fn
+	}
+	return c
+}
+
+func (c *Collector) nowUTC() time.Time {
+	if c != nil && c.nowClock != nil {
+		return c.nowClock()
+	}
+	return time.Now().UTC()
 }
 
 func (c *Collector) WithAlwaysTracked(logins []string) *Collector {
@@ -138,7 +184,12 @@ func (c *Collector) WithAlwaysTracked(logins []string) *Collector {
 		if normalized != "" {
 			alwaysMap[normalized] = true
 			if _, ok := c.tracked[normalized]; !ok {
-				c.tracked[normalized] = &trackedChannel{login: normalized, addedAt: time.Now().UTC()}
+				c.tracked[normalized] = &trackedChannel{
+					login:        normalized,
+					addedAt:      time.Now().UTC(),
+					lastViewedAt: time.Now().UTC(),
+					refCounts:    map[string]int{},
+				}
 			}
 		}
 	}
@@ -195,9 +246,29 @@ func (c *Collector) Stop() {
 }
 
 func (c *Collector) Watch(ctx context.Context, login string) WatchResponse {
+	return c.WatchForPrincipal(ctx, login, "")
+}
+
+func (c *Collector) WatchForPrincipal(ctx context.Context, login, principalID string) WatchResponse {
+	incoming := TrackPriorityIdleNoRef
+	if strings.TrimSpace(principalID) != "" {
+		incoming = TrackPriorityManualWatch
+	}
+	return c.WatchWithPriority(ctx, login, principalID, incoming)
+}
+
+func (c *Collector) WatchWithPriority(ctx context.Context, login, principalID string, incomingPriority int) WatchResponse {
 	login = normalizeLogin(login)
+	now := time.Now().UTC()
 	c.mu.Lock()
-	if _, ok := c.tracked[login]; ok {
+	if tc, ok := c.tracked[login]; ok {
+		c.touchPrincipalLocked(tc, principalID, now)
+		if incomingPriority > tc.watchPriority {
+			tc.watchPriority = incomingPriority
+		}
+		if incomingPriority >= TrackPriorityPrincipalAlwaysTrack {
+			tc.poolAlwaysTrack = true
+		}
 		active := len(c.tracked)
 		c.mu.Unlock()
 		c.kickoffLiveEmoteEnsure(login)
@@ -211,18 +282,39 @@ func (c *Collector) Watch(ctx context.Context, login string) WatchResponse {
 		}
 	}
 	if len(c.tracked) >= c.maxTracked {
-		active := len(c.tracked)
-		c.mu.Unlock()
-		return WatchResponse{
-			Channel:  login,
-			Tracking: false,
-			Active:   active,
-			Max:      c.maxTracked,
-			Message:  "analytics tracking pool is full",
-			Sources:  []SourceStatus{{Source: "analytics_collector", State: "limited", Message: "max tracked channels reached"}},
+		evicted, evictedPriority, ok := c.evictOneForIncomingPriorityLocked(now, incomingPriority)
+		if !ok {
+			active := len(c.tracked)
+			c.mu.Unlock()
+			return WatchResponse{
+				Channel:  login,
+				Tracking: false,
+				Active:   active,
+				Max:      c.maxTracked,
+				Message:  "analytics tracking pool is full",
+				Sources:  []SourceStatus{{Source: "analytics_collector", State: "limited", Message: "max tracked channels reached"}},
+			}
 		}
+		c.log.Info("collector preempted lower-priority channel",
+			"evicted", evicted,
+			"evicted_priority", evictedPriority,
+			"incoming", login,
+			"incoming_priority", incomingPriority,
+		)
+		c.irc.Part(c.runCtx, evicted)
 	}
-	c.tracked[login] = &trackedChannel{login: login, addedAt: time.Now().UTC()}
+	tc := &trackedChannel{
+		login:         login,
+		addedAt:       now,
+		lastViewedAt:  now,
+		refCounts:     map[string]int{},
+		watchPriority: incomingPriority,
+	}
+	if incomingPriority >= TrackPriorityPrincipalAlwaysTrack {
+		tc.poolAlwaysTrack = true
+	}
+	c.touchPrincipalLocked(tc, principalID, now)
+	c.tracked[login] = tc
 	active := len(c.tracked)
 	ircCtx := c.runCtx
 	c.mu.Unlock()
@@ -238,23 +330,197 @@ func (c *Collector) Watch(ctx context.Context, login string) WatchResponse {
 	}
 }
 
-func (c *Collector) SetAlwaysTracked(ctx context.Context, login string, always bool) WatchResponse {
+func (c *Collector) TouchForPrincipal(login, principalID string) {
+	if principalID == "" {
+		return
+	}
 	login = normalizeLogin(login)
+	now := time.Now().UTC()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tc := c.tracked[login]
+	if tc == nil {
+		return
+	}
+	c.touchPrincipalLocked(tc, principalID, now)
+}
+
+func (c *Collector) ReleaseForPrincipal(login, principalID string) {
+	if principalID == "" {
+		return
+	}
+	login = normalizeLogin(login)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tc := c.tracked[login]
+	if tc == nil || tc.refCounts == nil {
+		return
+	}
+	if tc.refCounts[principalID] <= 1 {
+		delete(tc.refCounts, principalID)
+	} else {
+		tc.refCounts[principalID]--
+	}
+}
+
+func (c *Collector) SetPoolAlwaysTrack(login string, always bool) {
+	login = normalizeLogin(login)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tc := c.tracked[login]
+	if tc == nil {
+		return
+	}
+	tc.poolAlwaysTrack = always
+}
+
+func (c *Collector) touchPrincipalLocked(tc *trackedChannel, principalID string, now time.Time) {
+	if tc == nil {
+		return
+	}
+	tc.lastViewedAt = now
+	if principalID == "" {
+		return
+	}
+	if tc.refCounts == nil {
+		tc.refCounts = map[string]int{}
+	}
+	if tc.refCounts[principalID] == 0 {
+		tc.refCounts[principalID] = 1
+	}
+}
+
+func (c *Collector) channelRefCount(tc *trackedChannel) int {
+	if tc == nil || len(tc.refCounts) == 0 {
+		return 0
+	}
+	total := 0
+	for _, n := range tc.refCounts {
+		total += n
+	}
+	return total
+}
+
+func (c *Collector) shouldRetainTracked(login string, tc *trackedChannel) bool {
+	if tc == nil {
+		return false
+	}
+	if c.alwaysTracked[login] || tc.poolAlwaysTrack {
+		return true
+	}
+	if len(tc.refCounts) == 0 {
+		return false
+	}
+	return c.channelRefCount(tc) > 0
+}
+
+func (c *Collector) effectiveTrackingPriority(login string, tc *trackedChannel) int {
+	if tc == nil {
+		return TrackPriorityIdleNoRef
+	}
+	if c.alwaysTracked[login] {
+		return TrackPriorityGlobalProtected
+	}
+	if tc.poolAlwaysTrack {
+		return TrackPriorityPrincipalAlwaysTrack
+	}
+	if tc.watchPriority > 0 {
+		return tc.watchPriority
+	}
+	if c.channelRefCount(tc) > 0 {
+		return TrackPriorityManualWatch
+	}
+	return TrackPriorityIdleNoRef
+}
+
+func (c *Collector) evictOneForIncomingPriorityLocked(now time.Time, incomingPriority int) (string, int, bool) {
+	type candidate struct {
+		login    string
+		priority int
+		idle     time.Duration
+	}
+	candidates := make([]candidate, 0, len(c.tracked))
+	for login, tc := range c.tracked {
+		victimPriority := c.effectiveTrackingPriority(login, tc)
+		if !trackingPriorityCanPreempt(incomingPriority, victimPriority) {
+			continue
+		}
+		idle := now.Sub(tc.lastViewedAt)
+		candidates = append(candidates, candidate{login: login, priority: victimPriority, idle: idle})
+	}
+	if len(candidates) == 0 {
+		return "", 0, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority < candidates[j].priority
+		}
+		return candidates[i].idle > candidates[j].idle
+	})
+	login := candidates[0].login
+	priority := candidates[0].priority
+	delete(c.tracked, login)
+	return login, priority, true
+}
+
+func (c *Collector) TrackedStreamID(login string) string {
+	login = normalizeLogin(login)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if tc := c.tracked[login]; tc != nil {
+		return tc.currentStreamID
+	}
+	return ""
+}
+
+func (c *Collector) evictIdleChannels(now time.Time) {
+	var evict []string
+	c.mu.Lock()
+	for login, tc := range c.tracked {
+		if c.shouldRetainTracked(login, tc) {
+			continue
+		}
+		if tc.lastViewedAt.IsZero() || now.Sub(tc.lastViewedAt) < c.idleTTL {
+			continue
+		}
+		evict = append(evict, login)
+	}
+	for _, login := range evict {
+		delete(c.tracked, login)
+	}
+	c.mu.Unlock()
+	for _, login := range evict {
+		c.irc.Part(context.Background(), login)
+	}
+}
+
+func (c *Collector) SetAlwaysTracked(ctx context.Context, login string, always bool, skipStoreWrite ...bool) WatchResponse {
+	login = normalizeLogin(login)
+	skipStore := len(skipStoreWrite) > 0 && skipStoreWrite[0]
 	c.mu.Lock()
 	if always {
 		c.alwaysTracked[login] = true
 		if _, ok := c.tracked[login]; !ok {
-			c.tracked[login] = &trackedChannel{login: login, addedAt: time.Now().UTC()}
+			c.tracked[login] = &trackedChannel{
+				login:        login,
+				addedAt:      time.Now().UTC(),
+				lastViewedAt: time.Now().UTC(),
+				refCounts:    map[string]int{},
+			}
 			c.irc.Join(c.runCtx, login)
 		}
-		_ = c.store.AddAlwaysTracked(ctx, login)
+		if !skipStore {
+			_ = c.store.AddAlwaysTracked(ctx, login)
+		}
 	} else {
 		delete(c.alwaysTracked, login)
 		if tc, ok := c.tracked[login]; ok && tc.currentStreamID == "" {
 			c.irc.Part(c.runCtx, login)
 			delete(c.tracked, login)
 		}
-		_ = c.store.RemoveAlwaysTracked(ctx, login)
+		if !skipStore {
+			_ = c.store.RemoveAlwaysTracked(ctx, login)
+		}
 	}
 	active := len(c.tracked)
 	c.mu.Unlock()
@@ -430,7 +696,7 @@ func (c *Collector) pollOnce(ctx context.Context) {
 					c.mu.Lock()
 				}
 			}
-			if !isAlwaysTracked {
+			if !c.shouldRetainTracked(login, tracked) {
 				remove = append(remove, login)
 			}
 		}
@@ -454,6 +720,7 @@ func (c *Collector) pollOnce(ctx context.Context) {
 		c.scheduleVodIDResolve(streamID)
 	}
 	c.flushCompleted(ctx, now)
+	c.evictIdleChannels(now)
 }
 
 func (c *Collector) trackedLogins() []string {
@@ -543,7 +810,9 @@ func (c *Collector) flushWhere(ctx context.Context, shouldFlush func(*minuteAccu
 		rollup := acc.rollup(c.topEmotes)
 		if err := c.store.UpsertMinuteRollup(ctx, acc.streamID, rollup); err != nil {
 			c.log.Warn("analytics flush rollup failed", "stream_id", acc.streamID, "minute", acc.minute, "err", err)
+			continue
 		}
+		c.recordFirstRollupMetrics(acc.streamID, acc.minute)
 	}
 }
 
@@ -565,17 +834,18 @@ func (c *Collector) scheduleVodIDResolve(streamID string) {
 // links the VOD, the historical stream record exposes the same minute-bucket
 // scored points the live session produced (Requirement 19.3).
 //
-// Resolution is bounded to a 5-minute window (offsets 0 / 30s / 2m / 5m after
-// close). If the VOD id does not resolve within that window, the rollups are
-// retained under the live stream id and the record is marked "unlinked" so a
-// later sync or manual trigger can complete the association (Requirement 19.4).
+// Resolution is bounded to a 60-minute auto-retry window after close. If the VOD
+// id does not resolve within that window, the rollups are retained under the
+// live stream id and the record is marked soft "unlinked" so a later sync,
+// manual retry, or validated extension hint can complete the association
+// (Requirement 19.4).
 func (c *Collector) resolveVodIDWithRetry(streamID string, closedAt time.Time) {
 	offsets := c.vodResolveOffsets
 	if len(offsets) == 0 {
 		offsets = []time.Duration{0}
 	}
 	for attempt, offset := range offsets {
-		if wait := time.Until(closedAt.Add(offset)); wait > 0 {
+		if wait := closedAt.Add(offset).Sub(c.nowUTC()); wait > 0 {
 			time.Sleep(wait)
 		}
 		ctx := context.Background()
@@ -589,12 +859,13 @@ func (c *Collector) resolveVodIDWithRetry(streamID string, closedAt time.Time) {
 		}
 		if strings.TrimSpace(rec.VodID) != "" {
 			// Already linked (e.g. by a concurrent sync); nothing left to stitch.
+			c.invalidatePulseBFFCache(ctx, rec.Login)
 			return
 		}
 		broadcasterID := strings.TrimSpace(rec.BroadcasterID)
 		if broadcasterID == "" {
 			c.log.Debug("vod resolve skipped; broadcaster_id missing", "stream_id", streamID)
-			c.markVodUnlinked(ctx, streamID)
+			c.markVodUnlinked(ctx, streamID, rec.Login)
 			return
 		}
 		vodID, err := c.helix.VideoIDByStreamID(ctx, broadcasterID, streamID)
@@ -611,20 +882,43 @@ func (c *Collector) resolveVodIDWithRetry(streamID string, closedAt time.Time) {
 			c.log.Warn("failed to persist vod_id on stream close", "stream_id", streamID, "err", err)
 			return
 		}
+		c.invalidatePulseBFFCache(ctx, rec.Login)
 		c.log.Info("stitched live heatmap points to historical vod", "stream_id", streamID, "vod_id", vodID, "attempt", attempt+1)
 		return
 	}
-	// VOD id did not resolve within the 5-minute window: retain live points under
-	// the live stream id and mark the record unlinked.
-	c.markVodUnlinked(context.Background(), streamID)
+	// VOD id did not resolve within the auto-retry window: retain live points
+	// under the live stream id and mark the record soft-unlinked.
+	ctx := context.Background()
+	rec, _ := c.store.StreamByID(ctx, streamID)
+	login := ""
+	if rec != nil {
+		login = rec.Login
+	}
+	c.markVodUnlinked(ctx, streamID, login)
 }
 
-func (c *Collector) markVodUnlinked(ctx context.Context, streamID string) {
+func (c *Collector) markVodUnlinked(ctx context.Context, streamID, login string) {
 	if err := c.store.MarkStreamVodUnlinked(ctx, streamID); err != nil {
 		c.log.Warn("failed to mark stream vod unlinked", "stream_id", streamID, "err", err)
 		return
 	}
+	c.invalidatePulseBFFCache(ctx, login)
 	c.log.Info("vod unresolved within window; retained live heatmap points as unlinked", "stream_id", streamID)
+}
+
+func (c *Collector) invalidatePulseBFFCache(ctx context.Context, login string) {
+	c.invalidatePulseCachesMode(ctx, login, "", false)
+}
+
+func (c *Collector) invalidatePulseCaches(ctx context.Context, login, streamID string) {
+	c.invalidatePulseCachesMode(ctx, login, streamID, true)
+}
+
+func (c *Collector) invalidatePulseCachesMode(ctx context.Context, login, streamID string, includeHeatmap bool) {
+	if c == nil || c.pulseCacheInvalidator == nil {
+		return
+	}
+	c.pulseCacheInvalidator(ctx, login, streamID, includeHeatmap)
 }
 
 func (a *minuteAccumulator) rollup(topN int) MinuteRollup {

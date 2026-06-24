@@ -185,6 +185,17 @@ type Config struct {
 	Tier0RosterInterval time.Duration `env:"TIER0_ROSTER_INTERVAL" envDefault:"5m"`
 	Tier0RosterTopN     int           `env:"TIER0_ROSTER_TOP_N" envDefault:"200"`
 
+	PulseHostedMode              bool   `env:"PULSE_HOSTED_MODE" envDefault:"false"`
+	PulseBetaKeys                string `env:"PULSE_BETA_KEYS"`
+	PulseMaxActiveChannels       int    `env:"PULSE_MAX_ACTIVE_CHANNELS" envDefault:"0"`
+	PulseMaxBackfills            int    `env:"PULSE_MAX_BACKFILLS" envDefault:"0"`
+	PulseMaxChannelsPerPrincipal int    `env:"PULSE_MAX_CHANNELS_PER_PRINCIPAL" envDefault:"0"`
+	PulseWatchRatePerMin         int    `env:"PULSE_WATCH_RATE_PER_MIN" envDefault:"0"`
+	PulseBackfillRatePerHour     int    `env:"PULSE_BACKFILL_RATE_PER_HOUR" envDefault:"0"`
+	PulseCFAccessTeamDomain      string `env:"PULSE_CF_ACCESS_TEAM_DOMAIN"`
+	PulseCFAccessAud             string `env:"PULSE_CF_ACCESS_AUD"`
+	PulseAdminLocalBypass        bool   `env:"PULSE_ADMIN_LOCAL_BYPASS" envDefault:"false"`
+
 	BackfillEnabled             bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
 	BackfillWorkerInterval      time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`
 	BackfillStaleRunningAfter   time.Duration `env:"BACKFILL_STALE_RUNNING_AFTER" envDefault:"2h"`

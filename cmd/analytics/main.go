@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,15 @@ func main() {
 		cfg.GoldBackfillEnabled = false
 		cfg.Tier0Enabled = false
 		logger.Info("CORPUS_WORKERS_ENABLED=false — corpus plane off for this process")
+	}
+	if cfg.PulseHostedMode && strings.TrimSpace(cfg.PulseBetaKeys) == "" {
+		logger.Error("PULSE_HOSTED_MODE=true but PULSE_BETA_KEYS is empty — hosted Pulse write/read routes fail closed until keys are configured")
+	}
+	pulseMaxAlwaysTrackedPerPrincipal := cfg.PulseMaxChannelsPerPrincipal
+	if raw := strings.TrimSpace(os.Getenv("PULSE_MAX_ALWAYS_TRACKED_PER_PRINCIPAL")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			pulseMaxAlwaysTrackedPerPrincipal = n
+		}
 	}
 
 	ctx := context.Background()
@@ -126,6 +136,10 @@ func main() {
 		logger.Error("failed to load always tracked from db", "err", err)
 	}
 	allAlways := append(cfg.AlwaysTrackedChannels, dbAlways...)
+	maxTracked := cfg.MaxConcurrentTrackedChannels
+	if cfg.PulseMaxActiveChannels > 0 {
+		maxTracked = cfg.PulseMaxActiveChannels
+	}
 	if report, err := store.CleanupSessionStubs(ctx, allAlways); err != nil {
 		logger.Warn("prefetch stub cleanup failed", "err", err)
 	} else if report.StubSessionsMerged > 0 || len(report.OrphanAliasesMerged) > 0 {
@@ -147,7 +161,7 @@ func main() {
 		irc,
 		enricher,
 		logger,
-		cfg.MaxConcurrentTrackedChannels,
+		maxTracked,
 		cfg.AnalyticsPollInterval,
 		time.Duration(cfg.AnalyticsRetentionDays)*24*time.Hour,
 		cfg.AnalyticsTopEmotesPerMinute,
@@ -338,9 +352,50 @@ func main() {
 	}
 
 	heatmapCache := heatmap.NewCache(rdb, logger)
-	pulseBackfill := analytics.NewPulseBackfillManager(syncService, store, helix, rdb, heatmapCache)
+	collector.WithPulseCacheInvalidator(func(ctx context.Context, login, streamID string, includeHeatmap bool) {
+		analytics.InvalidatePulseBFFCache(ctx, rdb, login, logger)
+		if includeHeatmap {
+			analytics.InvalidatePulseHeatmapCache(ctx, heatmapCache, streamID, logger)
+		}
+	})
+	pulseRuntime := analytics.PulseRuntimeConfigFromEnv()
+	pulseBackfill := analytics.NewPulseBackfillManager(syncService, store, helix, rdb, heatmapCache).WithRuntime(pulseRuntime)
+	if cfg.PulseMaxBackfills > 0 {
+		pulseBackfill.WithMaxConcurrent(cfg.PulseMaxBackfills)
+	}
 	handler := analytics.NewHandler(store, collector, helix, syncService)
-	handler.WithHeatmapCache(heatmapCache).WithTimeseries(tsWriter).WithRedis(rdb).WithPulseBackfill(pulseBackfill)
+	pulseHosted := analytics.PulseHostedConfig{
+		Hosted:                  cfg.PulseHostedMode,
+		BetaKeys:                analytics.ParsePulseBetaKeys(cfg.PulseBetaKeys),
+		MaxActiveChannels:       cfg.PulseMaxActiveChannels,
+		MaxChannelsPerPrincipal: pulseMaxAlwaysTrackedPerPrincipal,
+		WatchRatePerMin:         cfg.PulseWatchRatePerMin,
+		BackfillRatePerHour:     cfg.PulseBackfillRatePerHour,
+	}
+	if raw := strings.TrimSpace(os.Getenv("PULSE_IDLE_TTL")); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			pulseHosted.IdleTTL = d
+		}
+	}
+	if pulseHosted.IdleTTL == 0 {
+		pulseHosted.IdleTTL = 15 * time.Minute
+	}
+	handler.WithHeatmapCache(heatmapCache).WithTimeseries(tsWriter).WithRedis(rdb).WithPulseBackfill(pulseBackfill).WithPulseHosted(pulseHosted).WithPulseRuntime(pulseRuntime)
+	handler.WithRateLimiter(analytics.NewPulseRateLimiter(rdb, pulseHosted.WatchRatePerMin, pulseHosted.BackfillRatePerHour))
+	analytics.StartProtectedGoLivePoller(ctx, analytics.NewProtectedGoLivePoller(store, helix, collector, pulseRuntime, logger), logger)
+	logger.Info("pulse runtime config",
+		"hosted", pulseHosted.Hosted,
+		"active_cap", pulseHosted.MaxActiveChannels,
+		"backfill_cap", cfg.PulseMaxBackfills,
+		"helix_live", pulseRuntime.HelixLiveEnabled,
+		"helix_vod", pulseRuntime.HelixVodEnabled,
+		"helix_metadata", pulseRuntime.HelixMetadataEnabled,
+		"helix_golive", pulseRuntime.HelixGoLiveEnabled,
+		"gql_comments", pulseRuntime.GQLCommentsEnabled,
+		"pulse_backfill", pulseRuntime.BackfillEnabled,
+		"read_only", pulseRuntime.ReadOnlyMode,
+	)
+	handler.StartPublicCacheRefresh(ctx)
 	adminArchiveHandler := analytics.NewAdminArchiveHandler(pool, cfg)
 	chatReplayStore := chatreplay.NewStore(pool).WithArchiveProtectRetention(cfg.ArchiveProtectRetention)
 	chatReplayHandler := chatreplay.NewHandler(chatReplayStore).WithLogger(logger).WithIngestEnabled(func() bool {
@@ -356,6 +411,7 @@ func main() {
 		return store.Ping(ctx)
 	})
 	handler.Routes(srv.Router)
+	handler.AdminPulseRoutes(srv.Router, cfg)
 	adminArchiveHandler.Routes(srv.Router, cfg)
 	chatReplayHandler.Routes(srv.Router)
 
