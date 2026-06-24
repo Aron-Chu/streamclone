@@ -462,20 +462,25 @@ func TestTop500MetadataSamplerIntegrationWritePath(t *testing.T) {
 	}
 }
 
-func TestTop500MetadataSamplerNotWiredInMain(t *testing.T) {
+func TestTop500MetadataSamplerRuntimeWiringInMain(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "cmd", "analytics", "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := string(raw)
-	for _, forbidden := range []string{
+	for _, required := range []string{
+		"Top500MetadataEnabled",
+		"Top500SamplerConfigFromApp",
+		"InitTop500MetadataSamplerMetrics",
 		"NewTop500MetadataSampler",
 		"StartTop500MetadataSampler",
-		"Top500MetadataProvider",
 	} {
-		if strings.Contains(source, forbidden) {
-			t.Fatalf("Batch I3 must not wire runtime sampler startup in main.go; found %q", forbidden)
+		if !strings.Contains(source, required) {
+			t.Fatalf("Batch L1 runtime wiring missing %q in cmd/analytics/main.go", required)
 		}
+	}
+	if !strings.Contains(source, "top500 metadata sampler disabled") {
+		t.Fatal("expected disabled-default startup log in cmd/analytics/main.go")
 	}
 }
 
