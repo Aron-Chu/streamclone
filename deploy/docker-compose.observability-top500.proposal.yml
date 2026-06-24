@@ -1,0 +1,36 @@
+# Batch B2 proposal — observability overlay additions (NOT APPLIED).
+# Merge into deploy/docker-compose.observability.yml when operator approves deploy.
+#
+# Prometheus:
+#   --storage.tsdb.retention.time=15d
+#   named volume prometheus-obs-data:/prometheus
+#
+# Alert rules: deploy/prometheus/alerts/top500-hosted.proposal.yml
+# Alertmanager: deploy/alertmanager/alertmanager.proposal.yml
+
+services:
+  prometheus-obs:
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - prometheus-obs-data:/prometheus
+      - ./prometheus/prometheus-observability.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
+
+  alertmanager-obs:
+    profiles: [observability]
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.proposal.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+
+volumes:
+  prometheus-obs-data:
