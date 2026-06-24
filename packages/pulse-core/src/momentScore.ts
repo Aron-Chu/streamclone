@@ -1,4 +1,4 @@
-import type { HeatmapEmote, ReplayHeatmapDetailPoint, ReplayHeatmapPoint } from './types/heatmap'
+import type { HeatmapEmote, ReplayHeatmapDetailPoint, ReplayHeatmapPoint } from './types/heatmap.ts'
 
 const REASON_LABELS: Record<string, string> = {
   chat_spike: 'Chat spike',

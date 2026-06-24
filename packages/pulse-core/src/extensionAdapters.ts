@@ -5,11 +5,11 @@ import type {
   LiveHeatPoint,
   LiveHeatReason,
   LiveHeatRollup,
-} from './liveHeat'
-import { LIVE_HEAT_MAX_EMOTES } from './liveHeat'
-import { momentScoreReasonLabel } from './momentScore'
-import { resolveEmoteImageUrl } from './emoteImageUrl'
-import type { LiveStatsInput, LiveStatsRollup, LiveTopEmote } from './liveStats'
+} from './liveHeat.ts'
+import { LIVE_HEAT_MAX_EMOTES } from './liveHeat.ts'
+import { momentScoreReasonLabel } from './momentScore.ts'
+import { resolveEmoteImageUrl } from './emoteImageUrl.ts'
+import type { LiveStatsInput, LiveStatsRollup, LiveTopEmote } from './liveStats.ts'
 
 export interface ExtensionEmoteLike {
   id?: string
@@ -180,13 +180,32 @@ function rollupTopEmotesToEmotesMap(topEmotes?: ExtensionEmoteLike[]): Record<st
   return map
 }
 
+function isSevenTvProvider(provider?: string): boolean {
+  if (!provider) return false
+  const lower = provider.trim().toLowerCase()
+  return lower === '7tv' || lower === 'seventv'
+}
+
 function extensionRollupToStatsRollup(r: ExtensionRollupLike, startedAt?: string): LiveStatsRollup {
   const viewerCount = r.viewerCount ?? 0
+  let totalEmoteCount = r.totalEmoteCount
+  let seventvEmoteCount = r.sevenTvEmoteCount
+
+  if ((totalEmoteCount ?? 0) === 0 && (r.topEmotes?.length ?? 0) > 0) {
+    totalEmoteCount = r.topEmotes!.reduce((sum, emote) => sum + Math.max(0, emote.count ?? 0), 0)
+    seventvEmoteCount = r.topEmotes!
+      .filter(emote => isSevenTvProvider(emote.provider))
+      .reduce((sum, emote) => sum + Math.max(0, emote.count ?? 0), 0)
+  }
+  if ((totalEmoteCount ?? 0) === 0 && (seventvEmoteCount ?? 0) > 0) {
+    totalEmoteCount = seventvEmoteCount
+  }
+
   return {
     minuteTs: minuteTsFromOffset(startedAt, r.offsetSeconds),
     chatCount: r.chatCount,
-    totalEmoteCount: r.totalEmoteCount,
-    seventvEmoteCount: r.sevenTvEmoteCount,
+    totalEmoteCount,
+    seventvEmoteCount,
     viewerLatest: viewerCount > 0 ? viewerCount : undefined,
     viewerSamples: viewerCount > 0 ? 1 : undefined,
     missing: r.missing,

@@ -1,12 +1,12 @@
-import type { ReplayHeatmapPoint } from './types/heatmap'
-import { resolveEmoteImageUrl } from './emoteImageUrl'
-import { buildMomentScoreModel } from './momentScore'
+import type { ReplayHeatmapPoint } from './types/heatmap.ts'
+import { resolveEmoteImageUrl } from './emoteImageUrl.ts'
+import { buildMomentScoreModel } from './momentScore.ts'
 import {
   computeStreamBaselines,
   detectPickReason,
   fallbackMomentScore100,
   type StreamBaselines,
-} from './momentScoring'
+} from './momentScoring.ts'
 
 export const LIVE_HEAT_REFRESH_MS = 30000
 export const LIVE_HEAT_MIN_COMPLETED_ROLLUPS = 5

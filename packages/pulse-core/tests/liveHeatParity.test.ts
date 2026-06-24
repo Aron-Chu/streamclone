@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { deriveLiveHeat, type LiveHeatInput, type LiveHeatRollup } from '../src/liveHeat'
-import { toLiveHeatInputFromExtension, type ExtensionPulseLike } from '../src/extensionAdapters'
+import { deriveLiveHeat, type LiveHeatInput, type LiveHeatRollup } from '../src/liveHeat.ts'
+import { toLiveHeatInputFromExtension, type ExtensionPulseLike } from '../src/extensionAdapters.ts'
 
 const STARTED_AT = '2026-06-11T12:00:00.000Z'
 const MINUTE_MS = 60_000
