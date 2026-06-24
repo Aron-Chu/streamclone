@@ -1,0 +1,68 @@
+{
+  "subsystems": [
+    {
+      "id": "service:metadata",
+      "name": "metadata",
+      "description": "Core metadata API and catch-all /v1 routes",
+      "keywords": ["metadata", "channels", "ops"],
+      "path_patterns": ["cmd/metadata", "internal/metadata"],
+      "routes": ["/v1/channels", "/v1/ops"]
+    },
+    {
+      "id": "service:video",
+      "name": "video",
+      "description": "Stream relay, HLS, and playback",
+      "keywords": ["video", "stream", "hls", "playback"],
+      "path_patterns": ["cmd/video", "internal/video"],
+      "routes": ["/v1/stream", "/live"]
+    },
+    {
+      "id": "service:chat",
+      "name": "chat",
+      "description": "Twitch auth, websocket chat, and session APIs",
+      "keywords": ["chat", "auth", "websocket", "oauth"],
+      "path_patterns": ["cmd/chat", "internal/chat"],
+      "routes": ["/v1/auth", "/v1/ws", "/v1/me"]
+    },
+    {
+      "id": "service:emote",
+      "name": "emote",
+      "description": "7TV/FFZ emote sync and rendering",
+      "keywords": ["emote", "7tv", "ffz"],
+      "path_patterns": ["cmd/emote", "internal/emote"],
+      "routes": ["/v1/emotes", "/emotes"]
+    },
+    {
+      "id": "service:analytics",
+      "name": "analytics",
+      "description": "VOD sync, rollups, Pulse extension BFF",
+      "keywords": ["analytics", "vod", "sync", "rollup", "pulse", "extension"],
+      "path_patterns": ["cmd/analytics", "internal/analytics"],
+      "routes": ["/v1/analytics", "/v1/extension", "/v1/pulse"]
+    },
+    {
+      "id": "service:storygraph",
+      "name": "storygraph",
+      "description": "Pulse Wire news ingest and social spread",
+      "keywords": ["pulse-wire", "storygraph", "news", "spread", "reddit", "lsf"],
+      "path_patterns": ["cmd/storygraph", "internal/storygraph", "internal/social"],
+      "routes": ["/v1/pulse-wire", "/v1/channels"]
+    },
+    {
+      "id": "service:frontend",
+      "name": "frontend",
+      "description": "React SPA and browser clients",
+      "keywords": ["frontend", "react", "spa"],
+      "path_patterns": ["frontend/src"],
+      "routes": []
+    },
+    {
+      "id": "service:pulse-core",
+      "name": "pulse-core",
+      "description": "Shared Pulse scoring and extension adapters",
+      "keywords": ["pulse-core", "scoring", "extension-adapters"],
+      "path_patterns": ["packages/pulse-core"],
+      "routes": []
+    }
+  ]
+}
