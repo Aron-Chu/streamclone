@@ -1,7 +1,7 @@
-import type { HeatmapEmote } from './types/heatmap.ts'
-import { parseEmoteKey } from './emoteKey.ts'
-import { resolveEmoteImageUrl } from './emoteImageUrl.ts'
-import { clampMomentScore } from './momentScore.ts'
+import type { HeatmapEmote } from './types/heatmap'
+import { parseEmoteKey } from './emoteKey'
+import { resolveEmoteImageUrl } from './emoteImageUrl'
+import { clampMomentScore } from './momentScore'
 
 export type MomentScoringRollup = {
   minuteTs?: string

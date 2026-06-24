@@ -1,4 +1,4 @@
-import { normalizeVodId } from './vodId.ts'
+import { normalizeVodId } from './vodId'
 
 export function buildAnalyticsMomentLink(
   login: string,

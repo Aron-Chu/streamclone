@@ -3,11 +3,14 @@ import { describe, it } from 'node:test'
 
 import {
   aggregateTopEmotesFromExtensionRollups,
+  extensionSupportsPeaks,
+  peaksToLiveHeatPoints,
   toLiveHeatInputFromExtension,
   toLiveStatsInputFromExtension,
+  type ExtensionPeakLike,
   type ExtensionPulseLike,
-} from '../src/extensionAdapters.ts'
-import { deriveLiveHeat, deriveLiveStats, splitEmoteProviderRates } from '../src/index.ts'
+} from '../src/extensionAdapters'
+import { deriveLiveHeat, deriveLiveStats, splitEmoteProviderRates } from '../src/index'
 
 const STARTED_AT = '2026-06-11T12:00:00.000Z'
 
@@ -116,5 +119,39 @@ describe('toLiveHeatInputFromExtension', () => {
     const heat = deriveLiveHeat(toLiveHeatInputFromExtension(makeExtensionPayload(7)))
     assert.equal(heat.visible, true)
     assert.ok(heat.collectingPoint?.collecting)
+  })
+})
+
+describe('peaksToLiveHeatPoints', () => {
+  const peaks: ExtensionPeakLike[] = [
+    {
+      offsetSeconds: 3120,
+      score: 88,
+      reasons: ['twitch_emote_spike'],
+      reasonLabel: 'Twitch emote spike',
+      chatCount: 214,
+      emoteCount: 5,
+      topEmotes: [
+        { name: 'LUL', count: 2, provider: 'twitch', id: 'lul' },
+        { name: 'TriHard', count: 1, provider: 'twitch', id: 'tri' },
+      ],
+    },
+  ]
+
+  it('maps backend peaks to non-estimated LiveHeatPoint rows', () => {
+    const points = peaksToLiveHeatPoints(peaks, STARTED_AT)
+    assert.equal(points.length, 1)
+    assert.equal(points[0]?.score, 88)
+    assert.equal(points[0]?.estimated, false)
+    assert.equal(points[0]?.reasonLabel, 'Twitch emote spike')
+    assert.equal(points[0]?.chatCount, 214)
+    assert.equal(points[0]?.topEmotes[0]?.name, 'LUL')
+    assert.equal(points[0]?.topEmotes[0]?.count, 2)
+  })
+
+  it('extensionSupportsPeaks is true only when peaks field is present', () => {
+    assert.equal(extensionSupportsPeaks(makeExtensionPayload(1, { peaks: [] })), true)
+    assert.equal(extensionSupportsPeaks(makeExtensionPayload(1)), false)
+    assert.equal(extensionSupportsPeaks(null), false)
   })
 })
