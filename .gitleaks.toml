@@ -4,7 +4,7 @@ title = "streamclone gitleaks config"
 useDefault = true
 
 [allowlist]
-description = "Known dev templates and Twitch public web client ID (not a private secret)"
+description = "Known dev templates and Twitch public web client ID (not a private secret). Do not put real webhooks or tokens in .env.example — use ~/.streamclone/ (see docs/operator-secrets.md)."
 paths = [
   '''(?i)\.env\.example$''',
   '''(?i)\.env\.dev$''',
