@@ -27,6 +27,38 @@ func TestTop500SilverGateMetricsRegisterAndUseAllowedLabels(t *testing.T) {
 	assertTop500SilverGateLabelsAllowed(t)
 }
 
+func TestTop500SilverGateMetricsAllDecisionReasonLabels(t *testing.T) {
+	reasons := []string{
+		"allow_enqueue",
+		"skip_not_candidate",
+		"skip_metadata_stale",
+		"skip_missing_stream_id",
+		"skip_already_done",
+		"skip_duplicate_job",
+		"skip_channel_cooldown",
+		"skip_recent_failure",
+		"skip_global_backoff",
+		"skip_daily_budget",
+		"skip_running_limit",
+		"skip_queue_full",
+		"skip_disk_guard",
+		"skip_backup_guard",
+		"skip_archive_guard",
+		"skip_alerting_guard",
+		"skip_corpus_unhealthy",
+		"skip_hosted_unhealthy",
+		"skip_counter_unavailable",
+		"skip_counter_stale",
+	}
+	for _, reason := range reasons {
+		result := "skip"
+		if reason == "allow_enqueue" {
+			result = "allow"
+		}
+		Top500SilverGateDecisionsTotal.WithLabelValues(result, reason, "top500_selective", "evaluate").Inc()
+	}
+}
+
 func assertTop500SilverGateLabelsAllowed(t *testing.T) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("top500_silver_gate.go"))
