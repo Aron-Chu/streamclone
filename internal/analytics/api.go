@@ -154,6 +154,9 @@ func (h *Handler) watchChannel(w http.ResponseWriter, r *http.Request) {
 		principalID = p.ID
 	}
 	resp := h.collector.WatchForPrincipal(r.Context(), login, principalID)
+	if resp.Tracking {
+		h.invalidateExtensionCoverageCache(r.Context(), login)
+	}
 	status := http.StatusOK
 	if !resp.Tracking {
 		status = http.StatusAccepted

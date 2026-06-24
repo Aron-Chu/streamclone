@@ -21,6 +21,9 @@ func TestExtensionHealthPublicShape(t *testing.T) {
 	if !payload.Routes.PulseChannel || !payload.Routes.VodHint || !payload.Routes.Backfill {
 		t.Fatalf("expected public route capabilities, got %+v", payload.Routes)
 	}
+	if !payload.Routes.PulseCoverage {
+		t.Fatal("expected pulseCoverage route flag for read-only coverage endpoint")
+	}
 }
 
 func TestExtensionHealthDoesNotExposeCapsOrRateLimits(t *testing.T) {
