@@ -113,7 +113,7 @@ func NewFixtureSilverBudgetCounterReader() *FixtureSilverBudgetCounterReader {
 	return &FixtureSilverBudgetCounterReader{}
 }
 
-func (r *FixtureSilverBudgetCounterReader) ReadSnapshot(_ context.Context, login string) (SilverBudgetSnapshot, error) {
+func (r *FixtureSilverBudgetCounterReader) ReadSnapshot(_ context.Context, login, _ string) (SilverBudgetSnapshot, error) {
 	if r == nil {
 		return SilverBudgetSnapshot{Available: false}, nil
 	}
@@ -134,7 +134,7 @@ func (r *FixtureSilverBudgetCounterReader) ReadSnapshot(_ context.Context, login
 // HealthySilverBudgetCounterReader is an in-memory healthy snapshot for local read-only dry-run.
 type HealthySilverBudgetCounterReader struct{}
 
-func (HealthySilverBudgetCounterReader) ReadSnapshot(context.Context, string) (SilverBudgetSnapshot, error) {
+func (HealthySilverBudgetCounterReader) ReadSnapshot(context.Context, string, string) (SilverBudgetSnapshot, error) {
 	return healthySilverBudgetSnapshot(), nil
 }
 

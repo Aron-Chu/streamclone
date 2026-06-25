@@ -14,7 +14,7 @@ type SilverCandidateReader interface {
 
 // SilverBudgetCounterReader loads budget and guard counters for gate evaluation.
 type SilverBudgetCounterReader interface {
-	ReadSnapshot(ctx context.Context, login string) (SilverBudgetSnapshot, error)
+	ReadSnapshot(ctx context.Context, login, streamID string) (SilverBudgetSnapshot, error)
 }
 
 // SilverEnqueueAdapter inserts silver-tier backfill jobs when write-enabled.
@@ -32,7 +32,7 @@ func (NoopSilverCandidateReader) ListCandidates(context.Context, int) ([]SilverG
 // NoopSilverBudgetCounterReader is a stub counter reader for LOAD-003a scaffold.
 type NoopSilverBudgetCounterReader struct{}
 
-func (NoopSilverBudgetCounterReader) ReadSnapshot(context.Context, string) (SilverBudgetSnapshot, error) {
+func (NoopSilverBudgetCounterReader) ReadSnapshot(context.Context, string, string) (SilverBudgetSnapshot, error) {
 	return SilverBudgetSnapshot{Available: false}, nil
 }
 

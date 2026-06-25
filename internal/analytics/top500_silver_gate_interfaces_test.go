@@ -19,7 +19,7 @@ func TestNoopSilverCandidateReaderReturnsEmpty(t *testing.T) {
 
 func TestNoopSilverBudgetCounterReaderFailClosed(t *testing.T) {
 	var reader NoopSilverBudgetCounterReader
-	snap, err := reader.ReadSnapshot(context.Background(), "shroud")
+	snap, err := reader.ReadSnapshot(context.Background(), "shroud", "stream-1")
 	if err != nil {
 		t.Fatalf("ReadSnapshot err = %v", err)
 	}
@@ -62,7 +62,7 @@ type mockSilverBudgetCounterReader struct {
 	snap SilverBudgetSnapshot
 }
 
-func (m *mockSilverBudgetCounterReader) ReadSnapshot(context.Context, string) (SilverBudgetSnapshot, error) {
+func (m *mockSilverBudgetCounterReader) ReadSnapshot(context.Context, string, string) (SilverBudgetSnapshot, error) {
 	return m.snap, nil
 }
 

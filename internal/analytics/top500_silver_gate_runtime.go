@@ -88,7 +88,7 @@ func RunTop500SilverGateOnce(ctx context.Context, gate *Top500SilverGate) (Silve
 }
 
 // LogSilverGateStartup logs the expected startup line for local dry-run.
-func LogSilverGateStartup(log *slog.Logger, cfg SilverGateConfig, fixtureCandidates bool) {
+func LogSilverGateStartup(log *slog.Logger, cfg SilverGateConfig, fixtureCandidates, realCounterReader bool) {
 	if log == nil {
 		return
 	}
@@ -99,5 +99,6 @@ func LogSilverGateStartup(log *slog.Logger, cfg SilverGateConfig, fixtureCandida
 		"max_enqueue_per_run", cfg.MaxEnqueuePerRun,
 		"interval", cfg.Interval.String(),
 		"fixture_candidates", fixtureCandidates,
+		"real_counter_reader", realCounterReader,
 	)
 }

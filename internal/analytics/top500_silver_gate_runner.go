@@ -10,11 +10,12 @@ import (
 
 // Top500SilverGate orchestrates one selective silver gate evaluation window.
 type Top500SilverGate struct {
-	cfg        SilverGateConfig
-	candidates SilverCandidateReader
-	counters   SilverBudgetCounterReader
-	enqueue    SilverEnqueueAdapter
-	log        *slog.Logger
+	cfg               SilverGateConfig
+	candidates        SilverCandidateReader
+	counters          SilverBudgetCounterReader
+	enqueue           SilverEnqueueAdapter
+	log               *slog.Logger
+	realCounterReader bool
 }
 
 // SilverGateTickSummary aggregates one dry-run or live gate tick.
@@ -73,9 +74,20 @@ func (g *Top500SilverGate) RunTick(ctx context.Context) (SilverGateTickSummary, 
 		summary.CandidatesEvaluated++
 		metrics.Top500SilverGateCandidatesTotal.WithLabelValues(SilverGateLaneTop500Selective, "evaluate").Inc()
 
-		budget, err := g.counters.ReadSnapshot(ctx, candidate.Login)
+		budget, err := g.counters.ReadSnapshot(ctx, candidate.Login, candidate.StreamID)
 		if err != nil {
-			return summary, err
+			result := deny(SilverGateSkipCounterUnavailable)
+			RecordSilverGateDecision(result, SilverGateLaneTop500Selective, "evaluate")
+			summary.Decisions[result.Decision]++
+			if g.log != nil {
+				g.log.Info("top500 silver gate candidate evaluated",
+					"decision", result.Decision,
+					"allow_enqueue", result.AllowEnqueue,
+					"dry_run", g.cfg.DryRun,
+					"write_enabled", g.cfg.WriteEnabled,
+				)
+			}
+			continue
 		}
 		result := EvaluateSilverGate(candidate, budget, g.cfg)
 		RecordSilverGateDecision(result, SilverGateLaneTop500Selective, "evaluate")
@@ -137,4 +149,12 @@ func (g *Top500SilverGate) RunTick(ctx context.Context) (SilverGateTickSummary, 
 	}
 
 	return summary, nil
+}
+
+// UsesRealCounterReader reports whether the gate reads hosted Postgres/Redis counters.
+func (g *Top500SilverGate) UsesRealCounterReader() bool {
+	if g == nil {
+		return false
+	}
+	return g.realCounterReader
 }
