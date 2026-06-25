@@ -18,7 +18,7 @@ MIN_SYMBOLS = 5000
 
 MERGE_SYMBOL = "mergeMinuteRollups"
 MERGE_FILE = "internal/analytics/api.go"
-MERGE_LINE = 612
+MERGE_LINE = 614
 
 LEGACY_TOOLS = {
     "get_call_chain",
