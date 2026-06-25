@@ -31,12 +31,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	blob, err := archive.NewAzureBlobStore(archive.AzureConfig{
-		StorageAccount:       cfg.ArchiveAzureStorageAccount,
-		Container:            cfg.ArchiveAzureContainer,
-		Prefix:               cfg.ArchiveAzurePrefix,
-		ConnectionStringFile: cfg.ArchiveAzureConnectionStringFile,
-	})
+	blob, err := archive.NewBlobStore(cfg.ArchiveBlobStoreConfig())
 	if err != nil {
 		logger.Error("azure blob init failed", "err", err)
 		os.Exit(1)

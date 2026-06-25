@@ -183,12 +183,7 @@ func main() {
 	var archiveWriter *archive.Writer
 	var archiveBlob archive.BlobStore
 	if cfg.ArchiveEnabled && cfg.ArchiveStorageProvider == "azure" {
-		blob, blobErr := archive.NewAzureBlobStore(archive.AzureConfig{
-			StorageAccount:       cfg.ArchiveAzureStorageAccount,
-			Container:            cfg.ArchiveAzureContainer,
-			Prefix:               cfg.ArchiveAzurePrefix,
-			ConnectionStringFile: cfg.ArchiveAzureConnectionStringFile,
-		})
+		blob, blobErr := archive.NewBlobStore(cfg.ArchiveBlobStoreConfig())
 		if blobErr != nil {
 			logger.Error("archive blob init failed", "err", blobErr)
 			os.Exit(1)

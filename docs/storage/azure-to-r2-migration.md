@@ -16,7 +16,7 @@ Streamclone/StreamPulse cold archive is **implemented in production against Azur
 
 **R2 (personal account `51dd8007…`):** enabled; **`streampulse-artifacts-staging`** holds **31 verified sample objects** (~5.2 KiB; rollups, streams, vod_catalog). **No production R2 buckets.** **No production read-path change.** Azure remains authoritative for all production reads/writes.
 
-**Task ledger:** [tasks.md](./tasks.md) (`STOR-R2-001`–`002` done; `STOR-R2-003`–`005` pending).
+**Task ledger:** [tasks.md](./tasks.md) (`STOR-R2-001`–`003` done; `STOR-R2-004`–`005` pending).
 
 **Recommended path:**
 
@@ -24,7 +24,7 @@ Streamclone/StreamPulse cold archive is **implemented in production against Azur
 2. **Phase 1** — enable R2 on personal account + budget alerts; create **staging** bucket only. **Done 2026-06-25** (`streampulse-artifacts-staging`).
 3. **Phase 2A** — one-object mirror + verify. **Done 2026-06-25.**
 4. **Phase 2B** — mirror **31** sample objects ([`sample-manifest-phase2a.csv`](./sample-manifest-phase2a.csv)) — **STOR-R2-002**, **done 2026-06-25**.
-5. **Phase 3** — read-through in BearHost API: R2 first → Azure fallback — **STOR-R2-003**, not started.
+5. **Phase 3** — `R2BlobStore` + `ReadThroughStore` in Go (**STOR-R2-003**, **done 2026-06-25**) — **flags default off**; production unchanged.
 6. **Phase 4** — batch migration by prefix — **STOR-R2-005**; keep Azure fallback; no Azure deletes until verified.
 
 **Do not** migrate Postgres to D1, route VOD Library through Workers, or store user library rows in R2.
@@ -512,11 +512,53 @@ aws s3 cp "/tmp/mirror-$(echo "$KEY" | tr '/' '_')" "s3://${R2_BUCKET}/archive/$
 
 ---
 
-## Phase 3 — App integration plan (future)
+## Phase 3 — App integration (STOR-R2-003)
 
-`BlobStore` + `R2BlobStore` + `ReadThroughStore` — no code changes in this phase. See prior audit sections.
+**Status:** **Code complete** 2026-06-25. **Production behavior unchanged** — all flags default to Azure-only.
 
-**No production read path change** until Phase 2 verification passes.
+### 3.1 Implementation
+
+| Component | Path |
+|-----------|------|
+| `R2BlobStore` | `internal/archive/r2_store.go` (S3-compatible via minio-go) |
+| `ReadThroughStore` | `internal/archive/read_through_store.go` |
+| Factory | `internal/archive/store_factory.go` → `NewBlobStore(StoreConfig)` |
+| Config mapping | `internal/config/archive_store.go` → `Config.ArchiveBlobStoreConfig()` |
+| Wired in | `cmd/archive`, `cmd/analytics`, `cmd/backfill` |
+
+### 3.2 Env flags (defaults preserve production)
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `ARCHIVE_PRIMARY_PROVIDER` | `azure` | `r2` uses R2 for Put/Get/BlobURI (staging only) |
+| `ARCHIVE_READ_THROUGH` | `false` | `true`: Get tries R2 first, Azure fallback on miss |
+| `ARCHIVE_DUAL_WRITE` | `false` | `true`: Put writes Azure then R2 (non-prod only) |
+| `ARCHIVE_R2_BUCKET` | — | e.g. `streampulse-artifacts-staging` |
+| `ARCHIVE_R2_ACCOUNT_ID` | — | Cloudflare account ID |
+| `ARCHIVE_R2_PREFIX` | `archive` | R2 key prefix (matches staging mirror) |
+| `ARCHIVE_R2_ENDPOINT` | derived | `https://{account}.r2.cloudflarestorage.com` |
+| `ARCHIVE_R2_ACCESS_KEY_ID_FILE` | — | Secret file (never commit) |
+| `ARCHIVE_R2_SECRET_ACCESS_KEY_FILE` | — | Secret file (never commit) |
+
+When all R2 flags are off and `ARCHIVE_PRIMARY_PROVIDER=azure`, `NewBlobStore` returns plain `AzureBlobStore` (no wrapper).
+
+### 3.3 Behavior summary
+
+| Operation | Default (prod) | `ARCHIVE_READ_THROUGH=true` |
+|-----------|----------------|----------------------------|
+| **Get** | Azure only | R2 → Azure fallback |
+| **Put** | Azure only | Azure only (unless `DUAL_WRITE` or `PRIMARY=r2`) |
+| **BlobURI** | Azure HTTPS | Azure HTTPS (unless `PRIMARY=r2`) |
+
+### 3.4 Tests
+
+```bash
+go test ./internal/archive/...
+# Optional live read (skipped in CI):
+ARCHIVE_R2_LIVE_TEST=1 ARCHIVE_R2_ACCESS_KEY_ID_FILE=... ARCHIVE_R2_SECRET_ACCESS_KEY_FILE=... go test ./internal/archive/ -run LiveSample
+```
+
+**No production read-path enablement** until STOR-R2-004 restore drill passes and operator approves flag flip on BearHost.
 
 ---
 
@@ -654,3 +696,4 @@ Ledger: [tasks.md](./tasks.md).
 | 2026-06-25 | Handoff: `docs/storage/README.md`, stable `scripts/storage/*` inventory scripts |
 | 2026-06-25 | Phase 2A continuation recheck: API still `10042`; staging bucket not created |
 | 2026-06-25 | Phase 2B complete: 31-object sample mirror verified (`STOR-R2-002`) |
+| 2026-06-25 | Phase 3 code: `R2BlobStore` + `ReadThroughStore` behind flags (`STOR-R2-003`); defaults Azure-only |

@@ -16,6 +16,7 @@ StreamPulse long-term **artifact bytes** vs **queryable app state**. Read this b
 | Item | State |
 |------|-------|
 | **Authoritative archive** | **Azure Blob** — no cutover |
+| **Go `BlobStore`** | **`AzureBlobStore` by default**; R2 + read-through via env flags (**off** in production) |
 | **R2 (personal `51dd8007…`)** | **Enabled** — subscription active on aron.chu90 |
 | **Staging bucket** | **`streampulse-artifacts-staging`** |
 | **Azure → R2 staging copies** | **31** sample objects verified (~5.2 KiB) — [`sample-mirror-phase2b.csv`](./sample-mirror-phase2b.csv) |
@@ -64,10 +65,9 @@ EXECUTE=1 bash scripts/storage/r2-sample-mirror-phase2b.sh  # Phase 2B sample ba
 
 ## Next operator actions
 
-1. **STOR-R2-003** — implement `R2BlobStore` + `ReadThroughStore` behind flags (BearHost; default off).
-2. **STOR-R2-004** — R2 restore drill before any `postgres/nightly/` mirror.
-3. **STOR-R2-005** — batch migration by prefix after verification.
-4. Prod/backups buckets — not until separately approved.
+1. **STOR-R2-004** — R2 restore drill before any `postgres/nightly/` mirror or prod read-through flip.
+2. **STOR-R2-005** — batch migration by prefix after verification.
+3. Prod/backups buckets — not until separately approved.
 
 See [tasks.md](./tasks.md) for guardrails.
 
@@ -81,7 +81,7 @@ npx wrangler r2 bucket list
 
 ## Out of scope until later phases
 
-- Production `R2BlobStore` / `ReadThroughStore` cutover (**STOR-R2-003**)
+- Production `R2BlobStore` / read-through cutover on BearHost (**STOR-R2-004** gate)
 - Prod/backups R2 buckets, bulk Azure copy, Azure delete/lifecycle change
 - DNS, Pages deploy, API tunnel, D1, Workers, VOD Library implementation
 - `archive_exports` schema migration for R2 URIs

@@ -165,6 +165,15 @@ type Config struct {
 	ArchiveAzureContainer            string        `env:"ARCHIVE_AZURE_CONTAINER" envDefault:"streamclone-archive"`
 	ArchiveAzurePrefix               string        `env:"ARCHIVE_AZURE_PREFIX" envDefault:"streamclone"`
 	ArchiveAzureConnectionStringFile string        `env:"ARCHIVE_AZURE_CONNECTION_STRING_FILE"`
+	ArchivePrimaryProvider           string        `env:"ARCHIVE_PRIMARY_PROVIDER" envDefault:"azure"`
+	ArchiveReadThrough               bool          `env:"ARCHIVE_READ_THROUGH" envDefault:"false"`
+	ArchiveDualWrite                 bool          `env:"ARCHIVE_DUAL_WRITE" envDefault:"false"`
+	ArchiveR2Bucket                  string        `env:"ARCHIVE_R2_BUCKET"`
+	ArchiveR2AccountID               string        `env:"ARCHIVE_R2_ACCOUNT_ID"`
+	ArchiveR2Prefix                  string        `env:"ARCHIVE_R2_PREFIX" envDefault:"archive"`
+	ArchiveR2Endpoint                string        `env:"ARCHIVE_R2_ENDPOINT"`
+	ArchiveR2AccessKeyIDFile         string        `env:"ARCHIVE_R2_ACCESS_KEY_ID_FILE"`
+	ArchiveR2SecretAccessKeyFile     string        `env:"ARCHIVE_R2_SECRET_ACCESS_KEY_FILE"`
 	ArchiveExportInterval            time.Duration `env:"ARCHIVE_EXPORT_INTERVAL" envDefault:"1h"`
 	ArchivePGDumpNightly             bool          `env:"ARCHIVE_PG_DUMP_NIGHTLY" envDefault:"false"`
 	ArchiveContentHashEnabled        bool          `env:"ARCHIVE_CONTENT_HASH_ENABLED" envDefault:"true"`
