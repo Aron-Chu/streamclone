@@ -16,7 +16,7 @@ Streamclone/StreamPulse cold archive is **implemented in production against Azur
 
 **R2 (personal account `51dd8007…`):** enabled; **`streampulse-artifacts-staging`** holds **31 verified sample objects** (~5.2 KiB; rollups, streams, vod_catalog). **No production R2 buckets.** **No production read-path change.** Azure remains authoritative for all production reads/writes.
 
-**Task ledger:** [tasks.md](./tasks.md) (`STOR-R2-001`–`003` done; `STOR-R2-004`–`005` pending).
+**Task ledger:** [tasks.md](./tasks.md) (`STOR-R2-001`–`004` done; `STOR-R2-005` pending).
 
 **Recommended path:**
 
@@ -25,7 +25,8 @@ Streamclone/StreamPulse cold archive is **implemented in production against Azur
 3. **Phase 2A** — one-object mirror + verify. **Done 2026-06-25.**
 4. **Phase 2B** — mirror **31** sample objects ([`sample-manifest-phase2a.csv`](./sample-manifest-phase2a.csv)) — **STOR-R2-002**, **done 2026-06-25**.
 5. **Phase 3** — `R2BlobStore` + `ReadThroughStore` in Go (**STOR-R2-003**, **done 2026-06-25**) — **flags default off**; production unchanged.
-6. **Phase 4** — batch migration by prefix — **STOR-R2-005**; keep Azure fallback; no Azure deletes until verified.
+6. **Phase 3.5** — R2 restore drill on staging sample (**STOR-R2-004**, **done 2026-06-25**) — read-through validated locally; **no BearHost flag flip**.
+7. **Phase 4** — batch migration by prefix — **STOR-R2-005**; keep Azure fallback; no Azure deletes until verified.
 
 **Do not** migrate Postgres to D1, route VOD Library through Workers, or store user library rows in R2.
 
@@ -554,11 +555,39 @@ When all R2 flags are off and `ARCHIVE_PRIMARY_PROVIDER=azure`, `NewBlobStore` r
 
 ```bash
 go test ./internal/archive/...
-# Optional live read (skipped in CI):
-ARCHIVE_R2_LIVE_TEST=1 ARCHIVE_R2_ACCESS_KEY_ID_FILE=... ARCHIVE_R2_SECRET_ACCESS_KEY_FILE=... go test ./internal/archive/ -run LiveSample
+# STOR-R2-004 restore drill (local secrets, read-only):
+bash scripts/storage/r2-restore-drill.sh
+# Or manual:
+ARCHIVE_R2_LIVE_TEST=1 go test ./internal/archive/ -run TestR2RestoreDrillLive -count=1 -v
 ```
 
-**No production read-path enablement** until STOR-R2-004 restore drill passes and operator approves flag flip on BearHost.
+**No production read-path enablement** until operator explicitly sets `ARCHIVE_READ_THROUGH=true` on BearHost after reviewing [r2-restore-drill-log.md](./r2-restore-drill-log.md).
+
+---
+
+## Phase 3.5 — R2 restore drill (**STOR-R2-004**, done 2026-06-25)
+
+Read-only validation against **`streampulse-artifacts-staging`** and the **31** mirrored keys in [`sample-mirror-phase2b.csv`](./sample-mirror-phase2b.csv).
+
+| Check | Result |
+|-------|--------|
+| Direct `R2BlobStore.Get` | **PASS** — rollups, stream session, vod index samples |
+| `ReadThroughStore` R2 hit | **PASS** — same bytes/SHA-256 as direct R2 |
+| Azure fallback on R2 miss | **PASS** — e.g. `rollups/stream_id=317014684259/part-000.jsonl.gz` (Azure-only) |
+| Gzip decompress | **PASS** |
+| Payload shape | **PASS** — stream session JSON; rollups/vod stubs accept valid gzip JSON |
+
+**Operator replay (local secrets only):**
+
+```bash
+bash scripts/storage/r2-restore-drill.sh
+```
+
+**Go test:** `internal/archive/r2_restore_drill_test.go` (`TestR2RestoreDrillLive`, gated on `ARCHIVE_R2_LIVE_TEST=1`).
+
+**Log:** [r2-restore-drill-log.md](./r2-restore-drill-log.md).
+
+**Production:** BearHost still `ARCHIVE_READ_THROUGH=false`. Azure authoritative. No `archive_exports` updates during drill.
 
 ---
 
@@ -696,4 +725,4 @@ Ledger: [tasks.md](./tasks.md).
 | 2026-06-25 | Handoff: `docs/storage/README.md`, stable `scripts/storage/*` inventory scripts |
 | 2026-06-25 | Phase 2A continuation recheck: API still `10042`; staging bucket not created |
 | 2026-06-25 | Phase 2B complete: 31-object sample mirror verified (`STOR-R2-002`) |
-| 2026-06-25 | Phase 3 code: `R2BlobStore` + `ReadThroughStore` behind flags (`STOR-R2-003`); defaults Azure-only |
+| 2026-06-25 | Phase 3.5: STOR-R2-004 restore drill — read-through + Azure fallback validated on staging sample |
