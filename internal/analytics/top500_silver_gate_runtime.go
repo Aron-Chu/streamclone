@@ -47,17 +47,17 @@ func InitTop500SilverGateMetrics(cfg SilverGateConfig) {
 }
 
 // StartTop500SilverGate launches a non-blocking ticker loop when enabled.
-// LOAD-003a: tick body is intentionally empty — no candidate reads or enqueue.
-func StartTop500SilverGate(ctx context.Context, cfg SilverGateConfig, log *slog.Logger) {
-	cfg = normalizeSilverGateConfig(cfg)
-	if !cfg.Enabled {
+// LOAD-003c: each tick evaluates candidates in dry-run when write is disabled.
+func StartTop500SilverGate(ctx context.Context, gate *Top500SilverGate) {
+	if gate == nil || !gate.cfg.Enabled {
 		return
 	}
-	interval := cfg.Interval
+	interval := gate.cfg.Interval
 	if interval <= 0 {
 		interval = DefaultTop500SilverGateInterval
 	}
 	go func() {
+		runSilverGateTick(ctx, gate)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -65,14 +65,39 @@ func StartTop500SilverGate(ctx context.Context, cfg SilverGateConfig, log *slog.
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				metrics.Top500SilverGateCandidatesTotal.WithLabelValues(SilverGateLaneTop500Selective, "tick").Inc()
-				if log != nil {
-					log.Debug("top500 silver gate tick (scaffold; no enqueue)",
-						"dry_run", cfg.DryRun,
-						"write_enabled", cfg.WriteEnabled,
-					)
-				}
+				runSilverGateTick(ctx, gate)
 			}
 		}
 	}()
+}
+
+func runSilverGateTick(ctx context.Context, gate *Top500SilverGate) {
+	metrics.Top500SilverGateCandidatesTotal.WithLabelValues(SilverGateLaneTop500Selective, "tick").Inc()
+	if _, err := gate.RunTick(ctx); err != nil && gate.log != nil {
+		gate.log.Warn("top500 silver gate tick failed", "err", err)
+	}
+}
+
+// RunTop500SilverGateOnce evaluates one gate window synchronously (local dry-run harness).
+func RunTop500SilverGateOnce(ctx context.Context, gate *Top500SilverGate) (SilverGateTickSummary, error) {
+	if gate == nil {
+		return SilverGateTickSummary{Decisions: map[SilverGateDecisionReason]int{}}, nil
+	}
+	metrics.Top500SilverGateCandidatesTotal.WithLabelValues(SilverGateLaneTop500Selective, "tick").Inc()
+	return gate.RunTick(ctx)
+}
+
+// LogSilverGateStartup logs the expected startup line for local dry-run.
+func LogSilverGateStartup(log *slog.Logger, cfg SilverGateConfig, fixtureCandidates bool) {
+	if log == nil {
+		return
+	}
+	log.Info("top500 silver gate started",
+		"dry_run", cfg.DryRun,
+		"write_enabled", cfg.WriteEnabled,
+		"max_candidates", cfg.MaxCandidates,
+		"max_enqueue_per_run", cfg.MaxEnqueuePerRun,
+		"interval", cfg.Interval.String(),
+		"fixture_candidates", fixtureCandidates,
+	)
 }

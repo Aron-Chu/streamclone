@@ -200,6 +200,7 @@ func clearTop500SilverGateEnv(t *testing.T) {
 		"TOP500_SILVER_GATE_MAX_CANDIDATES",
 		"TOP500_SILVER_GATE_MAX_ENQUEUE_PER_RUN",
 		"TOP500_SILVER_GATE_INTERVAL",
+		"TOP500_SILVER_GATE_FIXTURE_CANDIDATES",
 	}
 	previous := make(map[string]string, len(keys))
 	present := make(map[string]bool, len(keys))
