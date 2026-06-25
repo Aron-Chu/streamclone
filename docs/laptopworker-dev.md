@@ -7,16 +7,26 @@ Tailnet host **`laptopworker`** runs the **core Streamclone dev stack** (UI, pla
 From the **streamclone repo root** (not `C:\Windows\System32`):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\laptopworker-remote.ps1 status
+make laptopworker-status
+make laptopworker-smoke
+make laptopworker-update
 ```
 
-Or:
+Or without `make`:
 
 ```cmd
 scripts\laptopworker-remote.cmd status
+scripts\laptopworker-remote.cmd smoke
+scripts\laptopworker-remote.cmd update
 ```
 
-Commands: `start` | `stop` | `restart` | `status` | `smoke` | `logs` | `update` | `install-service`
+PowerShell directly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\laptopworker-remote.ps1 status
+```
+
+Commands on laptop: `bash scripts/laptopworker-stack.sh` → `start` | `stop` | `restart` | `status` | `logs` | `smoke` | `update` | `install-service` | `ufw-tailnet`
 
 Browse UI on tailnet: **http://laptopworker:8090**
 
@@ -30,7 +40,7 @@ Browse UI on tailnet: **http://laptopworker:8090**
 | **laptopworker** | Caddy `:8090`, frontend, metadata, video, chat, emote, analytics API, postgres, redis, minio, mediamtx | Local scraper profile, storygraph ingest, corpus workers |
 | **Windows PC** | Cursor, `laptopworker-remote.*` | — |
 
-Env: `deploy/env/profile-laptopworker-dev.env` merged into `.env.local` (user keys win; bootstrap/update do **not** clobber custom overrides).
+Env: `deploy/env/profile-laptopworker-dev.env` merged into `.env.local` (**user keys win**; bootstrap/update never clobber custom overrides).
 
 Compose overlay: `deploy/docker-compose.laptopworker-dev.yml` (disables `storygraph`)
 
@@ -38,13 +48,164 @@ Shared helpers: `scripts/laptopworker-env.sh`
 
 ---
 
-## What the laptop must host (core stack)
+## Operator checklist (Aron)
 
-### Docker services (always when stack is up)
+One-time on laptop:
+
+```bash
+ssh aron@laptopworker
+cd ~/streamclone
+bash scripts/laptopworker-install-service.sh
+sudo loginctl enable-linger aron
+bash scripts/laptopworker-stack.sh ufw-tailnet   # tailnet-only :8090 + SSH
+sudo reboot
+```
+
+After reboot (from Windows repo root):
+
+```cmd
+scripts\laptopworker-remote.cmd smoke
+```
+
+After every push to `master`:
+
+```cmd
+scripts\laptopworker-remote.cmd update
+```
+
+Optional Sign-in (only if needed):
+
+```powershell
+scp deploy\env\oauth-bundle.env aron@laptopworker:~/streamclone/deploy/env/
+```
+
+Add Twitch OAuth redirect: `http://laptopworker:8090` (and exact callback path if your app requires it). Never commit OAuth files.
+
+---
+
+## Update flow (P1)
+
+`scripts/laptopworker-update.sh`:
+
+1. `git fetch` + fast-forward `master`
+2. Merge `.env.local` (preserve overrides) + resynth `.env`
+3. Detect changed paths between old/new SHA
+4. Rebuild only affected services:
+
+| Changed paths | Action |
+|---------------|--------|
+| `go.mod`, `go.sum` | Rebuild all Go services |
+| `frontend/**`, `packages/pulse-core/**` | Rebuild `frontend` |
+| `cmd/**`, `internal/**`, `deploy/Dockerfile*` | Rebuild Go services |
+| `deploy/docker-compose*`, `profile-laptopworker*` | Full `compose up --build` |
+| `deploy/Caddyfile*` | Rebuild `frontend`; recreate `local-proxy` |
+| `deploy/mediamtx.yml` | Recreate `mediamtx`, `video` |
+| `migrations/**` | Run `migrate` container, then rebuild Go services |
+| Docs-only / other | `compose up -d` without `--build` |
+
+5. Smoke via `:8090`
+
+---
+
+## Tailscale dev efficiency
+
+| Item | Value |
+|------|-------|
+| MagicDNS UI | `http://laptopworker:8090` |
+| SSH | `ssh aron@laptopworker` (Tailscale SSH) |
+| Subnet routes / exit node | **Off by default** — laptop is a private dev host, not a router |
+| Key expiry | Consider disabling for this trusted always-on node in Tailscale admin |
+| Production-like API | Use **BearHost** `https://api.streampulse.stream` for public ingress tests |
+| VPS-only services | BearHost must appear in `tailscale status` only if laptop needs direct tailnet access to VPS |
+
+---
+
+## Security (tailnet-only)
+
+Defense in depth (UFW alone does not filter Docker-published ports):
+
+1. **DOCKER-USER** — `scripts/laptopworker-ufw-tailnet.sh` allows `:8090` on `lo` (local smoke) and `tailscale0` only; drops other interfaces.
+2. **UFW** — SSH allowed on `tailscale0` only by default (set `LAPTOPWORKER_UFW_ALLOW_LAN_SSH=1` for LAN console SSH).
+
+Docker still publishes `8090:80` on all interfaces (same as `local-tunnel`); DOCKER-USER is what blocks home-LAN access. Tailscale-IP compose bind is not used — it fails on some Docker/Tailscale hosts.
+
+```bash
+bash scripts/laptopworker-stack.sh ufw-tailnet
+sudo ufw status verbose
+sudo iptables -S DOCKER-USER | head -6
+```
+
+Docker service ports (`5432`, `6379`, etc.) stay on `127.0.0.1` in compose — never publish them on `0.0.0.0`.
+
+---
+
+## Systemd boot reliability
+
+Install once:
+
+```bash
+bash scripts/laptopworker-install-service.sh
+sudo loginctl enable-linger aron
+```
+
+| Unit | Role |
+|------|------|
+| `streamclone-dev.service` | Start stack on boot (user unit, `sg docker`) |
+| `streamclone-dev-health.timer` | Smoke every 10 min |
+
+Logs:
+
+```bash
+journalctl --user -u streamclone-dev.service -n 50 --no-pager
+journalctl --user -u streamclone-dev-health.service -n 20 --no-pager
+loginctl show-user aron -p Linger
+systemctl --user status streamclone-dev.service
+```
+
+Reboot test: `sudo reboot` → wait ~3–5 min → `scripts\laptopworker-remote.cmd smoke` from Windows.
+
+Future option: system-level unit with `User=aron` / `Group=docker` if user service proves fragile.
+
+---
+
+## Docker disk hygiene
+
+Check usage:
+
+```bash
+docker system df
+```
+
+Safe manual cleanup (does not remove running stack volumes):
+
+```bash
+docker builder prune
+```
+
+Avoid `docker system prune -a` unless you intend to re-pull/rebuild everything.
+
+---
+
+## OAuth / Sign-in (optional)
+
+| Step | Action |
+|------|--------|
+| 1 | Copy `deploy/env/oauth-bundle.env` to laptop (not committed) |
+| 2 | Re-run update or `laptopworker_synth_env` path via `bash scripts/laptopworker-update.sh` |
+| 3 | Add Twitch redirect URI: `http://laptopworker:8090` |
+| 4 | Sign in via UI at `http://laptopworker:8090` |
+
+Secrets dir: `~/.streamclone/secrets/` (mode 700)
+
+---
+
+## What the laptop hosts (core stack)
+
+### Docker services
 
 | Service | Purpose | Host port |
 |---------|---------|-----------|
-| `local-proxy` (Caddy) | Single entry `:8090` | `0.0.0.0:8090` |
+| `local-proxy` (Caddy) | Single entry `:8090` | `8090:80` (DOCKER-USER: lo + tailscale0 only) |
 | `frontend` | React UI | internal |
 | `metadata` | Directory, Helix, VOD lists | `127.0.0.1:8081` |
 | `video` | HLS relay, streamlink | `127.0.0.1:8082` |
@@ -52,89 +213,17 @@ Shared helpers: `scripts/laptopworker-env.sh`
 | `emote` | 7TV/FFZ pipeline | `127.0.0.1:8084` |
 | `analytics` | Pulse BFF, extension routes | `127.0.0.1:8086` |
 | `postgres` | Local dev DB | `127.0.0.1:5432` |
-| `redis` | Cache, chat buffer | `127.0.0.1:6379` |
-| `minio` | Emote object storage | `127.0.0.1:9000` |
-| `mediamtx` | RTMP/HLS origin | `127.0.0.1:8888` |
-| `migrate` | One-shot schema apply | — |
+| `redis` | Cache | `127.0.0.1:6379` |
+| `minio` | Emote storage | `127.0.0.1:9000` |
+| `mediamtx` | RTMP/HLS | `127.0.0.1:8888` |
 
 ### Host packages
 
-| Package | Required | Notes |
-|---------|----------|-------|
-| Docker Engine + compose plugin | Yes | `get.docker.com`; user in `docker` group |
-| git, curl, make, jq | Yes | Bootstrap installs |
-| Tailscale | Yes | MagicDNS `laptopworker` |
-| Go / Node on host | No | Services run in containers |
+Docker, git, curl, make, jq, Tailscale — no Go/Node on host.
 
-### Disk / RAM (observed)
+### Power (always-on)
 
-| Resource | Minimum | This host |
-|----------|---------|-----------|
-| RAM | 8 GB | 15 GB |
-| Disk | ~20 GB free for images + PG | ~87 GB free |
-| Build cache | prune periodically | `docker builder prune` |
-
-### Secrets (`~/.streamclone/secrets/`)
-
-Copy from dev PC when needed (never commit):
-
-| Secret | Used for |
-|--------|----------|
-| `deploy/env/oauth-bundle.env` | Twitch OAuth app (Sign in, Helix) |
-| Twitch user tokens | Imported via dev token import at `http://laptopworker:8090` |
-| Azure archive connection string | Only if enabling archive export locally (default **off**) |
-
-Optional VPS reference (read-only): `STREAMPULSE_PUBLIC_API=https://api.streampulse.stream`
-
-### Network (15 Mbps home)
-
-- **Playback** uses bandwidth when you watch streams through the laptop stack.
-- **Scrape / corpus / Pulse Wire ingest** must stay on VPS — local profile sets `STREAMCLONE_DISABLE_LOCAL_SCRAPER=true`, `PULSE_WIRE_ENABLED=false`, storygraph overlay off.
-- Tailscale access to `:8090` is light (UI/API only).
-
-### Power (always-on worker)
-
-Applied by `scripts/laptopworker-power-config.sh`:
-
-- Lid closed → **ignore** (no suspend)
-- Idle → **ignore**
-- Sleep targets → **masked**
-- Keep **AC connected**
-
----
-
-## Always-on after push
-
-1. **One-time on laptop** (after bootstrap):
-
-   ```bash
-   cd ~/streamclone
-   bash scripts/laptopworker-install-service.sh
-   ```
-
-   Installs `streamclone-dev.service` (start on boot) + health timer (smoke every 10 min). Requires `sudo` once for `loginctl enable-linger`.
-
-2. **After merging to `master`**, from Windows repo root:
-
-   ```powershell
-   make laptopworker-update
-   ```
-
-   Requires laptopworker files on `origin/master`. Merges `.env.local` (preserves user overrides), then `compose up -d`.
-
-3. **Container restart policy**: compose services use `restart: unless-stopped` — Docker daemon restarts unhealthy containers; full stack comes back on boot via systemd user unit.
-
-4. **Boot without login** — run once on laptop if `loginctl show-user aron -p Linger` shows `no`:
-
-   ```bash
-   sudo loginctl enable-linger aron
-   ```
-
-There is **no auto-pull on every push** (by design — avoids surprise deploys). Run `update` after you push, or add a cron/timer that runs `laptopworker-update.sh` if you want hands-off sync.
-
-### Security note
-
-Caddy binds `:8090` on all interfaces; restrict with host UFW to `tailscale0` if you need tailnet-only exposure (not automated in bootstrap yet).
+`scripts/laptopworker-power-config.sh`: lid ignore, idle ignore, sleep targets masked. Keep AC connected.
 
 ---
 
@@ -142,10 +231,12 @@ Caddy binds `:8090` on all interfaces; restrict with host UFW to `tailscale0` if
 
 ```bash
 ssh aron@laptopworker
-cd ~/streamclone   # or clone first
+git clone https://github.com/Aron-Chu/streamclone.git ~/streamclone
+cd ~/streamclone
 bash scripts/laptopworker-bootstrap.sh
 bash scripts/laptopworker-install-service.sh
 sudo loginctl enable-linger aron
+bash scripts/laptopworker-stack.sh ufw-tailnet
 ```
 
 ---
@@ -157,10 +248,20 @@ bash scripts/laptopworker-stack.sh smoke
 curl -fsS http://127.0.0.1:8090/v1/extension/health
 ```
 
+Compose config sanity:
+
+```bash
+docker compose --env-file .env --env-file .env.local \
+  -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.local-tunnel.yml \
+  -f deploy/docker-compose.laptopworker-dev.yml \
+  config >/dev/null && echo OK
+```
+
 ---
 
 ## Related
 
 - BearHost production: `docs/bearhost-production.md`
 - Azure hybrid (VPS scraper pattern): `docs/azure-archive-plane.md`
-- Local env synthesis: `scripts/setup.sh`, `scripts/lib/env.sh`
+- Workspace layout: `docs/workspace.md`

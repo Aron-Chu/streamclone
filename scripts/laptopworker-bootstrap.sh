@@ -128,6 +128,9 @@ Bootstrap complete.
 
   Scrape + corpus workers stay on legacy-rollback-host — do not enable scraper profile here.
 
+Optional tailnet firewall (once):
+  bash scripts/laptopworker-stack.sh ufw-tailnet
+
 EOF
 
 if ! groups | grep -q docker; then

@@ -12,22 +12,8 @@ if ! laptopworker_required_files "$ROOT"; then
   exit 1
 fi
 
-ENV_FILE="${ENV_FILE:-.env}"
-COMPOSE=(docker compose --env-file "$ENV_FILE"
-  -f deploy/docker-compose.yml
-  -f deploy/docker-compose.local-tunnel.yml
-  -f deploy/docker-compose.laptopworker-dev.yml)
-
-if [ -f deploy/env/.env.pulse-local ]; then
-  COMPOSE+=(--env-file deploy/env/.env.pulse-local)
-fi
-if [ -f .env.local ]; then
-  COMPOSE+=(--env-file .env.local)
-fi
-
 _laptopworker_up() {
-  "${COMPOSE[@]}" up -d --remove-orphans
-  laptopworker_stop_storygraph
+  laptopworker_compose_up "$ROOT"
 }
 
 usage() {
@@ -42,6 +28,7 @@ Usage: scripts/laptopworker-stack.sh <command>
   smoke    Health via :8090 extension + frontend
   update   git pull + resynth .env + compose up (after push to master)
   install-service  systemd user unit + boot linger (run once on laptop)
+  ufw-tailnet      Apply tailnet-only UFW rules (sudo once)
 EOF
 }
 
@@ -49,22 +36,22 @@ cmd="${1:-}"
 case "$cmd" in
   start)
     _laptopworker_up
-    "${COMPOSE[@]}" ps
+    laptopworker_compose "$ROOT" ps
     ;;
   stop)
-    "${COMPOSE[@]}" stop
+    laptopworker_compose "$ROOT" stop
     laptopworker_stop_storygraph
     ;;
   restart)
-    "${COMPOSE[@]}" stop
+    laptopworker_compose "$ROOT" stop
     _laptopworker_up
-    "${COMPOSE[@]}" ps
+    laptopworker_compose "$ROOT" ps
     ;;
   status)
-    "${COMPOSE[@]}" ps
+    laptopworker_compose "$ROOT" ps
     ;;
   logs)
-    "${COMPOSE[@]}" logs -f --tail=100
+    laptopworker_compose "$ROOT" logs -f --tail=100
     ;;
   smoke)
     curl -fsS "http://127.0.0.1:8090/v1/extension/health" | head -c 240
@@ -77,6 +64,9 @@ case "$cmd" in
     ;;
   install-service)
     bash "$ROOT/scripts/laptopworker-install-service.sh"
+    ;;
+  ufw-tailnet)
+    bash "$ROOT/scripts/laptopworker-ufw-tailnet.sh"
     ;;
   -h|--help|"")
     usage
