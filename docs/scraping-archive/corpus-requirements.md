@@ -15,7 +15,8 @@ Streamclone maintains **one shared global archive corpus** in Azure Blob Storage
 |------|--------|
 | No VOD video mirroring | Do not download or store full MP4/HLS VOD files |
 | One global corpus | No per-user or per-install cold archives |
-| Azure first | `ARCHIVE_STORAGE_PROVIDER=azure`; legacy `gcs_uri` column name stays |
+| Azure first | `ARCHIVE_STORAGE_PROVIDER=azure`; legacy `gcs_uri` column name stays; **production authoritative until R2 read-through verified** |
+| R2 mirror (planned) | Long-term artifact bytes on Cloudflare R2 after staging proof — [../storage/tasks.md](../storage/tasks.md); defer `postgres/nightly/` and bulk `vod_chat/` per ledger |
 | Scraper internal | TT/Camoufox egress from BearHost requires residential proxy or hybrid home-PC slot |
 | Idempotent exports | Same natural key + unchanged content → stable hash or versioned path |
 

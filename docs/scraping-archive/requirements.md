@@ -10,7 +10,16 @@ Planned code: `cmd/archive` (export worker), `cmd/backfill` (bulk queue), Azure 
 
 ## TL;DR
 
-Streamclone should treat **Azure Blob Storage** as the durable archive (Phase A infra: [azure-archive-setup.md](../azure-archive-setup.md)) and **Postgres** as a disposable hot cache (30–90 days). Planned R2 mirror (no cutover yet): [storage/azure-to-r2-migration.md](../storage/azure-to-r2-migration.md) and [storage/README.md](../storage/README.md). Historical Analytics depends on expensive sources — especially **TwitchTracker per-stream detail** (Camoufox) and **GQL VOD chat** — that must not be re-fetched after a Postgres reset.
+Streamclone should treat **Azure Blob Storage** as the **authoritative durable archive today** (Phase A infra: [azure-archive-setup.md](../azure-archive-setup.md)) and **Postgres** as a disposable hot cache (30–90 days). **Cloudflare R2** is planned for long-term artifact bytes after staged mirror verification — see [storage/azure-to-r2-migration.md](../storage/azure-to-r2-migration.md), [storage/tasks.md](../storage/tasks.md), and [storage/README.md](../storage/README.md).
+
+**R2 guardrails (corpus / archive):**
+
+- Azure remains authoritative for production reads/writes until read-through is verified behind flags.
+- Do **not** bulk-copy `postgres/nightly/` to R2 until **STOR-R2-004** restore drill passes.
+- Do **not** bulk-copy `vod_chat/` until sample mirror + read-through are proven on staging.
+- Postgres `archive_exports` remains the manifest source of truth; R2 holds bytes only.
+
+Historical Analytics depends on expensive sources — especially **TwitchTracker per-stream detail** (Camoufox) and **GQL VOD chat** — that must not be re-fetched after a Postgres reset.
 
 Bulk collection targets **top 200–500 live streamers** in three scrape depths (Bronze / Silver / Gold). Browser scraping runs from a **residential IP** (home PC or verified residential proxy). API-only work (Helix, 7TV, directory sampling) can run anywhere.
 

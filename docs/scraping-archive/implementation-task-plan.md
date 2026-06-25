@@ -1,8 +1,12 @@
 # Streamclone Global Archive — Implementation Task Plan
 
 Status: **Release 1–3 code complete**; BearHost smoke + TASK-031/031B passed on 2026-06-21; TASK-030 sign-off pending
-Sources: [corpus-requirements.md](corpus-requirements.md) · [archive-observability.md](archive-observability.md) · [requirements.md](requirements.md) · [proxy-benchmark.md](proxy-benchmark.md)
+Sources: [corpus-requirements.md](corpus-requirements.md) · [archive-observability.md](archive-observability.md) · [requirements.md](requirements.md) · [proxy-benchmark.md](proxy-benchmark.md) · [../storage/tasks.md](../storage/tasks.md)
 Verified against repo: 2026-06-21
+
+## R2 long-term mirror (2026-06-25 — planning only)
+
+Azure Blob remains **authoritative in production**. R2 staging (`streampulse-artifacts-staging`) holds one verified sample object; bulk mirror and read-through are **STOR-R2-002**–**005** in [../storage/tasks.md](../storage/tasks.md). Do not migrate `postgres/nightly/` until restore drill passes; do not bulk-copy `vod_chat/` until sample read-through is proven. No implementation changes in this ledger row.
 
 ## Execution progress (live)
 
