@@ -11,12 +11,13 @@ StreamPulse long-term **artifact bytes** vs **queryable app state**. Read this b
 | User library rows | **Postgres** | Never R2, never D1 for VOD Library MVP |
 | Portal/extension user state (V2+) | Optional **D1** | Watchlist/device only — **deferred** (WATCH-100) |
 
-## Current status (2026-06-25, Phase 2B — sample mirror verified)
+## Current status (2026-06-25, Phase 3.5 — restore drill passed)
 
 | Item | State |
 |------|-------|
 | **Authoritative archive** | **Azure Blob** — no cutover |
 | **Go `BlobStore`** | **`AzureBlobStore` by default**; R2 + read-through via env flags (**off** in production) |
+| **R2 read-through drill** | **Done (local)** — [`r2-restore-drill-log.md`](./r2-restore-drill-log.md) |
 | **R2 (personal `51dd8007…`)** | **Enabled** — subscription active on aron.chu90 |
 | **Staging bucket** | **`streampulse-artifacts-staging`** |
 | **Azure → R2 staging copies** | **31** sample objects verified (~5.2 KiB) — [`sample-mirror-phase2b.csv`](./sample-mirror-phase2b.csv) |
@@ -47,6 +48,7 @@ StreamPulse long-term **artifact bytes** vs **queryable app state**. Read this b
 | [tasks.md](./tasks.md) | Task ledger `STOR-R2-001`–`005` |
 | [sample-manifest-phase2a.csv](./sample-manifest-phase2a.csv) | BearHost sample manifest (31 rows) |
 | [sample-mirror-phase2b.csv](./sample-mirror-phase2b.csv) | Phase 2B mirror verification log (31 rows) |
+| [r2-restore-drill-log.md](./r2-restore-drill-log.md) | STOR-R2-004 restore drill evidence |
 | [../azure-archive-setup.md](../azure-archive-setup.md) | Azure archive operator setup |
 | [../scraping-archive/requirements.md](../scraping-archive/requirements.md) | Scrape tiers + cold storage requirements |
 
@@ -61,12 +63,13 @@ bash scripts/storage/azure-extra-prefixes.sh     # directory/, viewer_rollup/
 BEARHOST_SAMPLE_MANIFEST_REMOTE=1 bash scripts/storage/archive-exports-sample-manifest.sh --csv
 bash scripts/storage/r2-one-object-dry-run.sh           # Phase 2A single object (EXECUTE=1)
 EXECUTE=1 bash scripts/storage/r2-sample-mirror-phase2b.sh  # Phase 2B sample batch
+bash scripts/storage/r2-restore-drill.sh              # STOR-R2-004 read-through drill (local secrets)
 ```
 
 ## Next operator actions
 
-1. **STOR-R2-004** — R2 restore drill before any `postgres/nightly/` mirror or prod read-through flip.
-2. **STOR-R2-005** — batch migration by prefix after verification.
+1. **STOR-R2-005** — batch migration by prefix (after operator approval).
+2. BearHost read-through flip — **optional**; only after reviewing [`r2-restore-drill-log.md`](./r2-restore-drill-log.md).
 3. Prod/backups buckets — not until separately approved.
 
 See [tasks.md](./tasks.md) for guardrails.
@@ -81,7 +84,7 @@ npx wrangler r2 bucket list
 
 ## Out of scope until later phases
 
-- Production `R2BlobStore` / read-through cutover on BearHost (**STOR-R2-004** gate)
+- Production read-through cutover on BearHost (optional; drill passed locally — see log)
 - Prod/backups R2 buckets, bulk Azure copy, Azure delete/lifecycle change
 - DNS, Pages deploy, API tunnel, D1, Workers, VOD Library implementation
 - `archive_exports` schema migration for R2 URIs
