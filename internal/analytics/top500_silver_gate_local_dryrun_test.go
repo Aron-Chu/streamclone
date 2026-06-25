@@ -95,7 +95,7 @@ func TestNewTop500SilverGateFromAppUsesFixtureWhenConfigured(t *testing.T) {
 		Top500SilverGateWriteEnabled:      false,
 		Top500SilverGateFixtureCandidates: true,
 	}
-	gate := NewTop500SilverGateFromApp(cfg, nil, nil)
+	gate := NewTop500SilverGateFromApp(cfg, nil, nil, nil)
 	if gate == nil {
 		t.Fatal("gate is nil")
 	}
@@ -124,11 +124,11 @@ func TestFixtureSilverCandidateReaderReturnsFiveLocalCandidates(t *testing.T) {
 
 func TestFixtureSilverBudgetCounterReaderFailClosedOverrides(t *testing.T) {
 	reader := NewFixtureSilverBudgetCounterReader()
-	dup, err := reader.ReadSnapshot(context.Background(), fixtureSilverDuplicateLogin)
+	dup, err := reader.ReadSnapshot(context.Background(), fixtureSilverDuplicateLogin, "fixture-stream-dup")
 	if err != nil || !dup.DuplicateQueuedOrRunning {
 		t.Fatalf("dup snapshot = %+v err=%v", dup, err)
 	}
-	budget, err := reader.ReadSnapshot(context.Background(), fixtureSilverBudgetLogin)
+	budget, err := reader.ReadSnapshot(context.Background(), fixtureSilverBudgetLogin, "fixture-stream-budget")
 	if err != nil || budget.SilverEnqueuedToday != SilverGateGlobalMaxEnqueuePerDay {
 		t.Fatalf("budget snapshot = %+v err=%v", budget, err)
 	}
