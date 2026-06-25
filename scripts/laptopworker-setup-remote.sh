@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # One-shot laptopworker QoL from Windows: scripts\laptopworker-remote.cmd setup
-# Enter laptop sudo password once at your desk — then ufw/grub/power work without walking over.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,8 +23,14 @@ if ! sudo -n true 2>/dev/null; then
   sudo -v
 fi
 
-echo "==> Installing passwordless sudo for laptopworker scripts..."
-bash "$ROOT/scripts/laptopworker-install-sudoers.sh"
+echo "==> Installing root-owned /usr/local/sbin helpers..."
+sudo bash "$ROOT/scripts/laptopworker-install-helpers.sh"
+
+echo "==> Installing passwordless sudo (helpers only, not git checkout)..."
+sudo bash "$ROOT/scripts/laptopworker-install-sudoers.sh"
+
+echo "==> Installing boot-time firewall systemd unit..."
+sudo bash "$ROOT/scripts/laptopworker-install-firewall-service.sh"
 
 echo "==> linger (boot stack without console login)"
 if [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || echo no)" != "yes" ]; then
@@ -34,18 +39,16 @@ fi
 loginctl show-user "$(id -un)" -p Linger
 
 echo "==> Always-on power posture"
-bash "$ROOT/scripts/laptopworker-power-config.sh"
-
-echo "==> Tailnet firewall (UFW + DOCKER-USER)"
-bash "$ROOT/scripts/laptopworker-ufw-tailnet.sh"
+sudo -n /usr/local/sbin/streamclone-laptopworker-power
 
 echo "==> Boot into Ubuntu by default (GRUB + UEFI)"
-bash "$ROOT/scripts/laptopworker-setup-boot.sh"
+sudo -n /usr/local/sbin/streamclone-laptopworker-boot
 
 if [ ! -f "${HOME}/.config/systemd/user/streamclone-dev.service" ]; then
   echo "==> Installing systemd user service..."
   bash "$ROOT/scripts/laptopworker-stack.sh" install-service
 else
+  bash "$ROOT/scripts/laptopworker-install-service.sh"
   systemctl --user daemon-reload
   systemctl --user enable streamclone-dev.service streamclone-dev-health.timer 2>/dev/null || true
   laptopworker_ensure_scripts_executable "$ROOT"
@@ -54,16 +57,15 @@ else
 fi
 
 echo
-bash "$ROOT/scripts/laptopworker-stack.sh" boot-check
+bash "$ROOT/scripts/laptopworker-stack.sh" setup-verify
 
 cat <<EOF
 
-Setup complete. From Windows (no sudo prompts next time):
+Setup complete. From Windows (no sudo prompts):
   scripts\\laptopworker-remote.cmd smoke
-  scripts\\laptopworker-remote.cmd boot-check
-  scripts\\laptopworker-remote.cmd ufw-tailnet   # re-apply if Docker rules lost
+  scripts\\laptopworker-remote.cmd setup-verify
+  scripts\\laptopworker-remote.cmd ufw-tailnet
 
-Reboot test (optional): ssh -t aron@laptopworker sudo reboot
-  then: scripts\\laptopworker-remote.cmd smoke
+LAN should NOT reach http://<laptop-lan-ip>:8090 (only tailnet + localhost).
 
 EOF

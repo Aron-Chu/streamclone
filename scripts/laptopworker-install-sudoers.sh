@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Passwordless sudo for laptopworker remote ops (run once from laptopworker-setup-remote.sh).
+# Passwordless sudo for root-owned /usr/local/sbin helpers only.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-USER_NAME="$(id -un)"
+if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+  exec sudo bash "$0" "$@"
+fi
+
+USER_NAME="${SUDO_USER:-${LAPTOPWORKER_USER:-aron}}"
 DROP="/etc/sudoers.d/streamclone-laptopworker"
 TMP="$(mktemp)"
 
@@ -11,16 +14,16 @@ cleanup() { rm -f "$TMP"; }
 trap cleanup EXIT
 
 cat >"$TMP" <<EOF
-# Streamclone laptopworker — remote setup from Windows (scripts/laptopworker-remote.cmd setup)
-# Managed by ${ROOT}/scripts/laptopworker-install-sudoers.sh
+# Streamclone laptopworker — NOPASSWD for root-owned helpers only (not git checkout).
 ${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/loginctl enable-linger ${USER_NAME}
-${USER_NAME} ALL=(ALL) NOPASSWD: /bin/bash ${ROOT}/scripts/laptopworker-ufw-tailnet.sh
-${USER_NAME} ALL=(ALL) NOPASSWD: /bin/bash ${ROOT}/scripts/laptopworker-power-config.sh
-${USER_NAME} ALL=(ALL) NOPASSWD: /bin/bash ${ROOT}/scripts/laptopworker-setup-boot.sh
-${USER_NAME} ALL=(ALL) NOPASSWD: /usr/sbin/iptables
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/local/sbin/streamclone-laptopworker-firewall
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/local/sbin/streamclone-laptopworker-power
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/local/sbin/streamclone-laptopworker-boot
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start streamclone-laptopworker-firewall.service
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart streamclone-laptopworker-firewall.service
 EOF
 
-sudo cp "$TMP" "$DROP"
-sudo chmod 440 "$DROP"
-sudo visudo -cf "$DROP"
-echo "Installed $DROP (passwordless laptopworker sudo for remote control)"
+cp "$TMP" "$DROP"
+chmod 440 "$DROP"
+visudo -cf "$DROP"
+echo "Installed $DROP"
