@@ -7,11 +7,13 @@ alwaysApply: true
 
 1. Open `AGENTS.md` and load **one** domain steering file from the task router table.
 2. Load the matching **domain skill** from `.cursor/skills/streamclone/` when present (see AGENTS.md Skills router).
-3. Use MCP before broad search:
-   - **`streamclone-codegraph`**: `get_ast_chunk`, `get_blast_radius`, `get_call_chain`, `search_symbols`
-   - **`streamclone-stack`**: `stack_health`, `stack_ports`, `playback_probe`, `compose_logs` (runtime at `:8090`)
-   - **`streamclone-data`**: `emote_jobs`, `redis_channel_emotes`, `postgres_query` (SELECT only)
+3. **Context retrieval (cheap → expensive):**
+   - **Symbols / call graph:** `streamclone-codegraph` only (`get_ast_chunk`, `get_blast_radius`, `get_call_chain`) — not for runtime state.
+   - **Runtime truth:** MCP `stack_health`, `stack_ports`, `postgres_query` (SELECT), or `make context-snapshots` → read `runtime/context/*.txt` summaries only.
+   - **Bulk codebase:** Repomix via skill `context-retrieval` — last resort; never paste full output into chat.
+   - **Optional semantic index:** CocoIndex MCP if you configured it locally; codegraph remains primary for Go/TS symbols.
 4. Local stack URL: `http://localhost:8090`. Windows localhost issues → `.kiro/steering/windows-dev.md`. HLS 401 → `.kiro/steering/playback.md`.
 5. Prefer narrow tests; avoid pasting full API JSON into responses.
 6. MCP setup: `make mcp-setup`; copy `.cursor/mcp.recommended.json.example` → local `.cursor/mcp.json`.
 7. Commits → `.cursor/rules/commits.mdc` (Aron-Chu author, Conventional Commits, no agent co-authors).
+8. Verify agent stack: `make context-verify` (rules, hooks, codegraph freshness).

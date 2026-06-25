@@ -155,6 +155,28 @@ func TestWatchPoolCap(t *testing.T) {
 	}
 }
 
+func TestCollectorPrincipalRefCount(t *testing.T) {
+	store := &fakeStore{}
+	joiner := &fakeJoiner{}
+	c := NewCollector(store, fakeProvider{}, joiner, nil, nilLogger(), 5, time.Second, time.Hour, 200)
+	c.WithIdleTTL(time.Millisecond)
+
+	first := c.WatchForPrincipal(context.Background(), "xqc", "principal-a")
+	second := c.WatchForPrincipal(context.Background(), "xqc", "principal-b")
+	if !first.Tracking || !second.Tracking {
+		t.Fatalf("expected shared tracking: %+v %+v", first, second)
+	}
+	if len(joiner.joined) != 1 {
+		t.Fatalf("expected one IRC join, got %v", joiner.joined)
+	}
+	c.ReleaseForPrincipal("xqc", "principal-a")
+	c.ReleaseForPrincipal("xqc", "principal-b")
+	c.evictIdleChannels(time.Now().UTC().Add(time.Second))
+	if c.IsTracking("xqc") {
+		t.Fatal("expected channel evicted after refs released and idle TTL")
+	}
+}
+
 func TestWatchUsesCollectorContextForIRCJoin(t *testing.T) {
 	store := &fakeStore{}
 	joiner := &fakeJoiner{}
@@ -359,12 +381,11 @@ func TestStreamCloseMarksUnlinkedWhenVodUnresolved(t *testing.T) {
 	}
 }
 
-// TestVodResolveWindowBoundedToFiveMinutes asserts the default resolution window
-// honors the 5-minute bound: retries happen at 0 / 30s / 2m / 5m after close,
-// with the final offset capping the window (Requirement 19.3).
-func TestVodResolveWindowBoundedToFiveMinutes(t *testing.T) {
+// TestVodResolveWindowBoundedToSixtyMinutes asserts the default auto-resolution
+// window retries at short intervals, then soft-finalizes after 60m.
+func TestVodResolveWindowBoundedToSixtyMinutes(t *testing.T) {
 	c := NewCollector(&fakeStore{}, fakeProvider{}, &fakeJoiner{}, nil, nilLogger(), 50, time.Hour, 30*24*time.Hour, 200)
-	want := []time.Duration{0, 30 * time.Second, 2 * time.Minute, 5 * time.Minute}
+	want := []time.Duration{0, 30 * time.Second, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute, 60 * time.Minute}
 	if len(c.vodResolveOffsets) != len(want) {
 		t.Fatalf("expected %d resolve offsets, got %v", len(want), c.vodResolveOffsets)
 	}
@@ -374,7 +395,7 @@ func TestVodResolveWindowBoundedToFiveMinutes(t *testing.T) {
 		}
 	}
 	last := c.vodResolveOffsets[len(c.vodResolveOffsets)-1]
-	if last != 5*time.Minute {
-		t.Fatalf("resolution window must be bounded to 5m, got final offset %s", last)
+	if last != 60*time.Minute {
+		t.Fatalf("resolution window must be bounded to 60m, got final offset %s", last)
 	}
 }

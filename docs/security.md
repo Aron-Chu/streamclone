@@ -30,6 +30,8 @@ make validate-env
 make security-scan
 ```
 
+Operator secret files (webhooks, Azure connection strings) live outside the repo — see [`docs/operator-secrets.md`](operator-secrets.md). Initialize with `scripts/operator-secrets-init.ps1` or `scripts/operator-secrets-init.sh`.
+
 ## Tunnels
 
 Forward only the Caddy proxy (`127.0.0.1:8090`).

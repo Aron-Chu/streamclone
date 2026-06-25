@@ -53,9 +53,27 @@ func (s *SyncService) SyncPulseMissedChat(ctx context.Context, streamID, login, 
 		st.Channel = login
 	})
 
+	storedVodID := strings.TrimSpace(stream.VodID)
 	vodID := strings.TrimSpace(hintVodID)
+	if vodID != "" {
+		if _, err := validatePulseVODCandidate(*stream, vodID); err != nil {
+			return err
+		}
+		if vodID != storedVodID {
+			validatedVodID, err := validatePulseVodViaHelix(ctx, s.helix, *stream, login, vodID, true)
+			if err != nil {
+				return err
+			}
+			vodID = validatedVodID
+		}
+	}
 	if vodID == "" {
-		vodID = strings.TrimSpace(stream.VodID)
+		vodID = storedVodID
+		if vodID != "" {
+			if _, err := validatePulseVODCandidate(*stream, vodID); err != nil {
+				return err
+			}
+		}
 	}
 	if vodID == "" && broadcasterID != "" && s.helix != nil && s.helix.Enabled() {
 		if resolved, _ := s.helix.VideoIDByStreamID(ctx, broadcasterID, streamID); resolved != "" {

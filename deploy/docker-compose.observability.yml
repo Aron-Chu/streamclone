@@ -9,12 +9,46 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
+      - prometheus-obs-data:/prometheus
       - ./prometheus/prometheus-observability.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts:/etc/prometheus/alerts:ro
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
       - --web.enable-lifecycle
+    depends_on:
+      alertmanager-obs:
+        condition: service_started
+
+  alertmanager-obs:
+    profiles: [observability]
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - /etc/streamclone/secrets/alertmanager-webhook-url:/etc/alertmanager/secrets/webhook_url:ro
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+
+  node-exporter-obs:
+    profiles: [observability]
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --web.listen-address=:9100
 
   grafana-obs:
     profiles: [observability]
@@ -36,3 +70,4 @@ services:
 
 volumes:
   grafana-obs-data:
+  prometheus-obs-data:

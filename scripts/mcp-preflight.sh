@@ -24,9 +24,25 @@ mcp_handshake() {
   local list='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
   local err="/tmp/streamclone-mcp-preflight-${label}.err"
   local out
-  out=$(printf '%s\n%s\n%s\n' "$init" "$note" "$list" | timeout 20 bash "$ROOT/$script" 2>"$err" | tail -1)
+  out=$(printf '%s\n%s\n%s\n' "$init" "$note" "$list" | timeout 20 bash "$ROOT/$script" 2>"$err")
   local count
-  count=$(printf '%s' "$out" | "$PY" -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('result',{}).get('tools',[])))" 2>/dev/null || echo 0)
+  count=$(printf '%s' "$out" | "$PY" -c "
+import json, sys
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        d = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    tools = d.get('result', {}).get('tools')
+    if tools is not None:
+        print(len(tools))
+        break
+else:
+    print(0)
+" 2>/dev/null || echo 0)
   local stderr_preview=""
   if [[ -s "$err" ]]; then
     stderr_preview=$(head -c 200 "$err")

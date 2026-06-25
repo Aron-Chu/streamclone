@@ -1,0 +1,19 @@
+---
+description: Go services — cmd/internal patterns, tests, and Caddy routing
+globs: cmd/**,internal/**,*.go
+alwaysApply: false
+---
+
+# Backend (Go)
+
+Read `.kiro/steering/tech.md` first.
+
+- Services under `cmd/*`; shared logic in `internal/*`. Chi routers, pgx, Redis, slog.
+- Browser/API boundary: **`http://localhost:8090`** via Caddy — not raw container ports.
+- Env-driven config only; never hardcode secrets, tokens, or hostnames.
+- Bounded queues, context cancellation, retry caps on upstream loops.
+- **Symbol lookup:** `streamclone-codegraph` MCP (`get_ast_chunk`, `get_blast_radius`) — not Repomix.
+- **Runtime truth:** `make context-snapshots` or MCP `stack_health` / `postgres_query` (SELECT only).
+- Tests: `go test ./internal/<pkg>/...` before `make check-quick`.
+
+Pulse BFF: also read sibling `streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md` when touching `internal/analytics/pulse*` or `extension_api.go`.

@@ -185,16 +185,47 @@ type Config struct {
 	Tier0RosterInterval time.Duration `env:"TIER0_ROSTER_INTERVAL" envDefault:"5m"`
 	Tier0RosterTopN     int           `env:"TIER0_ROSTER_TOP_N" envDefault:"200"`
 
-	BackfillEnabled             bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
-	BackfillWorkerInterval      time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`
-	BackfillStaleRunningAfter   time.Duration `env:"BACKFILL_STALE_RUNNING_AFTER" envDefault:"2h"`
-	BackfillHeartbeatInterval   time.Duration `env:"BACKFILL_HEARTBEAT_INTERVAL" envDefault:"60s"`
-	BackfillGoldWorkerEnabled   bool          `env:"BACKFILL_GOLD_WORKER_ENABLED"`
-	SilverAutoEnqueueEnabled bool        `env:"SILVER_AUTO_ENQUEUE_ENABLED" envDefault:"false"`
-	SilverEnqueueSinceDays   int         `env:"SILVER_ENQUEUE_SINCE_DAYS" envDefault:"60"`
-	SilverEnqueueTopN        int         `env:"SILVER_ENQUEUE_TOP_N" envDefault:"200"`
-	SilverEnqueueMaxPerRun   int         `env:"SILVER_ENQUEUE_MAX_PER_RUN" envDefault:"25"`
-	SilverEnqueueInterval    time.Duration `env:"SILVER_ENQUEUE_INTERVAL" envDefault:"15m"`
+	Top500MetadataEnabled                 bool          `env:"TOP500_METADATA_ENABLED" envDefault:"false"`
+	Top500MetadataDryRun                  bool          `env:"TOP500_METADATA_DRY_RUN" envDefault:"true"`
+	Top500MetadataTopN                    int           `env:"TOP500_METADATA_TOP_N" envDefault:"100"`
+	Top500MetadataWriteEnabled            bool          `env:"TOP500_METADATA_WRITE_ENABLED" envDefault:"false"`
+	Top500MetadataLiveInterval            time.Duration `env:"TOP500_METADATA_LIVE_INTERVAL" envDefault:"60s"`
+	Top500MetadataOfflineInterval         time.Duration `env:"TOP500_METADATA_OFFLINE_INTERVAL" envDefault:"10m"`
+	Top500MetadataBatchSize               int           `env:"TOP500_METADATA_BATCH_SIZE" envDefault:"100"`
+	Top500MetadataFixtureProvider         bool          `env:"TOP500_METADATA_FIXTURE_PROVIDER" envDefault:"false"`
+	Top500MetadataDBP95HoldMS             int           `env:"TOP500_METADATA_DB_P95_HOLD_MS" envDefault:"50"`
+	Top500MetadataRollbackDBP95MS         int           `env:"TOP500_METADATA_ROLLBACK_DB_P95_MS" envDefault:"200"`
+	Top500MetadataRollbackDiskFreePercent int           `env:"TOP500_METADATA_ROLLBACK_DISK_FREE_PERCENT" envDefault:"15"`
+
+	Top500SilverGateEnabled          bool          `env:"TOP500_SILVER_GATE_ENABLED" envDefault:"false"`
+	Top500SilverGateDryRun           bool          `env:"TOP500_SILVER_GATE_DRY_RUN" envDefault:"true"`
+	Top500SilverGateWriteEnabled     bool          `env:"TOP500_SILVER_GATE_WRITE_ENABLED" envDefault:"false"`
+	Top500SilverGateMaxCandidates    int           `env:"TOP500_SILVER_GATE_MAX_CANDIDATES" envDefault:"5"`
+	Top500SilverGateMaxEnqueuePerRun int           `env:"TOP500_SILVER_GATE_MAX_ENQUEUE_PER_RUN" envDefault:"1"`
+	Top500SilverGateInterval         time.Duration `env:"TOP500_SILVER_GATE_INTERVAL" envDefault:"10m"`
+	Top500SilverGateFixtureCandidates bool         `env:"TOP500_SILVER_GATE_FIXTURE_CANDIDATES" envDefault:"false"`
+
+	PulseHostedMode              bool   `env:"PULSE_HOSTED_MODE" envDefault:"false"`
+	PulseBetaKeys                string `env:"PULSE_BETA_KEYS"`
+	PulseMaxActiveChannels       int    `env:"PULSE_MAX_ACTIVE_CHANNELS" envDefault:"0"`
+	PulseMaxBackfills            int    `env:"PULSE_MAX_BACKFILLS" envDefault:"0"`
+	PulseMaxChannelsPerPrincipal int    `env:"PULSE_MAX_CHANNELS_PER_PRINCIPAL" envDefault:"0"`
+	PulseWatchRatePerMin         int    `env:"PULSE_WATCH_RATE_PER_MIN" envDefault:"0"`
+	PulseBackfillRatePerHour     int    `env:"PULSE_BACKFILL_RATE_PER_HOUR" envDefault:"0"`
+	PulseCFAccessTeamDomain      string `env:"PULSE_CF_ACCESS_TEAM_DOMAIN"`
+	PulseCFAccessAud             string `env:"PULSE_CF_ACCESS_AUD"`
+	PulseAdminLocalBypass        bool   `env:"PULSE_ADMIN_LOCAL_BYPASS" envDefault:"false"`
+
+	BackfillEnabled           bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
+	BackfillWorkerInterval    time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`
+	BackfillStaleRunningAfter time.Duration `env:"BACKFILL_STALE_RUNNING_AFTER" envDefault:"2h"`
+	BackfillHeartbeatInterval time.Duration `env:"BACKFILL_HEARTBEAT_INTERVAL" envDefault:"60s"`
+	BackfillGoldWorkerEnabled bool          `env:"BACKFILL_GOLD_WORKER_ENABLED"`
+	SilverAutoEnqueueEnabled  bool          `env:"SILVER_AUTO_ENQUEUE_ENABLED" envDefault:"false"`
+	SilverEnqueueSinceDays    int           `env:"SILVER_ENQUEUE_SINCE_DAYS" envDefault:"60"`
+	SilverEnqueueTopN         int           `env:"SILVER_ENQUEUE_TOP_N" envDefault:"200"`
+	SilverEnqueueMaxPerRun    int           `env:"SILVER_ENQUEUE_MAX_PER_RUN" envDefault:"25"`
+	SilverEnqueueInterval     time.Duration `env:"SILVER_ENQUEUE_INTERVAL" envDefault:"15m"`
 
 	GoldBackfillEnabled    bool          `env:"GOLD_BACKFILL_ENABLED" envDefault:"false"`
 	GoldMinPeakViewers     int           `env:"GOLD_MIN_PEAK_VIEWERS" envDefault:"0"`
@@ -205,34 +236,34 @@ type Config struct {
 	PostEndWaitMax         time.Duration `env:"POST_END_WAIT_MAX" envDefault:"30m"`
 	PostEndCoveragePct     float64       `env:"POST_END_COVERAGE_PCT" envDefault:"70"`
 
-	BronzeEnabled              bool          `env:"BRONZE_ENABLED" envDefault:"false"`
-	BronzeTopN                 int           `env:"BRONZE_TOP_N" envDefault:"500"`
-	BronzeWorkerInterval       time.Duration `env:"BRONZE_WORKER_INTERVAL" envDefault:"5m"`
-	BronzeHelixConcurrency     int           `env:"BRONZE_HELIX_CONCURRENCY" envDefault:"2"`
-	BronzeTTSummaryConcurrency int           `env:"BRONZE_TT_SUMMARY_CONCURRENCY" envDefault:"4"`
-	BronzeVODIndexSinceDays    int           `env:"BRONZE_VOD_INDEX_SINCE_DAYS" envDefault:"365"`
-	BronzeVODIndexMaxPages     int           `env:"BRONZE_VOD_INDEX_MAX_PAGES" envDefault:"10"`
-	BronzeIdentityEnabled      bool          `env:"BRONZE_IDENTITY_ENABLED" envDefault:"true"`
-	BronzeCrosswalkEnabled     bool          `env:"BRONZE_CROSSWALK_ENABLED" envDefault:"true"`
-	BronzeTombstoneEnabled     bool          `env:"BRONZE_TOMBSTONE_ENABLED" envDefault:"true"`
-	BronzeCoverageExportEnabled bool         `env:"BRONZE_COVERAGE_EXPORT_ENABLED" envDefault:"true"`
-	EmoteGlobal7TVEnabled      bool          `env:"EMOTE_GLOBAL_7TV_ENABLED" envDefault:"true"`
-	EmoteChangelogDiffEnabled  bool          `env:"EMOTE_CHANGELOG_DIFF_ENABLED" envDefault:"true"`
-	EmoteFFZSnapshotEnabled    bool          `env:"EMOTE_FFZ_SNAPSHOT_ENABLED" envDefault:"false"`
-	EmoteBTTVSnapshotEnabled   bool          `env:"EMOTE_BTTV_SNAPSHOT_ENABLED" envDefault:"false"`
-	GoldLiteEnabled            bool          `env:"GOLD_LITE_ENABLED" envDefault:"false"`
-	GoldLiteRequireRollups     bool          `env:"GOLD_LITE_REQUIRE_ROLLUPS" envDefault:"true"`
-	GoldFullEnabled            bool          `env:"GOLD_FULL_ENABLED" envDefault:"false"`
-	GoldFullOperatorOnly       bool          `env:"GOLD_FULL_OPERATOR_ONLY" envDefault:"true"`
-	GoldFullMinPeakViewers     int           `env:"GOLD_FULL_MIN_PEAK_VIEWERS" envDefault:"5000"`
-	GoldFullMinDurationMinutes int           `env:"GOLD_FULL_MIN_DURATION_MINUTES" envDefault:"60"`
-	SilverRawTTChartJSON       bool          `env:"SILVER_RAW_TT_CHART_JSON" envDefault:"true"`
-	SilverRawTTMaxBytes        int           `env:"SILVER_RAW_TT_MAX_BYTES" envDefault:"8388608"`
-	SilverPartialMinCoverage   float64       `env:"SILVER_PARTIAL_MIN_COVERAGE" envDefault:"0.5"`
-	AnalyticsTTUseProxy        bool          `env:"ANALYTICS_TT_USE_PROXY" envDefault:"false"`
-	ViteAdminArchiveUIEnabled  bool          `env:"VITE_ADMIN_ARCHIVE_UI_ENABLED" envDefault:"false"`
+	BronzeEnabled                 bool          `env:"BRONZE_ENABLED" envDefault:"false"`
+	BronzeTopN                    int           `env:"BRONZE_TOP_N" envDefault:"500"`
+	BronzeWorkerInterval          time.Duration `env:"BRONZE_WORKER_INTERVAL" envDefault:"5m"`
+	BronzeHelixConcurrency        int           `env:"BRONZE_HELIX_CONCURRENCY" envDefault:"2"`
+	BronzeTTSummaryConcurrency    int           `env:"BRONZE_TT_SUMMARY_CONCURRENCY" envDefault:"4"`
+	BronzeVODIndexSinceDays       int           `env:"BRONZE_VOD_INDEX_SINCE_DAYS" envDefault:"365"`
+	BronzeVODIndexMaxPages        int           `env:"BRONZE_VOD_INDEX_MAX_PAGES" envDefault:"10"`
+	BronzeIdentityEnabled         bool          `env:"BRONZE_IDENTITY_ENABLED" envDefault:"true"`
+	BronzeCrosswalkEnabled        bool          `env:"BRONZE_CROSSWALK_ENABLED" envDefault:"true"`
+	BronzeTombstoneEnabled        bool          `env:"BRONZE_TOMBSTONE_ENABLED" envDefault:"true"`
+	BronzeCoverageExportEnabled   bool          `env:"BRONZE_COVERAGE_EXPORT_ENABLED" envDefault:"true"`
+	EmoteGlobal7TVEnabled         bool          `env:"EMOTE_GLOBAL_7TV_ENABLED" envDefault:"true"`
+	EmoteChangelogDiffEnabled     bool          `env:"EMOTE_CHANGELOG_DIFF_ENABLED" envDefault:"true"`
+	EmoteFFZSnapshotEnabled       bool          `env:"EMOTE_FFZ_SNAPSHOT_ENABLED" envDefault:"false"`
+	EmoteBTTVSnapshotEnabled      bool          `env:"EMOTE_BTTV_SNAPSHOT_ENABLED" envDefault:"false"`
+	GoldLiteEnabled               bool          `env:"GOLD_LITE_ENABLED" envDefault:"false"`
+	GoldLiteRequireRollups        bool          `env:"GOLD_LITE_REQUIRE_ROLLUPS" envDefault:"true"`
+	GoldFullEnabled               bool          `env:"GOLD_FULL_ENABLED" envDefault:"false"`
+	GoldFullOperatorOnly          bool          `env:"GOLD_FULL_OPERATOR_ONLY" envDefault:"true"`
+	GoldFullMinPeakViewers        int           `env:"GOLD_FULL_MIN_PEAK_VIEWERS" envDefault:"5000"`
+	GoldFullMinDurationMinutes    int           `env:"GOLD_FULL_MIN_DURATION_MINUTES" envDefault:"60"`
+	SilverRawTTChartJSON          bool          `env:"SILVER_RAW_TT_CHART_JSON" envDefault:"true"`
+	SilverRawTTMaxBytes           int           `env:"SILVER_RAW_TT_MAX_BYTES" envDefault:"8388608"`
+	SilverPartialMinCoverage      float64       `env:"SILVER_PARTIAL_MIN_COVERAGE" envDefault:"0.5"`
+	AnalyticsTTUseProxy           bool          `env:"ANALYTICS_TT_USE_PROXY" envDefault:"false"`
+	ViteAdminArchiveUIEnabled     bool          `env:"VITE_ADMIN_ARCHIVE_UI_ENABLED" envDefault:"false"`
 	ArchiveMetricsRefreshInterval time.Duration `env:"ARCHIVE_METRICS_REFRESH_INTERVAL" envDefault:"30s"`
-	PulsewireArchiveEnabled    bool          `env:"PULSEWIRE_ARCHIVE_ENABLED" envDefault:"false"`
+	PulsewireArchiveEnabled       bool          `env:"PULSEWIRE_ARCHIVE_ENABLED" envDefault:"false"`
 
 	EmoteImportConcurrency     int           `env:"EMOTE_IMPORT_CONCURRENCY" envDefault:"8"`
 	EmoteWorkerConcurrency     int           `env:"EMOTE_WORKER_CONCURRENCY" envDefault:"8"`
@@ -269,6 +300,21 @@ func Load() (Config, error) {
 	}
 	if strings.TrimSpace(os.Getenv("BACKFILL_GOLD_WORKER_ENABLED")) == "" {
 		c.BackfillGoldWorkerEnabled = c.GoldBackfillEnabled
+	}
+	if c.Top500MetadataTopN <= 0 || c.Top500MetadataTopN > 100 {
+		c.Top500MetadataTopN = 100
+	}
+	if c.Top500MetadataBatchSize <= 0 || c.Top500MetadataBatchSize > 100 {
+		c.Top500MetadataBatchSize = 100
+	}
+	if c.Top500SilverGateMaxCandidates <= 0 || c.Top500SilverGateMaxCandidates > 100 {
+		c.Top500SilverGateMaxCandidates = 5
+	}
+	if c.Top500SilverGateMaxEnqueuePerRun <= 0 || c.Top500SilverGateMaxEnqueuePerRun > 10 {
+		c.Top500SilverGateMaxEnqueuePerRun = 1
+	}
+	if c.Top500SilverGateInterval <= 0 {
+		c.Top500SilverGateInterval = 10 * time.Minute
 	}
 	return c, nil
 }

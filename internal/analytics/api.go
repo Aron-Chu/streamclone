@@ -9,11 +9,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 
 	"streamclone/internal/analytics/heatmap"
 	"streamclone/internal/timeseries"
@@ -30,6 +32,13 @@ type Handler struct {
 	heatmapCache  *heatmap.Cache
 	timeseries    timeseries.Writer
 	rdb           *redis.Client
+	rateLimiter   *PulseRateLimiter
+	pulseHosted   PulseHostedConfig
+	pulseRuntime  PulseRuntimeConfig
+	statsGroup    singleflight.Group
+	statusGroup   singleflight.Group
+	refreshStop   chan struct{}
+	refreshOnce   sync.Once
 }
 
 func NewHandler(store *Store, collector *Collector, helix *HelixClient, syncService *SyncService) *Handler {
@@ -46,13 +55,31 @@ func (h *Handler) WithTimeseries(writer timeseries.Writer) *Handler {
 	return h
 }
 
+func (h *Handler) WithPulseRuntime(cfg PulseRuntimeConfig) *Handler {
+	h.pulseRuntime = cfg.withDefaults()
+	return h
+}
+
+func (h *Handler) pulseRuntimeConfig() PulseRuntimeConfig {
+	if h == nil {
+		return DefaultPulseRuntimeConfig()
+	}
+	return h.pulseRuntime.withDefaults()
+}
+
 func (h *Handler) Routes(r chi.Router) {
+	h.PublicRoutes(r)
 	h.ExtensionRoutes(r)
 	h.PulseRoutes(r)
+	h.PortalRoutes(r)
 	r.Route("/v1/analytics", func(r chi.Router) {
 		r.Get("/always-tracked", h.getAlwaysTracked)
 		r.Post("/always-tracked", h.setAlwaysTracked)
-		r.Post("/channels/{login}/watch", h.watchChannel)
+		if h.pulseHosted.Hosted {
+			r.With(h.pulseHostedAuthMiddleware).Post("/channels/{login}/watch", h.watchChannel)
+		} else {
+			r.Post("/channels/{login}/watch", h.watchChannel)
+		}
 		r.Get("/channels/{login}/live", h.channelLive)
 		r.Get("/channels/{login}/streams", h.channelStreams)
 		r.Get("/channels/{login}/streams/ranked", h.channelStreamsRanked)
@@ -76,6 +103,9 @@ func (h *Handler) getAlwaysTracked(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) setAlwaysTracked(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePulseWrite(w) {
+		return
+	}
 	var req struct {
 		Channel string `json:"channel"`
 		Track   bool   `json:"track"`
@@ -89,17 +119,44 @@ func (h *Handler) setAlwaysTracked(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_channel"})
 		return
 	}
-	resp := h.collector.SetAlwaysTracked(r.Context(), login, req.Track)
+	globalLimit := h.pulseRuntimeConfig().ProtectedGlobalLimit
+	if req.Track {
+		if err := h.store.AddAlwaysTrackedWithCap(r.Context(), login, globalLimit); err != nil {
+			if isProtectedCapError(err) {
+				writeProtectedCapReached(w)
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		resp := h.collector.SetAlwaysTracked(r.Context(), login, true, true)
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	resp := h.collector.SetAlwaysTracked(r.Context(), login, false)
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) watchChannel(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePulseWrite(w) {
+		return
+	}
+	if !h.enforceWatchRateLimit(w, r) {
+		return
+	}
 	login, ok := validLogin(chi.URLParam(r, "login"))
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_channel"})
 		return
 	}
-	resp := h.collector.Watch(r.Context(), login)
+	principalID := ""
+	if p, ok := pulsePrincipalFromContext(r.Context()); ok {
+		principalID = p.ID
+	}
+	resp := h.collector.WatchForPrincipal(r.Context(), login, principalID)
+	if resp.Tracking {
+		h.invalidateExtensionCoverageCache(r.Context(), login)
+	}
 	status := http.StatusOK
 	if !resp.Tracking {
 		status = http.StatusAccepted

@@ -12,11 +12,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+_REPO = Path(__file__).resolve().parents[2]
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
+
 import kuzu
 from mcp.server.fastmcp import FastMCP
 
-
-NODE_TABLES = ("Function", "Class", "Interface", "ImportModule")
+from tools.codegraph.query import (
+    NODE_TABLES,
+    find_symbols,
+    incoming_calls,
+    open_connection,
+    outgoing_calls,
+    query_all,
+    search_symbol_substring,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,85 +49,50 @@ mcp = FastMCP(
 
 
 def connection() -> kuzu.Connection:
-    if not DB_PATH.exists():
-        raise FileNotFoundError(f"Code graph database not found at {DB_PATH}. Run tools/codegraph/codegraph_ingest.py first.")
-    return kuzu.Connection(kuzu.Database(str(DB_PATH), read_only=True))
+    return open_connection(DB_PATH)
 
 
-def query_all(query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    conn = connection()
-    result = conn.execute(query, params or {})
-    columns = result.get_column_names()
-    return [dict(zip(columns, row, strict=False)) for row in result.get_all()]
+def db_query_all(query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    return query_all(connection(), query, params)
 
 
-def find_symbols(symbol_name: str, tables: tuple[str, ...] = NODE_TABLES) -> list[dict[str, Any]]:
-    matches: list[dict[str, Any]] = []
-    for table in tables:
-        if table == "ImportModule":
-            rows = query_all(
-                """
-                MATCH (n:ImportModule)
-                WHERE n.id = $symbol OR n.name = $symbol OR n.path = $symbol OR n.local_path = $symbol
-                RETURN 'ImportModule' AS kind, n.id AS id, n.name AS name, n.path AS qualified_name,
-                       n.local_path AS file_path, 0 AS start_line, 0 AS end_line,
-                       0 AS start_byte, 0 AS end_byte
-                """,
-                {"symbol": symbol_name},
-            )
-        else:
-            rows = query_all(
-                f"""
-                MATCH (n:{table})
-                WHERE n.id = $symbol OR n.name = $symbol OR n.qualified_name = $symbol
-                RETURN '{table}' AS kind, n.id AS id, n.name AS name, n.qualified_name AS qualified_name,
-                       n.file_path AS file_path, n.start_line AS start_line, n.end_line AS end_line,
-                       n.start_byte AS start_byte, n.end_byte AS end_byte
-                """,
-                {"symbol": symbol_name},
-            )
-        matches.extend(rows)
-    return sorted(matches, key=lambda row: (row["kind"], row["file_path"], row["start_line"]))
+def db_find_symbols(symbol_name: str, tables: tuple[str, ...] = NODE_TABLES) -> list[dict[str, Any]]:
+    return find_symbols(connection(), symbol_name, tables)
 
 
-def outgoing_calls(function_id: str) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for table in ("Function", "Class"):
-        rows.extend(
-            query_all(
-                f"""
-                MATCH (a:Function {{id: $id}})-[r:CALLS]->(b:{table})
-                RETURN 'outgoing' AS direction, '{table}' AS target_kind,
-                       b.id AS target_id, b.name AS target_name, b.qualified_name AS target_qualified_name,
-                       b.file_path AS target_file, b.start_line AS target_line,
-                       r.call_expr AS call_expr, r.line AS call_line
-                """,
-                {"id": function_id},
-            )
-        )
-    return rows
-
-
-def incoming_calls(symbol: dict[str, Any]) -> list[dict[str, Any]]:
-    if symbol["kind"] not in {"Function", "Class"}:
-        return []
-    return query_all(
-        f"""
-        MATCH (a:Function)-[r:CALLS]->(b:{symbol["kind"]} {{id: $id}})
-        RETURN 'incoming' AS direction, 'Function' AS source_kind,
-               a.id AS source_id, a.name AS source_name, a.qualified_name AS source_qualified_name,
-               a.file_path AS source_file, a.start_line AS source_line,
-               r.call_expr AS call_expr, r.line AS call_line
-        """,
-        {"id": symbol["id"]},
+def read_line_region(file_path: str, start_line: int, end_line: int) -> dict[str, Any]:
+    path = REPO / file_path
+    if not path.exists():
+        return {"error": f"file not found: {file_path}"}
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    if start_line < 1 or start_line > len(lines):
+        return {"error": f"start_line {start_line} out of range for {file_path}"}
+    if end_line <= 0:
+        end_line = min(len(lines), start_line + 50)
+    end_line = min(end_line, len(lines))
+    code = "\n".join(lines[start_line - 1 : end_line])
+    indexed_file = db_query_all(
+        "MATCH (f:File {path: $path}) RETURN f.sha256 AS sha256",
+        {"path": file_path},
     )
+    current_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    indexed_sha = indexed_file[0]["sha256"] if indexed_file else ""
+    return {
+        "file_path": file_path,
+        "absolute_path": str(path.resolve()),
+        "start_line": start_line,
+        "end_line": end_line,
+        "stale_index": bool(indexed_sha and indexed_sha != current_sha),
+        "code": code,
+    }
 
 
 @mcp.tool()
 def get_call_chain(function_name: str, depth: int = 3) -> dict[str, Any]:
     """Trace direct and indirect callers and callees for a function up to 3 hops deep."""
     max_depth = max(1, min(int(depth), 3))
-    seeds = find_symbols(function_name, ("Function",))
+    conn = connection()
+    seeds = find_symbols(conn, function_name, ("Function",))
     if not seeds:
         return {"query": function_name, "error": "No function matched this name, qualified name, or id.", "seeds": []}
 
@@ -133,7 +109,7 @@ def get_call_chain(function_name: str, depth: int = 3) -> dict[str, Any]:
                 continue
 
             if mode == "callee":
-                for edge in outgoing_calls(current_id):
+                for edge in outgoing_calls(conn, current_id):
                     edge["depth"] = current_depth + 1
                     edge["from_id"] = current_id
                     edges.append(edge)
@@ -152,7 +128,7 @@ def get_call_chain(function_name: str, depth: int = 3) -> dict[str, Any]:
                         queue.append((target_id, current_depth + 1, "callee"))
             else:
                 current_symbol = {"kind": "Function", "id": current_id}
-                for edge in incoming_calls(current_symbol):
+                for edge in incoming_calls(conn, current_symbol):
                     edge["depth"] = current_depth + 1
                     edge["to_id"] = current_id
                     edges.append(edge)
@@ -180,13 +156,53 @@ def get_call_chain(function_name: str, depth: int = 3) -> dict[str, Any]:
     }
 
 
+def inheritance_edges(seed: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for table in ("Class", "Interface"):
+        rows.extend(
+            db_query_all(
+                f"""
+                MATCH (a:{seed["kind"]} {{id: $id}})-[r:INHERITS_FROM]->(b:{table})
+                RETURN 'inherits from seed' AS direction, '{table}' AS other_kind,
+                       b.id AS other_id, b.name AS other_name, b.qualified_name AS other_qualified_name,
+                       b.file_path AS other_file, b.start_line AS other_line,
+                       r.line AS line
+                """,
+                {"id": seed["id"]},
+            )
+        )
+        rows.extend(
+            db_query_all(
+                f"""
+                MATCH (a:{table})-[r:INHERITS_FROM]->(b:{seed["kind"]} {{id: $id}})
+                RETURN 'inheritor of seed' AS direction, '{table}' AS other_kind,
+                       a.id AS other_id, a.name AS other_name, a.qualified_name AS other_qualified_name,
+                       a.file_path AS other_file, a.start_line AS other_line,
+                       r.line AS line
+                """,
+                {"id": seed["id"]},
+            )
+        )
+    return rows
+
+
+def import_targets_symbol_file(import_edge: dict[str, Any], symbol_file: str) -> bool:
+    local_path = import_edge.get("local_path") or ""
+    if not local_path:
+        return False
+    if Path(local_path).suffix:
+        return local_path == symbol_file
+    return symbol_file == local_path or symbol_file.startswith(local_path.rstrip("/") + "/")
+
+
 @mcp.tool()
 def get_blast_radius(symbol_name: str) -> dict[str, Any]:
     """Find files, functions, imports, and direct graph edges that rely on a symbol."""
-    seeds = find_symbols(symbol_name)
+    seeds = db_find_symbols(symbol_name)
     if not seeds:
         return {"query": symbol_name, "error": "No symbol matched this name, qualified name, module path, or id.", "seeds": []}
 
+    conn = connection()
     files: dict[str, dict[str, Any]] = {}
     functions: dict[str, dict[str, Any]] = {}
     classes: dict[str, dict[str, Any]] = {}
@@ -194,12 +210,13 @@ def get_blast_radius(symbol_name: str) -> dict[str, Any]:
     edges: list[dict[str, Any]] = []
 
     all_import_edges = query_all(
+        conn,
         """
         MATCH (f:File)-[r:IMPORTS]->(m:ImportModule)
         RETURN f.path AS file_path, m.id AS module_id, m.name AS module_name,
                m.path AS module_path, m.local_path AS local_path,
                r.alias AS alias, r.line AS line
-        """
+        """,
     )
 
     for seed in seeds:
@@ -207,6 +224,7 @@ def get_blast_radius(symbol_name: str) -> dict[str, Any]:
             files[seed["file_path"]] = {"path": seed["file_path"], "reason": "defines seed"}
 
             for row in query_all(
+                conn,
                 f"""
                 MATCH (f:File)-[:DEFINES]->(n:{seed["kind"]} {{id: $id}})
                 RETURN f.path AS file_path
@@ -216,7 +234,7 @@ def get_blast_radius(symbol_name: str) -> dict[str, Any]:
                 files[row["file_path"]] = {"path": row["file_path"], "reason": "defines seed"}
 
             if seed["kind"] in {"Function", "Class"}:
-                for edge in incoming_calls(seed):
+                for edge in incoming_calls(conn, seed):
                     functions[edge["source_id"]] = {
                         "id": edge["source_id"],
                         "name": edge["source_name"],
@@ -229,7 +247,7 @@ def get_blast_radius(symbol_name: str) -> dict[str, Any]:
                     edges.append(edge)
 
             if seed["kind"] == "Function":
-                for edge in outgoing_calls(seed["id"]):
+                for edge in outgoing_calls(conn, seed["id"]):
                     collection = classes if edge["target_kind"] == "Class" else functions
                     collection[edge["target_id"]] = {
                         "id": edge["target_id"],
@@ -288,9 +306,27 @@ def get_blast_radius(symbol_name: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def get_ast_chunk(function_name: str) -> dict[str, Any]:
-    """Return exact source text bounded by the matched function's tree-sitter node."""
-    matches = find_symbols(function_name, ("Function",))
+def get_ast_chunk(
+    function_name: str = "",
+    file_path: str = "",
+    start_line: int = 0,
+    end_line: int = 0,
+) -> dict[str, Any]:
+    """Return exact source text for a symbol or a file line range."""
+    if file_path and start_line > 0:
+        region = read_line_region(file_path, int(start_line), int(end_line))
+        if region.get("error"):
+            return {"query": file_path, "error": region["error"], "matches": []}
+        return {
+            "query": file_path,
+            "mode": "file_lines",
+            "matches": [region],
+        }
+
+    if not function_name:
+        return {"query": "", "error": "Provide function_name or file_path + start_line.", "matches": []}
+
+    matches = find_symbols(connection(), function_name, ("Function",))
     if not matches:
         return {"query": function_name, "error": "No function matched this name, qualified name, or id.", "matches": []}
 
@@ -298,7 +334,7 @@ def get_ast_chunk(function_name: str) -> dict[str, Any]:
     for match in matches:
         path = REPO / match["file_path"]
         content = path.read_bytes()
-        indexed_file = query_all(
+        indexed_file = db_query_all(
             "MATCH (f:File {path: $path}) RETURN f.sha256 AS sha256, f.abspath AS abspath",
             {"path": match["file_path"]},
         )
@@ -320,94 +356,23 @@ def get_ast_chunk(function_name: str) -> dict[str, Any]:
                 "code": code,
             }
         )
-    return {"query": function_name, "matches": chunks}
-
-
-def inheritance_edges(seed: dict[str, Any]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for table in ("Class", "Interface"):
-        rows.extend(
-            query_all(
-                f"""
-                MATCH (a:{seed["kind"]} {{id: $id}})-[r:INHERITS_FROM]->(b:{table})
-                RETURN 'inherits from seed' AS direction, '{table}' AS other_kind,
-                       b.id AS other_id, b.name AS other_name, b.qualified_name AS other_qualified_name,
-                       b.file_path AS other_file, b.start_line AS other_line,
-                       r.line AS line
-                """,
-                {"id": seed["id"]},
-            )
-        )
-        rows.extend(
-            query_all(
-                f"""
-                MATCH (a:{table})-[r:INHERITS_FROM]->(b:{seed["kind"]} {{id: $id}})
-                RETURN 'inheritor of seed' AS direction, '{table}' AS other_kind,
-                       a.id AS other_id, a.name AS other_name, a.qualified_name AS other_qualified_name,
-                       a.file_path AS other_file, a.start_line AS other_line,
-                       r.line AS line
-                """,
-                {"id": seed["id"]},
-            )
-        )
-    return rows
-
-
-def import_targets_symbol_file(import_edge: dict[str, Any], symbol_file: str) -> bool:
-    local_path = import_edge.get("local_path") or ""
-    if not local_path:
-        return False
-    if Path(local_path).suffix:
-        return local_path == symbol_file
-    return symbol_file == local_path or symbol_file.startswith(local_path.rstrip("/") + "/")
+    return {"query": function_name, "mode": "symbol", "matches": chunks}
 
 
 @mcp.tool()
 def search_symbols(query: str, kind: str = "", limit: int = 25) -> dict[str, Any]:
     """Search function/class/interface names by substring (case-insensitive)."""
-    needle = query.strip().lower()
-    if not needle:
+    if not query.strip():
         return {"query": query, "error": "query must not be empty", "matches": []}
-    max_rows = max(1, min(int(limit), 100))
-    tables = NODE_TABLES if kind.strip() == "" else (kind.strip(),)
-    invalid = [table for table in tables if table not in NODE_TABLES]
-    if invalid:
+    if kind.strip() and kind.strip() not in NODE_TABLES:
         return {
             "query": query,
-            "error": f"invalid kind {invalid!r}",
+            "error": f"invalid kind {kind!r}",
             "allowed_kinds": list(NODE_TABLES),
             "matches": [],
         }
-
-    matches: list[dict[str, Any]] = []
-    for table in tables:
-        if table == "ImportModule":
-            rows = query_all(
-                """
-                MATCH (n:ImportModule)
-                WHERE toLower(n.name) CONTAINS $needle
-                   OR toLower(n.path) CONTAINS $needle
-                   OR toLower(n.local_path) CONTAINS $needle
-                RETURN 'ImportModule' AS kind, n.id AS id, n.name AS name, n.path AS qualified_name,
-                       n.local_path AS file_path, 0 AS start_line, 0 AS end_line
-                LIMIT $limit
-                """,
-                {"needle": needle, "limit": max_rows},
-            )
-        else:
-            rows = query_all(
-                f"""
-                MATCH (n:{table})
-                WHERE toLower(n.name) CONTAINS $needle
-                   OR toLower(n.qualified_name) CONTAINS $needle
-                RETURN '{table}' AS kind, n.id AS id, n.name AS name, n.qualified_name AS qualified_name,
-                       n.file_path AS file_path, n.start_line AS start_line, n.end_line AS end_line
-                LIMIT $limit
-                """,
-                {"needle": needle, "limit": max_rows},
-            )
-        matches.extend(rows)
-    matches = sorted(matches, key=lambda row: (row["kind"], row["file_path"], row["start_line"]))[:max_rows]
+    max_rows = max(1, min(int(limit), 100))
+    matches = search_symbol_substring(connection(), query, kind, max_rows)
     return {"query": query, "kind_filter": kind or None, "limit": max_rows, "matches": matches}
 
 
@@ -423,11 +388,11 @@ def graph_status() -> dict[str, Any]:
     db_stat = DB_PATH.stat()
     indexed_at = datetime.fromtimestamp(db_stat.st_mtime, tz=timezone.utc).isoformat()
     counts: dict[str, int] = {}
-    for label in ("File", "Function", "Class", "Interface", "ImportModule"):
-        rows = query_all(f"MATCH (n:{label}) RETURN count(n) AS count")
+    for label in ("File", "Function", "Class", "Interface", "ImportModule", "Route", "Test", "Service"):
+        rows = db_query_all(f"MATCH (n:{label}) RETURN count(n) AS count")
         counts[label.lower()] = int(rows[0]["count"]) if rows else 0
     extensions: dict[str, int] = {}
-    for row in query_all("MATCH (f:File) RETURN f.path AS path"):
+    for row in db_query_all("MATCH (f:File) RETURN f.path AS path"):
         suffix = Path(row["path"]).suffix.lower() or "(none)"
         extensions[suffix] = extensions.get(suffix, 0) + 1
     return {
@@ -467,6 +432,263 @@ def rebuild_graph() -> dict[str, Any]:
         "stderr": proc.stderr[-2000:] if proc.stderr else "",
         "status": graph_status() if proc.returncode == 0 else None,
     }
+
+
+@mcp.tool()
+def find_callers(symbol_or_query: str, limit: int = 50) -> dict[str, Any]:
+    """Find functions that call the given symbol."""
+    max_rows = max(1, min(int(limit), 200))
+    conn = connection()
+    seeds = find_symbols(conn, symbol_or_query, ("Function", "Class"))
+    if not seeds:
+        seeds = search_symbol_substring(conn, symbol_or_query, "Function", 5)
+    callers: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for seed in seeds:
+        for edge in incoming_calls(conn, seed):
+            if edge["source_id"] in seen:
+                continue
+            seen.add(edge["source_id"])
+            callers.append(edge)
+            if len(callers) >= max_rows:
+                break
+    return {"query": symbol_or_query, "seeds": seeds, "callers": callers[:max_rows]}
+
+
+@mcp.tool()
+def find_callees(symbol_or_query: str, limit: int = 50) -> dict[str, Any]:
+    """Find functions/classes called by the given symbol."""
+    max_rows = max(1, min(int(limit), 200))
+    conn = connection()
+    seeds = find_symbols(conn, symbol_or_query, ("Function",))
+    if not seeds:
+        seeds = search_symbol_substring(conn, symbol_or_query, "Function", 5)
+    callees: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for seed in seeds:
+        for edge in outgoing_calls(conn, seed["id"]):
+            key = edge["target_id"]
+            if key in seen:
+                continue
+            seen.add(key)
+            callees.append(edge)
+            if len(callees) >= max_rows:
+                break
+    return {"query": symbol_or_query, "seeds": seeds, "callees": callees[:max_rows]}
+
+
+@mcp.tool()
+def find_routes(query: str = "", method: str = "", path: str = "") -> dict[str, Any]:
+    """Find HTTP routes by optional query, method, or path substring."""
+    conn = connection()
+    clauses: list[str] = []
+    params: dict[str, Any] = {}
+    if query.strip():
+        clauses.append(
+            "(toLower(r.path) CONTAINS $query OR toLower(r.handler) CONTAINS $query OR toLower(r.file_path) CONTAINS $query)"
+        )
+        params["query"] = query.strip().lower()
+    if method.strip():
+        clauses.append("toLower(r.method) = $method")
+        params["method"] = method.strip().lower()
+    if path.strip():
+        clauses.append("toLower(r.path) CONTAINS $path")
+        params["path"] = path.strip().lower()
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = query_all(
+        conn,
+        f"""
+        MATCH (r:Route)
+        {where}
+        RETURN r.id AS id, r.method AS method, r.path AS path, r.handler AS handler,
+               r.file_path AS file_path, r.line AS line, r.source AS source
+        ORDER BY r.path, r.method, r.line
+        LIMIT 100
+        """,
+        params,
+    )
+    for row in rows:
+        handlers = query_all(
+            conn,
+            """
+            MATCH (route:Route {id: $id})-[:HANDLES]->(fn:Function)
+            RETURN fn.name AS name, fn.qualified_name AS qualified_name,
+                   fn.file_path AS file_path, fn.start_line AS start_line
+            """,
+            {"id": row["id"]},
+        )
+        row["resolved_handlers"] = handlers
+    return {"query": query, "method": method or None, "path": path or None, "routes": rows}
+
+
+@mcp.tool()
+def find_tests_for_symbol(symbol_or_file: str) -> dict[str, Any]:
+    """Find tests linked to a symbol or source file."""
+    conn = connection()
+    target_file = symbol_or_file
+    target_symbol = ""
+    seeds = find_symbols(conn, symbol_or_file, ("Function",))
+    if seeds:
+        target_file = seeds[0]["file_path"]
+        target_symbol = seeds[0]["name"]
+
+    tests = query_all(
+        conn,
+        """
+        MATCH (t:Test)
+        WHERE t.target_file = $file
+           OR ($symbol <> '' AND t.target_symbol = $symbol)
+           OR t.file_path CONTAINS $file
+        RETURN t.id AS id, t.name AS name, t.file_path AS file_path,
+               t.target_file AS target_file, t.target_symbol AS target_symbol, t.line AS line
+        ORDER BY t.file_path, t.line
+        LIMIT 100
+        """,
+        {"file": target_file, "symbol": target_symbol},
+    )
+    return {
+        "query": symbol_or_file,
+        "target_file": target_file,
+        "target_symbol": target_symbol or None,
+        "tests": tests,
+    }
+
+
+@mcp.tool()
+def impact_analysis(symbol_or_file_or_config: str) -> dict[str, Any]:
+    """Expanded blast radius including routes, tests, and subsystem membership."""
+    base = get_blast_radius(symbol_or_file_or_config)
+    if base.get("error"):
+        file_query = symbol_or_file_or_config
+        routes = db_query_all(
+            """
+            MATCH (r:Route)
+            WHERE r.file_path CONTAINS $needle OR r.path CONTAINS $needle
+            RETURN r.method AS method, r.path AS path, r.handler AS handler,
+                   r.file_path AS file_path, r.line AS line
+            LIMIT 50
+            """,
+            {"needle": file_query},
+        )
+        tests = db_query_all(
+            """
+            MATCH (t:Test)
+            WHERE t.file_path CONTAINS $needle OR t.target_file CONTAINS $needle
+            RETURN t.name AS name, t.file_path AS file_path, t.target_file AS target_file, t.line AS line
+            LIMIT 50
+            """,
+            {"needle": file_query},
+        )
+        return {
+            "query": symbol_or_file_or_config,
+            "error": base["error"],
+            "routes": routes,
+            "tests": tests,
+        }
+
+    seed_files = {row["path"] for row in base.get("files", [])}
+    routes: list[dict[str, Any]] = []
+    tests: list[dict[str, Any]] = []
+    services: list[dict[str, Any]] = []
+    for file_path in sorted(seed_files):
+        routes.extend(
+            db_query_all(
+                """
+                MATCH (r:Route {file_path: $file})
+                RETURN r.method AS method, r.path AS path, r.handler AS handler, r.line AS line, r.file_path AS file_path
+                """,
+                {"file": file_path},
+            )
+        )
+        tests.extend(
+            db_query_all(
+                """
+                MATCH (t:Test)
+                WHERE t.target_file = $file OR t.file_path = $file
+                RETURN t.name AS name, t.file_path AS file_path, t.target_file AS target_file, t.line AS line
+                """,
+                {"file": file_path},
+            )
+        )
+        services.extend(
+            db_query_all(
+                """
+                MATCH (f:File {path: $file})-[:BELONGS_TO]->(s:Service)
+                RETURN DISTINCT s.id AS id, s.name AS name, s.keywords AS keywords
+                """,
+                {"file": file_path},
+            )
+        )
+
+    return {
+        **base,
+        "routes": routes,
+        "tests": tests,
+        "services": services,
+    }
+
+
+@mcp.tool()
+def explain_subsystem(query: str) -> dict[str, Any]:
+    """Explain a subsystem by keyword using seeded Service nodes and related graph entities."""
+    needle = query.strip().lower()
+    if not needle:
+        return {"query": query, "error": "query must not be empty"}
+
+    services = db_query_all(
+        """
+        MATCH (s:Service)
+        WHERE toLower(s.name) CONTAINS $needle
+           OR toLower(s.id) CONTAINS $needle
+           OR toLower(s.keywords) CONTAINS $needle
+        RETURN s.id AS id, s.name AS name, s.keywords AS keywords
+        ORDER BY s.name
+        LIMIT 10
+        """,
+        {"needle": needle},
+    )
+    if not services:
+        services = db_query_all(
+            """
+            MATCH (s:Service)
+            RETURN s.id AS id, s.name AS name, s.keywords AS keywords
+            ORDER BY s.name
+            LIMIT 20
+            """
+        )
+
+    details: list[dict[str, Any]] = []
+    for service in services[:5]:
+        files = db_query_all(
+            """
+            MATCH (f:File)-[:BELONGS_TO]->(s:Service {id: $id})
+            RETURN f.path AS path
+            ORDER BY f.path
+            LIMIT 40
+            """,
+            {"id": service["id"]},
+        )
+        routes = db_query_all(
+            """
+            MATCH (r:Route)-[:BELONGS_TO]->(s:Service {id: $id})
+            RETURN r.method AS method, r.path AS path, r.handler AS handler, r.file_path AS file_path
+            ORDER BY r.path
+            LIMIT 40
+            """,
+            {"id": service["id"]},
+        )
+        symbols = db_query_all(
+            """
+            MATCH (fn:Function)-[:BELONGS_TO]->(s:Service {id: $id})
+            RETURN fn.name AS name, fn.file_path AS file_path, fn.start_line AS start_line
+            ORDER BY fn.file_path, fn.start_line
+            LIMIT 40
+            """,
+            {"id": service["id"]},
+        )
+        details.append({**service, "files": files, "routes": routes, "symbols": symbols})
+
+    return {"query": query, "services": details}
 
 
 if __name__ == "__main__":

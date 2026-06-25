@@ -360,6 +360,52 @@ func (s *Store) LatestStreamByLogin(ctx context.Context, login string) (*StreamR
 	return scanStream(rows)
 }
 
+func (s *Store) LatestStreamsByLogins(ctx context.Context, logins []string) (map[string]*StreamRecord, error) {
+	out := make(map[string]*StreamRecord, len(logins))
+	if s == nil || len(logins) == 0 {
+		return out, nil
+	}
+	normalized := make([]string, 0, len(logins))
+	seen := make(map[string]struct{}, len(logins))
+	for _, login := range logins {
+		login = normalizeLogin(login)
+		if login == "" {
+			continue
+		}
+		if _, ok := seen[login]; ok {
+			continue
+		}
+		seen[login] = struct{}{}
+		normalized = append(normalized, login)
+	}
+	if len(normalized) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT DISTINCT ON (login)
+			stream_id, broadcaster_id, login, COALESCE(display_name,''), COALESCE(profile_image_url,''),
+			COALESCE(description,''), COALESCE(title,''), COALESCE(category,''), tags, COALESCE(language,''),
+			COALESCE(thumbnail_url,''), started_at, ended_at, last_seen_at, current_viewers, avg_viewers,
+			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,''),
+			COALESCE(canonical_stream_id, stream_id), COALESCE(viewer_source,'unknown')
+		FROM analytics_streams
+		WHERE login = ANY($1)
+		  AND COALESCE(canonical_stream_id, stream_id) = stream_id
+		ORDER BY login, ended_at IS NULL DESC, last_seen_at DESC, started_at DESC`, normalized)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		rec, err := scanStream(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[rec.Login] = rec
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) StreamByID(ctx context.Context, streamID string) (*StreamRecord, error) {
 	canonicalID, err := s.ResolveCanonicalStreamID(ctx, streamID)
 	if err != nil {
@@ -474,12 +520,89 @@ func (s *Store) SetStreamVodID(ctx context.Context, streamID, vodID, source stri
 			UPDATE analytics_streams
 			SET vod_id=$2, updated_at=now()
 			WHERE stream_id=$1`, streamID, vodID)
+	} else {
+		_, err = s.db.Exec(ctx, `
+			UPDATE analytics_streams
+			SET vod_id=$2, vod_source=$3, updated_at=now()
+			WHERE stream_id=$1`, streamID, vodID, source)
+	}
+	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `
-		UPDATE analytics_streams
-		SET vod_id=$2, vod_source=$3, updated_at=now()
-		WHERE stream_id=$1`, streamID, vodID, source)
+	_ = s.recordPulseVODAvailable(ctx, streamID, vodID, source)
+	return err
+}
+
+func (s *Store) recordPulseVODAvailable(ctx context.Context, streamID, vodID, source string) error {
+	now := time.Now().UTC()
+	var rec StreamRecord
+	queryErr := s.db.QueryRow(ctx, `
+		SELECT stream_id, COALESCE(login,''), COALESCE(broadcaster_id,'')
+		FROM analytics_streams
+		WHERE stream_id=$1`, streamID).Scan(&rec.StreamID, &rec.Login, &rec.BroadcasterID)
+	if queryErr != nil {
+		rec.StreamID = streamID
+	}
+	return s.RecordPulseVODResolutionAttempt(ctx, PulseVODResolutionAttemptInput{
+		StreamID:       rec.StreamID,
+		Login:          rec.Login,
+		TwitchStreamID: rec.StreamID,
+		BroadcasterID:  rec.BroadcasterID,
+		CandidateVodID: vodID,
+		Source:         source,
+		Status:         "available",
+		Attempts:       1,
+		LastAttemptAt:  &now,
+		FinalizedAt:    &now,
+	})
+}
+
+type PulseVODResolutionAttemptInput struct {
+	StreamID           string
+	Login              string
+	TwitchStreamID     string
+	BroadcasterID      string
+	CandidateVodID     string
+	Source             string
+	Status             string
+	Attempts           int
+	LastAttemptAt      *time.Time
+	NextAutoRetryAt    *time.Time
+	FinalAfterAt       *time.Time
+	FinalizedAt        *time.Time
+	ManualRetryAllowed bool
+	ErrorCode          string
+}
+
+func (s *Store) RecordPulseVODResolutionAttempt(ctx context.Context, in PulseVODResolutionAttemptInput) error {
+	if s == nil || s.db == nil || strings.TrimSpace(in.StreamID) == "" || strings.TrimSpace(in.Status) == "" {
+		return nil
+	}
+	if in.Attempts < 0 {
+		in.Attempts = 0
+	}
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO pulse_vod_resolution_attempts (
+			stream_id, login, twitch_stream_id, broadcaster_id, candidate_vod_id,
+			source, status, attempts, last_attempt_at, next_auto_retry_at,
+			final_after_at, finalized_at, manual_retry_allowed, error_code
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+		strings.TrimSpace(in.StreamID),
+		normalizeLogin(in.Login),
+		strings.TrimSpace(in.TwitchStreamID),
+		NormalizeBroadcasterID(in.BroadcasterID),
+		strings.TrimSpace(in.CandidateVodID),
+		strings.TrimSpace(in.Source),
+		strings.TrimSpace(in.Status),
+		in.Attempts,
+		in.LastAttemptAt,
+		in.NextAutoRetryAt,
+		in.FinalAfterAt,
+		in.FinalizedAt,
+		in.ManualRetryAllowed,
+		strings.TrimSpace(in.ErrorCode),
+	)
 	return err
 }
 
@@ -497,12 +620,36 @@ func (s *Store) MarkStreamVodUnlinked(ctx context.Context, streamID string) erro
 	if streamID == "" {
 		return nil
 	}
+	now := time.Now().UTC()
+	var rec StreamRecord
+	queryErr := s.db.QueryRow(ctx, `
+		SELECT stream_id, COALESCE(login,''), COALESCE(broadcaster_id,'')
+		FROM analytics_streams
+		WHERE stream_id=$1`, streamID).Scan(&rec.StreamID, &rec.Login, &rec.BroadcasterID)
+	if queryErr != nil {
+		rec.StreamID = streamID
+	}
 	_, err := s.db.Exec(ctx, `
 		UPDATE analytics_streams
 		SET vod_source=$2, updated_at=now()
 		WHERE stream_id=$1
 		  AND COALESCE(vod_id,'')=''
 		  AND COALESCE(vod_source,'') <> $2`, streamID, VodSourceUnlinked)
+	if err != nil {
+		return err
+	}
+	_ = s.RecordPulseVODResolutionAttempt(ctx, PulseVODResolutionAttemptInput{
+		StreamID:           rec.StreamID,
+		Login:              rec.Login,
+		TwitchStreamID:     rec.StreamID,
+		BroadcasterID:      rec.BroadcasterID,
+		Source:             "helix_stream_match",
+		Status:             "unavailable",
+		LastAttemptAt:      &now,
+		FinalizedAt:        &now,
+		ManualRetryAllowed: true,
+		ErrorCode:          "vod_unavailable",
+	})
 	return err
 }
 

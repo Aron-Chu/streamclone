@@ -1,0 +1,36 @@
+# Batch B2 proposal — Alertmanager routing (NOT APPLIED).
+# Replace receiver webhook_url with operator-approved channel before deploy.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: operator-default
+  group_by: [alertname, lane]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - lane = corpus
+      receiver: operator-corpus
+    - matchers:
+        - lane = hosted
+      receiver: operator-hosted
+
+receivers:
+  - name: operator-default
+    webhook_configs:
+      - url: 'https://REPLACE_WITH_OPERATOR_WEBHOOK'
+        send_resolved: true
+  - name: operator-hosted
+    webhook_configs:
+      - url: 'https://REPLACE_WITH_OPERATOR_WEBHOOK'
+        send_resolved: true
+  - name: operator-corpus
+    webhook_configs:
+      - url: 'https://REPLACE_WITH_OPERATOR_WEBHOOK'
+        send_resolved: true
+
+# Dry-run plan (operator):
+#   amtool alert add PrometheusTargetDown lane=hosted --alertmanager.url=http://127.0.0.1:9093
+#   curl http://127.0.0.1:9093/api/v2/alerts

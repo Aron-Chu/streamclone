@@ -6,6 +6,10 @@
         "command": "powershell -ExecutionPolicy Bypass -NoProfile -File scripts/cursor-hook.ps1 -Hook codegraph-stale-hint.py"
       },
       {
+        "command": "powershell -ExecutionPolicy Bypass -NoProfile -File scripts/cursor-hook.ps1 -Hook gofmt-touched.py",
+        "matcher": "\\.go$"
+      },
+      {
         "command": "powershell -ExecutionPolicy Bypass -NoProfile -File scripts/cursor-hook.ps1 -Hook compose-config-check.py",
         "matcher": "deploy/"
       }
@@ -14,6 +18,16 @@
       {
         "command": "powershell -ExecutionPolicy Bypass -NoProfile -File scripts/cursor-hook.ps1 -Hook domain-test-hint.py",
         "loop_limit": 1
+      },
+      {
+        "command": "powershell -ExecutionPolicy Bypass -NoProfile -File scripts/cursor-hook.ps1 -Hook tasks-md-reminder.py",
+        "loop_limit": 1
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "powershell -ExecutionPolicy Bypass -NoProfile -File scripts/cursor-hook.ps1 -Hook secrets-scan-pre-commit.py",
+        "matcher": "git commit"
       }
     ]
   }
