@@ -35,9 +35,12 @@ laptopworker_sync_files() {
     scripts/laptopworker-bootstrap.sh \
     scripts/laptopworker-env.sh \
     scripts/laptopworker-install-service.sh \
+    scripts/laptopworker-install-sudoers.sh \
     scripts/laptopworker-power-config.sh \
     scripts/laptopworker-remote.cmd \
     scripts/laptopworker-remote.ps1 \
+    scripts/laptopworker-setup-boot.sh \
+    scripts/laptopworker-setup-remote.sh \
     scripts/laptopworker-stack.sh \
     scripts/laptopworker-update.sh \
     scripts/laptopworker-ufw-tailnet.sh; do
@@ -99,6 +102,15 @@ laptopworker_synth_env() {
 laptopworker_stop_storygraph() {
   docker stop streamclone-storygraph-1 2>/dev/null || true
   docker rm streamclone-storygraph-1 2>/dev/null || true
+}
+
+laptopworker_ensure_scripts_executable() {
+  local root="$1"
+  local rel
+  for rel in scripts/laptopworker-*.sh; do
+    [ -f "$root/$rel" ] || continue
+    chmod +x "$root/$rel"
+  done
 }
 
 # Build docker compose argv for laptopworker core stack (array name: LAPTOPWORKER_COMPOSE).

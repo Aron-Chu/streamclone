@@ -29,6 +29,10 @@ Usage: scripts/laptopworker-stack.sh <command>
   update   git pull + resynth .env + compose up (after push to master)
   install-service  systemd user unit + boot linger (run once on laptop)
   ufw-tailnet      Apply tailnet-only UFW rules (sudo once)
+  enable-linger    sudo loginctl enable-linger (sudo once; boot without login)
+  boot-check       Linger, systemd unit, script perms, smoke (no sudo)
+  setup            One-shot remote QoL (sudo once at Windows desk)
+  setup-verify     Confirm sudoers, ufw, linger, boot order (no sudo)
 EOF
 }
 
@@ -67,6 +71,41 @@ case "$cmd" in
     ;;
   ufw-tailnet)
     bash "$ROOT/scripts/laptopworker-ufw-tailnet.sh"
+    ;;
+  enable-linger)
+    if ! command -v loginctl >/dev/null 2>&1; then
+      echo "loginctl not found" >&2
+      exit 1
+    fi
+    sudo -n loginctl enable-linger "$(id -un)" 2>/dev/null || sudo loginctl enable-linger "$(id -un)"
+    loginctl show-user "$(id -un)" -p Linger
+    ;;
+  setup)
+    bash "$ROOT/scripts/laptopworker-setup-remote.sh"
+    ;;
+  setup-verify)
+    echo "==> passwordless sudo"
+    if sudo -n true 2>/dev/null; then echo "ok"; else echo "missing — run: scripts/laptopworker-stack.sh setup"; fi
+    echo "==> sudoers drop-in"
+    [ -f /etc/sudoers.d/streamclone-laptopworker ] && echo "ok" || echo "missing"
+    echo "==> ufw"
+    sudo -n ufw status 2>/dev/null | head -3 || ufw status 2>/dev/null | head -3 || echo "unknown"
+    echo "==> DOCKER-USER :8090"
+    sudo -n iptables -S DOCKER-USER 2>/dev/null | grep 8090 || iptables -S DOCKER-USER 2>/dev/null | grep 8090 || echo "no rules yet — run ufw-tailnet"
+    bash "$ROOT/scripts/laptopworker-stack.sh" boot-check
+    ;;
+  boot-check)
+    laptopworker_ensure_scripts_executable "$ROOT"
+    echo "==> linger"
+    loginctl show-user "$(id -un)" -p Linger 2>/dev/null || echo "loginctl unavailable"
+    echo "==> streamclone-dev.service"
+    systemctl --user is-enabled streamclone-dev.service 2>/dev/null && echo "enabled" || echo "not enabled"
+    systemctl --user is-active streamclone-dev.service 2>/dev/null && echo "active" || echo "inactive (run: systemctl --user start streamclone-dev.service)"
+    echo "==> script permissions"
+    ls -l "$ROOT/scripts/laptopworker-stack.sh"
+    echo "==> smoke"
+    curl -fsS "http://127.0.0.1:8090/v1/extension/health" | head -c 240
+    echo
     ;;
   -h|--help|"")
     usage

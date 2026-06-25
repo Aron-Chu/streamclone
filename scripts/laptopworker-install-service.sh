@@ -19,6 +19,7 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=${ROOT}
+ExecStartPre=/bin/bash -c 'chmod +x ${ROOT}/scripts/laptopworker-*.sh 2>/dev/null || true'
 ExecStartPre=/bin/bash -c 'for i in $(seq 1 60); do docker info >/dev/null 2>&1 && tailscale status >/dev/null 2>&1 && exit 0; sleep 2; done; echo docker/tailscale not ready; exit 1'
 ExecStart=/usr/bin/sg docker -c "${STACK} start"
 ExecStop=/usr/bin/sg docker -c "${STACK} stop"

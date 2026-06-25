@@ -47,7 +47,7 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 	preflight-deps start stop-user ensure-localhost agent-smoke coverage-report \
 	rebuild-analytics-emote restart-analytics test-pulse-emote \
 	smoke-pulse-emote pulse-emote-pick-stream smoke-pulse-emote-gold smoke-pulse-emote-gold-fail \
-	laptopworker-status laptopworker-smoke laptopworker-update
+	laptopworker-status laptopworker-smoke laptopworker-update laptopworker-boot-check laptopworker-setup laptopworker-setup-verify
 
 help:
 	@printf 'Streamclone — common targets\n\n'
@@ -84,6 +84,9 @@ help:
 	@printf '  make laptopworker-status   ssh stack ps on laptopworker\n'
 	@printf '  make laptopworker-smoke      remote health smoke\n'
 	@printf '  make laptopworker-update     git pull + compose on laptop after push\n'
+	@printf '  make laptopworker-boot-check linger, systemd, smoke (remote)\n'
+	@printf '  make laptopworker-setup       one-shot QoL (sudo once at desk)\n'
+	@printf '  make laptopworker-setup-verify  confirm ufw, linger, sudoers\n'
 	@printf '  Without make: scripts\\laptopworker-remote.cmd status|smoke|update\n\n'
 	@printf 'BearHost VPS (corpus + Grafana — from your PC):\n'
 	@printf '  make bearhost-help              List BearHost make targets\n'
@@ -663,6 +666,15 @@ laptopworker-smoke:
 
 laptopworker-update:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/laptopworker-remote.ps1 update
+
+laptopworker-boot-check:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/laptopworker-remote.ps1 boot-check
+
+laptopworker-setup:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/laptopworker-remote.ps1 setup
+
+laptopworker-setup-verify:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/laptopworker-remote.ps1 setup-verify
 
 setup:
 	@bash scripts/setup.sh

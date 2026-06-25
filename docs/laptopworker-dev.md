@@ -26,7 +26,19 @@ PowerShell directly:
 powershell -ExecutionPolicy Bypass -File scripts\laptopworker-remote.ps1 status
 ```
 
-Commands on laptop: `bash scripts/laptopworker-stack.sh` → `start` | `stop` | `restart` | `status` | `logs` | `smoke` | `update` | `install-service` | `ufw-tailnet`
+Commands on laptop: `bash scripts/laptopworker-stack.sh` → `start` | `stop` | `restart` | `status` | `logs` | `smoke` | `update` | `install-service` | `ufw-tailnet` | `enable-linger` | `boot-check`
+
+From **Windows** (repo root), same stack via SSH:
+
+| Command | Sudo at desk? |
+|---------|----------------|
+| `scripts\laptopworker-remote.cmd setup` | **Once** (then passwordless) |
+| `scripts\laptopworker-remote.cmd setup-verify` | No |
+| `scripts\laptopworker-remote.cmd smoke` | No |
+| `scripts\laptopworker-remote.cmd boot-check` | No |
+| `scripts\laptopworker-remote.cmd ufw-tailnet` | No (after `setup`) |
+
+After `setup`, laptopworker scripts run via passwordless sudo — no need to visit the machine.
 
 Browse UI on tailnet: **http://laptopworker:8090**
 
@@ -50,15 +62,20 @@ Shared helpers: `scripts/laptopworker-env.sh`
 
 ## Operator checklist (Aron)
 
-One-time on laptop:
+One-time on laptop (or from Windows — **one sudo password at your desk**):
+
+```cmd
+scripts\laptopworker-remote.cmd setup
+```
+
+This installs passwordless sudo for laptopworker scripts, enables linger, UFW+DOCKER-USER, always-on power, Ubuntu-first boot (GRUB+UEFI), and systemd. After that, everything below is remote with no walk-over.
+
+Legacy manual steps (included in `setup`):
 
 ```bash
 ssh aron@laptopworker
 cd ~/streamclone
-bash scripts/laptopworker-install-service.sh
-sudo loginctl enable-linger aron
-bash scripts/laptopworker-stack.sh ufw-tailnet   # tailnet-only :8090 + SSH
-sudo reboot
+bash scripts/laptopworker-stack.sh setup
 ```
 
 After reboot (from Windows repo root):
