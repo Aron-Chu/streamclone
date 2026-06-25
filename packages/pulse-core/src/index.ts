@@ -1,6 +1,7 @@
 export * from './liveHeat.ts'
 export * from './liveStats.ts'
 export * from './extensionAdapters.ts'
+export * from './extensionPeaks.ts'
 export * from './vodDeepLink.ts'
 export * from './momentScoring.ts'
 export * from './momentScore.ts'
