@@ -37,6 +37,14 @@ fi
 
 laptopworker_ensure_scripts_executable "$ROOT"
 
+# Remind to refresh root-owned sbin after firewall/sudo script changes.
+if [ -x /usr/local/sbin/streamclone-laptopworker-firewall ] && \
+   [ -f "$ROOT/scripts/laptopworker/sbin/streamclone-laptopworker-firewall" ] && \
+   ! cmp -s "$ROOT/scripts/laptopworker/sbin/streamclone-laptopworker-firewall" \
+      /usr/local/sbin/streamclone-laptopworker-firewall 2>/dev/null; then
+  echo "==> note: /usr/local/sbin helpers differ from repo — run: scripts\\laptopworker-remote.cmd setup"
+fi
+
 echo "==> merge .env.local (preserve user overrides)"
 laptopworker_synth_env "$ROOT"
 
