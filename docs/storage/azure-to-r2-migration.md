@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Phase 2A complete (one-object staging proof) — **no production cutover** |
+| **Status** | Phase 2B complete (31-object staging sample mirror) — **no production cutover** |
 | **Owner** | Aron-Chu |
 | **Date** | 2026-06-25 |
 | **Product** | StreamPulse long-term analytics artifacts |
@@ -14,16 +14,16 @@
 
 Streamclone/StreamPulse cold archive is **implemented in production against Azure Blob only**. The Go `archive` package writes through a `BlobStore` interface (`internal/archive/writer.go`); only `AzureBlobStore` is wired. Manifest rows live in Postgres `archive_exports` (`gcs_uri` column name is legacy — values are Azure HTTPS URIs).
 
-**R2 (personal account `51dd8007…`):** enabled; **`streampulse-artifacts-staging`** exists; **one 131-byte `analytics_rollups` object** copied and verified (size, SHA-256, gzip, Azure etag unchanged). **No production R2 buckets.** **No production read-path change.** Azure remains authoritative for all production reads/writes.
+**R2 (personal account `51dd8007…`):** enabled; **`streampulse-artifacts-staging`** holds **31 verified sample objects** (~5.2 KiB; rollups, streams, vod_catalog). **No production R2 buckets.** **No production read-path change.** Azure remains authoritative for all production reads/writes.
 
-**Task ledger:** [tasks.md](./tasks.md) (`STOR-R2-001` done; `STOR-R2-002`–`005` pending).
+**Task ledger:** [tasks.md](./tasks.md) (`STOR-R2-001`–`002` done; `STOR-R2-003`–`005` pending).
 
 **Recommended path:**
 
 1. **Phase 0** — operator inventory on Azure (counts/sizes) using existing scripts + `az storage blob list` (read-only). **Done 2026-06-25.**
 2. **Phase 1** — enable R2 on personal account + budget alerts; create **staging** bucket only. **Done 2026-06-25** (`streampulse-artifacts-staging`).
 3. **Phase 2A** — one-object mirror + verify. **Done 2026-06-25.**
-4. **Phase 2B** — mirror **10–50** sample objects ([`sample-manifest-phase2a.csv`](./sample-manifest-phase2a.csv)) — **STOR-R2-002**, pending approval.
+4. **Phase 2B** — mirror **31** sample objects ([`sample-manifest-phase2a.csv`](./sample-manifest-phase2a.csv)) — **STOR-R2-002**, **done 2026-06-25**.
 5. **Phase 3** — read-through in BearHost API: R2 first → Azure fallback — **STOR-R2-003**, not started.
 6. **Phase 4** — batch migration by prefix — **STOR-R2-005**; keep Azure fallback; no Azure deletes until verified.
 
@@ -255,7 +255,7 @@ npx wrangler r2 bucket create streampulse-artifacts-staging
 
 ## Phase 2A — R2 enable, sample manifest, staging bucket, one-object dry run
 
-**Status:** R2 **enabled** on personal account. Staging bucket **created**. **One-object proof succeeded** (2026-06-25). Phase 2B sample batch pending (**STOR-R2-002**).
+**Status:** R2 **enabled** on personal account. Staging bucket **created**. Phase 2A one-object proof **done**. Phase 2B sample batch **done** (**STOR-R2-002**, 2026-06-25).
 
 ### 2A.1 R2 verification
 
@@ -346,6 +346,49 @@ Script: `scripts/storage/r2-one-object-dry-run.sh` (Wrangler OAuth on Windows; o
 
 - R2 bucket CLI: run from **streamclone repo root** (`CLOUDFLARE_ACCOUNT_ID=51dd8007…`) — not `streampulse-web/` (ASU `wrangler.toml`).
 - WSL non-interactive Wrangler needs `CLOUDFLARE_API_TOKEN`; Windows OAuth session works for `wrangler r2 object put/get`.
+
+---
+
+## Phase 2B — sample batch mirror (STOR-R2-002)
+
+**Status:** **Complete** 2026-06-25. **31/31** objects verified.
+
+### 2B.1 Scope
+
+| Included | Count | R2 prefix |
+|----------|------:|-----------|
+| `analytics_rollups` | 20 | `archive/rollups/` |
+| `analytics_stream` | 10 | `archive/streams/` |
+| `bronze_vod_catalog` | 1 | `archive/channels/vod_index/` |
+| **Total** | **31** | **~5,232 bytes** |
+
+**Skipped (explicit):** `postgres/nightly/`, `vod_chat/`, `tt-detail/`, `emote_snapshot` (none in manifest).
+
+### 2B.2 Script and log
+
+```bash
+EXECUTE=1 CONCURRENCY=3 bash scripts/storage/r2-sample-mirror-phase2b.sh
+```
+
+**Mirror log:** [`sample-mirror-phase2b.csv`](./sample-mirror-phase2b.csv).
+
+### 2B.3 Verification summary
+
+| Check | Result |
+|-------|--------|
+| Objects copied | **31** |
+| SHA-256 match (Azure download = R2 round-trip) | **31/31** |
+| Byte size match | **31/31** |
+| gzip -t (all `.gz`) | **31/31** |
+| Azure etag/size unchanged after mirror | **31/31** |
+| Failed objects | **0** |
+| `archive_exports` / read-path | **not modified** |
+
+One manifest row had stale CSV `byte_size`; script validates against **live Azure metadata**.
+
+### 2B.4 Mutations confirmation
+
+Staging R2 uploads only. No Azure delete/lifecycle change. No prod buckets. No Go read-path changes.
 
 ---
 
@@ -497,7 +540,7 @@ Azure fallback minimum **90 days** after R2 read verified per batch.
 | Guardrail | Detail |
 |-----------|--------|
 | Budget alerts | Required on Cloudflare before R2 enable (**done** on personal account); Azure budget already in Terraform |
-| Staging mutations only | One-object R2 staging proof allowed; **no** prod cutover, Azure delete/lifecycle change, or bulk copy without **STOR-R2-002**+ approval |
+| Staging mutations only | Phase 2A/2B staging sample mirrors allowed; **no** prod cutover, Azure delete/lifecycle change, or prefix batch without **STOR-R2-005** approval |
 | No DNS / Pages / tunnel / D1 changes | Out of scope |
 | Secrets | Never commit connection strings or R2 keys |
 
@@ -610,4 +653,4 @@ Ledger: [tasks.md](./tasks.md).
 | 2026-06-25 | Phase 0.6 live inventory + Phase 1 prep + closeout report |
 | 2026-06-25 | Handoff: `docs/storage/README.md`, stable `scripts/storage/*` inventory scripts |
 | 2026-06-25 | Phase 2A continuation recheck: API still `10042`; staging bucket not created |
-| 2026-06-25 | Phase 2A complete: one-object staging proof; docs/tasks alignment (`STOR-R2-002`–`005`) |
+| 2026-06-25 | Phase 2B complete: 31-object sample mirror verified (`STOR-R2-002`) |

@@ -11,16 +11,15 @@ StreamPulse long-term **artifact bytes** vs **queryable app state**. Read this b
 | User library rows | **Postgres** | Never R2, never D1 for VOD Library MVP |
 | Portal/extension user state (V2+) | Optional **D1** | Watchlist/device only — **deferred** (WATCH-100) |
 
-## Current status (2026-06-25, Phase 2A — R2 live)
+## Current status (2026-06-25, Phase 2B — sample mirror verified)
 
 | Item | State |
 |------|-------|
 | **Authoritative archive** | **Azure Blob** — no cutover |
 | **R2 (personal `51dd8007…`)** | **Enabled** — subscription active on aron.chu90 |
-| **Staging bucket** | **`streampulse-artifacts-staging` created** |
-| **Azure → R2 copies** | **One** staging object verified (131 B rollup); no bulk copy |
+| **Staging bucket** | **`streampulse-artifacts-staging`** |
+| **Azure → R2 staging copies** | **31** sample objects verified (~5.2 KiB) — [`sample-mirror-phase2b.csv`](./sample-mirror-phase2b.csv) |
 | **Sample manifest** | [`sample-manifest-phase2a.csv`](./sample-manifest-phase2a.csv) |
-| **One-object dry run** | **Done** — 131 B rollup mirrored; SHA-256 match; Azure etag unchanged |
 | **R2 config (local)** | `~/.streamclone/r2-staging-s3.env` (endpoint; S3 keys optional for CLI via Wrangler OAuth) |
 
 ## Hosting boundaries (no change)
@@ -45,7 +44,8 @@ StreamPulse long-term **artifact bytes** vs **queryable app state**. Read this b
 |-----|---------|
 | [azure-to-r2-migration.md](./azure-to-r2-migration.md) | Full Phase 0–4 audit, Phase 2A status, operator commands |
 | [tasks.md](./tasks.md) | Task ledger `STOR-R2-001`–`005` |
-| [sample-manifest-phase2a.csv](./sample-manifest-phase2a.csv) | Phase 2A BearHost sample manifest (31 data rows) |
+| [sample-manifest-phase2a.csv](./sample-manifest-phase2a.csv) | BearHost sample manifest (31 rows) |
+| [sample-mirror-phase2b.csv](./sample-mirror-phase2b.csv) | Phase 2B mirror verification log (31 rows) |
 | [../azure-archive-setup.md](../azure-archive-setup.md) | Azure archive operator setup |
 | [../scraping-archive/requirements.md](../scraping-archive/requirements.md) | Scrape tiers + cold storage requirements |
 
@@ -58,16 +58,16 @@ bash scripts/storage/azure-prefix-inventory.sh   # required migration prefixes
 bash scripts/storage/azure-top-prefixes.sh       # top-level virtual folders
 bash scripts/storage/azure-extra-prefixes.sh     # directory/, viewer_rollup/
 BEARHOST_SAMPLE_MANIFEST_REMOTE=1 bash scripts/storage/archive-exports-sample-manifest.sh --csv
-bash scripts/storage/r2-one-object-dry-run.sh    # dry-run steps (prep only unless EXECUTE=1)
+bash scripts/storage/r2-one-object-dry-run.sh           # Phase 2A single object (EXECUTE=1)
+EXECUTE=1 bash scripts/storage/r2-sample-mirror-phase2b.sh  # Phase 2B sample batch
 ```
 
 ## Next operator actions
 
-1. **STOR-R2-002** — mirror 10–50 sample objects from `sample-manifest-phase2a.csv` to staging (after approval).
-2. **STOR-R2-003** — implement `R2BlobStore` + `ReadThroughStore` behind flags (BearHost; default off).
-3. **STOR-R2-004** — R2 restore drill before any `postgres/nightly/` mirror.
-4. **STOR-R2-005** — batch migration by prefix after verification.
-5. Prod/backups buckets — not until separately approved.
+1. **STOR-R2-003** — implement `R2BlobStore` + `ReadThroughStore` behind flags (BearHost; default off).
+2. **STOR-R2-004** — R2 restore drill before any `postgres/nightly/` mirror.
+3. **STOR-R2-005** — batch migration by prefix after verification.
+4. Prod/backups buckets — not until separately approved.
 
 See [tasks.md](./tasks.md) for guardrails.
 
