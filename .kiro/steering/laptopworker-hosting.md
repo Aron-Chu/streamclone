@@ -73,6 +73,41 @@ Health: `GET /v1/extension/health` on the chosen base URL.
 4. BearHost owns scrape; laptop is UI/playback/chat/emotes/BFF dev only.
 5. Do not bind laptop Caddy to `0.0.0.0` without firewall helper active.
 
+## Frontend / website placement
+
+| Surface | What it is | Where it lives |
+|---------|------------|----------------|
+| **Streamclone UI** (directory, channel, VOD shell) | Docker `frontend` + Caddy | `:8090` on laptop / PC / BearHost stack — **not** a separate static host |
+| **StreamPulse public site** (`streampulse.stream`) | `streamclone-pulse/streampulse-web` | **Cloudflare Pages** (static `dist/`); API = `https://api.streampulse.stream` |
+| **Pulse extension** | MV3 in `streamclone-pulse` | User's browser; backend URL in extension Options |
+
+Do not put the StreamPulse marketing/portal site on laptopworker — it is a separate repo deploy to Cloudflare.
+
+## When to add Kubernetes / ArgoCD
+
+**Not needed today.** Streamclone uses **Docker Compose** on BearHost and laptopworker; that matches team size and ops burden.
+
+Consider K8s + ArgoCD only if **all** of these become true:
+
+- Multiple long-lived environments (staging + prod + region) with the same manifests
+- Several stateful services you want unified rollouts/rollback for
+- A dedicated ops owner for cluster lifecycle
+
+Until then: Compose + git pull + `laptopworker-remote.cmd update` / BearHost deploy scripts + Cloudflare Pages for the portal is the intended model. See `docs/azure-archive-cicd.md` (ArgoCD noted for K8s app GitOps only, not archive plane).
+
+## When to use InfluxDB
+
+**Optional dev/ops layer**, not product source of truth.
+
+| Use InfluxDB | Do not use InfluxDB for |
+|--------------|-------------------------|
+| Emote Pulse Grafana charts (`pulse` compose profile) | Public API, extension data, portal analytics |
+| Local time-series mirror of minute rollups | Corpus, scraper, backfill state |
+
+Enable with `make up` + **`pulse` profile** on PC or BearHost when you want Grafana dashboards — **not required on laptopworker** (core dev hub only). Postgres + analytics service remain authoritative; Influx is a mirror for charts (`docs/scraping-archive/requirements.md`, `docs/options.md`).
+
+BearHost observability may use **Prometheus** (VPS tunnel `:3001`) separately from local Influx Pulse on `:3000` — do not mix them up (`docs/site-links.md`).
+
 ## Related docs
 
 - `docs/laptopworker-dev.md` — runbook
