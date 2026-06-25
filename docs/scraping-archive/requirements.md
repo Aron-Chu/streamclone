@@ -10,7 +10,7 @@ Planned code: `cmd/archive` (export worker), `cmd/backfill` (bulk queue), Azure 
 
 ## TL;DR
 
-Streamclone should treat **Azure Blob Storage** as the durable archive (Phase A infra: [azure-archive-setup.md](../azure-archive-setup.md)) and **Postgres** as a disposable hot cache (30–90 days). Historical Analytics depends on expensive sources — especially **TwitchTracker per-stream detail** (Camoufox) and **GQL VOD chat** — that must not be re-fetched after a Postgres reset.
+Streamclone should treat **Azure Blob Storage** as the durable archive (Phase A infra: [azure-archive-setup.md](../azure-archive-setup.md)) and **Postgres** as a disposable hot cache (30–90 days). Planned R2 mirror (no cutover yet): [storage/azure-to-r2-migration.md](../storage/azure-to-r2-migration.md) and [storage/README.md](../storage/README.md). Historical Analytics depends on expensive sources — especially **TwitchTracker per-stream detail** (Camoufox) and **GQL VOD chat** — that must not be re-fetched after a Postgres reset.
 
 Bulk collection targets **top 200–500 live streamers** in three scrape depths (Bronze / Silver / Gold). Browser scraping runs from a **residential IP** (home PC or verified residential proxy). API-only work (Helix, 7TV, directory sampling) can run anywhere.
 

@@ -23,6 +23,8 @@ Small index for docs, cleanup, and install bug-fix notes.
 | [docs/scraper-cloudflare-and-proxy.md](scraper-cloudflare-and-proxy.md) | Scraper notes |
 | [docs/tiers-scraper-and-social-spread.md](tiers-scraper-and-social-spread.md) | Tier detachment, scraper coupling, proxies, Social spread |
 | [docs/scraping-archive/requirements.md](scraping-archive/requirements.md) | Bulk scrape + Azure blob archive requirements |
+| [docs/storage/README.md](storage/README.md) | Storage SoT index — Azure authoritative, R2 planned, VOD Library direction |
+| [docs/storage/azure-to-r2-migration.md](storage/azure-to-r2-migration.md) | Azure → R2 migration audit (Phase 0.6 inventory, Phase 1 prep) |
 | [docs/agents-streamclone-and-replayforge.md](agents-streamclone-and-replayforge.md) | Clip Studio / ReplayForge boundary |
 | [deploy/FREE_DEPLOYMENT.md](../deploy/FREE_DEPLOYMENT.md) | Public VM notes |
 

@@ -76,9 +76,10 @@ Streamclone/StreamPulse cold archive is **implemented today against Azure Blob o
 | `scripts/archive-restore-drill.sh` | Restore drill (reads Azure) |
 | `scripts/bearhost-corpus-smoke.sh` | Requires Azure secret file |
 | `scripts/bearhost-corpus-preflight.sh` | Validates secret path |
-| `scripts/tmp/batch-b-azure-list.sh` | Read-only `az storage blob list` samples |
-| `scripts/tmp/azure-prefix-inventory.sh` | Phase 0.6 per-prefix aggregate (metadata only) |
-| `scripts/tmp/batch-b2-azure-list-nightly.sh` | Nightly backup prefix list |
+| `scripts/storage/azure-prefix-inventory.sh` | Phase 0.6 per-prefix aggregate (metadata only) |
+| `scripts/storage/azure-top-prefixes.sh` | Top-level virtual folders + sub-prefix counts |
+| `scripts/storage/azure-extra-prefixes.sh` | Additional prefixes (`directory/`, `viewer_rollup/`) |
+| `scripts/tmp/batch-b2-azure-list-nightly.sh` | Nightly backup prefix list (legacy tmp) |
 | `scripts/azure-archive-acceptance.ps1` | Acceptance checks |
 | `cmd/archive/main.go` | CLI restore/export against Azure |
 | `cmd/backfill/main.go` | Archive client for backfill paths |
@@ -157,10 +158,9 @@ Read-only listing via `az storage blob list` (metadata only). Connection string 
 **Commands run:**
 
 ```bash
-bash scripts/tmp/batch-b-azure-list.sh
-bash scripts/tmp/azure-prefix-inventory.sh
-bash scripts/tmp/azure-top-prefixes.sh
-bash scripts/tmp/azure-extra-prefixes.sh
+bash scripts/storage/azure-prefix-inventory.sh
+bash scripts/storage/azure-top-prefixes.sh
+bash scripts/storage/azure-extra-prefixes.sh
 ```
 
 **Inventory table (required prefixes):**
@@ -417,10 +417,9 @@ Set `ARCHIVE_PRIMARY_PROVIDER=azure` / `ARCHIVE_READ_THROUGH=false`. Azure untou
 | Command | Result |
 |---------|--------|
 | `git status` | `docs/storage/` did not exist; audit doc recreated with inventory |
-| `bash scripts/tmp/batch-b-azure-list.sh` | OK — samples under `postgres/nightly/` (3) and `rollups/` (5 shown, paginated) |
-| `bash scripts/tmp/azure-prefix-inventory.sh` | OK — per-prefix counts for 7 required prefixes |
-| `bash scripts/tmp/azure-top-prefixes.sh` | OK — 11 top-level virtual folders discovered |
-| `bash scripts/tmp/azure-extra-prefixes.sh` | OK — `directory/`, `viewer_rollup/` counts |
+| `bash scripts/storage/azure-prefix-inventory.sh` | OK — per-prefix counts for 7 required prefixes |
+| `bash scripts/storage/azure-top-prefixes.sh` | OK — 11 top-level virtual folders discovered |
+| `bash scripts/storage/azure-extra-prefixes.sh` | OK — `directory/`, `viewer_rollup/` counts |
 | `npx wrangler r2 bucket list` (personal `51dd8007…`) | **R2 disabled** (10042) |
 | `npx wrangler r2 bucket list` (ASU `513d8937…`) | **R2 disabled** (10042) |
 
@@ -478,3 +477,4 @@ Set `ARCHIVE_PRIMARY_PROVIDER=azure` / `ARCHIVE_READ_THROUGH=false`. Azure untou
 |------|--------|
 | 2026-06-25 | Initial read-only audit + staging plan |
 | 2026-06-25 | Phase 0.6 live inventory + Phase 1 prep + closeout report |
+| 2026-06-25 | Handoff: `docs/storage/README.md`, stable `scripts/storage/*` inventory scripts |
