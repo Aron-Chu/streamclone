@@ -297,14 +297,9 @@ func main() {
 	silverGateCfg := analytics.SilverGateConfigFromApp(cfg)
 	analytics.InitTop500SilverGateMetrics(silverGateCfg)
 	if cfg.Top500SilverGateEnabled {
-		logger.Info("top500 silver gate started",
-			"dry_run", cfg.Top500SilverGateDryRun,
-			"write_enabled", cfg.Top500SilverGateWriteEnabled,
-			"max_candidates", silverGateCfg.MaxCandidates,
-			"max_enqueue_per_run", silverGateCfg.MaxEnqueuePerRun,
-			"interval", cfg.Top500SilverGateInterval.String(),
-		)
-		analytics.StartTop500SilverGate(ctx, silverGateCfg, logger)
+		silverGate := analytics.NewTop500SilverGateFromApp(cfg, logger, store)
+		analytics.LogSilverGateStartup(logger, silverGateCfg, cfg.Top500SilverGateFixtureCandidates)
+		analytics.StartTop500SilverGate(ctx, silverGate)
 	} else {
 		logger.Info("top500 silver gate disabled", "flag", "TOP500_SILVER_GATE_ENABLED")
 	}

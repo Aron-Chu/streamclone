@@ -27,7 +27,7 @@ func TestShouldStartTop500SilverGateDefaultOff(t *testing.T) {
 func TestStartTop500SilverGateDisabledIsNoOp(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	StartTop500SilverGate(ctx, SilverGateConfig{Enabled: false}, nil)
+	StartTop500SilverGate(ctx, NewTop500SilverGate(SilverGateConfig{Enabled: false}, nil, nil, nil, nil))
 	time.Sleep(5 * time.Millisecond)
 }
 
@@ -90,19 +90,22 @@ func TestStartTop500SilverGateEnabledScaffoldTicksWithoutEnqueue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	before := testutil.ToFloat64(metrics.Top500SilverGateCandidatesTotal.WithLabelValues(SilverGateLaneTop500Selective, "tick"))
-	StartTop500SilverGate(ctx, SilverGateConfig{
-		Enabled:  true,
-		DryRun:   true,
-		Interval: 5 * time.Millisecond,
-	}, nil)
+	before := testutil.ToFloat64(metrics.Top500SilverGateCandidatesTotal.WithLabelValues(SilverGateLaneTop500Selective, "evaluate"))
+	gate := NewTop500SilverGate(
+		SilverGateConfig{Enabled: true, DryRun: true, WriteEnabled: false, Interval: 5 * time.Millisecond},
+		nil,
+		NewFixtureSilverCandidateReader(),
+		NewFixtureSilverBudgetCounterReader(),
+		RefusingSilverEnqueueAdapter{WriteEnabled: false},
+	)
+	StartTop500SilverGate(ctx, gate)
 	time.Sleep(25 * time.Millisecond)
 	cancel()
 	time.Sleep(5 * time.Millisecond)
 
-	after := testutil.ToFloat64(metrics.Top500SilverGateCandidatesTotal.WithLabelValues(SilverGateLaneTop500Selective, "tick"))
+	after := testutil.ToFloat64(metrics.Top500SilverGateCandidatesTotal.WithLabelValues(SilverGateLaneTop500Selective, "evaluate"))
 	if after <= before {
-		t.Fatalf("candidate tick metric unchanged: before=%v after=%v", before, after)
+		t.Fatalf("candidate evaluate metric unchanged: before=%v after=%v", before, after)
 	}
 }
 

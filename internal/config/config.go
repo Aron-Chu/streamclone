@@ -203,6 +203,7 @@ type Config struct {
 	Top500SilverGateMaxCandidates    int           `env:"TOP500_SILVER_GATE_MAX_CANDIDATES" envDefault:"5"`
 	Top500SilverGateMaxEnqueuePerRun int           `env:"TOP500_SILVER_GATE_MAX_ENQUEUE_PER_RUN" envDefault:"1"`
 	Top500SilverGateInterval         time.Duration `env:"TOP500_SILVER_GATE_INTERVAL" envDefault:"10m"`
+	Top500SilverGateFixtureCandidates bool         `env:"TOP500_SILVER_GATE_FIXTURE_CANDIDATES" envDefault:"false"`
 
 	PulseHostedMode              bool   `env:"PULSE_HOSTED_MODE" envDefault:"false"`
 	PulseBetaKeys                string `env:"PULSE_BETA_KEYS"`

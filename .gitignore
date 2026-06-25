@@ -11,6 +11,8 @@
 .env.*
 !.env.example
 !.env.dev
+deploy/env/.env.pulse-local
+deploy/env/.env.silver-gate-local
 node_modules/
 memories/
 frontend/test-results/
