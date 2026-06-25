@@ -12,7 +12,7 @@ require (
 	github.com/minio/minio-go/v7 v7.2.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.20.1
-	golang.org/x/net v0.53.0
+	golang.org/x/net v0.55.0
 	golang.org/x/sync v0.21.0
 	pgregory.net/rapid v1.3.0
 )
