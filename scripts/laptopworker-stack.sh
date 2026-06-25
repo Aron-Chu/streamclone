@@ -84,14 +84,18 @@ case "$cmd" in
     bash "$ROOT/scripts/laptopworker-setup-remote.sh"
     ;;
   setup-verify)
-    echo "==> passwordless sudo"
-    if sudo -n true 2>/dev/null; then echo "ok"; else echo "missing — run: scripts/laptopworker-stack.sh setup"; fi
+    echo "==> passwordless sudo (laptopworker scripts)"
+    if [ -f /etc/sudoers.d/streamclone-laptopworker ]; then
+      echo "ok (sudoers installed)"
+    else
+      echo "missing — run: scripts/laptopworker-stack.sh setup"
+    fi
     echo "==> sudoers drop-in"
     [ -f /etc/sudoers.d/streamclone-laptopworker ] && echo "ok" || echo "missing"
     echo "==> ufw"
-    sudo -n ufw status 2>/dev/null | head -3 || ufw status 2>/dev/null | head -3 || echo "unknown"
+    sudo -n bash -c 'ufw status 2>/dev/null | head -3' 2>/dev/null || echo "run: ufw-tailnet"
     echo "==> DOCKER-USER :8090"
-    sudo -n iptables -S DOCKER-USER 2>/dev/null | grep 8090 || iptables -S DOCKER-USER 2>/dev/null | grep 8090 || echo "no rules yet — run ufw-tailnet"
+    sudo -n iptables -S DOCKER-USER 2>/dev/null | grep 8090 || echo "no rules — run ufw-tailnet"
     bash "$ROOT/scripts/laptopworker-stack.sh" boot-check
     ;;
   boot-check)

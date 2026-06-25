@@ -2,8 +2,9 @@
 # Prefer Ubuntu on reboot: GRUB default + UEFI boot order (dual-boot laptops).
 set -euo pipefail
 
+_self="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-  exec sudo -n bash "$0" "$@" 2>/dev/null || exec sudo bash "$0" "$@"
+  exec sudo -n bash "$_self" "$@" 2>/dev/null || exec sudo bash "$_self" "$@"
 fi
 
 echo "==> GRUB default (Ubuntu first)"
@@ -41,6 +42,7 @@ others=()
 
 for line in "${lines[@]}"; do
   num="${line#Boot}"
+  num="${num%%\**}"
   num="${num%% *}"
   lower="$(echo "$line" | tr '[:upper:]' '[:lower:]')"
   if [ -z "$ubuntu_num" ] && [[ "$lower" == *ubuntu* || "$lower" == *grub* || "$lower" == *shim* ]]; then
