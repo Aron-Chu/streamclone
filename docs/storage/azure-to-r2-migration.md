@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Phase 0.6 inventory complete + Phase 1 prep — **no cutover, no copies executed** |
+| **Status** | Phase 2A complete (one-object staging proof) — **no production cutover** |
 | **Owner** | Aron-Chu |
 | **Date** | 2026-06-25 |
 | **Product** | StreamPulse long-term analytics artifacts |
@@ -12,17 +12,20 @@
 
 ## Executive summary
 
-Streamclone/StreamPulse cold archive is **implemented today against Azure Blob only**. The Go `archive` package writes through a `BlobStore` interface (`internal/archive/writer.go`); only `AzureBlobStore` exists. Manifest rows live in Postgres `archive_exports` (`gcs_uri` column name is legacy — values are Azure HTTPS URIs).
+Streamclone/StreamPulse cold archive is **implemented in production against Azure Blob only**. The Go `archive` package writes through a `BlobStore` interface (`internal/archive/writer.go`); only `AzureBlobStore` is wired. Manifest rows live in Postgres `archive_exports` (`gcs_uri` column name is legacy — values are Azure HTTPS URIs).
 
-**R2 is not enabled** on either Cloudflare account checked (personal `51dd8007…`, ASU `513d8937…`) — API returns `code 10042`. **No R2 buckets exist.** Azure remains authoritative.
+**R2 (personal account `51dd8007…`):** enabled; **`streampulse-artifacts-staging`** exists; **one 131-byte `analytics_rollups` object** copied and verified (size, SHA-256, gzip, Azure etag unchanged). **No production R2 buckets.** **No production read-path change.** Azure remains authoritative for all production reads/writes.
+
+**Task ledger:** [tasks.md](./tasks.md) (`STOR-R2-001` done; `STOR-R2-002`–`005` pending).
 
 **Recommended path:**
 
 1. **Phase 0** — operator inventory on Azure (counts/sizes) using existing scripts + `az storage blob list` (read-only). **Done 2026-06-25.**
-2. **Phase 1** — enable R2 on chosen account + budget alerts; create staging/prod buckets (prepared, not executed).
-3. **Phase 2** — mirror **10–50 sample objects** Azure → R2; verify checksums; Azure untouched.
-4. **Phase 3** — read-through in BearHost API: R2 first → Azure fallback → metadata-only.
-5. **Phase 4** — batch migration by prefix; keep Azure fallback window; no Azure deletes until verified.
+2. **Phase 1** — enable R2 on personal account + budget alerts; create **staging** bucket only. **Done 2026-06-25** (`streampulse-artifacts-staging`).
+3. **Phase 2A** — one-object mirror + verify. **Done 2026-06-25.**
+4. **Phase 2B** — mirror **10–50** sample objects ([`sample-manifest-phase2a.csv`](./sample-manifest-phase2a.csv)) — **STOR-R2-002**, pending approval.
+5. **Phase 3** — read-through in BearHost API: R2 first → Azure fallback — **STOR-R2-003**, not started.
+6. **Phase 4** — batch migration by prefix — **STOR-R2-005**; keep Azure fallback; no Azure deletes until verified.
 
 **Do not** migrate Postgres to D1, route VOD Library through Workers, or store user library rows in R2.
 
@@ -207,8 +210,8 @@ bash scripts/storage/azure-extra-prefixes.sh
 
 | Account | ID | Current use | R2 status (2026-06-25) |
 |---------|-----|-------------|------------------------|
-| **Personal** (`aron.chu90@gmail.com`) | `51dd8007b22ac92482388d8b6cdbb6e3` | DNS zone `streampulse.stream`, prod Pages, `api` tunnel DNS | **Disabled** — `wrangler r2 bucket list` → `code 10042` |
-| **ASU** (`amchu2@asu.edu`) | `513d89373bebfc78b66e243b80f4debf` | Staging Pages, edge Worker, D1, KV | **Disabled** — `code 10042` |
+| **Personal** (`aron.chu90@gmail.com`) | `51dd8007b22ac92482388d8b6cdbb6e3` | DNS zone `streampulse.stream`, prod Pages, `api` tunnel DNS, **R2 staging** | **Enabled** — staging bucket live |
+| **ASU** (`amchu2@asu.edu`) | `513d89373bebfc78b66e243b80f4debf` | Staging Pages, edge Worker, D1, KV | **R2 disabled** — not used for artifact migration |
 
 **Operator action required before any bucket create:**
 
@@ -246,9 +249,105 @@ $env:CLOUDFLARE_ACCOUNT_ID = '513d89373bebfc78b66e243b80f4debf'
 npx wrangler r2 bucket create streampulse-artifacts-staging
 ```
 
-**Bucket status:** none created (R2 not enabled).
+**Bucket status (2026-06-25):** `streampulse-artifacts-staging` **created** on personal account. Prod/backups buckets **not** created.
 
-### 1.3 R2 key layout
+---
+
+## Phase 2A — R2 enable, sample manifest, staging bucket, one-object dry run
+
+**Status:** R2 **enabled** on personal account. Staging bucket **created**. **One-object proof succeeded** (2026-06-25). Phase 2B sample batch pending (**STOR-R2-002**).
+
+### 2A.1 R2 verification
+
+| Check | Result |
+|-------|--------|
+| Command | `CLOUDFLARE_ACCOUNT_ID=51dd8007b22ac92482388d8b6cdbb6e3 npx wrangler r2 bucket list` |
+| After personal R2 subscription | **Success** — empty list, then bucket visible after create |
+| Wrangler note | Run R2 commands from **streamclone repo root** (no `wrangler.toml`) — `streampulse-web/wrangler.toml` pins ASU `513d8937…` and caused `10042` on create |
+
+### 2A.2 Bucket status
+
+| Bucket | Account | Status |
+|--------|---------|--------|
+| `streampulse-artifacts-staging` | Personal `51dd8007…` | **Created** 2026-06-25 (`wrangler r2 bucket create` from streamclone repo root) |
+| `streampulse-artifacts-prod` | — | Not created (not approved) |
+| `streampulse-backups-prod` | — | Not created (not approved) |
+
+**Wrangler (personal account — use streamclone repo root, not streampulse-web/):**
+
+```powershell
+$env:CLOUDFLARE_ACCOUNT_ID = '51dd8007b22ac92482388d8b6cdbb6e3'
+cd C:\Users\Aron\twitch-7tv-clone
+npx wrangler r2 bucket list
+```
+
+### 2A.3 Sample manifest (BearHost Postgres — read-only)
+
+**Source:** BearHost `archive_exports` via `BEARHOST_SAMPLE_MANIFEST_REMOTE=1 bash scripts/storage/archive-exports-sample-manifest.sh --csv`
+
+**Artifact file:** [`sample-manifest-phase2a.csv`](./sample-manifest-phase2a.csv) — **31 data rows** (20× `analytics_rollups`, 10× `analytics_stream`, 1× `bronze_vod_catalog`)
+
+Excludes: `vod_chat/`, `postgres/nightly/`, `tt-detail/`, `viewer_rollup/` hive rows (sample SQL filters to canonical `rollups/` and `streams/` paths).
+
+| artifact_type | natural_key | byte_size | proposed R2 key |
+|---------------|-------------|----------:|-----------------|
+| `analytics_rollups` | `316787476195:twitchtracker` | 131 | `archive/rollups/stream_id=316787476195/part-000.jsonl.gz` |
+| `analytics_stream` | `316070541810` | 240 | `archive/streams/stream_id=316070541810/session.json.gz` |
+| `bronze_vod_catalog` | `gorizontradio:2026-06-25` | 23 | `archive/channels/vod_index/gorizontradio.jsonl.gz` |
+
+Regenerate:
+
+```bash
+BEARHOST_SAMPLE_MANIFEST_REMOTE=1 bash scripts/storage/archive-exports-sample-manifest.sh --csv \
+  > docs/storage/sample-manifest-phase2a.csv
+```
+
+### 2A.4 One-object dry-run candidate
+
+| Field | Value |
+|-------|-------|
+| **Selected** | Smallest canonical `analytics_rollups` / `rollups/` object |
+| `natural_key` | `316787476195:twitchtracker` |
+| `byte_size` | **131** |
+| Azure blob | `streamclone/rollups/stream_id=316787476195/part-000.jsonl.gz` |
+| R2 key | `archive/rollups/stream_id=316787476195/part-000.jsonl.gz` |
+| `gcs_uri` | `https://ststreamclone3lf6tt.blob.core.windows.net/streamclone-archive/streamclone/rollups/stream_id=316787476195/part-000.jsonl.gz` |
+
+### 2A.5 One-object dry run — **EXECUTED** (2026-06-25)
+
+| Step | Result |
+|------|--------|
+| Azure metadata | 131 B, etag `"0x8DED095FEE6D766"` |
+| Download + SHA-256 | `8c0fd0d6a814325beb752a0a5caa20905cedf5f8078c20df9d2e2c83b1519056` |
+| R2 upload | `streampulse-artifacts-staging/archive/rollups/stream_id=316787476195/part-000.jsonl.gz` |
+| R2 round-trip | Same SHA-256 |
+| gzip -t | ok |
+| Azure etag after | **unchanged** |
+| `archive_exports` / read-path | **not modified** |
+
+Script: `scripts/storage/r2-one-object-dry-run.sh` (Wrangler OAuth on Windows; optional S3 keys in `~/.streamclone/r2-staging-s3.env`).
+
+### 2A.6 Phase 2A closeout (2026-06-25 — dry run executed)
+
+| Item | Result |
+|------|--------|
+| R2 enabled (API) | **Yes** — personal account after subscription |
+| `streampulse-artifacts-staging` | **Created** |
+| One-object dry run | **Success** (Wrangler OAuth on Windows; WSL used for Azure download) |
+| Object | `archive/rollups/stream_id=316787476195/part-000.jsonl.gz` (131 B) |
+| SHA-256 | `8c0fd0d6a814325beb752a0a5caa20905cedf5f8078c20df9d2e2c83b1519056` (Azure = R2 round-trip) |
+| gzip test | **ok** |
+| Azure etag | **unchanged** `"0x8DED095FEE6D766"` |
+| `archive_exports` / read-path | **Not modified** |
+
+**Env file (local, not committed):** `~/.streamclone/r2-staging-s3.env` — endpoint + account ID. S3 access keys optional (Wrangler OAuth works for CLI; BearHost will need S3 keys later).
+
+**Wrangler notes:**
+
+- R2 bucket CLI: run from **streamclone repo root** (`CLOUDFLARE_ACCOUNT_ID=51dd8007…`) — not `streampulse-web/` (ASU `wrangler.toml`).
+- WSL non-interactive Wrangler needs `CLOUDFLARE_API_TOKEN`; Windows OAuth session works for `wrangler r2 object put/get`.
+
+---
 
 **Phase A — mirror existing Azure layout**
 
@@ -397,8 +496,8 @@ Azure fallback minimum **90 days** after R2 read verified per batch.
 
 | Guardrail | Detail |
 |-----------|--------|
-| Budget alerts | Required on Cloudflare **before** R2 enable; Azure budget already in Terraform |
-| No mutations this phase | No Azure download/copy/delete/lifecycle change; no R2 uploads |
+| Budget alerts | Required on Cloudflare before R2 enable (**done** on personal account); Azure budget already in Terraform |
+| Staging mutations only | One-object R2 staging proof allowed; **no** prod cutover, Azure delete/lifecycle change, or bulk copy without **STOR-R2-002**+ approval |
 | No DNS / Pages / tunnel / D1 changes | Out of scope |
 | Secrets | Never commit connection strings or R2 keys |
 
@@ -471,6 +570,38 @@ Set `ARCHIVE_PRIMARY_PROVIDER=azure` / `ARCHIVE_READ_THROUGH=false`. Azure untou
 
 ---
 
+## Phase 2A docs alignment closeout (2026-06-25)
+
+### Current storage truth
+
+| Item | State |
+|------|-------|
+| Production archive reads/writes | **Azure Blob** (`AzureBlobStore`) |
+| R2 personal account | **Enabled** |
+| Staging bucket | **`streampulse-artifacts-staging`** |
+| Verified staging objects | **1** (131 B `analytics_rollups`) |
+| Prod / backups R2 buckets | **Not created** |
+| Production read-path cutover | **No** |
+| BearHost Postgres SoT | `archive_exports`, jobs, queues, VOD Library rows (future) |
+
+### Task IDs added
+
+| ID | Summary |
+|----|---------|
+| STOR-R2-001 | Done — inventory + one-object proof |
+| STOR-R2-002 | Mirror 10–50 sample `archive_exports` objects |
+| STOR-R2-003 | `R2BlobStore` + `ReadThroughStore` behind flags |
+| STOR-R2-004 | R2 restore drill |
+| STOR-R2-005 | Batch migration by prefix |
+
+Ledger: [tasks.md](./tasks.md).
+
+### Mutations confirmation (this alignment pass)
+
+**Docs/task ledger updates only.** No new R2 uploads, no prod buckets, no Azure lifecycle/delete, no production read-path flags, no DNS/Pages/D1/Workers/VOD Library code changes.
+
+---
+
 ## Document history
 
 | Date | Change |
@@ -478,3 +609,5 @@ Set `ARCHIVE_PRIMARY_PROVIDER=azure` / `ARCHIVE_READ_THROUGH=false`. Azure untou
 | 2026-06-25 | Initial read-only audit + staging plan |
 | 2026-06-25 | Phase 0.6 live inventory + Phase 1 prep + closeout report |
 | 2026-06-25 | Handoff: `docs/storage/README.md`, stable `scripts/storage/*` inventory scripts |
+| 2026-06-25 | Phase 2A continuation recheck: API still `10042`; staging bucket not created |
+| 2026-06-25 | Phase 2A complete: one-object staging proof; docs/tasks alignment (`STOR-R2-002`–`005`) |
