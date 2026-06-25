@@ -147,6 +147,19 @@ Defense in depth (UFW alone does not filter Docker-published ports):
 4. **Boot persistence** — `streamclone-laptopworker-firewall.service` reapplies rules after Docker/Tailscale start.
 5. **UFW** — SSH on `tailscale0` only by default.
 
+After changing `scripts/laptopworker/sbin/*`, refresh installed helpers:
+
+```cmd
+scripts\laptopworker-remote.cmd setup
+scripts\laptopworker-remote.cmd ufw-tailnet
+```
+
+LAN block test from Windows (should **fail**):
+
+```powershell
+Invoke-WebRequest http://192.168.4.27:8090/v1/extension/health -TimeoutSec 5
+```
+
 ```bash
 bash scripts/laptopworker-stack.sh ufw-tailnet
 sudo ufw status verbose
@@ -393,6 +406,7 @@ No Portainer or node exporter unless explicitly requested.
 
 ## Related
 
+- Hosting topology (BearHost / laptop / PC): [`.kiro/steering/laptopworker-hosting.md`](../.kiro/steering/laptopworker-hosting.md)
 - BearHost production: `docs/bearhost-production.md`
 - Azure hybrid (VPS scraper pattern): `docs/azure-archive-plane.md`
 - Workspace layout: `docs/workspace.md`

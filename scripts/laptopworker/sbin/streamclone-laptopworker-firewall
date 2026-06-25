@@ -7,6 +7,15 @@ if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   exit 1
 fi
 
+LAN_BLOCK_RULE=( -p tcp --dport 8090 ! -i lo ! -i tailscale0 -j DROP )
+
+_firewall_cleanup_input_8090() {
+  while iptables -D INPUT -i lo -p tcp --dport 8090 -j ACCEPT 2>/dev/null; do :; done
+  while iptables -D INPUT -i tailscale0 -p tcp --dport 8090 -j ACCEPT 2>/dev/null; do :; done
+  while iptables -D INPUT -p tcp --dport 8090 -j DROP 2>/dev/null; do :; done
+  while iptables -D INPUT "${LAN_BLOCK_RULE[@]}" 2>/dev/null; do :; done
+}
+
 if [ "${1:-}" = "--verify" ]; then
   ok=0
   if iptables -L DOCKER-USER -n >/dev/null 2>&1 && iptables -S DOCKER-USER 2>/dev/null | grep -q 8090; then
@@ -14,10 +23,10 @@ if [ "${1:-}" = "--verify" ]; then
   else
     echo "DOCKER-USER :8090 MISSING"; ok=1
   fi
-  if iptables -S INPUT 2>/dev/null | grep -q 8090; then
-    echo "INPUT :8090 ok"
+  if iptables -C INPUT "${LAN_BLOCK_RULE[@]}" 2>/dev/null; then
+    echo "INPUT early LAN block ok"
   else
-    echo "INPUT :8090 MISSING"; ok=1
+    echo "INPUT early LAN block MISSING"; ok=1
   fi
   ufw status 2>/dev/null | head -3 || true
   exit "$ok"
@@ -61,16 +70,9 @@ else
   echo "    DOCKER-USER chain missing (docker not up?) — skipping"
 fi
 
-echo "==> INPUT :8090 (lo + tailscale0; blocks LAN to docker-proxy)"
-if ! iptables -C INPUT -i lo -p tcp --dport 8090 -j ACCEPT 2>/dev/null; then
-  iptables -I INPUT 1 -i lo -p tcp --dport 8090 -j ACCEPT
-fi
-if ! iptables -C INPUT -i tailscale0 -p tcp --dport 8090 -j ACCEPT 2>/dev/null; then
-  iptables -I INPUT 2 -i tailscale0 -p tcp --dport 8090 -j ACCEPT
-fi
-if ! iptables -C INPUT -p tcp --dport 8090 -j DROP 2>/dev/null; then
-  iptables -A INPUT -p tcp --dport 8090 -j DROP
-fi
+echo "==> INPUT :8090 early drop (non-lo, non-tailscale0 — before UFW/Docker accepts)"
+_firewall_cleanup_input_8090
+iptables -I INPUT 1 "${LAN_BLOCK_RULE[@]}"
 
 ufw status verbose
-echo "Firewall applied."
+echo "Firewall applied. LAN IP :8090 should fail; tailnet + localhost OK."

@@ -63,6 +63,7 @@ Redirect stubs in `docs/pulse-extension/` point to the pulse repo. On GitHub, us
 
 Home Linux box on Tailscale (`laptopworker`) runs the **core dev stack only** — UI at `http://laptopworker:8090`, no local scraper/corpus. Network-heavy scrape stays on **legacy-rollback-host**.
 
+- Topology (what runs where): [`.kiro/steering/laptopworker-hosting.md`](../.kiro/steering/laptopworker-hosting.md)
 - Runbook: [`docs/laptopworker-dev.md`](laptopworker-dev.md) (stack ops, extension/portal backend modes, Remote SSH)
 - From Windows repo root: `make laptopworker-status` or `scripts\laptopworker-remote.cmd status`
 - After pushing laptopworker scripts to `master`: `make laptopworker-update`

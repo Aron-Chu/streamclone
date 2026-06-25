@@ -93,12 +93,10 @@ case "$cmd" in
       fi
     done
     echo "==> sudoers"
-    if [ -f /etc/sudoers.d/streamclone-laptopworker ]; then
-      if grep -q '/usr/local/sbin/streamclone-laptopworker-firewall' /etc/sudoers.d/streamclone-laptopworker 2>/dev/null; then
-        echo "ok (root-owned helpers only)"
-      else
-        echo "STALE — re-run setup (still grants checkout paths)"
-      fi
+    if sudo -n grep -q '/usr/local/sbin/streamclone-laptopworker-firewall' /etc/sudoers.d/streamclone-laptopworker 2>/dev/null; then
+      echo "ok (root-owned helpers only)"
+    elif [ -f /etc/sudoers.d/streamclone-laptopworker ]; then
+      echo "STALE — re-run setup"
     else
       echo "missing — run setup"
     fi
