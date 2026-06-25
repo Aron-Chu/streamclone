@@ -337,12 +337,7 @@ func newArchiveBlobStore(cfg config.Config) (archive.BlobStore, error) {
 	if !cfg.ArchiveEnabled || cfg.ArchiveStorageProvider != "azure" {
 		return nil, fmt.Errorf("archive azure export must be enabled (ARCHIVE_ENABLED=true)")
 	}
-	return archive.NewAzureBlobStore(archive.AzureConfig{
-		StorageAccount:       cfg.ArchiveAzureStorageAccount,
-		Container:            cfg.ArchiveAzureContainer,
-		Prefix:               cfg.ArchiveAzurePrefix,
-		ConnectionStringFile: cfg.ArchiveAzureConnectionStringFile,
-	})
+	return archive.NewBlobStore(cfg.ArchiveBlobStoreConfig())
 }
 
 type bronzeVODRangeResult struct {
@@ -459,12 +454,7 @@ func newBronzeIndexer(ctx context.Context, cfg config.Config, pool *pgxpool.Pool
 	if !cfg.ArchiveEnabled || cfg.ArchiveStorageProvider != "azure" {
 		return nil, fmt.Errorf("archive azure export must be enabled (ARCHIVE_ENABLED=true)")
 	}
-	blob, err := archive.NewAzureBlobStore(archive.AzureConfig{
-		StorageAccount:       cfg.ArchiveAzureStorageAccount,
-		Container:            cfg.ArchiveAzureContainer,
-		Prefix:               cfg.ArchiveAzurePrefix,
-		ConnectionStringFile: cfg.ArchiveAzureConnectionStringFile,
-	})
+	blob, err := archive.NewBlobStore(cfg.ArchiveBlobStoreConfig())
 	if err != nil {
 		return nil, err
 	}
