@@ -224,7 +224,12 @@ func (w *BackfillWorker) runOnce(ctx context.Context) (processed bool, err error
 		defer cancel()
 	}
 	_, syncErr := w.sync.SyncHistoricalStream(syncCtx, jobStreamID, job.Login, viewersOnly, forceChat, "")
-	outcome := resolveBackfillOutcome(*job, syncErr, time.Now())
+	var outcome backfillOutcome
+	if syncErr != nil && strings.EqualFold(job.Tier, "silver") {
+		outcome = resolveSilverBackfillOutcome(*job, syncErr, time.Now())
+	} else {
+		outcome = resolveBackfillOutcome(*job, syncErr, time.Now())
+	}
 	if syncErr == nil {
 		job.StreamID = jobStreamID
 	}
