@@ -35,6 +35,8 @@ if ! laptopworker_required_files "$ROOT"; then
   exit 1
 fi
 
+laptopworker_ensure_scripts_executable "$ROOT"
+
 echo "==> merge .env.local (preserve user overrides)"
 laptopworker_synth_env "$ROOT"
 
