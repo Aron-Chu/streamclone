@@ -53,8 +53,20 @@ Folders: **streamclone** (`.`) and **streamclone-pulse** (`../streamclone-pulse`
 | Shared scoring / heat types | `packages/pulse-core/` | Imported by frontend and extension |
 | Migrations (bookmarks, etc.) | `migrations/` in streamclone | — |
 | Stack / compose / Caddy | `deploy/`, `docs/SERVICE_MAP.md` | — |
+| **Laptopworker dev hub** | [`docs/laptopworker-dev.md`](laptopworker-dev.md) | Tailscale host `laptopworker`; remote `make laptopworker-status` |
 
 Redirect stubs in `docs/pulse-extension/` point to the pulse repo. On GitHub, use repo URLs; on disk, open the sibling checkout or multi-root workspace.
+
+---
+
+## Laptopworker (optional tailnet dev host)
+
+Home Linux box on Tailscale (`laptopworker`) runs the **core dev stack only** — UI at `http://laptopworker:8090`, no local scraper/corpus. Network-heavy scrape stays on **BearHost VPS**.
+
+- Runbook: [`docs/laptopworker-dev.md`](laptopworker-dev.md)
+- From Windows repo root: `make laptopworker-status` or `scripts\laptopworker-remote.cmd status`
+- After pushing laptopworker scripts to `master`: `make laptopworker-update`
+- One-time on laptop: `sudo loginctl enable-linger aron` (boot without login)
 
 ---
 
@@ -83,9 +95,10 @@ Extension work does not add MCP tools in the pulse repo; probe the backend via `
 ## Dev workflow
 
 1. **Stack** (streamclone): `make up` → Caddy at `http://localhost:8090`.
-2. **BFF health**: `curl http://localhost:8090/v1/extension/health`
-3. **Extension** (streamclone-pulse): `npm run build` → Load unpacked from `dist/` in Chrome.
-4. **Tests**: `make check-quick` in streamclone; `npm test` / `npm run typecheck` in pulse.
-5. **Spec edits**: requirements/design/tasks in **streamclone-pulse**; API/schema changes in **streamclone**.
+2. **StreamPulse web** (sibling `streamclone-pulse/streampulse-web`): `make pulse-local-up` then `make pulse-web-dev` → `http://localhost:5173` (beta key from `make pulse-local-enable`).
+3. **BFF health**: `curl http://localhost:8090/v1/extension/health`
+4. **Extension** (streamclone-pulse): `npm run build` → Load unpacked from `dist/` in Chrome.
+5. **Tests**: `make check-quick` in streamclone; `npm test` / `npm run typecheck` in pulse.
+6. **Spec edits**: requirements/design/tasks in **streamclone-pulse**; API/schema changes in **streamclone**.
 
 Windows localhost issues → `.kiro/steering/windows-dev.md`.
