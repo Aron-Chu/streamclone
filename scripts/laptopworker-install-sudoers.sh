@@ -17,7 +17,7 @@ ${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/loginctl enable-linger ${USER_NAME}
 ${USER_NAME} ALL=(ALL) NOPASSWD: /bin/bash ${ROOT}/scripts/laptopworker-ufw-tailnet.sh
 ${USER_NAME} ALL=(ALL) NOPASSWD: /bin/bash ${ROOT}/scripts/laptopworker-power-config.sh
 ${USER_NAME} ALL=(ALL) NOPASSWD: /bin/bash ${ROOT}/scripts/laptopworker-setup-boot.sh
-${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/chmod +x ${ROOT}/scripts/laptopworker-*.sh
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/sbin/iptables
 EOF
 
 sudo cp "$TMP" "$DROP"

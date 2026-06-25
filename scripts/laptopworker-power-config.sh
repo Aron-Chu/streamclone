@@ -2,8 +2,9 @@
 # Always-on worker posture: lid closed + AC does not suspend.
 set -euo pipefail
 
+_self="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-  exec sudo -n bash "$0" "$@" 2>/dev/null || exec sudo bash "$0" "$@"
+  exec sudo -n bash "$_self" "$@" 2>/dev/null || exec sudo bash "$_self" "$@"
 fi
 
 echo "==> Configuring logind..."
