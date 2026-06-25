@@ -37,6 +37,7 @@ type Handler struct {
 	pulseRuntime  PulseRuntimeConfig
 	statsGroup    singleflight.Group
 	statusGroup   singleflight.Group
+	storyboardCache *vodStoryboardCache
 	refreshStop   chan struct{}
 	refreshOnce   sync.Once
 }
@@ -93,6 +94,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/streams/{streamID}/games", h.getStreamGames)
 		r.Get("/streams/{streamID}/replay-heatmap", h.replayHeatmap)
 		r.Delete("/streams/{streamID}/replay-heatmap/cache", h.invalidateHeatmapCache)
+		r.Get("/vods/{vodId}/storyboard-thumb", h.vodStoryboardThumb)
 		r.Get("/timeseries/status", h.timeseriesStatus)
 	})
 }
