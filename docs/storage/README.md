@@ -2,6 +2,8 @@
 
 StreamPulse long-term **artifact bytes** vs **queryable app state**. Read this before Azure/R2 migration or VOD Library storage work.
 
+> **Production remains Azure-only.** All BearHost production archive reads and writes use `AzureBlobStore`. R2 + read-through flags exist for local/staging validation only (`profile-r2-staging-readthrough.env.example`). Do **not** set `ARCHIVE_READ_THROUGH=true` on BearHost production without explicit operator approval.
+
 ## Source of truth (unchanged)
 
 | Data | Home | Notes |
@@ -23,6 +25,7 @@ StreamPulse long-term **artifact bytes** vs **queryable app state**. Read this b
 | **Azure → R2 staging copies** | **31** sample objects verified (~5.2 KiB) — [`sample-mirror-phase2b.csv`](./sample-mirror-phase2b.csv) |
 | **Sample manifest** | [`sample-manifest-phase2a.csv`](./sample-manifest-phase2a.csv) |
 | **R2 config (local)** | `~/.streamclone/r2-staging-s3.env` (endpoint; S3 keys optional for CLI via Wrangler OAuth) |
+| **Staging read-through canary (local only)** | [`profile-r2-staging-readthrough.env.example`](../../deploy/env/profile-r2-staging-readthrough.env.example) + `bash scripts/storage/r2-restore-drill.sh` |
 
 ## Hosting boundaries (no change)
 
@@ -68,9 +71,10 @@ bash scripts/storage/r2-restore-drill.sh              # STOR-R2-004 read-through
 
 ## Next operator actions
 
-1. **STOR-R2-005** — batch migration by prefix (after operator approval).
-2. BearHost read-through flip — **optional**; only after reviewing [`r2-restore-drill-log.md`](./r2-restore-drill-log.md).
-3. Prod/backups buckets — not until separately approved.
+1. **STOR-R2-005** — **deferred** (see [tasks.md](./tasks.md)); no batch prefix migration at current scale/cost.
+2. Optional local read-through canary — copy `deploy/env/profile-r2-staging-readthrough.env.example` locally; run `bash scripts/storage/r2-restore-drill.sh`.
+3. BearHost read-through flip — **not recommended** until scale/cost or product need justifies it.
+4. Prod/backups buckets — not until separately approved.
 
 See [tasks.md](./tasks.md) for guardrails.
 

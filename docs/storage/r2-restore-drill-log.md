@@ -17,6 +17,8 @@ Local/staging **read-only** drill. No `archive_exports` updates. No Azure or R2 
 
 Production BearHost: **unchanged** — all R2 flags remain default off.
 
+> **Do not enable read-through on BearHost production** without explicit operator approval. This drill validates the Go path locally; production remains Azure-only.
+
 ## Sample objects exercised
 
 From [`sample-mirror-phase2b.csv`](./sample-mirror-phase2b.csv):
