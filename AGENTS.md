@@ -77,6 +77,7 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 | Clipper (legacy stub) | `.kiro/steering/clipper.md`, `clipper/README.md` | Deprecated in compose |
 | System health / optional services | `.kiro/steering/windows-dev.md` | `stack_health`, `get_ast_chunk("SystemHealthPanel")` |
 | Scraping archive / Azure blob backfill | `docs/scraping-archive/requirements.md` | `get_ast_chunk("SyncService")` |
+| **Azure archive → R2 migration / storage SoT** | [`docs/storage/README.md`](docs/storage/README.md), [`docs/storage/azure-to-r2-migration.md`](docs/storage/azure-to-r2-migration.md) | Read-only inventory: `scripts/storage/azure-prefix-inventory.sh` |
 | Security / secrets | `SECURITY.md`, `docs/security.md` | `make security-scan` |
 
 ---
@@ -100,6 +101,7 @@ Load the matching skill from `.cursor/skills/streamclone/` when the task fits (r
 | Context ladder (codegraph → snapshots → Repomix) | `context-retrieval/SKILL.md` |
 | Pulse extension (Chrome MV3) | Cross-read [streamclone-pulse `AGENTS.md`](https://github.com/Aron-Chu/streamclone-pulse/blob/master/AGENTS.md) and [docs/workspace.md](docs/workspace.md) |
 | Pulse live coverage / backfill / Protect / BearHost | `.cursor/skills/pulse/pulse-live-coverage-review/SKILL.md` (+ `coverage-triage`, `backfill-safety-review`, `capacity-governor-review`) — Codex: `.agents/skills/pulse/` |
+| StreamPulse portal / website-portal tasks | `streamclone-pulse/.cursor/skills/streamclone-task-runner/` — Codex: `.agents/skills/pulse/streamclone-task-runner/` (`make codex-sync-skills`) |
 
 ---
 
