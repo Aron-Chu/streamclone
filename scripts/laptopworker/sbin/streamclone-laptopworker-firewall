@@ -7,7 +7,7 @@ if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   exit 1
 fi
 
-LAN_BLOCK_RULE=( -p tcp --dport 8090 ! -i lo ! -i tailscale0 -j DROP )
+LAN_BLOCK_RULE=( -p tcp --dport 8090 -j DROP )
 
 _firewall_cleanup_input_8090() {
   while iptables -D INPUT -i lo -p tcp --dport 8090 -j ACCEPT 2>/dev/null; do :; done
@@ -23,10 +23,12 @@ if [ "${1:-}" = "--verify" ]; then
   else
     echo "DOCKER-USER :8090 MISSING"; ok=1
   fi
-  if iptables -C INPUT "${LAN_BLOCK_RULE[@]}" 2>/dev/null; then
-    echo "INPUT early LAN block ok"
+  if iptables -C INPUT -i lo -p tcp --dport 8090 -j ACCEPT 2>/dev/null && \
+     iptables -C INPUT -i tailscale0 -p tcp --dport 8090 -j ACCEPT 2>/dev/null && \
+     iptables -C INPUT "${LAN_BLOCK_RULE[@]}" 2>/dev/null; then
+    echo "INPUT lo/tailscale0 accept + LAN drop ok"
   else
-    echo "INPUT early LAN block MISSING"; ok=1
+    echo "INPUT :8090 rules MISSING"; ok=1
   fi
   ufw status 2>/dev/null | head -3 || true
   exit "$ok"
@@ -70,9 +72,11 @@ else
   echo "    DOCKER-USER chain missing (docker not up?) — skipping"
 fi
 
-echo "==> INPUT :8090 early drop (non-lo, non-tailscale0 — before UFW/Docker accepts)"
+echo "==> INPUT :8090 (accept lo + tailscale0, then drop — before UFW/Docker accepts)"
 _firewall_cleanup_input_8090
-iptables -I INPUT 1 "${LAN_BLOCK_RULE[@]}"
+iptables -I INPUT 1 -i lo -p tcp --dport 8090 -j ACCEPT
+iptables -I INPUT 2 -i tailscale0 -p tcp --dport 8090 -j ACCEPT
+iptables -I INPUT 3 "${LAN_BLOCK_RULE[@]}"
 
 ufw status verbose
 echo "Firewall applied. LAN IP :8090 should fail; tailnet + localhost OK."

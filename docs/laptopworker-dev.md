@@ -100,7 +100,25 @@ Add Twitch OAuth redirect: `http://laptopworker:8090` (and exact callback path i
 
 ---
 
-## Update flow (P1)
+## Update flow (not automatic on git push)
+
+| Product | Auto-deploy? | How it updates |
+|---------|--------------|----------------|
+| **laptopworker stack** | **No** — manual after `git push` to streamclone `master` | Windows: `scripts\laptopworker-remote.cmd update` (git pull + smart rebuild + smoke) |
+| **legacy-rollback-host** | **No** — separate deploy scripts | `make bearhost-*`, `scripts/bearhost-pulse-redeploy-remote.sh`, etc. |
+| **StreamPulse website** | **Yes** (when CI wired) | `streamclone-pulse/streampulse-web` → Cloudflare Pages on push |
+| **Chrome extension** | **No** | Build `streamclone-pulse` → Load unpacked / store release |
+| **Windows local stack** | **No** | `git pull` + `make up` / `make restart` yourself |
+
+Boot on laptop **does** auto-start the stack (`streamclone-dev.service`) but does **not** auto `git pull`. After every streamclone push you intend to run on laptop:
+
+```cmd
+scripts\laptopworker-remote.cmd update
+```
+
+If firewall/sudo sbin changed, re-run `setup` once to refresh `/usr/local/sbin`.
+
+Future (P3): optional webhook/auto-deploy on push — not implemented yet.
 
 `scripts/laptopworker-update.sh`:
 
