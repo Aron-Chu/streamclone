@@ -260,6 +260,119 @@ docker compose --env-file .env --env-file .env.local \
 
 ---
 
+## Dev workflows (extension, portal, Remote SSH)
+
+### Backend targets
+
+| Mode | Backend URL | When to use |
+|------|-------------|-------------|
+| Windows local stack | `http://localhost:8090` | Daily dev on PC with `make up` |
+| Laptop dev hub | `http://laptopworker:8090` | Shared tailnet stack; lighter on PC RAM |
+| Production / BearHost | `https://api.streampulse.stream` | Public ingress, scrape/corpus, hosted API tests |
+
+Health check (all modes):
+
+```bash
+curl -fsS http://laptopworker:8090/v1/extension/health
+# Windows local: curl -fsS http://localhost:8090/v1/extension/health
+```
+
+### StreamPulse extension (sibling `streamclone-pulse`)
+
+Config lives in **Chrome extension storage**, not committed env files:
+
+| Item | Location |
+|------|----------|
+| Backend URL key | `backendUrl` in `chrome.storage.sync` |
+| Default | `http://localhost:8090` (`src/shared/storage.ts`) |
+| UI to change | Extension **Options** page (`src/options/options.tsx` → Backend URL) |
+| Popup readout | `src/popup/popup.tsx` |
+
+Switch to laptop hub:
+
+1. Confirm smoke: `scripts\laptopworker-remote.cmd smoke`
+2. Open extension **Options** → set Backend URL to `http://laptopworker:8090` → Save
+3. Reload a Twitch channel tab
+
+Do **not** commit OAuth tokens or machine-specific URLs into the repo. For production API tests, use `https://api.streampulse.stream` in Options only when you intend to hit BearHost (extension still talks to `/v1/extension/*` on that host).
+
+**CORS / origins:** laptop profile sets `PUBLIC_ORIGIN`, `FRONTEND_ORIGIN`, and `HLS_PUBLIC_BASE` to `http://laptopworker:8090` (`deploy/env/profile-laptopworker-dev.env`). Twitch pages load from `https://www.twitch.tv`; the BFF must allow extension origins — same as localhost dev when origins are merged into `.env.local`.
+
+**OAuth caveat:** Sign-in on the laptop UI requires a Twitch redirect for `http://laptopworker:8090` in the Twitch dev console (optional; see [OAuth / Sign-in](#oauth--sign-in-optional)).
+
+### StreamPulse web portal (sibling `streampulse-web`)
+
+From **streamclone** repo root (after laptop smoke passes):
+
+```powershell
+scripts\laptopworker-remote.cmd smoke
+cd ..\streamclone-pulse\streampulse-web
+$env:VITE_BACKEND_URL = 'http://laptopworker:8090'
+npm run dev
+```
+
+Or from streamclone (if sibling checkout exists):
+
+```bash
+VITE_BACKEND_URL=http://laptopworker:8090 bash scripts/pulse-web-dev.sh
+```
+
+Portal reads `VITE_BACKEND_URL` at dev/build time (`streampulse-web/src/lib/apiClient.ts`). Default local dev remains `http://localhost:8090` (`streampulse-web/README.md`).
+
+### Cursor / VS Code Remote SSH
+
+Use when you want the editor on the laptop filesystem for long stack work:
+
+1. Connect: `ssh aron@laptopworker` (Tailscale SSH)
+2. Open folder: `~/streamclone`
+3. Terminal on laptop for stack commands (`bash scripts/laptopworker-stack.sh …`)
+
+Keep **Windows + multi-root workspace** as the default for cross-repo Pulse work (`streamclone-pulse-extension.code-workspace`). Remote SSH is optional for laptop-only ops.
+
+**Recover unhealthy stack:**
+
+```bash
+bash scripts/laptopworker-stack.sh status
+bash scripts/laptopworker-stack.sh logs
+bash scripts/laptopworker-stack.sh smoke
+systemctl --user status streamclone-dev.service
+journalctl --user -u streamclone-dev.service -n 50 --no-pager
+```
+
+### Tailscale security checklist
+
+| Check | Recommendation |
+|-------|----------------|
+| MagicDNS | Enabled — browse `http://laptopworker:8090` |
+| Tailscale SSH | Enabled for `aron@laptopworker` |
+| Key expiry | Disable for this trusted always-on node if admin policy allows |
+| Exit node / subnet routes | **Off** on laptop unless explicitly approved |
+| BearHost in `tailscale status` | Only when you need direct tailnet access to VPS services |
+| `:8090` exposure | Run `bash scripts/laptopworker-stack.sh ufw-tailnet` once (DOCKER-USER + UFW) |
+| Future ACL idea | Tag laptop as `tag:dev-hub`; allow Windows PC (+ BearHost if needed); deny broad tailnet access to `:8090` as the tailnet grows |
+
+### Optional: VPS reverse proxy over Tailscale (future)
+
+Document only — not implemented by default:
+
+- Public users continue to hit **BearHost HTTPS** (`https://api.streampulse.stream`)
+- BearHost *may* reverse-proxy selected routes to `http://laptopworker:PORT` over Tailscale for private demos
+- Laptop must **not** receive home-router port forwards
+- Never expose Postgres, Redis, or Minio on `0.0.0.0`
+
+### Lightweight observability
+
+```bash
+systemctl --user list-timers | grep streamclone
+docker system df
+docker stats   # when debugging resource use
+journalctl --user -u streamclone-dev-health.service -n 20 --no-pager
+```
+
+No Portainer or node exporter unless explicitly requested.
+
+---
+
 ## Related
 
 - BearHost production: `docs/bearhost-production.md`
