@@ -1,0 +1,27 @@
+# Synthetic channel roster for LOAD-001 (25 distinct valid Twitch logins).
+# One channel per line; lines starting with # are ignored.
+xqc
+shroud
+summit1g
+pokimane
+ludwig
+hasanabi
+tarik
+extraemily
+fuslie
+qtcinderella
+moistcr1tikal
+asmongold
+sodapoppin
+esfandtv
+trainwreckstv
+xbox
+riotgames
+chess
+gaules
+ibai
+jynxzi
+mizkif
+emiru
+squeex
+cinna

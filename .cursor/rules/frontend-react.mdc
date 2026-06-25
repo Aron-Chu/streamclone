@@ -1,0 +1,17 @@
+---
+description: React/TS frontend — Vite, playback, Zustand, same-origin API
+globs: frontend/**,packages/pulse-core/**,*.tsx,*.ts
+alwaysApply: false
+---
+
+# Frontend (React / TS)
+
+Read `.kiro/steering/tech.md` and `.kiro/steering/product.md` when UX matters.
+
+- Vite + React + TypeScript + Tailwind. State: Zustand. Playback: hls.js via `frontend/src/playback.ts`.
+- API calls through same-origin `:8090` — no raw service ports in client config.
+- **Symbol lookup:** codegraph MCP for component/hook symbols — not full-tree Repomix dumps.
+- Build check: `cd frontend && npm run build` or `make frontend-test`.
+- Pulse extension UI lives in sibling **streamclone-pulse** — shared types in `packages/pulse-core/`.
+
+Do not compute Pulse scores client-side; use backend peaks/coverage payloads.

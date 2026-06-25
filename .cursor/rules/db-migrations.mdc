@@ -1,0 +1,15 @@
+---
+description: Postgres migrations — forward-only SQL, no edits to applied files
+globs: migrations/**
+alwaysApply: false
+---
+
+# DB migrations
+
+- **Forward-only:** add new `NNNNNN_name.up.sql` + `.down.sql` pairs. Never edit migrations already applied in shared/prod DBs.
+- Match existing naming (`000038_pulse_bookmarks.up.sql`). One concern per migration when possible.
+- After schema change: update Go store/models in same PR; run `make migrate` locally if stack up.
+- **Runtime schema truth:** `scripts/context/db_schema_snapshot.sh` → `runtime/context/db_schema.txt` (gitignored).
+- Agent check: `streamclone-data` MCP `postgres_query` (SELECT only) for live column verification.
+
+Pulse watchlist / portal tables: coordinate with sibling `streamclone-pulse/docs/website-portal/design.md`.

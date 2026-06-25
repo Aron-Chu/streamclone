@@ -1,4 +1,14 @@
-import type { LiveHeatCatalogEmote, LiveHeatInput, LiveHeatRollup } from './liveHeat.ts'
+import type {
+  LiveHeatCatalogEmote,
+  LiveHeatEmote,
+  LiveHeatInput,
+  LiveHeatPoint,
+  LiveHeatReason,
+  LiveHeatRollup,
+} from './liveHeat.ts'
+import { LIVE_HEAT_MAX_EMOTES } from './liveHeat.ts'
+import { momentScoreReasonLabel } from './momentScore.ts'
+import { resolveEmoteImageUrl } from './emoteImageUrl.ts'
 import type { LiveStatsInput, LiveStatsRollup, LiveTopEmote } from './liveStats.ts'
 
 export interface ExtensionEmoteLike {
@@ -19,12 +29,109 @@ export interface ExtensionRollupLike {
   missing?: boolean
 }
 
+export interface ExtensionPeakLike {
+  offsetSeconds: number
+  score: number
+  reasons: string[]
+  reasonLabel?: string
+  dominantSignal?: string
+  chatCount?: number
+  emoteCount?: number
+  topEmotes?: ExtensionEmoteLike[]
+}
+
 export interface ExtensionPulseLike {
   isLive: boolean
   startedAt?: string
   topEmotes?: ExtensionEmoteLike[]
   rollups: ExtensionRollupLike[]
   fullRollups?: ExtensionRollupLike[]
+  peaks?: ExtensionPeakLike[]
+}
+
+/** True when the backend sent a peaks field (including an empty warming array). */
+export function extensionSupportsPeaks(payload: ExtensionPulseLike | null): boolean {
+  return payload != null && payload.peaks !== undefined
+}
+
+function peakReasonToLiveHeatReason(reason: string | undefined): LiveHeatReason {
+  const normalized = (reason ?? 'manual').trim() as LiveHeatReason
+  const allowed: LiveHeatReason[] = [
+    'chat_spike',
+    'emote_spike',
+    'seventv_spike',
+    'twitch_emote_spike',
+    'ffz_spike',
+    'viewer_spike',
+    'manual',
+  ]
+  return allowed.includes(normalized) ? normalized : 'manual'
+}
+
+function peakTopEmotesToLiveHeatEmotes(
+  peak: ExtensionPeakLike,
+  catalog: Map<string, LiveHeatCatalogEmote>,
+  byName: Map<string, LiveHeatCatalogEmote>,
+): LiveHeatEmote[] {
+  return (peak.topEmotes ?? [])
+    .filter(emote => emote.name)
+    .slice(0, LIVE_HEAT_MAX_EMOTES)
+    .map(emote => {
+      const key = emoteCatalogKey(emote)
+      const match = catalog.get(key) ?? byName.get(emote.name.toLowerCase())
+      const provider = catalogProvider(emote.provider) ?? match?.provider
+      const id = emote.id ?? match?.id
+      const imageUrl = resolveEmoteImageUrl({
+        provider,
+        id,
+        imageUrl: emote.imageUrl ?? match?.imageUrl,
+        scale: '1x',
+      })
+      return {
+        key,
+        name: emote.name,
+        id,
+        provider: displayProvider(emote.provider) ?? match?.provider,
+        imageUrl: imageUrl || undefined,
+        count: Math.max(0, emote.count ?? 0),
+      }
+    })
+}
+
+/** Map BFF extension peaks to ranked LiveHeatPoint rows (backend scores, not estimated). */
+export function peaksToLiveHeatPoints(
+  peaks: ExtensionPeakLike[],
+  startedAt?: string,
+  catalogEmotes?: ExtensionEmoteLike[],
+): LiveHeatPoint[] {
+  const catalog = new Map<string, LiveHeatCatalogEmote>(
+    (catalogEmotes ?? [])
+      .filter(emote => emote.name)
+      .map(emote => [emoteCatalogKey(emote), extensionEmoteToCatalogEmote(emote)]),
+  )
+  const byName = new Map<string, LiveHeatCatalogEmote>(
+    (catalogEmotes ?? [])
+      .filter(emote => emote.name)
+      .map(emote => [emote.name.toLowerCase(), extensionEmoteToCatalogEmote(emote)]),
+  )
+
+  return peaks.map(peak => {
+    const reasonCode = peak.reasons[0]
+    const reason = peakReasonToLiveHeatReason(reasonCode)
+    const reasonLabel = peak.reasonLabel?.trim() || momentScoreReasonLabel(reasonCode ?? '')
+    return {
+      minuteTs: minuteTsFromOffset(startedAt, peak.offsetSeconds) ?? '',
+      offsetSeconds: Math.max(0, peak.offsetSeconds),
+      score: Math.round(peak.score),
+      estimated: false,
+      reason,
+      reasonLabel,
+      chatCount: Math.max(0, Math.round(peak.chatCount ?? 0)),
+      emoteCount: Math.max(0, Math.round(peak.emoteCount ?? 0)),
+      topEmotes: peakTopEmotesToLiveHeatEmotes(peak, catalog, byName),
+      collecting: false,
+    }
+  })
 }
 
 /** Rollups used for live stats / Most Reacted — prefer recent window, fall back to full. */
@@ -73,13 +180,32 @@ function rollupTopEmotesToEmotesMap(topEmotes?: ExtensionEmoteLike[]): Record<st
   return map
 }
 
+function isSevenTvProvider(provider?: string): boolean {
+  if (!provider) return false
+  const lower = provider.trim().toLowerCase()
+  return lower === '7tv' || lower === 'seventv'
+}
+
 function extensionRollupToStatsRollup(r: ExtensionRollupLike, startedAt?: string): LiveStatsRollup {
   const viewerCount = r.viewerCount ?? 0
+  let totalEmoteCount = r.totalEmoteCount
+  let seventvEmoteCount = r.sevenTvEmoteCount
+
+  if ((totalEmoteCount ?? 0) === 0 && (r.topEmotes?.length ?? 0) > 0) {
+    totalEmoteCount = r.topEmotes!.reduce((sum, emote) => sum + Math.max(0, emote.count ?? 0), 0)
+    seventvEmoteCount = r.topEmotes!
+      .filter(emote => isSevenTvProvider(emote.provider))
+      .reduce((sum, emote) => sum + Math.max(0, emote.count ?? 0), 0)
+  }
+  if ((totalEmoteCount ?? 0) === 0 && (seventvEmoteCount ?? 0) > 0) {
+    totalEmoteCount = seventvEmoteCount
+  }
+
   return {
     minuteTs: minuteTsFromOffset(startedAt, r.offsetSeconds),
     chatCount: r.chatCount,
-    totalEmoteCount: r.totalEmoteCount,
-    seventvEmoteCount: r.sevenTvEmoteCount,
+    totalEmoteCount,
+    seventvEmoteCount,
     viewerLatest: viewerCount > 0 ? viewerCount : undefined,
     viewerSamples: viewerCount > 0 ? 1 : undefined,
     missing: r.missing,

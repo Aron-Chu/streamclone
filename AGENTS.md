@@ -4,6 +4,18 @@ Product name: **Streamclone** (GitHub: `Aron-Chu/streamclone`). The local checko
 
 **Deep references:** [Service map](docs/SERVICE_MAP.md) · [Testing](docs/TESTING.md) · [MCP](docs/MCP.md) · [Codex](docs/CODEX.md) · [Environment](docs/ENVIRONMENT.md) · [Workspace layout](docs/workspace.md)
 
+## Cursor vs generic agents
+
+| Layer | Path | Role |
+|-------|------|------|
+| **This file** | `AGENTS.md` | Repo router — task table, golden rules, safe commands (Cursor, Codex, etc.) |
+| **Cursor rules** | `.cursor/rules/` | Cursor-specific behavior (`streamclone.mdc`, `agents-router.mdc`, domain rules) |
+| **Cursor skills** | `.cursor/skills/streamclone/` | Domain skills; Pulse portal skills in sibling **streamclone-pulse** `.cursor/skills/` |
+| **Cursor subagents** | `.cursor/agents/` | Backend-safety and ops-diagnostics reviewers (portal UX reviewer in streamclone-pulse) |
+| **Cursor hooks** | `.cursor/hooks.json` | Lightweight gofmt/compose/codegraph hints — not full test suites |
+
+Pulse/StreamPulse product docs and portal guardrails: sibling [`streamclone-pulse`](../streamclone-pulse) checkout.
+
 ---
 
 ## Golden rules
@@ -47,11 +59,13 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 | Task | Read first | Code graph / probes |
 |------|------------|---------------------|
 | Any code change | `.kiro/steering/tech.md` | `get_ast_chunk`, `get_blast_radius` |
+| Context / runtime truth | [`docs/agent-context.md`](docs/agent-context.md) | `make context-snapshots`, MCP `stack_health` |
 | Product / UI guardrails | `.kiro/steering/product.md` | As needed |
 | Roadmap / backlog | `README.md`, `.kiro/steering/product.md` | As needed |
 | **Playback / HLS** | `.kiro/steering/playback.md`, `docs/low-latency-relay/requirements.md` | `get_ast_chunk("Channel")`, `playback_probe` |
 | **Analytics / VOD / rollups** | `.kiro/steering/analytics.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("SyncProgressPanel")` |
 | **Pulse extension / pulse-core / BFF** | [docs/workspace.md](docs/workspace.md), `docs/pulse-extension/` (redirect), sibling [streamclone-pulse `docs/pulse-extension/`](https://github.com/Aron-Chu/streamclone-pulse/tree/master/docs/pulse-extension), `internal/analytics/extension_api.go`, `packages/pulse-core/` | `get_ast_chunk("ExtensionRoutes")`, `curl :8090/v1/extension/health` |
+| **Pulse live coverage / VOD backfill / Protect** | sibling [`live-coverage-requirements.md`](../streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md), [`docs/roadmapping.md`](docs/roadmapping.md), [`docs/tools.md`](docs/tools.md), [`docs/CODEX.md`](docs/CODEX.md) § Pulse review | Skill `pulse-live-coverage-review`, `get_blast_radius("SyncPulseMissedChat")`, `curl :8090/v1/extension/pulse/channels/{login}` |
 | **Scraper / Cloudflare / proxy** | `.kiro/steering/analytics.md`, `docs/scraper-cloudflare-and-proxy.md`, `docs/scraping-archive/requirements.md` | `scraper_probe`, `make scraper-preflight` |
 | **Pulse Wire / storygraph** | `.kiro/steering/pulse-wire.md`, `docs/options.md`, `docs/tiers-scraper-and-social-spread.md` | `get_ast_chunk("PulseWirePage")`, `get_blast_radius("ingestAll")` |
 | **Emotes / 7TV / FFZ** | `.kiro/steering/emote-pipeline.md` | `emote_jobs`, `redis_channel_emotes` |
@@ -83,7 +97,9 @@ Load the matching skill from `.cursor/skills/streamclone/` when the task fits (r
 | Clip Studio / ReplayForge | `clipper-local/SKILL.md` |
 | Windows install / Setup.exe / release bundle | `release-windows/SKILL.md` |
 | Choosing tests by domain | `test-by-domain/SKILL.md` |
+| Context ladder (codegraph → snapshots → Repomix) | `context-retrieval/SKILL.md` |
 | Pulse extension (Chrome MV3) | Cross-read [streamclone-pulse `AGENTS.md`](https://github.com/Aron-Chu/streamclone-pulse/blob/master/AGENTS.md) and [docs/workspace.md](docs/workspace.md) |
+| Pulse live coverage / backfill / Protect / BearHost | `.cursor/skills/pulse/pulse-live-coverage-review/SKILL.md` (+ `coverage-triage`, `backfill-safety-review`, `capacity-governor-review`) — Codex: `.agents/skills/pulse/` |
 
 ---
 
@@ -100,6 +116,8 @@ Load the matching skill from `.cursor/skills/streamclone/` when the task fits (r
 | `make smoke` / `make smoke-ui` / `make agent-smoke` | Runtime smoke (needs stack) |
 | `make validate-env PROFILE=core` | Env profile sanity |
 | `make codegraph` / `make mcp-setup` | Rebuild AST graph / full MCP setup |
+| `make context-snapshots` | Write `runtime/context/*.txt` route/schema/backfill/grafana summaries |
+| `make context-verify` | Check rules, hooks, codegraph freshness (no Docker required) |
 | `make scraper-preflight` | Scraper deps / image check |
 | MCP: `stack_health`, `playback_probe`, `postgres_query` (SELECT) | Diagnostics |
 
@@ -187,6 +205,8 @@ Env overlays: `deploy/env/profile-{core,scraper,pulse,full}.env` (+ legacy `prof
 ---
 
 ## Code graph
+
+Deep reference: [docs/agent-codegraph.md](docs/agent-codegraph.md) (`make codegraph-smoke` after rebuild).
 
 Use `streamclone-codegraph` first:
 

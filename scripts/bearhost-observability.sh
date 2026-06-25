@@ -14,8 +14,14 @@ shift || true
 
 case "${ACTION}" in
   up)
-    echo "bearhost-observability: starting Prometheus + Grafana (profile observability)"
-    bearhost_compose_obs up -d prometheus-obs grafana-obs
+    echo "bearhost-observability: starting Prometheus + Alertmanager + Grafana + node-exporter (profile observability)"
+    if [[ ! -s /etc/streamclone/secrets/alertmanager-webhook-url ]]; then
+      echo "bearhost-observability: alertmanager webhook secret missing at /etc/streamclone/secrets/alertmanager-webhook-url" >&2
+      echo "bearhost-observability: starting Prometheus/Grafana/node-exporter without Alertmanager" >&2
+      bearhost_compose_obs up -d prometheus-obs node-exporter-obs grafana-obs
+    else
+      bearhost_compose_obs up -d alertmanager-obs prometheus-obs node-exporter-obs grafana-obs
+    fi
     echo ""
     echo "bearhost-observability: Grafana (SSH tunnel required)"
     echo "  dashboard: http://localhost:3001/d/streamclone-archive/streamclone-archive"

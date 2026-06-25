@@ -1,0 +1,47 @@
+# 24h Pulse soak — operator evidence log (LOAD-001b → CAP-001)
+
+Start (UTC): 2026-06-24T03:02:05Z
+End (UTC):   2026-06-24T03:08:03Z (tmux pulse-soak exited; finish script PASS)
+Target:      http://127.0.0.1:8090 (production Pulse, cap 10)
+Cap config:  PULSE_MAX_ACTIVE_CHANNELS=10 (production unchanged during soak)
+Operator:    Batch R3 automated start (BearHost tmux)
+
+## Preconditions
+
+- [x] LOAD-001a harness smoke PASS
+- [x] LOAD-001b staging-25 harness PASS (2026-06-24)
+- [x] OPS-001 Grafana/Prometheus on VPS (localhost :9090)
+- [x] `scripts/load/pulse-soak-monitor.sh` running in tmux `pulse-soak`
+- [x] Batch R3 preflight PASS (no corpus; staging torn down)
+
+## Grafana checklist (every 4h)
+
+| Time (UTC) | active_tracked | backfill_active | up{analytics} | p99 golive→rollup | notes |
+|------------|----------------|-----------------|---------------|-------------------|-------|
+| 2026-06-24T03:02:05Z | 0 | 0 | n/a (first sample) | — | monitor started |
+
+## Abort thresholds (pulse-metrics-runbook §5)
+
+Stop soak if any persists >5 min: 5xx >0.1/s, active > cap, backfill > max, analytics down,
+missing rollups, p99 golive→rollup >600s, memory >85%.
+
+## Post-soak docker stats (2026-06-24T03:08:03Z)
+
+```
+NAME                      CPU %     MEM USAGE / LIMIT     MEM %
+streamclone-analytics-1   0.11%     20.12MiB / 30.16GiB   0.07%
+```
+
+## Hosted smokes (post-soak finish)
+
+- `bearhost-pulse-api.sh` — PASS
+- `test-013b-hosted.sh` — PASS
+
+## Outcome
+
+- [x] PASS — no abort; ready for CAP-001 review
+- [ ] FAIL — abort reason: ____________________
+
+## Notes
+
+Soak monitor session ended cleanly; post-soak hosted smokes PASS. Production cap remains **10** until operator approves `CAP001_APPROVED=1` cap raise.

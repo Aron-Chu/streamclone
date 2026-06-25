@@ -1,0 +1,43 @@
+# OPS-001 evidence — 2026-06-24 (Batch R Phase 0)
+
+Host: BearHost VPS (141.11.243.103)
+Prometheus: http://127.0.0.1:9090 (localhost bind)
+Grafana: http://127.0.0.1:3000 (localhost bind) — dashboard uid `streamclone-pulse-capacity`, 18 panels
+
+## Pre-checks
+
+| Check | Result |
+|-------|--------|
+| `PULSE_MAX_ACTIVE_CHANNELS` in profile | **10** (unchanged) |
+| `PULSE_MAX_BACKFILLS` in profile | **1** |
+| `grafana.streampulse.stream` from internet | **UNREACHABLE** (curl exit 6) |
+| `prometheus-obs` / `grafana-obs` | Up 2 days, 127.0.0.1 bind |
+| `up{job="analytics"}` | **1** |
+
+## Prometheus query summary (2026-06-24T02:23:07Z)
+
+| Query | Value |
+|-------|-------|
+| `max(pulse_active_tracked_channels{job="analytics"})` | **0** |
+| `max(pulse_backfill_active_jobs{job="analytics"})` | **0** |
+| `max(up{job="analytics"})` | **1** |
+| `sum(pulse_golive_detected_total{job="analytics"})` | *(no series — no go-live events yet)* |
+| `sum(pulse_tracked_from_start_total{job="analytics"})` | **0** |
+| `rate(http_requests_total{status=~"5.."}[5m])` | *(empty — no 5xx)* |
+| `pulse_golive_to_first_rollup_seconds` histogram | **present** (metric registered) |
+
+## Dashboard
+
+- JSON: `deploy/grafana/dashboards/streamclone-pulse-capacity.json`
+- Provisioning: `deploy/grafana/provisioning-obs/dashboards/pulse-capacity.yml`
+- Operator URL (SSH tunnel): `http://localhost:3001/d/streamclone-pulse-capacity`
+- Runbook: `docs/pulse-extension/pulse-metrics-runbook.md`
+
+## Missing metrics (documented, not faked)
+
+- Container memory / cgroup pressure — manual `docker stats` during LOAD-001
+- Per-route BFF latency histogram — follow-up ops metric task if needed
+
+## OPS-001 verdict
+
+**PASS** — dashboard provisioned and renders; required Pulse metrics scrape from analytics; sufficient for LOAD-001 go/no-go. Cap not raised; LOAD-001 not started.

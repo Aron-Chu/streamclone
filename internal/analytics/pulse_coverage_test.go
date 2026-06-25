@@ -64,6 +64,23 @@ func TestComputePulseCoverageInternalGap(t *testing.T) {
 	}
 }
 
+func TestEnrichExtensionCoverageLateStart(t *testing.T) {
+	cov := ExtensionCoverage{
+		State:   CoverageStatePartialTracking,
+		Message: "Collecting live moments",
+	}
+	enriched := enrichExtensionCoverage(cov, 900, "123", true)
+	if !enriched.CanBackfill {
+		t.Fatal("expected canBackfill")
+	}
+	if enriched.CoverageStartOffsetSeconds != 900 {
+		t.Fatalf("start = %d, want 900", enriched.CoverageStartOffsetSeconds)
+	}
+	if len(enriched.MissingRanges) == 0 {
+		t.Fatal("expected missing prefix range")
+	}
+}
+
 func TestComputePulseCoverageWaitingForVOD(t *testing.T) {
 	streamStart := time.Date(2026, 6, 22, 19, 0, 0, 0, time.UTC)
 	rollups := []heatmap.MinuteRollup{

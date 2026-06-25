@@ -1,0 +1,46 @@
+# LOAD-001 smoke evidence — 2026-06-24 (Batch R1)
+
+Host: BearHost VPS localhost (cap-safe — 3 channels, production cap remains 10)
+
+Command:
+```bash
+bash scripts/load/pulse-load-smoke-vps.sh
+```
+
+## Results
+
+| Metric | Value |
+|--------|-------|
+| channels_attempted | 3 (xqc, shroud, summit1g) |
+| watches_ok | 3 |
+| polls_ok | 3 |
+| auth_failures | 0 |
+| 4xx | 0 |
+| 5xx | 0 |
+| latency p50 | ~9.8 ms |
+| latency p95 | ~248 ms |
+| watch_active_max | 3 |
+| watch_cap_max | 10 |
+
+## Prometheus (end of run)
+
+| Metric | Value |
+|--------|-------|
+| up{job=analytics} | 1 |
+| pulse_active_tracked_channels | 0 *(gauge refresh may lag in-memory snapshot)* |
+| pulse_backfill_active_jobs | 0 |
+| http_5xx_rate | missing (no 5xx traffic) |
+
+## docker stats (analytics)
+
+CPU 0.50%, MEM 24.15 MiB / 7.709 GiB (0.31%)
+
+## Grafana
+
+Operator path (SSH tunnel, not public): `http://localhost:3001/d/streamclone-pulse-capacity`
+
+## Verdict
+
+Smoke **PASS** — 3-channel watch+poll on localhost without cap breach or auth/5xx failures.
+
+Full **staging-25** not run (LOAD-001b).

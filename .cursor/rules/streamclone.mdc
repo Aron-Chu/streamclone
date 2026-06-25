@@ -1,0 +1,37 @@
+---
+description: Pulse / StreamPulse guardrails — read sibling product docs before backend changes
+globs: internal/analytics/pulse*,internal/analytics/extension_api.go,internal/analytics/bookmarks.go,packages/pulse-core/**,deploy/*pulse*,deploy/Caddyfile.pulse-api,deploy/env/profile-bearhost-pulse.env
+alwaysApply: false
+---
+
+# Streamclone Pulse backend guardrails
+
+Cursor-specific. Generic routing: [`AGENTS.md`](../../AGENTS.md). Extension/portal repo: sibling **streamclone-pulse**.
+
+## Read docs before code
+
+Before changing coverage, backfill, extension BFF, portal analytics, or hosted pulse env:
+
+- [`../streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md`](../streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md)
+- [`../streamclone-pulse/docs/website-portal/design.md`](../streamclone-pulse/docs/website-portal/design.md)
+- [`../streamclone-pulse/docs/website-portal/tasks.md`](../streamclone-pulse/docs/website-portal/tasks.md)
+
+Also read `.kiro/steering/analytics.md` for sync/rollup context.
+
+## Guardrails (non-negotiable)
+
+- No unauthenticated `/watch`
+- No raw chat exposed to extension or portal
+- No client-side Pulse scoring
+- No fake progress in API payloads (coverage/backfill states must be honest)
+- No full timeline fetch on live polling endpoints
+- Backend coverage, peaks, sync, and backfill are source of truth
+- D1 is user state only — never rollups, raw chat, VOD chat, TwitchTracker, or corpus data
+
+## Key paths
+
+- BFF: `internal/analytics/extension_api.go`, `pulse_coverage.go`, `pulse_backfill*.go`, `pulse_hosted.go`
+- Shared types: `packages/pulse-core/`
+- Hosted: `deploy/env/profile-bearhost-pulse.env`, `PULSE_BETA_KEYS` (never commit)
+
+Cursor skills/subagents for Pulse work live in **streamclone-pulse** `.cursor/`; backend subagents also in this repo `.cursor/agents/`.
