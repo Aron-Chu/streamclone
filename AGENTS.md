@@ -30,6 +30,7 @@ Pulse/StreamPulse product docs and portal guardrails: sibling [`streamclone-puls
 8. **Never edit applied migrations** — add new migration files only.
 9. **Run narrow tests first**, then `make check-quick` or `make check` before a PR.
 10. **Update steering/docs** after scraper, analytics, Pulse Wire, install, OAuth, or large frontend changes; run `make codegraph` when symbols move.
+11. **Hosting split** — BearHost VPS = scrape/corpus/public API; **laptopworker** = tailnet core dev only (`docs/laptopworker-dev.md`, `.kiro/steering/laptopworker-hosting.md`); Windows PC = Cursor + local stack. Do not run scraper/workers/storygraph on laptop.
 
 ---
 
@@ -70,6 +71,7 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 | **Emotes / 7TV / FFZ** | `.kiro/steering/emote-pipeline.md` | `emote_jobs`, `redis_channel_emotes` |
 | **Local Twitch auth** | `.kiro/steering/local-auth.md` | `twitch_auth_status`, `make twitch-debug` |
 | **Install / desktop / bootstrap** | `docs/install-desktop.md`, `docs/repo-maintenance.md` | Launcher scripts under `scripts/` |
+| **Laptopworker dev hub (Tailscale)** | [`docs/laptopworker-dev.md`](docs/laptopworker-dev.md), [`.kiro/steering/laptopworker-hosting.md`](.kiro/steering/laptopworker-hosting.md) | `scripts/laptopworker-remote.ps1`; **no scraper/workers on laptop** |
 | **Release / CI / images** | `.github/workflows/release-images.yml`, `VERSION`, `docs/repo-maintenance.md` | `make compose-config-check` |
 | Clip Studio / ReplayForge | `docs/agents-streamclone-and-replayforge.md` | Sibling `../replayforge` — not in-repo clipper |
 | Clipper (legacy stub) | `.kiro/steering/clipper.md`, `clipper/README.md` | Deprecated in compose |

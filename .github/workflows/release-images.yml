@@ -51,7 +51,9 @@ jobs:
           python-version: "3.12"
       - name: Install security-scan deps
         run: |
-          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | bash -s -- -b /usr/local/bin
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz -C /tmp gitleaks
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
           sudo apt-get update && sudo apt-get install -y ripgrep
       - run: cp .env.dev .env
       - run: cd frontend && npm ci
