@@ -84,19 +84,39 @@ case "$cmd" in
     bash "$ROOT/scripts/laptopworker-setup-remote.sh"
     ;;
   setup-verify)
-    echo "==> passwordless sudo (laptopworker scripts)"
+    echo "==> root-owned helpers (/usr/local/sbin)"
+    for h in firewall power boot; do
+      if [ -x "/usr/local/sbin/streamclone-laptopworker-${h}" ]; then
+        echo "  streamclone-laptopworker-${h} ok"
+      else
+        echo "  streamclone-laptopworker-${h} MISSING — run setup"
+      fi
+    done
+    echo "==> sudoers"
     if [ -f /etc/sudoers.d/streamclone-laptopworker ]; then
-      echo "ok (sudoers installed)"
+      if grep -q '/usr/local/sbin/streamclone-laptopworker-firewall' /etc/sudoers.d/streamclone-laptopworker 2>/dev/null; then
+        echo "ok (root-owned helpers only)"
+      else
+        echo "STALE — re-run setup (still grants checkout paths)"
+      fi
     else
-      echo "missing — run: scripts/laptopworker-stack.sh setup"
+      echo "missing — run setup"
     fi
-    echo "==> sudoers drop-in"
-    [ -f /etc/sudoers.d/streamclone-laptopworker ] && echo "ok" || echo "missing"
-    echo "==> ufw"
-    sudo -n bash -c 'ufw status 2>/dev/null | head -3' 2>/dev/null || echo "run: ufw-tailnet"
-    echo "==> DOCKER-USER :8090"
-    sudo -n iptables -S DOCKER-USER 2>/dev/null | grep 8090 || echo "no rules — run ufw-tailnet"
-    bash "$ROOT/scripts/laptopworker-stack.sh" boot-check
+    echo "==> boot-time firewall unit"
+    systemctl is-enabled streamclone-laptopworker-firewall.service 2>/dev/null || echo "not enabled"
+    echo "==> firewall rules"
+    if [ -x /usr/local/sbin/streamclone-laptopworker-firewall ]; then
+      sudo -n /usr/local/sbin/streamclone-laptopworker-firewall --verify 2>/dev/null || \
+        echo "rules missing — run: scripts/laptopworker-remote.cmd ufw-tailnet"
+    else
+      echo "helper not installed"
+    fi
+    echo "==> stack boot-check"
+    laptopworker_ensure_scripts_executable "$ROOT"
+    loginctl show-user "$(id -un)" -p Linger 2>/dev/null || true
+    systemctl --user is-active streamclone-dev.service 2>/dev/null || echo "streamclone-dev inactive"
+    curl -fsS "http://127.0.0.1:8090/v1/extension/health" | head -c 120
+    echo
     ;;
   boot-check)
     laptopworker_ensure_scripts_executable "$ROOT"

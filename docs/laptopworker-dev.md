@@ -141,10 +141,11 @@ Add Twitch OAuth redirect: `http://laptopworker:8090` (and exact callback path i
 
 Defense in depth (UFW alone does not filter Docker-published ports):
 
-1. **DOCKER-USER** — `scripts/laptopworker-ufw-tailnet.sh` allows `:8090` on `lo` (local smoke) and `tailscale0` only; drops other interfaces.
-2. **UFW** — SSH allowed on `tailscale0` only by default (set `LAPTOPWORKER_UFW_ALLOW_LAN_SSH=1` for LAN console SSH).
-
-Docker still publishes `8090:80` on all interfaces (same as `local-tunnel`); DOCKER-USER is what blocks home-LAN access. Tailscale-IP compose bind is not used — it fails on some Docker/Tailscale hosts.
+1. **Root-owned helpers** — `/usr/local/sbin/streamclone-laptopworker-*` (not the git checkout). Passwordless sudo grants **only** these paths.
+2. **DOCKER-USER** — allow `:8090` on `lo` + `tailscale0`; drop other interfaces.
+3. **INPUT** — same for host `docker-proxy` on `:8090` (blocks home-LAN IP access).
+4. **Boot persistence** — `streamclone-laptopworker-firewall.service` reapplies rules after Docker/Tailscale start.
+5. **UFW** — SSH on `tailscale0` only by default.
 
 ```bash
 bash scripts/laptopworker-stack.sh ufw-tailnet

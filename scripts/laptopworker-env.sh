@@ -34,6 +34,8 @@ laptopworker_sync_files() {
     docs/laptopworker-dev.md \
     scripts/laptopworker-bootstrap.sh \
     scripts/laptopworker-env.sh \
+    scripts/laptopworker-install-firewall-service.sh \
+    scripts/laptopworker-install-helpers.sh \
     scripts/laptopworker-install-service.sh \
     scripts/laptopworker-install-sudoers.sh \
     scripts/laptopworker-power-config.sh \

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Root-owned boot-order helper (installed to /usr/local/sbin).
+set -euo pipefail
+
+if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+  echo "must run as root (installed helper)" >&2
+  exit 1
+fi
+
+echo "==> GRUB default (Ubuntu first)"
+if [ -f /etc/default/grub ]; then
+  if grep -q '^GRUB_DEFAULT=' /etc/default/grub; then
+    sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=0/' /etc/default/grub
+  else
+    echo 'GRUB_DEFAULT=0' >> /etc/default/grub
+  fi
+  if grep -q '^GRUB_TIMEOUT=' /etc/default/grub; then
+    sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /etc/default/grub
+  else
+    echo 'GRUB_TIMEOUT=2' >> /etc/default/grub
+  fi
+  if command -v update-grub >/dev/null 2>&1; then
+    update-grub
+  elif command -v grub-mkconfig >/dev/null 2>&1; then
+    grub-mkconfig -o /boot/grub/grub.cfg
+  fi
+fi
+
+if ! command -v efibootmgr >/dev/null 2>&1; then
+  exit 0
+fi
+
+mapfile -t lines < <(efibootmgr 2>/dev/null | grep -E '^Boot[0-9]{4}' || true)
+ubuntu_num=""
+windows_num=""
+others=()
+
+for line in "${lines[@]}"; do
+  num="${line#Boot}"
+  num="${num%%\**}"
+  num="${num%% *}"
+  lower="$(echo "$line" | tr '[:upper:]' '[:lower:]')"
+  if [ -z "$ubuntu_num" ] && [[ "$lower" == *ubuntu* || "$lower" == *grub* || "$lower" == *shim* ]]; then
+    ubuntu_num="$num"
+  elif [ -z "$windows_num" ] && [[ "$lower" == *windows* ]]; then
+    windows_num="$num"
+  else
+    others+=("$num")
+  fi
+done
+
+[ -z "$ubuntu_num" ] && exit 0
+
+order="$ubuntu_num"
+[ -n "$windows_num" ] && order="${order},${windows_num}"
+for n in "${others[@]}"; do
+  [ "$n" = "$ubuntu_num" ] || [ "$n" = "$windows_num" ] && continue
+  order="${order},${n}"
+done
+
+efibootmgr -o "$order" >/dev/null
+echo "Boot order: $(efibootmgr | grep BootOrder | head -1)"
