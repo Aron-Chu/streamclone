@@ -46,7 +46,8 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
 	preflight-deps start stop-user ensure-localhost agent-smoke coverage-report \
 	rebuild-analytics-emote restart-analytics test-pulse-emote \
-	smoke-pulse-emote pulse-emote-pick-stream smoke-pulse-emote-gold smoke-pulse-emote-gold-fail
+	smoke-pulse-emote pulse-emote-pick-stream smoke-pulse-emote-gold smoke-pulse-emote-gold-fail \
+	laptopworker-status laptopworker-smoke laptopworker-update
 
 help:
 	@printf 'Streamclone — common targets\n\n'
@@ -79,6 +80,11 @@ help:
 	@printf '          make frontend-test | frontend-audit | compose-config-check\n'
 	@printf '          make frontend-refresh  Build + migrate + restart frontend/chat/analytics\n'
 	@printf '          make frontend-restart  Rebuild frontend image + restart frontend/proxy only\n\n'
+	@printf 'Laptopworker (tailnet dev host — run from repo root):\n'
+	@printf '  make laptopworker-status   ssh stack ps on laptopworker\n'
+	@printf '  make laptopworker-smoke      remote health smoke\n'
+	@printf '  make laptopworker-update     git pull + compose on laptop after push\n'
+	@printf '  Without make: scripts\\laptopworker-remote.cmd status|smoke|update\n\n'
 	@printf 'BearHost VPS (corpus + Grafana — from your PC):\n'
 	@printf '  make bearhost-help              List BearHost make targets\n'
 	@printf '  make local-vps-only             Stop local scraper; VPS owns scrape\n'
@@ -648,6 +654,15 @@ frontend-logs: env
 
 bootstrap:
 	@bash scripts/bootstrap.sh
+
+laptopworker-status:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/laptopworker-remote.ps1 status
+
+laptopworker-smoke:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/laptopworker-remote.ps1 smoke
+
+laptopworker-update:
+	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/laptopworker-remote.ps1 update
 
 setup:
 	@bash scripts/setup.sh

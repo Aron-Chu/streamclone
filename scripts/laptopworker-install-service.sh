@@ -64,6 +64,8 @@ if command -v loginctl >/dev/null 2>&1; then
     else
       echo "    Run manually: sudo loginctl enable-linger $USER_NAME"
     fi
+  else
+    echo "==> Linger already enabled for $USER_NAME"
   fi
 fi
 
@@ -75,14 +77,26 @@ systemctl --user start streamclone-dev.service || {
 cat <<EOF
 
 Installed:
-  streamclone-dev.service         — start stack on boot
-  streamclone-dev-health.timer    — smoke every 10 min (logs: journalctl --user -u streamclone-dev-health)
+  streamclone-dev.service         — start stack on boot (user unit, uses sg docker)
+  streamclone-dev-health.timer    — smoke every 10 min
 
-After git push to master, from Windows:
-  powershell -File scripts/laptopworker-remote.ps1 update
+Logs:
+  journalctl --user -u streamclone-dev.service -n 50 --no-pager
+  journalctl --user -u streamclone-dev-health.service -n 20 --no-pager
+
+Reboot test (after linger enabled):
+  sudo reboot
+  # from Windows after ~3 min:
+  scripts\\laptopworker-remote.cmd smoke
+
+After git push to master:
+  make laptopworker-update
+  # or: scripts\\laptopworker-remote.cmd update
 
 Status:
   systemctl --user status streamclone-dev.service
   bash scripts/laptopworker-stack.sh status
+
+Future option: system-level unit (User=${USER_NAME} Group=docker) if user service proves fragile.
 
 EOF

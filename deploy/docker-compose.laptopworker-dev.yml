@@ -1,5 +1,5 @@
-# Laptopworker overlay — storygraph/Pulse Wire ingest is network-heavy; keep off this host.
-# VPS (BearHost) owns scrape + corpus; laptop owns core dev UI only.
+# Laptopworker overlay — storygraph off; :8090 stays on 8090:80 (local-tunnel).
+# Tailnet-only access: run scripts/laptopworker-ufw-tailnet.sh (DOCKER-USER + UFW).
 services:
   storygraph:
     profiles: [laptopworker-pulse-wire]
