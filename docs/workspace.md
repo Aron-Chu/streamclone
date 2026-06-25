@@ -63,10 +63,12 @@ Redirect stubs in `docs/pulse-extension/` point to the pulse repo. On GitHub, us
 
 Home Linux box on Tailscale (`laptopworker`) runs the **core dev stack only** — UI at `http://laptopworker:8090`, no local scraper/corpus. Network-heavy scrape stays on **legacy-rollback-host**.
 
-- Runbook: [`docs/laptopworker-dev.md`](laptopworker-dev.md)
+- Runbook: [`docs/laptopworker-dev.md`](laptopworker-dev.md) (stack ops, extension/portal backend modes, Remote SSH)
 - From Windows repo root: `make laptopworker-status` or `scripts\laptopworker-remote.cmd status`
 - After pushing laptopworker scripts to `master`: `make laptopworker-update`
-- One-time on laptop: `sudo loginctl enable-linger aron` (boot without login)
+- Extension laptop target: Options → Backend URL `http://laptopworker:8090` (see runbook)
+- Portal laptop target: `VITE_BACKEND_URL=http://laptopworker:8090` in sibling `streamclone-pulse/streampulse-web`
+- One-time on laptop: `sudo loginctl enable-linger aron` + `bash scripts/laptopworker-stack.sh ufw-tailnet` (boot without login; tailnet-only `:8090`)
 
 ---
 

@@ -56,7 +56,7 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 | **Emotes / 7TV / FFZ** | `.kiro/steering/emote-pipeline.md` | `emote_jobs`, `redis_channel_emotes` |
 | **Local Twitch auth** | `.kiro/steering/local-auth.md` | `twitch_auth_status`, `make twitch-debug` |
 | **Install / desktop / bootstrap** | `docs/install-desktop.md`, `docs/repo-maintenance.md` | Launcher scripts under `scripts/` |
-| **Laptopworker dev hub (Tailscale)** | [`docs/laptopworker-dev.md`](docs/laptopworker-dev.md) | `ssh aron@laptopworker`, `scripts/laptopworker-remote.ps1` |
+| **Laptopworker dev hub (Tailscale)** | [`docs/laptopworker-dev.md`](docs/laptopworker-dev.md) | `ssh aron@laptopworker`, `scripts/laptopworker-remote.ps1`; extension/portal backends in runbook § Dev workflows |
 | **Release / CI / images** | `.github/workflows/release-images.yml`, `VERSION`, `docs/repo-maintenance.md` | `make compose-config-check` |
 | Clip Studio / ReplayForge | `docs/agents-streamclone-and-replayforge.md` | Sibling `../replayforge` — not in-repo clipper |
 | Clipper (legacy stub) | `.kiro/steering/clipper.md`, `clipper/README.md` | Deprecated in compose |
