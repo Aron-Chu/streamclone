@@ -1,0 +1,5 @@
+# Laptopworker overlay — storygraph/Pulse Wire ingest is network-heavy; keep off this host.
+# VPS (BearHost) owns scrape + corpus; laptop owns core dev UI only.
+services:
+  storygraph:
+    profiles: [laptopworker-pulse-wire]
