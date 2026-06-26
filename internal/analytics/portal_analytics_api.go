@@ -60,6 +60,27 @@ type PortalSyncStatus struct {
 	Stale     bool      `json:"stale,omitempty"`
 }
 
+// PortalMinutePoint is a sanitized per-minute series point (no emote maps or raw chat).
+type PortalMinutePoint struct {
+	OffsetSeconds     int  `json:"offsetSeconds"`
+	ViewerAvg         int  `json:"viewerAvg,omitempty"`
+	ViewerMax         int  `json:"viewerMax,omitempty"`
+	ViewerLatest      int  `json:"viewerLatest,omitempty"`
+	ChatCount         int  `json:"chatCount,omitempty"`
+	SevenTVEmoteCount int  `json:"seventvEmoteCount,omitempty"`
+	Missing           bool `json:"missing,omitempty"`
+}
+
+// PortalStreamMinutesResponse exposes portal-safe minute rollups for chart rails.
+type PortalStreamMinutesResponse struct {
+	StreamID                   string              `json:"streamId"`
+	Channel                    string              `json:"channel"`
+	StartedAt                  time.Time           `json:"startedAt"`
+	CoverageStartOffsetSeconds int                 `json:"coverageStartOffsetSeconds,omitempty"`
+	Minutes                    []PortalMinutePoint `json:"minutes"`
+	UpdatedAt                  int64               `json:"updatedAt"`
+}
+
 func portalStreamRecordFrom(rec *StreamRecord) *PortalStreamRecord {
 	if rec == nil {
 		return nil
@@ -126,7 +147,58 @@ func (h *Handler) PortalRoutes(r chi.Router) {
 		r.Get("/streams/{streamID}/replay-heatmap", h.portalReplayHeatmap)
 		r.Get("/streams/{streamID}/games", h.portalStreamGames)
 		r.Get("/streams/{streamID}/recap", h.portalStreamRecap)
+		r.Get("/streams/{streamID}/minutes", h.portalStreamMinutes)
 	})
+}
+
+func portalMinuteOffsetSeconds(streamStart time.Time, rollup MinuteRollup) int {
+	if streamStart.IsZero() || rollup.MinuteTS.IsZero() {
+		return 0
+	}
+	sec := rollup.MinuteTS.Sub(streamStart).Seconds()
+	if sec < 0 {
+		return 0
+	}
+	return int(sec)
+}
+
+func portalMinutesFromRollups(stream *StreamRecord, rollups []MinuteRollup) PortalStreamMinutesResponse {
+	points := make([]PortalMinutePoint, 0, len(rollups))
+	coverageStart := -1
+	for _, rollup := range rollups {
+		offset := portalMinuteOffsetSeconds(stream.StartedAt, rollup)
+		hasData := !rollup.Missing && (rollup.ChatCount > 0 || rollup.TotalEmoteCount > 0 || rollup.ViewerSamples > 0)
+		if hasData && coverageStart < 0 {
+			coverageStart = offset
+		}
+		viewer := rollup.ViewerLatest
+		if viewer == 0 {
+			viewer = rollup.ViewerMax
+		}
+		if viewer == 0 {
+			viewer = rollup.ViewerAvg
+		}
+		points = append(points, PortalMinutePoint{
+			OffsetSeconds:     offset,
+			ViewerAvg:         rollup.ViewerAvg,
+			ViewerMax:         rollup.ViewerMax,
+			ViewerLatest:      viewer,
+			ChatCount:         rollup.ChatCount,
+			SevenTVEmoteCount: rollup.SevenTVEmoteCount,
+			Missing:           rollup.Missing,
+		})
+	}
+	resp := PortalStreamMinutesResponse{
+		StreamID:  stream.StreamID,
+		Channel:   stream.Login,
+		StartedAt: stream.StartedAt,
+		Minutes:   points,
+		UpdatedAt: time.Now().UnixMilli(),
+	}
+	if coverageStart >= 0 {
+		resp.CoverageStartOffsetSeconds = coverageStart
+	}
+	return resp
 }
 
 func (h *Handler) portalStreamDetail(w http.ResponseWriter, r *http.Request) {
@@ -210,11 +282,13 @@ func (h *Handler) portalStreamSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metrics := summarizeStreamMetrics(stream, rollups)
+	topEmotes := TopEmotesFromRollups(rollups, 15)
+	topEmotes = h.rewriteHostedTopEmotes(r.Context(), topEmotes)
 	resp := map[string]any{
 		"channel": stream.Login,
 		"stream":  portalStreamRecordFrom(stream),
 		"metrics": metrics,
-		"topEmotes": TopEmotesFromRollups(rollups, 15),
+		"topEmotes": topEmotes,
 		"sources":   []SourceStatus{{Source: "analytics_db", State: "ready"}},
 		"updatedAt": time.Now().UnixMilli(),
 		"analyticsQuality": portalQualityFromMetrics(metrics),
@@ -266,6 +340,49 @@ func (h *Handler) portalStreamGames(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) portalStreamRecap(w http.ResponseWriter, r *http.Request) {
 	h.getPulseStreamRecap(w, r)
+}
+
+func (h *Handler) portalStreamMinutes(w http.ResponseWriter, r *http.Request) {
+	streamID := strings.TrimSpace(chi.URLParam(r, "streamID"))
+	if streamID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_stream_id"})
+		return
+	}
+	cacheKey := portalAnalyticsCachePrefix + "minutes:" + streamID
+	if body, ok := h.portalCacheGet(r.Context(), cacheKey); ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("X-Cache", "HIT")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+		return
+	}
+	stream, err := h.store.StreamByID(r.Context(), streamID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "stream_not_found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stream_unavailable"})
+		return
+	}
+	rollups, err := h.store.RollupsByStream(r.Context(), stream.StreamID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stream_unavailable"})
+		return
+	}
+	resp := portalMinutesFromRollups(stream, rollups)
+	body, err := json.Marshal(resp)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encode_failed"})
+		return
+	}
+	h.portalCacheSet(r.Context(), cacheKey, body, portalAnalyticsSummaryTTL)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Cache", "MISS")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 func (h *Handler) portalCacheGet(ctx context.Context, key string) ([]byte, bool) {
