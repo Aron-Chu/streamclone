@@ -166,3 +166,8 @@ func (h *Handler) WithPulseHosted(cfg PulseHostedConfig) *Handler {
 	}
 	return h
 }
+
+func (h *Handler) WithCDNPublicBase(base string) *Handler {
+	h.cdnPublicBase = strings.TrimSpace(base)
+	return h
+}

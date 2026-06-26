@@ -70,6 +70,31 @@ func URL(provider, id, scale string) string {
 	return out
 }
 
+// AbsolutizeHostedCDN rewrites relative /emotes/ paths and loopback absolute URLs to a public CDN base.
+// When cdnBase is empty, url is returned unchanged (local dev).
+func AbsolutizeHostedCDN(cdnBase, url string) string {
+	cdnBase = strings.TrimRight(strings.TrimSpace(cdnBase), "/")
+	url = strings.TrimSpace(url)
+	if url == "" || cdnBase == "" {
+		return url
+	}
+	if strings.HasPrefix(url, "/emotes/") {
+		return cdnBase + url
+	}
+	lower := strings.ToLower(url)
+	if strings.HasPrefix(lower, "http://localhost:") || strings.HasPrefix(lower, "http://127.0.0.1:") {
+		if idx := strings.Index(url, "/emotes/"); idx >= 0 {
+			return cdnBase + url[idx:]
+		}
+	}
+	return url
+}
+
+// HostedBrowserURL resolves an emote for hosted clients (extension + portal).
+func HostedBrowserURL(cdnBase, provider, localID, providerEmoteID string) string {
+	return AbsolutizeHostedCDN(cdnBase, ExtensionBrowserURL(provider, localID, providerEmoteID))
+}
+
 // ExtensionBrowserURL returns an HTTPS URL suitable for the Pulse Chrome extension on
 // twitch.tv. Synced 7TV emotes use local UUID ids in rollups; when providerEmoteID is
 // known, prefer the public 7TV CDN so the extension never proxies localhost images.

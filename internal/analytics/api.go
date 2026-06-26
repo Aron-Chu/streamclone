@@ -35,6 +35,7 @@ type Handler struct {
 	rateLimiter   *PulseRateLimiter
 	pulseHosted   PulseHostedConfig
 	pulseRuntime  PulseRuntimeConfig
+	cdnPublicBase string
 	statsGroup    singleflight.Group
 	statusGroup   singleflight.Group
 	storyboardCache *vodStoryboardCache
