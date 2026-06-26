@@ -60,7 +60,7 @@ describe('momentRef', () => {
   it('portal channel path encodes login', () => {
     const ref = buildMomentRef({ login: 'xqc', streamId: '1', offsetSeconds: 0 })
     assert.ok(ref)
-    assert.equal(momentRefToPortalChannelPath(ref), '/dashboard/c/xqc')
+    assert.equal(momentRefToPortalChannelPath(ref), '/analytics/xqc')
   })
 
   it('portal stream path includes offset query when present', () => {
@@ -68,7 +68,7 @@ describe('momentRef', () => {
     assert.ok(ref)
     assert.equal(
       momentRefToPortalStreamPath(ref),
-      '/dashboard/c/xqc/s/stream-1?t=120',
+      '/analytics/xqc/s/stream-1?t=120',
     )
   })
 

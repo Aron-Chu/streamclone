@@ -150,7 +150,7 @@ export function bookmarkToMomentRef(bookmark: BookmarkLike): MomentRef | null {
 
 export function momentRefToPortalChannelPath(ref: MomentRef): string | null {
   if (!isValidMomentRef(ref)) return null
-  return `/dashboard/c/${encodeURIComponent(ref.login)}`
+  return `/analytics/${encodeURIComponent(ref.login)}`
 }
 
 export function momentRefToPortalStreamPath(
@@ -162,7 +162,7 @@ export function momentRefToPortalStreamPath(
   const streamId = normalizeStreamId(ref.streamId)
   if (!streamId) return null
 
-  const base = `/dashboard/c/${encodeURIComponent(ref.login)}/s/${encodeURIComponent(streamId)}`
+  const base = `/analytics/${encodeURIComponent(ref.login)}/s/${encodeURIComponent(streamId)}`
   if (ref.offsetSeconds > 0) {
     return `${base}?t=${Math.floor(ref.offsetSeconds)}`
   }
