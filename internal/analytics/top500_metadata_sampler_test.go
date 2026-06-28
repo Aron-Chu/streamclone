@@ -183,8 +183,8 @@ func TestTop500MetadataSamplerTopNAndBatchSizeEnforced(t *testing.T) {
 			t.Fatalf("planned invalid channel: %+v", channel)
 		}
 	}
-	if store.lastLimit != DefaultTop500MetadataTopN {
-		t.Fatalf("store limit = %d, want %d", store.lastLimit, DefaultTop500MetadataTopN)
+	if store.lastLimit != 150 {
+		t.Fatalf("store limit = %d, want requested TopN 150", store.lastLimit)
 	}
 
 	batchStore := newFakeTop500SamplerStore(makeTop500SamplerChannels(100))
@@ -195,6 +195,41 @@ func TestTop500MetadataSamplerTopNAndBatchSizeEnforced(t *testing.T) {
 	}
 	if got := len(batchResult.Planned); got != 10 {
 		t.Fatalf("batch planned = %d, want 10", got)
+	}
+}
+
+func TestTop500MetadataSamplerBatchRotation(t *testing.T) {
+	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
+	channels := makeTop500SamplerChannels(150)
+	store := newFakeTop500SamplerStore(channels)
+	sampler := NewTop500MetadataSampler(Top500SamplerConfig{
+		Enabled:   true,
+		DryRun:    true,
+		TopN:      150,
+		BatchSize: 100,
+	}, store, &fakeTop500MetadataProvider{}, nil)
+
+	plan1, err := sampler.PlanTick(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(plan1.Planned); got != 100 {
+		t.Fatalf("tick1 planned = %d, want 100", got)
+	}
+	firstStart := plan1.Planned[0].ChannelID
+
+	plan2, err := sampler.PlanTick(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(plan2.Planned); got != 100 {
+		t.Fatalf("tick2 planned = %d, want next 100-row batch", got)
+	}
+	if plan2.Planned[0].ChannelID == firstStart {
+		t.Fatalf("tick2 should rotate roster start, still at channel %q", firstStart)
+	}
+	if got := plan2.Planned[0].ChannelID; got != "101" {
+		t.Fatalf("tick2 first planned channel = %q, want rotated channel 101", got)
 	}
 }
 
@@ -434,6 +469,23 @@ func TestTop500MetadataSamplerIntegrationWritePath(t *testing.T) {
 	if snapshots != 2 || currents != 2 {
 		t.Fatalf("rows snapshots=%d current=%d, want 2/2", snapshots, currents)
 	}
+	var lifecycleRows int
+	if err := store.db.QueryRow(ctx, `SELECT COUNT(*) FROM analytics_streams`).Scan(&lifecycleRows); err != nil {
+		t.Fatalf("count lifecycle rows: %v", err)
+	}
+	if lifecycleRows != 1 {
+		t.Fatalf("lifecycle rows = %d, want only live sample row", lifecycleRows)
+	}
+	var lifecycleLogin, lifecycleTitle, lifecycleCategory string
+	var lifecycleViewers, lifecyclePeak int
+	if err := store.db.QueryRow(ctx, `
+		SELECT login, COALESCE(title,''), COALESCE(category,''), current_viewers, peak_viewers
+		FROM analytics_streams WHERE stream_id='stream-100'`).Scan(&lifecycleLogin, &lifecycleTitle, &lifecycleCategory, &lifecycleViewers, &lifecyclePeak); err != nil {
+		t.Fatalf("read lifecycle row: %v", err)
+	}
+	if lifecycleLogin != "livechan" || lifecycleTitle != "live" || lifecycleViewers != viewerCount || lifecyclePeak != viewerCount {
+		t.Fatalf("lifecycle row login=%q title=%q category=%q viewers=%d peak=%d", lifecycleLogin, lifecycleTitle, lifecycleCategory, lifecycleViewers, lifecyclePeak)
+	}
 
 	provider.streams[0].Title = "updated live"
 	if err := store.WriteTop500MetadataSamples(ctx, buildTop500MetadataSamples(channels, provider.streams, provider.users, now)); err != nil {
@@ -459,6 +511,12 @@ func TestTop500MetadataSamplerIntegrationWritePath(t *testing.T) {
 	}
 	if currents != 1 {
 		t.Fatalf("current rows for channel = %d, want 1", currents)
+	}
+	if err := store.db.QueryRow(ctx, `SELECT COUNT(*) FROM analytics_streams`).Scan(&lifecycleRows); err != nil {
+		t.Fatalf("count lifecycle rows after retry: %v", err)
+	}
+	if lifecycleRows != 1 {
+		t.Fatalf("lifecycle rows after retries = %d, want 1", lifecycleRows)
 	}
 }
 

@@ -49,6 +49,23 @@ type ProviderSnapshot struct {
 	EmoteHash string
 }
 
+type ProviderSnapshotItem struct {
+	ProviderEmoteID string
+	ProviderSetID   string
+	Alias           string
+	CanonicalName   string
+	SourceURL       string
+	Flags           int
+	Animated        bool
+	ZeroWidth       bool
+}
+
+type ProviderSnapshotDetail struct {
+	Provider string
+	SetID    string
+	Items    []ProviderSnapshotItem
+}
+
 type ImportResult struct {
 	Imported int
 	Expected int
@@ -349,6 +366,33 @@ func (s *Seeder) SevenTVSnapshot(ctx context.Context, twitchID string) (Provider
 		Count:     len(u.EmoteSet.Emotes),
 		EmoteHash: sevenTVEmoteHash(u),
 	}, nil
+}
+
+func (s *Seeder) SevenTVSnapshotDetail(ctx context.Context, twitchID string) (ProviderSnapshotDetail, error) {
+	u, err := s.fetchSevenTVUser(ctx, twitchID)
+	if err != nil {
+		return ProviderSnapshotDetail{}, err
+	}
+	if u.EmoteSet == nil {
+		return ProviderSnapshotDetail{Provider: string(ProviderSevenTV)}, nil
+	}
+	items := make([]ProviderSnapshotItem, 0, len(u.EmoteSet.Emotes))
+	for _, em := range u.EmoteSet.Emotes {
+		if em.ID == "" || em.Name == "" {
+			continue
+		}
+		items = append(items, ProviderSnapshotItem{
+			ProviderEmoteID: em.ID,
+			ProviderSetID:   u.EmoteSet.ID,
+			Alias:           em.Name,
+			CanonicalName:   em.Name,
+			SourceURL:       fmt.Sprintf("%s/emote/%s/4x.webp", s.cdnURL, em.ID),
+			Flags:           remoteEmoteFlags(remoteEmote{ZeroWidth: sevenTVZeroWidth(em), Animated: em.Data.Animated}),
+			Animated:        em.Data.Animated,
+			ZeroWidth:       sevenTVZeroWidth(em),
+		})
+	}
+	return ProviderSnapshotDetail{Provider: string(ProviderSevenTV), SetID: u.EmoteSet.ID, Items: items}, nil
 }
 
 func (s *Seeder) fetchSevenTVGlobal(ctx context.Context) ([]sevenTVEmote, error) {
@@ -878,10 +922,11 @@ func (s *Seeder) rebuildChannelDictionary(ctx context.Context, login string) err
 	entries := make([]dict.EmoteEntry, 0, len(emotes))
 	for _, e := range emotes {
 		entries = append(entries, dict.EmoteEntry{
-			Name:      e.Name,
-			EmoteID:   e.EmoteID,
-			ZeroWidth: flags.IsZeroWidth(e.Flags),
-			Provider:  e.Provider,
+			Name:            e.Name,
+			EmoteID:         e.EmoteID,
+			ProviderEmoteID: e.ProviderEmoteID,
+			ZeroWidth:       flags.IsZeroWidth(e.Flags),
+			Provider:        e.Provider,
 		})
 	}
 	return s.d.Rebuild(ctx, login, entries)

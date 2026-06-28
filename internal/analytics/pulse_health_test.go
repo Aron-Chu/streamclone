@@ -24,6 +24,15 @@ func TestExtensionHealthPublicShape(t *testing.T) {
 	if !payload.Routes.PulseCoverage {
 		t.Fatal("expected pulseCoverage route flag for read-only coverage endpoint")
 	}
+	if !payload.Routes.Jobs {
+		t.Fatal("expected jobs route flag for backfill status endpoint")
+	}
+	if payload.Capabilities.Backfill || payload.Capabilities.MissedMomentsBackfill {
+		t.Fatalf("expected backfill capability unavailable without manager, got %+v", payload.Capabilities)
+	}
+	if !payload.Degraded.Backfill {
+		t.Fatalf("expected backfill degraded without manager, got %+v", payload.Degraded)
+	}
 }
 
 func TestExtensionHealthDoesNotExposeCapsOrRateLimits(t *testing.T) {

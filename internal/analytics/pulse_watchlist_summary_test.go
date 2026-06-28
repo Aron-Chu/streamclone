@@ -197,13 +197,13 @@ func TestWatchlistSummaryCappedArrays(t *testing.T) {
 		login := "ended" + strconvItoaTest(i)
 		items = append(items, PulseWatchlistEntry{Login: login})
 		streams[login] = &StreamRecord{
-			StreamID:       "e-" + login,
-			Login:          login,
-			StartedAt:      now.Add(-2 * time.Hour),
-			EndedAt:        &ended,
-			LastSeenAt:     ended,
-			ChatMessages:   10,
-			ViewerSamples:  5,
+			StreamID:      "e-" + login,
+			Login:         login,
+			StartedAt:     now.Add(-2 * time.Hour),
+			EndedAt:       &ended,
+			LastSeenAt:    ended,
+			ChatMessages:  10,
+			ViewerSamples: 5,
 		}
 	}
 	bookmarks := make([]PulseBookmark, pulseSummaryArrayCap+2)

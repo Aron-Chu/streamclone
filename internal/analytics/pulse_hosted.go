@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -22,13 +23,13 @@ type PulsePrincipal struct {
 
 // PulseHostedConfig gates public extension endpoints behind a beta key.
 type PulseHostedConfig struct {
-	Hosted                   bool
-	BetaKeys                 []string
-	MaxActiveChannels        int
-	MaxChannelsPerPrincipal  int
-	WatchRatePerMin          int
-	BackfillRatePerHour      int
-	IdleTTL                  time.Duration
+	Hosted                  bool
+	BetaKeys                []string
+	MaxActiveChannels       int
+	MaxChannelsPerPrincipal int
+	WatchRatePerMin         int
+	BackfillRatePerHour     int
+	IdleTTL                 time.Duration
 }
 
 func PulseHostedConfigFromEnv() PulseHostedConfig {
@@ -81,9 +82,9 @@ func ParsePulseBetaKeys(raw string) []string {
 	return keys
 }
 
-// BetaKeyRequired is true in hosted mode (fail-closed even when keys are misconfigured).
+// BetaKeyRequired is false — hosted Pulse uses guest principals when no beta key is sent.
 func (c PulseHostedConfig) BetaKeyRequired() bool {
-	return c.Hosted
+	return false
 }
 
 func (c PulseHostedConfig) authorized(r *http.Request) bool {
@@ -128,32 +129,33 @@ func pulsePrincipalFromContext(ctx context.Context) (PulsePrincipal, bool) {
 	return p, ok && p.ID != ""
 }
 
-func (h *Handler) pulseBetaKeyMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.pulseHosted.authorized(r) {
-			next.ServeHTTP(w, r)
-			return
+func pulseClientIP(r *http.Request) string {
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		if i := strings.Index(xff, ","); i >= 0 {
+			return strings.TrimSpace(xff[:i])
 		}
-		writeJSON(w, http.StatusUnauthorized, map[string]string{
-			"error": "unauthorized",
-			"hint":  "Set X-Streamclone-Beta-Key header (Pulse extension options)",
-		})
-	})
+		return xff
+	}
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
+}
+
+func guestPulsePrincipal(r *http.Request) PulsePrincipal {
+	return PulsePrincipal{
+		ID:   hashPulseBetaKey("guest:" + pulseClientIP(r)),
+		Kind: "guest",
+	}
+}
+
+func (h *Handler) pulseBetaKeyMiddleware(next http.Handler) http.Handler {
+	return h.pulseHostedAuthMiddleware(next)
 }
 
 func (h *Handler) pulsePrincipalMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, kind, ok := principalFromRequest(r, h.pulseHosted)
-		if !ok {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{
-				"error": "unauthorized",
-				"hint":  "Set X-Streamclone-Beta-Key header (Pulse extension options)",
-			})
-			return
-		}
-		ctx := context.WithValue(r.Context(), pulsePrincipalCtxKey{}, PulsePrincipal{ID: id, Kind: kind})
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+	return h.pulseHostedAuthMiddleware(next)
 }
 
 func (h *Handler) WithPulseHosted(cfg PulseHostedConfig) *Handler {

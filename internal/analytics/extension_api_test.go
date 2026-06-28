@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,34 @@ func TestExtensionPulseInvalidLogin(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestBuildExtensionPastStreamsLimitsCurrentLivePlusEnded(t *testing.T) {
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	ended := now.Add(-1 * time.Hour)
+	streams := []StreamRecord{
+		{StreamID: "live", Title: "Live", StartedAt: now, LastSeenAt: now},
+		{StreamID: "p1", Title: "Past 1", StartedAt: now.Add(-2 * time.Hour), EndedAt: &ended},
+		{StreamID: "p2", Title: "Past 2", StartedAt: now.Add(-3 * time.Hour), EndedAt: &ended},
+		{StreamID: "p3", Title: "Past 3", StartedAt: now.Add(-4 * time.Hour), EndedAt: &ended},
+		{StreamID: "p4", Title: "Past 4", StartedAt: now.Add(-5 * time.Hour), EndedAt: &ended},
+		{StreamID: "p5", Title: "Past 5", StartedAt: now.Add(-6 * time.Hour), EndedAt: &ended},
+	}
+
+	items := (&Handler{}).buildExtensionPastStreams(context.Background(), streams, 5)
+	if len(items) != 5 {
+		t.Fatalf("len = %d, want 5", len(items))
+	}
+	got := []string{items[0].StreamID, items[1].StreamID, items[2].StreamID, items[3].StreamID, items[4].StreamID}
+	want := []string{"live", "p1", "p2", "p3", "p4"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("items[%d] = %s, want %s (all: %+v)", i, got[i], want[i], got)
+		}
+	}
+	if !items[0].IsCurrentLive {
+		t.Fatal("expected first item to be current live")
 	}
 }
 
@@ -239,12 +268,17 @@ func TestExtensionTopEmotesFromHeatmapRollups(t *testing.T) {
 		},
 	}
 	top := TopEmotesFromRollups(storeRollupsFromHeatmap(heatmapRollups), 3)
+	top[0].ZeroWidth = true
+	top[0].Animated = true
 	ext := convertTopEmotesToExtension(top)
 	if len(ext) != 2 {
 		t.Fatalf("topEmotes len = %d, want 2", len(ext))
 	}
 	if ext[0].Name != "KEKW" || ext[0].Count != 15 {
 		t.Fatalf("top emote[0] = %+v, want KEKW/15", ext[0])
+	}
+	if !ext[0].ZeroWidth || !ext[0].Animated {
+		t.Fatalf("top emote[0] metadata = zeroWidth:%v animated:%v, want true/true", ext[0].ZeroWidth, ext[0].Animated)
 	}
 	if ext[1].Name != "PepeHands" || ext[1].Count != 3 {
 		t.Fatalf("top emote[1] = %+v, want PepeHands/3", ext[1])
@@ -297,8 +331,9 @@ func TestTrimExtensionFullWindowKeepsRecentTail(t *testing.T) {
 	}
 }
 
-func TestCollectExtensionSevenTVLocalIDs(t *testing.T) {
+func TestCollectExtensionProviderLocalIDs(t *testing.T) {
 	localID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
+	ffzLocalID := "b8e5fd87-07fd-4a15-8e12-8ca5feb99113"
 	payload := &ExtensionPulseResponse{
 		TopEmotes: []ExtensionEmote{{
 			ID:       localID,
@@ -308,12 +343,15 @@ func TestCollectExtensionSevenTVLocalIDs(t *testing.T) {
 			TopEmotes: []ExtensionEmote{{
 				ID:       localID,
 				Provider: "7tv",
+			}, {
+				ID:       ffzLocalID,
+				Provider: "ffz",
 			}},
 		}},
 	}
-	ids := collectExtensionSevenTVLocalIDs(payload)
-	if len(ids) != 1 || ids[0] != localID {
-		t.Fatalf("ids = %+v, want [%q]", ids, localID)
+	ids := collectExtensionProviderLocalIDs(payload)
+	if len(ids) != 2 || ids[0] != localID || ids[1] != ffzLocalID {
+		t.Fatalf("ids = %+v, want [%q %q]", ids, localID, ffzLocalID)
 	}
 }
 
@@ -471,4 +509,46 @@ func syntheticExtensionHeatmapWithEmotes(
 		},
 	}
 	return rollups, points
+}
+
+func TestPeakEmotePerMinFromHeatmapRollups(t *testing.T) {
+	rollups := []heatmap.MinuteRollup{
+		{ChatCount: 10, TotalEmoteCount: 40},
+		{Missing: true, TotalEmoteCount: 999},
+		{ChatCount: 5, SevenTVEmoteCount: 247},
+	}
+	if got := peakEmotePerMinFromHeatmapRollups(rollups); got != 247 {
+		t.Fatalf("peak = %d, want 247", got)
+	}
+}
+
+func TestResolveExtensionGamesFallback(t *testing.T) {
+	existing := []ExtensionGameSegment{{GameName: "Minecraft", OffsetSeconds: 0, DurationSeconds: 3600}}
+	if got := resolveExtensionGames(existing, true, 7200, "Just Chatting"); len(got) != 1 || got[0].GameName != "Minecraft" {
+		t.Fatalf("expected existing segments preserved, got %+v", got)
+	}
+	if got := resolveExtensionGames(nil, false, 7200, "Just Chatting"); len(got) != 0 {
+		t.Fatalf("expected no fallback while live, got %+v", got)
+	}
+	got := resolveExtensionGames(nil, true, 7200, "Just Chatting")
+	if len(got) != 1 || got[0].GameName != "Just Chatting" || got[0].DurationSeconds != 7200 {
+		t.Fatalf("fallback = %+v", got)
+	}
+}
+
+func TestConvertGameSegmentsForExtension(t *testing.T) {
+	got := convertGameSegmentsForExtension([]GameSegment{
+		{ID: 1, GameName: "  Just Chatting  ", OffsetSeconds: 0, DurationSeconds: 3600},
+		{ID: 2, GameName: "   ", OffsetSeconds: 3600, DurationSeconds: 1800},
+		{ID: 3, GameName: "Minecraft", OffsetSeconds: 5400, DurationSeconds: 900},
+	})
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].GameName != "Just Chatting" || got[1].GameName != "Minecraft" {
+		t.Fatalf("names = %+v", got)
+	}
+	if got[0].OffsetSeconds != 0 || got[1].DurationSeconds != 900 {
+		t.Fatalf("offsets/durations = %+v", got)
+	}
 }

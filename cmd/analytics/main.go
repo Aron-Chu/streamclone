@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -17,11 +18,48 @@ import (
 	"streamclone/internal/chat/enrich"
 	"streamclone/internal/chat/ircconn"
 	"streamclone/internal/config"
+	"streamclone/internal/emote/seeder"
 	"streamclone/internal/httpx"
 	"streamclone/internal/log"
 	"streamclone/internal/metrics"
 	"streamclone/internal/timeseries"
 )
+
+type sevenTVSnapshotProvider struct {
+	seed *seeder.Seeder
+}
+
+func (p sevenTVSnapshotProvider) SnapshotChannelEmotes(ctx context.Context, twitchID string) (analytics.EmoteProviderSnapshot, error) {
+	detail, err := p.seed.SevenTVSnapshotDetail(ctx, twitchID)
+	if err != nil {
+		return analytics.EmoteProviderSnapshot{Provider: string(seeder.ProviderSevenTV)}, err
+	}
+	now := time.Now().UTC()
+	items := make([]analytics.EmoteSnapshotItem, 0, len(detail.Items))
+	for _, item := range detail.Items {
+		items = append(items, analytics.EmoteSnapshotItem{
+			Provider:        detail.Provider,
+			ProviderEmoteID: item.ProviderEmoteID,
+			ProviderSetID:   item.ProviderSetID,
+			Alias:           item.Alias,
+			CanonicalName:   item.CanonicalName,
+			SourceURL:       item.SourceURL,
+			Flags:           item.Flags,
+			Animated:        item.Animated,
+			ZeroWidth:       item.ZeroWidth,
+		})
+	}
+	return analytics.EmoteProviderSnapshot{
+		Provider:      detail.Provider,
+		ProviderSetID: detail.SetID,
+		Items:         items,
+		FetchedAt:     now,
+		EffectiveAt:   now,
+		Complete:      true,
+		HTTPStatus:    200,
+		Source:        "seventv_snapshot_poll",
+	}, nil
+}
 
 func main() {
 	cfg, err := config.Load()
@@ -35,11 +73,10 @@ func main() {
 		cfg.BronzeEnabled = false
 		cfg.BackfillEnabled = false
 		cfg.GoldBackfillEnabled = false
-		cfg.Tier0Enabled = false
 		logger.Info("CORPUS_WORKERS_ENABLED=false — corpus plane off for this process")
 	}
 	if cfg.PulseHostedMode && strings.TrimSpace(cfg.PulseBetaKeys) == "" {
-		logger.Error("PULSE_HOSTED_MODE=true but PULSE_BETA_KEYS is empty — hosted Pulse write/read routes fail closed until keys are configured")
+		logger.Info("PULSE_HOSTED_MODE=true without PULSE_BETA_KEYS — extension routes use guest principals")
 	}
 	pulseMaxAlwaysTrackedPerPrincipal := cfg.PulseMaxChannelsPerPrincipal
 	if raw := strings.TrimSpace(os.Getenv("PULSE_MAX_ALWAYS_TRACKED_PER_PRINCIPAL")); raw != "" {
@@ -241,7 +278,31 @@ func main() {
 		cfg.AnalyticsTTDirectHTTPStaleOnly,
 		cfg.AnalyticsTTDirectHTTPTimeoutMS,
 		cfg.AnalyticsTTViewerSmoothWindow,
+		cfg.AnalyticsTTUseProxy,
 	).WithArchiveExportOnSync(cfg.ArchiveExportOnSync, archiveExporter)
+
+	ivrCfg := analytics.GoldIVRConfig{
+		Enabled:                     cfg.GoldIVREnabled,
+		LiteEnabled:                 cfg.GoldIVRLiteEnabled,
+		CanonicalReplace:            cfg.GoldIVRCanonicalReplace,
+		ShadowMode:                  cfg.GoldIVRShadowMode,
+		ShadowArtifactDir:           cfg.GoldIVRShadowArtifactDir,
+		ShadowArtifactRetentionDays: cfg.GoldIVRShadowArtifactRetentionDays,
+		ShadowArtifactMaxFiles:      cfg.GoldIVRShadowArtifactMaxFiles,
+		PeaksOnlyEnabled:            cfg.GoldIVRPeaksOnlyEnabled,
+		PeaksOnlyMaxMinutes:         cfg.GoldIVRPeaksOnlyMaxMinutes,
+		PeaksOnlyMinChatCount:       cfg.GoldIVRPeaksOnlyMinChatCount,
+		BaseURL:                     cfg.GoldIVRBaseURL,
+		MaxBytesPerJob:              cfg.GoldIVRMaxBytesPerJob,
+		MaxMessagesPerJob:           cfg.GoldIVRMaxMessagesPerJob,
+		MaxDurationMinutes:          cfg.GoldIVRMaxDurationMinutes,
+		HTTPTimeout:                 time.Duration(cfg.GoldIVRHTTPTimeoutSeconds) * time.Second,
+		MaxRetries:                  cfg.GoldIVRMaxRetries,
+		Allowlist:                   analytics.ParseGoldIVRAllowlist(cfg.GoldIVREnabledChannelAllowlist),
+	}
+	goldIVR := analytics.NewGoldIVRService(ivrCfg, store, nil, logger)
+	syncService = syncService.WithGoldIVR(goldIVR)
+	analytics.LogGoldIVREffectiveConfig(logger, ivrCfg, cfg.GoldIVREnabledChannelAllowlist)
 
 	startArchiveWorkers(ctx, cfg, pool, syncService, archiveSyncExporter, archiveWriter, logger)
 
@@ -313,18 +374,38 @@ func main() {
 			WithWorkerOptions(workerOpts("silver", []string{"silver"}))
 		analytics.StartBackfillWorker(ctx, silverWorker, logger)
 		if cfg.GoldBackfillEnabled && cfg.BackfillGoldWorkerEnabled {
-			goldWorker := analytics.NewBackfillWorker(pool, syncService, archiveExporter, cfg.BackfillWorkerInterval).
-				WithWorkerOptions(workerOpts("gold", []string{"gold", "gold_full", "gold_lite"})).
-				WithGoldSyncTimeout(time.Duration(cfg.GoldSyncTimeoutMS) * time.Millisecond)
-			if archiveSyncExporter != nil {
-				goldWorker = goldWorker.WithVODChatExporter(archiveSyncExporter)
+			for i := 0; i < cfg.BackfillGoldWorkerCount; i++ {
+				name := "gold"
+				if cfg.BackfillGoldWorkerCount > 1 {
+					name = fmt.Sprintf("gold-%d", i+1)
+				}
+				goldWorker := analytics.NewBackfillWorker(pool, syncService, archiveExporter, cfg.BackfillWorkerInterval).
+					WithWorkerOptions(workerOpts(name, []string{"gold", "gold_full", "gold_lite"})).
+					WithGoldSyncTimeout(time.Duration(cfg.GoldSyncTimeoutMS) * time.Millisecond)
+				if archiveSyncExporter != nil {
+					goldWorker = goldWorker.
+						WithVODChatExporter(archiveSyncExporter).
+						WithGoldLiteExporter(archiveSyncExporter, cfg.GoldLiteRequireRollups)
+				}
+				analytics.StartBackfillWorker(ctx, goldWorker, logger)
 			}
-			analytics.StartBackfillWorker(ctx, goldWorker, logger)
 		}
 		analytics.StartStaleBackfillReclaimer(ctx, pool, staleLease, 5*time.Minute, logger)
+		if cfg.BackfillQueueMaintenanceEnabled {
+			analytics.StartBackfillQueueMaintainer(ctx, pool, cfg.BackfillQueueMaintenanceInterval, analytics.BackfillQueueMaintenanceOptions{
+				StaleRunningAfter: staleLease,
+				RequeueFailedMax:  cfg.BackfillRequeueFailedMaxPerRun,
+				RepairSessionsMax: cfg.BackfillRepairSessionsMaxPerRun,
+			}, logger)
+			logger.Info("backfill queue maintainer started",
+				"interval", cfg.BackfillQueueMaintenanceInterval.String(),
+				"requeue_max", cfg.BackfillRequeueFailedMaxPerRun,
+			)
+		}
 		logger.Info("backfill workers started",
 			"interval", cfg.BackfillWorkerInterval.String(),
 			"gold_worker", cfg.GoldBackfillEnabled && cfg.BackfillGoldWorkerEnabled,
+			"gold_worker_count", cfg.BackfillGoldWorkerCount,
 			"stale_after", staleLease.String(),
 		)
 		if cfg.SilverAutoEnqueueEnabled && archiveBlob != nil {
@@ -347,6 +428,30 @@ func main() {
 			)
 		} else if cfg.SilverAutoEnqueueEnabled && archiveBlob == nil {
 			logger.Warn("SILVER_AUTO_ENQUEUE_ENABLED is true but archive blob store is not configured")
+		}
+		if cfg.Top500GoldVODInventoryEnabled && archiveBlob != nil {
+			directGoldEnqueue := cfg.Top500GoldVODInventoryDirectEnqueue && cfg.GoldFullEnabled && !cfg.GoldFullOperatorOnly
+			inventory := analytics.NewTop500GoldVODInventory(
+				pool,
+				analytics.NewArchiveVODCatalog(archiveBlob),
+				analytics.Top500GoldVODInventoryConfig{
+					SinceDays:     cfg.Top500GoldVODInventorySinceDays,
+					TopN:          cfg.Top500GoldVODInventoryTopN,
+					MaxPerRun:     cfg.Top500GoldVODInventoryMaxPerRun,
+					DirectEnqueue: directGoldEnqueue,
+					Interval:      cfg.Top500GoldVODInventoryInterval,
+				},
+			)
+			analytics.StartTop500GoldVODInventory(ctx, inventory, logger)
+			logger.Info("top500 gold vod inventory started",
+				"since_days", cfg.Top500GoldVODInventorySinceDays,
+				"top_n", cfg.Top500GoldVODInventoryTopN,
+				"max_per_run", cfg.Top500GoldVODInventoryMaxPerRun,
+				"direct_enqueue", directGoldEnqueue,
+				"interval", cfg.Top500GoldVODInventoryInterval.String(),
+			)
+		} else if cfg.Top500GoldVODInventoryEnabled && archiveBlob == nil {
+			logger.Warn("TOP500_GOLD_VOD_INVENTORY_ENABLED is true but archive blob store is not configured")
 		}
 	}
 	if cfg.GoldBackfillEnabled {
@@ -380,6 +485,32 @@ func main() {
 		}
 	}
 
+	var emoteSnapshotProvider analytics.EmoteSnapshotProvider
+	if cfg.EmoteHistorySnapshotEnabled {
+		emoteSnapshotProvider = sevenTVSnapshotProvider{seed: seeder.NewWithImportConcurrency(nil, nil, nil, logger, cfg.Upstream.SevenTVAPIURL, cfg.Upstream.SevenTVCDNURL, cfg.Upstream.FFZAPIURL, cfg.Upstream.BTTVAPIURL, nil, cfg.EmoteImportConcurrency)}
+	}
+	emoteHistoryJobConfig := analytics.EmoteHistoryJobConfig{
+		SnapshotEnabled:    cfg.EmoteHistorySnapshotEnabled,
+		SnapshotInterval:   cfg.EmoteHistorySnapshotInterval,
+		SnapshotBatchSize:  cfg.EmoteHistorySnapshotBatchSize,
+		NormalizeEnabled:   cfg.EmoteHistoryNormalizeEnabled,
+		NormalizeInterval:  cfg.EmoteHistoryNormalizeInterval,
+		NormalizeSince:     cfg.EmoteHistoryNormalizeSince,
+		NormalizeBatchSize: cfg.EmoteHistoryNormalizeBatchSize,
+	}
+	analytics.StartEmoteHistoryJobs(ctx, store, emoteSnapshotProvider, emoteHistoryJobConfig, logger)
+	providerRefreshWorker := analytics.NewPublicEmoteProviderRefreshWorker(store, analytics.PublicEmoteProviderRefreshConfig{
+		Enabled:  cfg.PublicEmoteProviderRefreshEnabled,
+		Interval: cfg.PublicEmoteProviderRefreshInterval,
+		Range:    "24h",
+	}, logger)
+	if providerRefreshWorker.Enabled() {
+		providerRefreshWorker.Start(ctx)
+		logger.Info("public emote provider refresh worker started", "interval", cfg.PublicEmoteProviderRefreshInterval.String(), "range", "24h")
+	} else {
+		logger.Info("public emote provider refresh worker disabled", "flag", "PUBLIC_EMOTE_PROVIDER_REFRESH_ENABLED")
+	}
+
 	heatmapCache := heatmap.NewCache(rdb, logger)
 	collector.WithPulseCacheInvalidator(func(ctx context.Context, login, streamID string, includeHeatmap bool) {
 		analytics.InvalidatePulseBFFCache(ctx, rdb, login, logger)
@@ -391,6 +522,23 @@ func main() {
 	pulseBackfill := analytics.NewPulseBackfillManager(syncService, store, helix, rdb, heatmapCache).WithRuntime(pulseRuntime)
 	if cfg.PulseMaxBackfills > 0 {
 		pulseBackfill.WithMaxConcurrent(cfg.PulseMaxBackfills)
+	}
+	if cfg.PulseAutoBackfillEnabled {
+		pulseAutoBackfill := analytics.NewPulseAutoBackfillEnqueuer(store, pulseBackfill, pulseRuntime, analytics.PulseAutoBackfillOptions{
+			Interval:  cfg.PulseAutoBackfillInterval,
+			Cooldown:  cfg.PulseAutoBackfillCooldown,
+			Since:     cfg.PulseAutoBackfillSince,
+			MaxPerRun: cfg.PulseAutoBackfillMaxPerRun,
+			ScanLimit: cfg.PulseAutoBackfillScanLimit,
+		})
+		analytics.StartPulseAutoBackfillEnqueuer(ctx, pulseAutoBackfill, logger)
+		logger.Info("pulse auto-backfill enqueuer started",
+			"interval", cfg.PulseAutoBackfillInterval.String(),
+			"cooldown", cfg.PulseAutoBackfillCooldown.String(),
+			"since", cfg.PulseAutoBackfillSince.String(),
+			"max_per_run", cfg.PulseAutoBackfillMaxPerRun,
+			"scan_limit", cfg.PulseAutoBackfillScanLimit,
+		)
 	}
 	handler := analytics.NewHandler(store, collector, helix, syncService)
 	pulseHosted := analytics.PulseHostedConfig{
@@ -409,9 +557,16 @@ func main() {
 	if pulseHosted.IdleTTL == 0 {
 		pulseHosted.IdleTTL = 15 * time.Minute
 	}
-	handler.WithHeatmapCache(heatmapCache).WithTimeseries(tsWriter).WithRedis(rdb).WithPulseBackfill(pulseBackfill).WithPulseHosted(pulseHosted).WithPulseRuntime(pulseRuntime)
+	handler.WithHeatmapCache(heatmapCache).WithTimeseries(tsWriter).WithRedis(rdb).WithPulseBackfill(pulseBackfill).WithPulseHosted(pulseHosted).WithPulseRuntime(pulseRuntime).WithCorpusRuntime(analytics.CorpusRuntimeConfigFromApp(cfg)).WithEmoteHistoryJobs(emoteHistoryJobConfig).WithCDNPublicBase(cfg.CDNPublicBase)
 	handler.WithRateLimiter(analytics.NewPulseRateLimiter(rdb, pulseHosted.WatchRatePerMin, pulseHosted.BackfillRatePerHour))
 	analytics.StartProtectedGoLivePoller(ctx, analytics.NewProtectedGoLivePoller(store, helix, collector, pulseRuntime, logger), logger)
+	analytics.StartTop500PriorityWatchPoller(ctx, analytics.NewTop500PriorityWatchPoller(store, collector, cfg, logger), logger)
+	if cfg.PulseTop500AdmissionEnabled {
+		logger.Info("top500 priority watch poller enabled",
+			"top_n", cfg.PulseTop500AdmissionTopN,
+			"interval", cfg.PulseTop500AdmissionInterval.String(),
+		)
+	}
 	logger.Info("pulse runtime config",
 		"hosted", pulseHosted.Hosted,
 		"active_cap", pulseHosted.MaxActiveChannels,

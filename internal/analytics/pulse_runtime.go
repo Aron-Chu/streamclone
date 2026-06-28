@@ -7,24 +7,24 @@ import (
 )
 
 type PulseRuntimeConfig struct {
-	Configured             bool
-	HelixLiveEnabled       bool
-	HelixVodEnabled        bool
-	HelixMetadataEnabled   bool
-	HelixGoLiveEnabled     bool
-	GQLCommentsEnabled     bool
-	BackfillEnabled        bool
-	ProtectedGoLiveEnabled bool
-	TopRosterPollEnabled   bool
-	ContextEnrichment      bool
-	EmoteEnsureBlocking    bool
-	BFFCacheEnabled        bool
-	ReadOnlyMode           bool
-	RosterSize             int
-	ProtectedGlobalLimit   int
+	Configured              bool
+	HelixLiveEnabled        bool
+	HelixVodEnabled         bool
+	HelixMetadataEnabled    bool
+	HelixGoLiveEnabled      bool
+	GQLCommentsEnabled      bool
+	BackfillEnabled         bool
+	ProtectedGoLiveEnabled  bool
+	TopRosterPollEnabled    bool
+	ContextEnrichment       bool
+	EmoteEnsureBlocking     bool
+	BFFCacheEnabled         bool
+	ReadOnlyMode            bool
+	RosterSize              int
+	ProtectedGlobalLimit    int
 	ProtectedGoLiveInterval time.Duration
 	TopRosterPollInterval   time.Duration
-	GoLiveBatchSize          int
+	GoLiveBatchSize         int
 }
 
 func DefaultPulseRuntimeConfig() PulseRuntimeConfig {

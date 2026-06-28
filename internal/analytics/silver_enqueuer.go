@@ -82,20 +82,20 @@ func filterVODsSince(vods []ArchivedVOD, since time.Time) []ArchivedVOD {
 
 // SilverEnqueuerConfig bounds automatic silver backfill from bronze VOD catalogs.
 type SilverEnqueuerConfig struct {
-	SinceDays  int
-	TopN       int
-	MaxPerRun  int
-	Interval   time.Duration
+	SinceDays int
+	TopN      int
+	MaxPerRun int
+	Interval  time.Duration
 }
 
 // SilverEnqueuer inserts silver-tier backfill_jobs from bronze vod_index blobs.
 type SilverEnqueuer struct {
-	db       *pgxpool.Pool
-	catalog  VODCatalogReader
+	db        *pgxpool.Pool
+	catalog   VODCatalogReader
 	sinceDays int
-	topN     int
+	topN      int
 	maxPerRun int
-	interval time.Duration
+	interval  time.Duration
 }
 
 func NewSilverEnqueuer(db *pgxpool.Pool, catalog VODCatalogReader, cfg SilverEnqueuerConfig) *SilverEnqueuer {

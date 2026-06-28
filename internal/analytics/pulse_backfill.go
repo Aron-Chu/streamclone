@@ -267,13 +267,13 @@ func (m *PulseBackfillManager) Enqueue(ctx context.Context, req PulseBackfillReq
 
 	if rangeFullyCovered(offsets, fromOffset, toOffset) {
 		job := &PulseBackfillJob{
-			JobID:    newPulseBackfillJobID(),
-			StreamID: streamID,
-			Login:    login,
-			Mode:     mode,
-			Status:   PulseBackfillAlreadyAvailable,
-			Message:  "Rollups already cover the requested range",
-			Range:    requestedRange,
+			JobID:     newPulseBackfillJobID(),
+			StreamID:  streamID,
+			Login:     login,
+			Mode:      mode,
+			Status:    PulseBackfillAlreadyAvailable,
+			Message:   "Rollups already cover the requested range",
+			Range:     requestedRange,
 			CreatedAt: time.Now().UTC(),
 			UpdatedAt: time.Now().UTC(),
 		}
@@ -328,13 +328,13 @@ func (m *PulseBackfillManager) Enqueue(ctx context.Context, req PulseBackfillReq
 	}
 
 	job := &PulseBackfillJob{
-		JobID:    newPulseBackfillJobID(),
-		StreamID: streamID,
-		Login:    login,
-		Mode:     mode,
-		Status:   PulseBackfillQueued,
-		Message:  fmt.Sprintf("Backfill queued for %s–%s", formatCoverageOffset(fromOffset), formatCoverageOffset(toOffset)),
-		Range:    requestedRange,
+		JobID:     newPulseBackfillJobID(),
+		StreamID:  streamID,
+		Login:     login,
+		Mode:      mode,
+		Status:    PulseBackfillQueued,
+		Message:   fmt.Sprintf("Backfill queued for %s–%s", formatCoverageOffset(fromOffset), formatCoverageOffset(toOffset)),
+		Range:     requestedRange,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}

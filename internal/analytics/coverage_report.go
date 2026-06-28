@@ -60,11 +60,11 @@ func ClassifyCoveragePct(pct float64) CoverageClass {
 }
 
 type RosterSummary struct {
-	TopN              int      `json:"topN"`
-	TotalTracked      int      `json:"totalTracked"`
-	AlwaysTracked     int      `json:"alwaysTracked"`
-	WithRecentLive    int      `json:"withRecentLive"`
-	Logins            []string `json:"logins,omitempty"`
+	TopN           int      `json:"topN"`
+	TotalTracked   int      `json:"totalTracked"`
+	AlwaysTracked  int      `json:"alwaysTracked"`
+	WithRecentLive int      `json:"withRecentLive"`
+	Logins         []string `json:"logins,omitempty"`
 }
 
 type StreamCoverageEntry struct {
@@ -79,12 +79,12 @@ type StreamCoverageEntry struct {
 }
 
 type StreamCoverageSummary struct {
-	Total       int `json:"total"`
-	LiveGood    int `json:"liveGood"`
-	Partial     int `json:"partial"`
-	TTRequired  int `json:"ttRequired"`
-	Live        int `json:"live"`
-	Ended       int `json:"ended"`
+	Total      int `json:"total"`
+	LiveGood   int `json:"liveGood"`
+	Partial    int `json:"partial"`
+	TTRequired int `json:"ttRequired"`
+	Live       int `json:"live"`
+	Ended      int `json:"ended"`
 }
 
 type BackfillJobCounts struct {
@@ -105,15 +105,15 @@ type AzureGapCheck struct {
 }
 
 type CoverageReport struct {
-	GeneratedAt    time.Time              `json:"generatedAt"`
-	Since          time.Time              `json:"since"`
-	Roster         RosterSummary          `json:"roster"`
-	BronzeIndex    []BronzeIndexState     `json:"bronzeIndex"`
-	Streams        []StreamCoverageEntry  `json:"streams"`
-	StreamSummary  StreamCoverageSummary  `json:"streamSummary"`
-	BackfillJobs   []BackfillJobCounts    `json:"backfillJobs"`
-	ArchiveExports []ArchiveExportCounts  `json:"archiveExports"`
-	AzureGaps      AzureGapCheck          `json:"azureGaps"`
+	GeneratedAt    time.Time             `json:"generatedAt"`
+	Since          time.Time             `json:"since"`
+	Roster         RosterSummary         `json:"roster"`
+	BronzeIndex    []BronzeIndexState    `json:"bronzeIndex"`
+	Streams        []StreamCoverageEntry `json:"streams"`
+	StreamSummary  StreamCoverageSummary `json:"streamSummary"`
+	BackfillJobs   []BackfillJobCounts   `json:"backfillJobs"`
+	ArchiveExports []ArchiveExportCounts `json:"archiveExports"`
+	AzureGaps      AzureGapCheck         `json:"azureGaps"`
 }
 
 // BuildCoverageReport assembles fleet progress for Bronze/Tier-0 acceptance runs.
@@ -283,6 +283,120 @@ func queryBackfillJobCounts(ctx context.Context, db *pgxpool.Pool) ([]BackfillJo
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+// BackfillTierCounts returns aggregate job counts grouped by tier+status for the
+// Silver and Gold corpus tiers only. It powers the hosted-safe public hub corpus
+// pipeline (counts only — never per-job rows, logins, stream IDs, or errors).
+func (s *Store) BackfillTierCounts(ctx context.Context) ([]BackfillJobCounts, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT tier, status, COUNT(*)::int
+		FROM backfill_jobs
+		WHERE tier IN ('silver', 'gold', 'gold_full', 'gold_lite')
+		GROUP BY tier, status
+		ORDER BY tier, status`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BackfillJobCounts
+	for rows.Next() {
+		var row BackfillJobCounts
+		if err := rows.Scan(&row.Tier, &row.Status, &row.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// CorpusSilverEligibleCount estimates how many Top-N channels have bronze VOD
+// catalogs available for the silver enqueuer to scan. The actual VOD rows live
+// in blob storage, so this is a readiness signal rather than a queue mutation
+// path.
+func (s *Store) CorpusSilverEligibleCount(ctx context.Context, topN int) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	if topN <= 0 {
+		topN = DefaultTop500MetadataTopN
+	}
+	var count int
+	err := s.db.QueryRow(ctx, `
+		WITH candidate_logins AS (
+			SELECT t.login
+			FROM tracked_streamers t
+			JOIN bronze_index_state b ON b.login = t.login
+			WHERE b.last_helix_at IS NOT NULL
+			  AND b.helix_row_count > 0
+			ORDER BY t.last_rank ASC NULLS LAST, t.login ASC
+			LIMIT $1
+		)
+		SELECT COUNT(*)::int
+		FROM candidate_logins c
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM backfill_jobs bj
+			WHERE bj.tier = 'silver'
+			  AND bj.login = c.login
+			  AND bj.status IN ('queued', 'running')
+		)`, topN).Scan(&count)
+	return count, err
+}
+
+// CorpusGoldEligibleCount counts silver-complete streams that do not yet have
+// an active or completed gold-family job.
+func (s *Store) CorpusGoldEligibleCount(ctx context.Context) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	var count int
+	err := s.db.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT silver.stream_id)::int
+		FROM backfill_jobs silver
+		WHERE silver.tier = 'silver'
+		  AND silver.status = 'done'
+		  AND silver.export_status = 'confirmed'
+		  AND COALESCE(silver.stream_id, '') <> ''
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM backfill_jobs gold
+			WHERE gold.stream_id = silver.stream_id
+			  AND gold.tier IN ('gold', 'gold_full', 'gold_lite')
+			  AND gold.status IN ('queued', 'running', 'done')
+		  )`).Scan(&count)
+	return count, err
+}
+
+// BackfillOldestQueuedAgeSeconds returns the age of the oldest queued job for
+// one or more tiers. A nil value means no queued jobs are present.
+func (s *Store) BackfillOldestQueuedAgeSeconds(ctx context.Context, tiers ...string) (*int, error) {
+	if s == nil || s.db == nil || len(tiers) == 0 {
+		return nil, nil
+	}
+	normalized := make([]string, 0, len(tiers))
+	for _, tier := range tiers {
+		tier = strings.ToLower(strings.TrimSpace(tier))
+		if tier != "" {
+			normalized = append(normalized, tier)
+		}
+	}
+	if len(normalized) == 0 {
+		return nil, nil
+	}
+	var rawSeconds int
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM now() - MIN(created_at)))::int, -1)
+		FROM backfill_jobs
+		WHERE tier = ANY($1)
+		  AND status = 'queued'`, normalized).Scan(&rawSeconds)
+	if err != nil || rawSeconds < 0 {
+		return nil, err
+	}
+	return &rawSeconds, nil
 }
 
 func queryArchiveExportCounts(ctx context.Context, db *pgxpool.Pool) ([]ArchiveExportCounts, error) {

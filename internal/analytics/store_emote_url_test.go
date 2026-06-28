@@ -5,10 +5,10 @@ import "testing"
 func TestTopEmotesFromRollupsImageURLs(t *testing.T) {
 	rollups := []MinuteRollup{{
 		Emotes: map[string]int{
-			"twitch:304894101:SomeEmote":                                      10,
-			"twitch:emotesv2_34dda6b8341e46d0b2118a9cabbe6a2e:Other":          5,
-			"seventv:75f49395-d5fc-41da-998c-880c6d8fddcb:KEKW":               3,
-			"seventv:62a3bf572b964d6cc2766004:LegacySevenTV":                  2,
+			"twitch:304894101:SomeEmote":                             10,
+			"twitch:emotesv2_34dda6b8341e46d0b2118a9cabbe6a2e:Other": 5,
+			"seventv:75f49395-d5fc-41da-998c-880c6d8fddcb:KEKW":      3,
+			"seventv:62a3bf572b964d6cc2766004:LegacySevenTV":         2,
 		},
 	}}
 	top := TopEmotesFromRollups(rollups, 10)

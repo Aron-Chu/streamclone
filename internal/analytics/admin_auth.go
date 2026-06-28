@@ -13,10 +13,10 @@ import (
 const adminArchiveHeader = "X-Admin-Archive-Token"
 
 type adminRateLimiter struct {
-	mu       sync.Mutex
-	last     map[string][]time.Time
-	limit    int
-	window   time.Duration
+	mu     sync.Mutex
+	last   map[string][]time.Time
+	limit  int
+	window time.Duration
 }
 
 func newAdminRateLimiter(limit int, window time.Duration) *adminRateLimiter {

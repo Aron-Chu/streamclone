@@ -23,6 +23,49 @@ func TestPickCanonicalSessionTieBreaksDeterministically(t *testing.T) {
 	}
 }
 
+func TestSessionsMatchRejectsDistinctTwitchStreamIDs(t *testing.T) {
+	now := time.Now().UTC()
+	existing := sessionCandidate{
+		StreamID:       "old-live-stream",
+		CanonicalID:    "old-live-stream",
+		Login:          "lacy",
+		TwitchStreamID: "old-live-stream",
+		StartedAt:      now.Add(-30 * time.Minute),
+	}
+	incoming := sessionCandidate{
+		StreamID:       "new-live-stream",
+		CanonicalID:    "new-live-stream",
+		Login:          "lacy",
+		TwitchStreamID: "new-live-stream",
+		StartedAt:      now,
+	}
+
+	if sessionsMatch(incoming, existing) {
+		t.Fatal("distinct Twitch live stream ids should not merge through open-ended overlap")
+	}
+}
+
+func TestSessionsMatchAllowsOverlapWhenOnlyOneTwitchStreamIDIsKnown(t *testing.T) {
+	now := time.Now().UTC()
+	existing := sessionCandidate{
+		StreamID:       "live-stream",
+		CanonicalID:    "live-stream",
+		Login:          "chan",
+		TwitchStreamID: "live-stream",
+		StartedAt:      now.Add(-30 * time.Minute),
+	}
+	incoming := sessionCandidate{
+		StreamID:   "tt-stream",
+		Login:      "chan",
+		TTStreamID: "tt-stream",
+		StartedAt:  now.Add(-20 * time.Minute),
+	}
+
+	if !sessionsMatch(incoming, existing) {
+		t.Fatal("overlap should still match when only one side has a Twitch stream id")
+	}
+}
+
 func TestResolveCanonicalStreamIDFollowsAliasChain(t *testing.T) {
 	ctx, store := setupSessionStore(t)
 	insertTestStream(t, ctx, store, "a", "chan", 0)
@@ -142,6 +185,32 @@ func TestBulkPatchViewerRollupsWritesThroughAlias(t *testing.T) {
 	}
 }
 
+func TestBulkUpsertMinuteRollupsStampsGQLCanonical(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	insertTestStream(t, ctx, store, "bulk-gql", "chan", 0)
+	minute := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	err := store.BulkUpsertMinuteRollups(ctx, "bulk-gql", []MinuteRollup{{
+		MinuteTS:          minute,
+		ChatCount:         42,
+		TotalEmoteCount:   10,
+		SevenTVEmoteCount: 3,
+		Emotes:            map[string]int{"twitch:1:Kappa": 3},
+	}})
+	if err != nil {
+		t.Fatalf("BulkUpsertMinuteRollups: %v", err)
+	}
+	var chatSource, confidence string
+	if err := store.db.QueryRow(ctx, `
+		SELECT chat_source, source_confidence
+		FROM analytics_minute_rollups
+		WHERE stream_id='bulk-gql' AND minute_ts=$1`, minute).Scan(&chatSource, &confidence); err != nil {
+		t.Fatalf("load rollup source: %v", err)
+	}
+	if chatSource != RollupChatSourceGQL || confidence != SourceConfidenceCanonical {
+		t.Fatalf("source = %q/%q, want gql/canonical", chatSource, confidence)
+	}
+}
+
 func TestAliasReadPathsResolveCanonicalStream(t *testing.T) {
 	ctx, store := setupSessionStore(t)
 	insertTestStream(t, ctx, store, "a", "chan", 0)
@@ -229,7 +298,7 @@ func TestCleanupSessionStubsReportsAndAppliesBackfillJobRekeys(t *testing.T) {
 		VALUES
 			('silver', 'a', 'chan', 'failed', 'failed'),
 			('gold', 'b', 'chan', 'queued', 'pending'),
-			('gold', 'a', 'chan', 'queued', 'pending')`)
+			('gold', 'a', 'chan', 'running', 'pending')`)
 
 	dryRun, err := store.CleanupSessionStubsWithOptions(ctx, []string{"chan"}, SessionCleanupOptions{DryRun: true})
 	if err != nil {
@@ -265,6 +334,53 @@ func TestCleanupSessionStubsReportsAndAppliesBackfillJobRekeys(t *testing.T) {
 	}
 	if aliasGoldStatus != "skipped" || aliasGoldExportStatus != "skipped" {
 		t.Fatalf("duplicate alias gold status/export = %s/%s, want skipped/skipped", aliasGoldStatus, aliasGoldExportStatus)
+	}
+}
+
+func TestResolveSessionCleanupLoginsIncludesBackfillJobs(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	mustExec(t, ctx, store, `INSERT INTO analytics_always_tracked (login) VALUES ('always')`)
+	mustExec(t, ctx, store, `
+		INSERT INTO backfill_jobs (tier, stream_id, login, status, export_status)
+		VALUES ('silver', 's1', 'corpuschan', 'done', 'confirmed')`)
+
+	logins, err := store.ResolveSessionCleanupLogins(ctx, nil, []string{"envchan"})
+	if err != nil {
+		t.Fatalf("ResolveSessionCleanupLogins: %v", err)
+	}
+	want := []string{"always", "corpuschan", "envchan"}
+	if strings.Join(logins, ",") != strings.Join(want, ",") {
+		t.Fatalf("logins = %v, want %v", logins, want)
+	}
+}
+
+func TestCanonicalizeClaimedBackfillJobSkipsDuplicateActiveCanonical(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	insertTestStream(t, ctx, store, "a", "chan", 0)
+	insertTestStream(t, ctx, store, "b", "chan", 10)
+	insertTestAlias(t, ctx, store, "a", "b")
+	mustExec(t, ctx, store, `
+		INSERT INTO backfill_jobs (id, tier, stream_id, login, status, export_status)
+		VALUES
+			(1, 'gold', 'b', 'chan', 'queued', 'pending'),
+			(2, 'gold', 'a', 'chan', 'running', 'pending')`)
+
+	worker := &BackfillWorker{db: store.db}
+	job := &BackfillJob{ID: 2, Tier: "gold", StreamID: "a", Login: "chan", Status: "running", ExportStatus: "pending"}
+	_, skipped, err := worker.canonicalizeClaimedBackfillJob(ctx, job)
+	if err != nil {
+		t.Fatalf("canonicalizeClaimedBackfillJob: %v", err)
+	}
+	if !skipped {
+		t.Fatal("expected duplicate active canonical job to be skipped")
+	}
+
+	var status, exportStatus string
+	if err := store.db.QueryRow(ctx, `SELECT status, export_status FROM backfill_jobs WHERE id=2`).Scan(&status, &exportStatus); err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	if status != "skipped" || exportStatus != "skipped" {
+		t.Fatalf("status/export = %s/%s, want skipped/skipped", status, exportStatus)
 	}
 }
 
@@ -484,7 +600,10 @@ func createSessionTestSchema(t *testing.T, ctx context.Context, store *Store) {
 		);
 		CREATE UNIQUE INDEX idx_backfill_jobs_active_stream
 			ON backfill_jobs (stream_id)
-			WHERE status IN ('queued', 'running')`)
+			WHERE status IN ('queued', 'running');
+		CREATE TABLE analytics_always_tracked (
+			login TEXT PRIMARY KEY
+		)`)
 }
 
 func insertTestStream(t *testing.T, ctx context.Context, store *Store, streamID, login string, score int) {
@@ -521,5 +640,41 @@ func mustExec(t *testing.T, ctx context.Context, store *Store, sql string, args 
 	t.Helper()
 	if _, err := store.db.Exec(ctx, sql, args...); err != nil {
 		t.Fatalf("exec failed: %v\nSQL: %s", err, sql)
+	}
+}
+
+func TestUpsertLiveStreamStubBeforeSessionAliasLink(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	startedAt := time.Date(2026, 6, 25, 20, 0, 0, 0, time.UTC)
+	insertTestStream(t, ctx, store, "canonical-old", "xqc", 5)
+	mustExec(t, ctx, store, `UPDATE analytics_streams SET started_at=$2 WHERE stream_id=$1`, "canonical-old", startedAt)
+
+	err := store.UpsertLiveStream(ctx, LiveStream{
+		ID:            "319944688345",
+		Login:         "xqc",
+		BroadcasterID: "12345",
+		Title:         "Live now",
+		GameName:      "Just Chatting",
+		StartedAt:     startedAt,
+		ViewerCount:   50000,
+	}, UserProfile{ID: "12345", DisplayName: "xQc"}, startedAt.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("UpsertLiveStream incoming helix id before canonical row existed: %v", err)
+	}
+
+	err = store.UpsertMinuteRollup(ctx, "319944688345", MinuteRollup{
+		MinuteTS:  startedAt.Truncate(time.Minute),
+		ChatCount: 10,
+	})
+	if err != nil {
+		t.Fatalf("UpsertMinuteRollup on helix stream id after live upsert: %v", err)
+	}
+
+	var rollupStreamID string
+	if err := store.db.QueryRow(ctx, `SELECT stream_id FROM analytics_minute_rollups LIMIT 1`).Scan(&rollupStreamID); err != nil {
+		t.Fatalf("load rollup: %v", err)
+	}
+	if rollupStreamID == "" {
+		t.Fatal("expected rollup row")
 	}
 }

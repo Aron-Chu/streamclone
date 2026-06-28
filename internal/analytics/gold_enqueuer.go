@@ -78,7 +78,16 @@ func (e *GoldEnqueuer) listCandidates(ctx context.Context) ([]goldCandidate, err
 			continue
 		}
 		canonicalID := strings.TrimSpace(stream.StreamID)
-		if canonicalID == "" || seen[canonicalID] {
+		if canonicalID == "" {
+			continue
+		}
+		if resolved, err := store.ResolveCanonicalStreamID(ctx, canonicalID); err == nil && resolved != "" {
+			canonicalID = resolved
+		}
+		if err := store.EnsureSessionForStream(ctx, canonicalID); err != nil {
+			continue
+		}
+		if seen[canonicalID] {
 			continue
 		}
 		exists, err := goldBackfillJobExists(ctx, e.db, canonicalID, silverStreamID)
@@ -121,13 +130,24 @@ func goldBackfillJobExists(ctx context.Context, db *pgxpool.Pool, streamIDs ...s
 }
 
 func insertGoldBackfillJob(ctx context.Context, db *pgxpool.Pool, streamID, login string) error {
+	_, inserted, err := insertGoldBackfillJobReturningID(ctx, db, streamID, login)
+	if err != nil {
+		return err
+	}
+	if !inserted {
+		return fmt.Errorf("gold job already exists or stream %s is not eligible", strings.TrimSpace(streamID))
+	}
+	return nil
+}
+
+func insertGoldBackfillJobReturningID(ctx context.Context, db *pgxpool.Pool, streamID, login string) (int64, bool, error) {
 	if db == nil {
-		return fmt.Errorf("db unavailable")
+		return 0, false, fmt.Errorf("db unavailable")
 	}
 	streamID = strings.TrimSpace(streamID)
 	login = normalizeLogin(login)
 	if streamID == "" || login == "" {
-		return fmt.Errorf("stream id and login are required")
+		return 0, false, fmt.Errorf("stream id and login are required")
 	}
 	store := NewStore(db)
 	duplicateIDs := []string{streamID}
@@ -136,22 +156,29 @@ func insertGoldBackfillJob(ctx context.Context, db *pgxpool.Pool, streamID, logi
 		duplicateIDs = append(duplicateIDs, canonicalID)
 	}
 	duplicateIDs = uniqueStrings(duplicateIDs)
-	tag, err := db.Exec(ctx, `
-		INSERT INTO backfill_jobs (tier, stream_id, login, status, export_status, next_run_at)
-		SELECT 'gold', $1, $2, 'queued', 'pending', now()
-		WHERE NOT EXISTS (
-			SELECT 1 FROM backfill_jobs
-			WHERE stream_id = ANY($3)
-			  AND tier = 'gold'
-			  AND status IN ('queued', 'running', 'done')
-		)`, streamID, login, duplicateIDs)
+	var jobID int64
+	err := db.QueryRow(ctx, `
+		WITH inserted AS (
+			INSERT INTO backfill_jobs (tier, stream_id, login, status, export_status, next_run_at)
+			SELECT 'gold', $1, $2, 'queued', 'pending', now()
+			WHERE NOT EXISTS (
+				SELECT 1 FROM backfill_jobs
+				WHERE stream_id = ANY($3)
+				  AND (
+					status IN ('queued', 'running')
+					OR (tier = 'gold' AND status = 'done')
+				  )
+			)
+			RETURNING id
+		)
+		SELECT COALESCE((SELECT id FROM inserted), 0)`, streamID, login, duplicateIDs).Scan(&jobID)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("gold job already exists or stream %s is not eligible", streamID)
+	if jobID == 0 {
+		return 0, false, nil
 	}
-	return nil
+	return jobID, true, nil
 }
 
 // EnqueueGoldJob inserts a gold job, optionally bypassing rules when force is true.

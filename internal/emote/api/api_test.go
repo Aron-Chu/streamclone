@@ -86,8 +86,14 @@ func TestEnsureChannelEmotesAlreadyLoaded(t *testing.T) {
 		if login != "leeonbeeon" || twitchID != "670388028" {
 			t.Fatalf("unexpected args: %q %q", login, twitchID)
 		}
-		if len(providers) != 1 || providers[0] != seeder.ProviderSevenTV {
+		want := []seeder.Provider{seeder.ProviderSevenTV, seeder.ProviderTwitch, seeder.ProviderFFZ, seeder.ProviderBTTV}
+		if len(providers) != len(want) {
 			t.Fatalf("unexpected providers: %+v", providers)
+		}
+		for i := range want {
+			if providers[i] != want[i] {
+				t.Fatalf("unexpected providers: %+v", providers)
+			}
 		}
 		return makeEnsureResponse("ready", 12, 0, providers), http.StatusOK, nil
 	}}

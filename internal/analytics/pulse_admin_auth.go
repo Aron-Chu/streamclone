@@ -58,12 +58,12 @@ func pulseOperatorFromContext(ctx context.Context) (PulseOperator, bool) {
 
 func newPulseAdminAuthConfig(cfg config.Config, hosted bool) pulseAdminAuthConfig {
 	return pulseAdminAuthConfig{
-		hosted:           hosted,
-		teamDomain:       strings.TrimSpace(cfg.PulseCFAccessTeamDomain),
-		audiences:        parseCSVEnv(cfg.PulseCFAccessAud),
-		archiveToken:     loadAdminArchiveToken(cfg),
-		requireArchive:   cfg.AdminArchiveRequireToken,
-		localBypass:      cfg.PulseAdminLocalBypass && !hosted,
+		hosted:         hosted,
+		teamDomain:     strings.TrimSpace(cfg.PulseCFAccessTeamDomain),
+		audiences:      parseCSVEnv(cfg.PulseCFAccessAud),
+		archiveToken:   loadAdminArchiveToken(cfg),
+		requireArchive: cfg.AdminArchiveRequireToken,
+		localBypass:    cfg.PulseAdminLocalBypass && !hosted,
 	}
 }
 

@@ -6,10 +6,10 @@ import (
 )
 
 const (
-	ttMaxAgeRecentMS      = 15 * 60 * 1000        // live / <6h ended
-	ttMaxAgeMidMS         = 6 * 60 * 60 * 1000    // 6–48h
-	ttMaxAgeStaleMS       = 24 * 60 * 60 * 1000   // 48h–7d
-	ttMaxAgeVeryStaleMS   = 7 * 24 * 60 * 60 * 1000 // >7d archived VODs
+	ttMaxAgeRecentMS       = 15 * 60 * 1000          // live / <6h ended
+	ttMaxAgeMidMS          = 6 * 60 * 60 * 1000      // 6–48h
+	ttMaxAgeStaleMS        = 24 * 60 * 60 * 1000     // 48h–7d
+	ttMaxAgeVeryStaleMS    = 7 * 24 * 60 * 60 * 1000 // >7d archived VODs
 	ttDirectHTTPStaleAfter = 6 * time.Hour
 )
 

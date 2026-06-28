@@ -225,10 +225,11 @@ func (w *Worker) rebuildChannelDictionary(ctx context.Context, login string) (in
 	entries := make([]dict.EmoteEntry, 0, len(emotes))
 	for _, e := range emotes {
 		entries = append(entries, dict.EmoteEntry{
-			Name:      e.Name,
-			EmoteID:   e.EmoteID,
-			ZeroWidth: flags.IsZeroWidth(e.Flags),
-			Provider:  e.Provider,
+			Name:            e.Name,
+			EmoteID:         e.EmoteID,
+			ProviderEmoteID: e.ProviderEmoteID,
+			ZeroWidth:       flags.IsZeroWidth(e.Flags),
+			Provider:        e.Provider,
 		})
 	}
 	if err := w.d.Rebuild(ctx, login, entries); err != nil {

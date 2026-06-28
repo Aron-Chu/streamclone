@@ -1,39 +1,27 @@
 package metrics
 
-
-
 import (
-
 	"context"
 
 	"strings"
 
 	"time"
 
-
-
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/prometheus/client_golang/prometheus/promauto"
-
 )
-
-
 
 const defaultBackfillStaleRunningAfter = 2 * time.Hour
 
-
-
 var (
-
 	ArchiveExportsConfirmedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 
 		Name: "archive_exports_confirmed_total",
 
 		Help: "Confirmed archive export uploads by artifact type.",
-
 	}, []string{"artifact_type"})
 
 	ArchiveExportsFailedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -41,7 +29,6 @@ var (
 		Name: "archive_exports_failed_total",
 
 		Help: "Failed archive export uploads by artifact type.",
-
 	}, []string{"artifact_type"})
 
 	BackfillJobsGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -49,7 +36,6 @@ var (
 		Name: "backfill_jobs_gauge",
 
 		Help: "Current backfill job counts by tier and status.",
-
 	}, []string{"tier", "status"})
 
 	BackfillOldestQueuedAgeSeconds = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -57,7 +43,6 @@ var (
 		Name: "backfill_oldest_queued_age_seconds",
 
 		Help: "Age in seconds of the oldest queued backfill job by tier.",
-
 	}, []string{"tier"})
 
 	BackfillStaleRunningGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -65,7 +50,6 @@ var (
 		Name: "backfill_stale_running_gauge",
 
 		Help: "Running backfill jobs older than the stale lease by tier.",
-
 	}, []string{"tier"})
 
 	BackfillJobsCompletedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -73,7 +57,6 @@ var (
 		Name: "backfill_jobs_completed_total",
 
 		Help: "Backfill jobs finished by tier and terminal status.",
-
 	}, []string{"tier", "status"})
 
 	BackfillWorkerLastTickTimestamp = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -81,7 +64,6 @@ var (
 		Name: "backfill_worker_last_tick_timestamp",
 
 		Help: "Unix timestamp of the last backfill worker tick by worker name.",
-
 	}, []string{"worker"})
 
 	BackfillWorkerPanicsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -89,7 +71,6 @@ var (
 		Name: "backfill_worker_panics_total",
 
 		Help: "Recovered panics in backfill worker loops by worker name.",
-
 	}, []string{"worker"})
 
 	BronzeChannelsIndexedTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -97,7 +78,6 @@ var (
 		Name: "bronze_channels_indexed_total",
 
 		Help: "Bronze channels with a successful Helix VOD index export.",
-
 	})
 
 	BronzeChannelsTarget = promauto.NewGauge(prometheus.GaugeOpts{
@@ -105,7 +85,6 @@ var (
 		Name: "bronze_channels_target",
 
 		Help: "Target bronze channel count for the current roster pass.",
-
 	})
 
 	BronzeChannelsRosterGauge = promauto.NewGauge(prometheus.GaugeOpts{
@@ -113,7 +92,6 @@ var (
 		Name: "bronze_channels_roster_gauge",
 
 		Help: "Distinct channels in bronze_index_state (roster progress).",
-
 	})
 
 	CorpusTierCompletionRatio = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -121,26 +99,19 @@ var (
 		Name: "corpus_tier_completion_ratio",
 
 		Help: "Corpus completion ratio 0-1 by tier and measure (roster, export_confirmed, jobs_done).",
-
 	}, []string{"tier", "measure"})
 
 	Tier0CoveragePctHistogram = promauto.NewHistogram(prometheus.HistogramOpts{
 
-		Name:    "tier0_coverage_pct",
+		Name: "tier0_coverage_pct",
 
-		Help:    "Tier-0 viewer minute coverage percent observed on stream export.",
+		Help: "Tier-0 viewer minute coverage percent observed on stream export.",
 
 		Buckets: []float64{0, 20, 40, 60, 70, 80, 85, 90, 95, 100},
-
 	})
-
 )
 
-
-
 var bronzeTargetCount float64
-
-
 
 func RecordArchiveExportConfirmed(artifactType string) {
 
@@ -152,8 +123,6 @@ func RecordArchiveExportConfirmed(artifactType string) {
 
 }
 
-
-
 func RecordArchiveExportFailed(artifactType string) {
 
 	if artifactType = prometheusLabel(artifactType); artifactType != "" {
@@ -163,8 +132,6 @@ func RecordArchiveExportFailed(artifactType string) {
 	}
 
 }
-
-
 
 func RecordTier0CoveragePct(pct float64) {
 
@@ -184,8 +151,6 @@ func RecordTier0CoveragePct(pct float64) {
 
 }
 
-
-
 func SetBronzeChannelsTarget(count int) {
 
 	if count < 0 {
@@ -200,15 +165,11 @@ func SetBronzeChannelsTarget(count int) {
 
 }
 
-
-
 func IncBronzeChannelsIndexed() {
 
 	BronzeChannelsIndexedTotal.Inc()
 
 }
-
-
 
 func RecordBackfillJobCompleted(tier, status string) {
 
@@ -216,23 +177,17 @@ func RecordBackfillJobCompleted(tier, status string) {
 
 }
 
-
-
 func RecordBackfillWorkerTick(worker string) {
 
 	BackfillWorkerLastTickTimestamp.WithLabelValues(prometheusLabel(worker)).Set(float64(time.Now().Unix()))
 
 }
 
-
-
 func RecordBackfillWorkerPanic(worker string) {
 
 	BackfillWorkerPanicsTotal.WithLabelValues(prometheusLabel(worker)).Inc()
 
 }
-
-
 
 func RefreshBackfillJobGauges(ctx context.Context, db *pgxpool.Pool, staleAfter ...time.Duration) {
 
@@ -356,8 +311,6 @@ func RefreshBackfillJobGauges(ctx context.Context, db *pgxpool.Pool, staleAfter 
 
 }
 
-
-
 func RefreshCorpusCompletionGauges(ctx context.Context, db *pgxpool.Pool) {
 
 	if db == nil {
@@ -365,6 +318,8 @@ func RefreshCorpusCompletionGauges(ctx context.Context, db *pgxpool.Pool) {
 		return
 
 	}
+
+	CorpusTierCompletionRatio.Reset()
 
 	var bronzeCount float64
 
@@ -379,8 +334,6 @@ func RefreshCorpusCompletionGauges(ctx context.Context, db *pgxpool.Pool) {
 		}
 
 	}
-
-	CorpusTierCompletionRatio.Reset()
 
 	tierRows, err := db.Query(ctx, `
 
@@ -434,8 +387,6 @@ func RefreshCorpusCompletionGauges(ctx context.Context, db *pgxpool.Pool) {
 
 }
 
-
-
 func prometheusLabel(v string) string {
 
 	v = trimPrometheusLabel(v)
@@ -449,8 +400,6 @@ func prometheusLabel(v string) string {
 	return v
 
 }
-
-
 
 func trimPrometheusLabel(v string) string {
 

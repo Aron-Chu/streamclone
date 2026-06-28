@@ -127,6 +127,9 @@ func sessionsMatch(a, b sessionCandidate) bool {
 	if a.TwitchStreamID != "" && b.TwitchStreamID != "" && a.TwitchStreamID == b.TwitchStreamID {
 		return true
 	}
+	if a.TwitchStreamID != "" && b.TwitchStreamID != "" {
+		return false
+	}
 	if a.TTStreamID != "" && b.TTStreamID != "" && a.TTStreamID == b.TTStreamID {
 		return true
 	}
@@ -759,14 +762,18 @@ func (s *Store) ensureSessionForStreamTx(ctx context.Context, tx pgx.Tx, streamI
 	if streamID == "" {
 		return nil
 	}
+	targetID := streamID
+	if resolved, err := resolveCanonicalStream(ctx, tx, streamID); err == nil && strings.TrimSpace(resolved.CanonicalID) != "" {
+		targetID = strings.TrimSpace(resolved.CanonicalID)
+	}
 	var canonicalExists bool
 	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM analytics_streams WHERE stream_id = $1)`, streamID,
+		SELECT EXISTS(SELECT 1 FROM analytics_streams WHERE stream_id = $1)`, targetID,
 	).Scan(&canonicalExists); err != nil {
 		return err
 	}
 	if !canonicalExists {
-		return fmt.Errorf("canonical stream row %s missing from analytics_streams", streamID)
+		return fmt.Errorf("canonical stream row %s missing from analytics_streams", targetID)
 	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO analytics_stream_sessions (
@@ -787,6 +794,6 @@ func (s *Store) ensureSessionForStreamTx(ctx context.Context, tx pgx.Tx, streamI
 			'alias_repair'
 		FROM analytics_streams
 		WHERE stream_id = $1
-		ON CONFLICT (canonical_stream_id) DO NOTHING`, streamID)
+		ON CONFLICT (canonical_stream_id) DO NOTHING`, targetID)
 	return err
 }

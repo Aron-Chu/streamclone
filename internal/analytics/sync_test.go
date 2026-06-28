@@ -40,7 +40,7 @@ func TestParseTwitchTrackerHTML_Metadata(t *testing.T) {
 		} else {
 			t.Logf("Decoded keys: %s", string(keysBytes))
 		}
-		
+
 		// Map key to index
 		var keys []string
 		_ = json.Unmarshal(keysBytes, &keys)
@@ -48,7 +48,7 @@ func TestParseTwitchTrackerHTML_Metadata(t *testing.T) {
 		for idx, key := range keys {
 			keyToIndex[key] = idx
 		}
-		
+
 		getPartBytes := func(key string) ([]byte, bool) {
 			idx, ok := keyToIndex[key]
 			if !ok || idx >= len(parts)-1 {

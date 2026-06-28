@@ -15,23 +15,23 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"streamclone/internal/metrics"
 	"streamclone/internal/archive"
 	"streamclone/internal/archive/jobtracker"
+	"streamclone/internal/metrics"
 )
 
 const bronzeHelixVODLimit = 80
 
 // BronzeIndexState is one row in bronze_index_state.
 type BronzeIndexState struct {
-	Login           string     `json:"login"`
-	LastHelixAt     *time.Time `json:"lastHelixAt,omitempty"`
-	LastSummaryAt   *time.Time `json:"lastSummaryAt,omitempty"`
-	HelixBlobURI    string     `json:"helixBlobUri,omitempty"`
-	SummaryBlobURI  string     `json:"summaryBlobUri,omitempty"`
-	HelixRowCount   int        `json:"helixRowCount"`
-	Error           string     `json:"error,omitempty"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	Login          string     `json:"login"`
+	LastHelixAt    *time.Time `json:"lastHelixAt,omitempty"`
+	LastSummaryAt  *time.Time `json:"lastSummaryAt,omitempty"`
+	HelixBlobURI   string     `json:"helixBlobUri,omitempty"`
+	SummaryBlobURI string     `json:"summaryBlobUri,omitempty"`
+	HelixRowCount  int        `json:"helixRowCount"`
+	Error          string     `json:"error,omitempty"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 type bronzeHelixClient interface {
@@ -498,10 +498,10 @@ func (b *BronzeIndexer) exportBronzeIdentityCrosswalk(ctx context.Context, login
 	}
 	if b.identityEnabled {
 		if err := b.bronzeExp.ExportIdentity(ctx, archive.ChannelIdentityBlob{
-			Login:         login,
-			ChannelID:     channelID,
-			DisplayName:   displayName,
-			RawHelix:      rawHelix,
+			Login:       login,
+			ChannelID:   channelID,
+			DisplayName: displayName,
+			RawHelix:    rawHelix,
 		}); err != nil {
 			return err
 		}

@@ -139,6 +139,8 @@ func StartArchiveMetricsRefresh(ctx context.Context, db *pgxpool.Pool, interval 
 		refresh := func() {
 			RefreshBackfillJobGauges(ctx, db)
 			RefreshArchiveJobGauges(ctx, db)
+			RefreshTop500VODInventoryGauges(ctx, db)
+			RefreshCorpusHistoryGauges(ctx, db)
 		}
 		refresh()
 		for {

@@ -29,11 +29,11 @@ func NewGoldRulesEngine(alwaysTracked []string, minPeakViewers, minDurationMinut
 
 // GoldEval describes why a stream matched or missed gold rules.
 type GoldEval struct {
-	StreamID        string `json:"streamId"`
-	Login           string `json:"login"`
-	PeakViewers     int    `json:"peakViewers"`
-	DurationMinutes int    `json:"durationMinutes"`
-	Matched         bool   `json:"matched"`
+	StreamID        string   `json:"streamId"`
+	Login           string   `json:"login"`
+	PeakViewers     int      `json:"peakViewers"`
+	DurationMinutes int      `json:"durationMinutes"`
+	Matched         bool     `json:"matched"`
 	Reasons         []string `json:"reasons,omitempty"`
 }
 

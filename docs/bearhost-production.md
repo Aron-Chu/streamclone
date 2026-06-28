@@ -96,6 +96,26 @@ STREAM_ID=<id> BEARHOST_USE_DOCKER_GO=1 bash scripts/archive-restore-drill.sh
 
 **Fail closed:** Without secret or Twitch creds, `bearhost-deploy-phased.sh` exports `CORPUS_WORKERS_ENABLED=0` so workers stay healthy without Azure init crash loops. `analytics` never runs corpus workers regardless.
 
+### IVR shadow canary (PROD_SHADOW_CANARY_ONLY)
+
+Non-mutating IVR comparison runs **only on the corpus workers plane**, not on Pulse API mode (`profile-bearhost-pulse.env` keeps `GOLD_BACKFILL_ENABLED=false`).
+
+Merge overlay after corpus profile:
+
+```bash
+# deploy/env/profile-bearhost-corpus-ivr-shadow.env
+GOLD_IVR_ENABLED=true
+GOLD_IVR_SHADOW_MODE=true
+GOLD_IVR_LITE_ENABLED=false
+GOLD_IVR_PEAKS_ONLY_ENABLED=false
+GOLD_IVR_CANONICAL_REPLACE=false
+GOLD_IVR_ENABLED_CHANNEL_ALLOWLIST=ludwig
+```
+
+Requires migration **000050** (`chat_source`, `source_confidence`, `chat_source_detail` on `analytics_minute_rollups`). Startup logs `gold_ivr effective config` from analytics and backfill.
+
+Local proof: `bash scripts/bench/ivr-shadow-reconcile-proof.sh`. This is **not** IVR prod — artifacts only; GQL remains canonical.
+
 
 
 ---
@@ -455,8 +475,8 @@ Off by default on the 8 GB VPS. When you need trend charts during a corpus backf
 ```bash
 bash scripts/bearhost-observability.sh up
 # on your PC:
-ssh -i ~/.ssh/legacy-rollback-key -L 3000:127.0.0.1:3000 streamclone@legacy-rollback-host
-# open http://localhost:3000
+ssh -i ~/.ssh/legacy-rollback-key -L 3001:127.0.0.1:3000 streamclone@legacy-rollback-host
+# open http://localhost:3001/d/streamclone-corpus-global/streamclone-corpus-global
 bash scripts/bearhost-observability.sh down   # reclaim RAM when done
 ```
 
@@ -560,6 +580,8 @@ When all smoke gates pass:
 | OAuth on raw IP | Update Twitch redirect URIs or defer login test |
 
 | Scraper scrape timeout | Check proxy env; increase `SCRAPER_TIMEOUT_MS` in smoke |
+
+| Portal `/analytics` chart empty or hub 404 | Redeploy Pulse API analytics: `make bearhost-rsync` then `bash scripts/bearhost-pulse-redeploy-remote.sh`. Post-deploy: `PULSE_SMOKE_BASE_URL=https://api.streampulse.stream PULSE_EXPECT_HOSTED_MODE=true bash deploy/smoke/bearhost-pulse-api.sh` — gates `/v1/extension/health` and `GET /v1/public/hub?activityWindow=30m` (200, `activity.points.length >= 2`) |
 
 
 

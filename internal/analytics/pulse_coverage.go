@@ -135,6 +135,14 @@ func computePulseCoverage(
 		}
 	}
 
+	// After a failed job, allow manual retry when a VOD archive exists and coverage is still partial.
+	if backfillFailed && strings.TrimSpace(vodID) != "" && !hasFull {
+		canBackfill = true
+		if backfillReason == "" {
+			backfillReason = "retry_after_failure"
+		}
+	}
+
 	return decoratePulseCoverage(ExtensionCoverage{
 		State:                      state,
 		CoverageStartOffsetSeconds: coverageStart,
@@ -160,6 +168,15 @@ func decoratePulseCoverage(c ExtensionCoverage, vodID string) ExtensionCoverage 
 		case CoverageStateVODUnavailable:
 			c.VODStatus = "unavailable"
 			c.ManualRetryAllowed = true
+		}
+	}
+	if c.State == CoverageStateBackfillFailed && strings.TrimSpace(vodID) != "" {
+		c.ManualRetryAllowed = true
+		if !c.CanBackfill && !c.HasFullStreamCoverage {
+			c.CanBackfill = true
+			if c.BackfillReason == "" {
+				c.BackfillReason = "retry_after_failure"
+			}
 		}
 	}
 	if c.CopyKey == "" {

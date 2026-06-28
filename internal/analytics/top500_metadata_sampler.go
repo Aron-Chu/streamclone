@@ -9,12 +9,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"streamclone/internal/metrics"
 )
 
 const (
 	DefaultTop500MetadataTopN            = 100
+	MaxTop500MetadataTopN                = 1000
 	DefaultTop500MetadataBatchSize       = 100
+	MaxTop500MetadataBatchSize           = 100
 	DefaultTop500MetadataLiveInterval    = 60 * time.Second
 	DefaultTop500MetadataOfflineInterval = 10 * time.Minute
 	DefaultTop500MetadataStaleAfter      = 15 * time.Minute
@@ -108,10 +112,11 @@ type Top500SamplerTickResult struct {
 }
 
 type Top500MetadataSampler struct {
-	cfg      Top500SamplerConfig
-	store    Top500MetadataStore
-	provider Top500MetadataProvider
-	locker   Top500MetadataSamplerLocker
+	cfg        Top500SamplerConfig
+	store      Top500MetadataStore
+	provider   Top500MetadataProvider
+	locker     Top500MetadataSamplerLocker
+	planCursor int
 }
 
 func NewTop500MetadataSampler(cfg Top500SamplerConfig, store Top500MetadataStore, provider Top500MetadataProvider, locker Top500MetadataSamplerLocker) *Top500MetadataSampler {
@@ -124,10 +129,10 @@ func NewTop500MetadataSampler(cfg Top500SamplerConfig, store Top500MetadataStore
 }
 
 func normalizeTop500SamplerConfig(cfg Top500SamplerConfig) Top500SamplerConfig {
-	if cfg.TopN <= 0 || cfg.TopN > DefaultTop500MetadataTopN {
+	if cfg.TopN <= 0 || cfg.TopN > MaxTop500MetadataTopN {
 		cfg.TopN = DefaultTop500MetadataTopN
 	}
-	if cfg.BatchSize <= 0 || cfg.BatchSize > DefaultTop500MetadataBatchSize {
+	if cfg.BatchSize <= 0 || cfg.BatchSize > MaxTop500MetadataBatchSize {
 		cfg.BatchSize = DefaultTop500MetadataBatchSize
 	}
 	if cfg.LiveInterval <= 0 {
@@ -258,6 +263,10 @@ func (s *Top500MetadataSampler) PlanTick(ctx context.Context, now time.Time) (To
 		return result, err
 	}
 	channels = filterTop500SamplerRoster(channels, cfg.TopN)
+	if len(channels) > 1 && s.planCursor > 0 {
+		offset := s.planCursor % len(channels)
+		channels = append(channels[offset:], channels[:offset]...)
+	}
 	for _, channel := range channels {
 		current, err := s.store.GetTop500CurrentByChannelID(ctx, channel.ChannelID)
 		if err != nil {
@@ -272,11 +281,14 @@ func (s *Top500MetadataSampler) PlanTick(ctx context.Context, now time.Time) (To
 		}
 		result.SkippedNotDue = append(result.SkippedNotDue, channel)
 	}
+	if len(channels) > 0 {
+		s.planCursor = (s.planCursor + cfg.BatchSize) % len(channels)
+	}
 	return result, nil
 }
 
 func filterTop500SamplerRoster(channels []Top500Channel, topN int) []Top500Channel {
-	if topN <= 0 || topN > DefaultTop500MetadataTopN {
+	if topN <= 0 || topN > MaxTop500MetadataTopN {
 		topN = DefaultTop500MetadataTopN
 	}
 	filtered := make([]Top500Channel, 0, len(channels))
@@ -554,7 +566,7 @@ func (r *Top500SamplerTickResult) addClass(classification string) {
 }
 
 func (s *Store) ListEnabledTop500Channels(ctx context.Context, limit int) ([]Top500Channel, error) {
-	if limit <= 0 || limit > DefaultTop500MetadataTopN {
+	if limit <= 0 || limit > MaxTop500MetadataTopN {
 		limit = DefaultTop500MetadataTopN
 	}
 	rows, err := s.db.Query(ctx, `
@@ -615,21 +627,34 @@ func scanTop500Channel(row top500ChannelScanner) (Top500Channel, error) {
 }
 
 func (s *Store) TryTop500MetadataSamplerLock(ctx context.Context) (Top500MetadataSamplerLock, bool, error) {
+	if s == nil || s.db == nil {
+		return nil, false, nil
+	}
+	conn, err := s.db.Acquire(ctx)
+	if err != nil {
+		return nil, false, err
+	}
 	var acquired bool
-	if err := s.db.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, top500MetadataSamplerAdvisoryLockKey).Scan(&acquired); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, top500MetadataSamplerAdvisoryLockKey).Scan(&acquired); err != nil {
+		conn.Release()
 		return nil, false, err
 	}
 	if !acquired {
+		conn.Release()
 		return nil, false, nil
 	}
-	return top500MetadataPostgresLock{store: s}, true, nil
+	return &top500MetadataPostgresLock{conn: conn}, true, nil
 }
 
 type top500MetadataPostgresLock struct {
-	store *Store
+	conn *pgxpool.Conn
 }
 
-func (l top500MetadataPostgresLock) Release(ctx context.Context) error {
+func (l *top500MetadataPostgresLock) Release(ctx context.Context) error {
+	if l == nil || l.conn == nil {
+		return nil
+	}
+	defer l.conn.Release()
 	var released bool
-	return l.store.db.QueryRow(ctx, `SELECT pg_advisory_unlock($1)`, top500MetadataSamplerAdvisoryLockKey).Scan(&released)
+	return l.conn.QueryRow(ctx, `SELECT pg_advisory_unlock($1)`, top500MetadataSamplerAdvisoryLockKey).Scan(&released)
 }

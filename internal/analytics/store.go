@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"streamclone/internal/archive"
+	"streamclone/internal/emote/flags"
 	"streamclone/internal/emoteimage"
 	"streamclone/internal/metrics"
 	"streamclone/internal/timeseries"
@@ -94,9 +95,49 @@ const streamSelectColumns = `
 	COALESCE(vod_id,''), COALESCE(vod_source,''),
 	COALESCE(NULLIF(canonical_stream_id,''), stream_id), COALESCE(viewer_source,'')`
 
+func (s *Store) ensureStreamStubBeforeSessionResolve(
+	ctx context.Context,
+	streamID, broadcasterID, login, title, category string,
+	startedAt time.Time,
+	viewerSource string,
+) error {
+	if streamID == "" || normalizeLogin(login) == "" {
+		return nil
+	}
+	if strings.TrimSpace(broadcasterID) == "" {
+		broadcasterID = "pending"
+	}
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	if strings.TrimSpace(viewerSource) == "" {
+		viewerSource = ViewerSourceUnknown
+	}
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO analytics_streams (
+			stream_id, canonical_stream_id, broadcaster_id, login, display_name,
+			title, category, started_at, last_seen_at, tags, peak_viewers, viewer_source
+		)
+		VALUES ($1, $1, $2, $3, $3, $4, $5, $6, $6, '[]'::jsonb, 0, $7)
+		ON CONFLICT (stream_id) DO NOTHING`,
+		streamID, broadcasterID, normalizeLogin(login), nullIfEmpty(title), nullIfEmpty(category), startedAt, viewerSource,
+	)
+	return err
+}
+
 func (s *Store) UpsertLiveStream(ctx context.Context, stream LiveStream, profile UserProfile, seenAt time.Time) error {
 	if stream.StartedAt.IsZero() {
 		stream.StartedAt = seenAt
+	}
+	broadcasterID := stream.BroadcasterID
+	if broadcasterID == "" {
+		broadcasterID = profile.ID
+	}
+	incomingStreamID := stream.ID
+	if err := s.ensureStreamStubBeforeSessionResolve(
+		ctx, incomingStreamID, broadcasterID, stream.Login, stream.Title, stream.GameName, stream.StartedAt, ViewerSourceLive,
+	); err != nil {
+		return err
 	}
 	resolved, err := s.ResolveOrCreateSession(ctx, SessionResolveInput{
 		Login:          stream.Login,
@@ -120,10 +161,6 @@ func (s *Store) UpsertLiveStream(ctx context.Context, stream LiveStream, profile
 	displayName := stream.DisplayName
 	if profile.DisplayName != "" {
 		displayName = profile.DisplayName
-	}
-	broadcasterID := stream.BroadcasterID
-	if broadcasterID == "" {
-		broadcasterID = profile.ID
 	}
 	_, err = s.db.Exec(ctx, `
 		INSERT INTO analytics_streams (
@@ -215,9 +252,10 @@ func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO analytics_minute_rollups (
 			stream_id, minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
-			chat_count, total_emote_count, seventv_emote_count, emotes_json
+			chat_count, total_emote_count, seventv_emote_count, emotes_json,
+			chat_source, source_confidence
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
 		ON CONFLICT (stream_id, minute_ts) DO UPDATE SET
 			viewer_avg=CASE WHEN EXCLUDED.viewer_avg > 0 THEN EXCLUDED.viewer_avg ELSE analytics_minute_rollups.viewer_avg END,
 			viewer_max=GREATEST(analytics_minute_rollups.viewer_max, EXCLUDED.viewer_max),
@@ -227,9 +265,20 @@ func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup 
 			total_emote_count=GREATEST(analytics_minute_rollups.total_emote_count, EXCLUDED.total_emote_count),
 			seventv_emote_count=GREATEST(analytics_minute_rollups.seventv_emote_count, EXCLUDED.seventv_emote_count),
 			emotes_json=EXCLUDED.emotes_json,
+			chat_source=CASE
+				WHEN COALESCE(analytics_minute_rollups.source_confidence,'') = 'canonical' THEN analytics_minute_rollups.chat_source
+				WHEN EXCLUDED.chat_count > 0 THEN EXCLUDED.chat_source
+				ELSE analytics_minute_rollups.chat_source
+			END,
+			source_confidence=CASE
+				WHEN COALESCE(analytics_minute_rollups.source_confidence,'') = 'canonical' THEN analytics_minute_rollups.source_confidence
+				WHEN EXCLUDED.chat_count > 0 THEN EXCLUDED.source_confidence
+				ELSE analytics_minute_rollups.source_confidence
+			END,
 			updated_at=now()`,
 		streamID, rollup.MinuteTS, rollup.ViewerAvg, rollup.ViewerMax, rollup.ViewerLatest, rollup.ViewerSamples,
 		rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount, string(emotes),
+		RollupChatSourceLive, SourceConfidenceVerified,
 	)
 	if err != nil {
 		result = "error"
@@ -429,6 +478,32 @@ func (s *Store) StreamByID(ctx context.Context, streamID string) (*StreamRecord,
 	return scanStream(rows)
 }
 
+func (s *Store) StreamByVodID(ctx context.Context, vodID string) (*StreamRecord, error) {
+	vodID = strings.TrimSpace(vodID)
+	if vodID == "" {
+		return nil, pgx.ErrNoRows
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT stream_id, broadcaster_id, login, COALESCE(display_name,''), COALESCE(profile_image_url,''),
+			COALESCE(description,''), COALESCE(title,''), COALESCE(category,''), tags, COALESCE(language,''),
+			COALESCE(thumbnail_url,''), started_at, ended_at, last_seen_at, current_viewers, avg_viewers,
+			peak_viewers, viewer_samples, chat_messages, total_emote_uses, seventv_emote_uses, COALESCE(vod_id,''), COALESCE(vod_source,''),
+			COALESCE(canonical_stream_id, stream_id), COALESCE(viewer_source,'unknown')
+		FROM analytics_streams
+		WHERE vod_id=$1
+		  AND COALESCE(canonical_stream_id, stream_id) = stream_id
+		ORDER BY ended_at DESC NULLS LAST, last_seen_at DESC, started_at DESC
+		LIMIT 1`, vodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, pgx.ErrNoRows
+	}
+	return scanStream(rows)
+}
+
 func (s *Store) GetStreamUpdatedAt(ctx context.Context, streamID string) (time.Time, error) {
 	canonicalID, err := s.ResolveCanonicalStreamID(ctx, streamID)
 	if err != nil {
@@ -479,7 +554,8 @@ func (s *Store) RollupsByStream(ctx context.Context, streamID string) ([]MinuteR
 	}
 	rows, err := s.db.Query(ctx, `
 		SELECT minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
-			chat_count, total_emote_count, seventv_emote_count, emotes_json
+			chat_count, total_emote_count, seventv_emote_count, emotes_json,
+			COALESCE(chat_source, ''), COALESCE(source_confidence, ''), COALESCE(chat_source_detail, '')
 		FROM analytics_minute_rollups
 		WHERE stream_id=$1
 		ORDER BY minute_ts ASC`, canonicalID)
@@ -491,7 +567,7 @@ func (s *Store) RollupsByStream(ctx context.Context, streamID string) ([]MinuteR
 	for rows.Next() {
 		var r MinuteRollup
 		var raw []byte
-		if err := rows.Scan(&r.MinuteTS, &r.ViewerAvg, &r.ViewerMax, &r.ViewerLatest, &r.ViewerSamples, &r.ChatCount, &r.TotalEmoteCount, &r.SevenTVEmoteCount, &raw); err != nil {
+		if err := rows.Scan(&r.MinuteTS, &r.ViewerAvg, &r.ViewerMax, &r.ViewerLatest, &r.ViewerSamples, &r.ChatCount, &r.TotalEmoteCount, &r.SevenTVEmoteCount, &raw, &r.ChatSource, &r.SourceConfidence, &r.ChatSourceDetail); err != nil {
 			return nil, err
 		}
 		if len(raw) > 0 {
@@ -500,6 +576,233 @@ func (s *Store) RollupsByStream(ctx context.Context, streamID string) ([]MinuteR
 		if r.Emotes == nil {
 			r.Emotes = map[string]int{}
 		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RecentRollupsByStreamID returns up to limit most-recent minute rollups for an
+// already-canonical stream id, ordered ascending by minute. Unlike
+// RollupsByStream it skips the canonical-id resolve query and bounds the row
+// count, which keeps the public hub aggregate cheap when joining many channels.
+func (s *Store) RecentRollupsByStreamID(ctx context.Context, canonicalStreamID string, limit int) ([]MinuteRollup, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	canonicalStreamID = strings.TrimSpace(canonicalStreamID)
+	if canonicalStreamID == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 240 {
+		limit = 60
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
+			chat_count, total_emote_count, seventv_emote_count, emotes_json,
+			COALESCE(chat_source, ''), COALESCE(source_confidence, ''), COALESCE(chat_source_detail, '')
+		FROM analytics_minute_rollups
+		WHERE stream_id=$1
+		ORDER BY minute_ts DESC
+		LIMIT $2`, canonicalStreamID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MinuteRollup
+	for rows.Next() {
+		var r MinuteRollup
+		var raw []byte
+		if err := rows.Scan(&r.MinuteTS, &r.ViewerAvg, &r.ViewerMax, &r.ViewerLatest, &r.ViewerSamples, &r.ChatCount, &r.TotalEmoteCount, &r.SevenTVEmoteCount, &raw, &r.ChatSource, &r.SourceConfidence, &r.ChatSourceDetail); err != nil {
+			return nil, err
+		}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &r.Emotes)
+		}
+		if r.Emotes == nil {
+			r.Emotes = map[string]int{}
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Reverse to ascending (query fetched newest-first for the LIMIT).
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+// LatestLiveStreamWithRecentRollupsByLogin finds the currently-open stream row
+// for a login that is actually receiving recent rollups. Top-N metadata can
+// refresh a metadata-only row more recently than the IRC collector row; hub and
+// readiness views use this only as a fallback when their preferred stream has no
+// fresh rollup signal.
+func (s *Store) LatestLiveStreamWithRecentRollupsByLogin(ctx context.Context, login string, since time.Time, limit int) (*StreamRecord, []MinuteRollup, error) {
+	if s == nil || s.db == nil {
+		return nil, nil, nil
+	}
+	login = normalizeLogin(login)
+	if login == "" {
+		return nil, nil, nil
+	}
+	if since.IsZero() {
+		since = time.Now().UTC().Add(-15 * time.Minute)
+	}
+	if limit <= 0 || limit > 240 {
+		limit = 60
+	}
+	row := s.db.QueryRow(ctx, `
+		SELECT `+streamSelectColumns+`
+		FROM analytics_streams
+		JOIN LATERAL (
+			SELECT MAX(minute_ts) AS latest_rollup_at
+			FROM analytics_minute_rollups
+			WHERE stream_id = COALESCE(NULLIF(analytics_streams.canonical_stream_id,''), analytics_streams.stream_id)
+			  AND minute_ts >= $2
+			  AND (
+				chat_count > 0 OR total_emote_count > 0 OR seventv_emote_count > 0 OR viewer_samples > 0
+			  )
+		) recent ON recent.latest_rollup_at IS NOT NULL
+		WHERE login=$1
+		  AND ended_at IS NULL
+		  AND COALESCE(NULLIF(canonical_stream_id,''), stream_id) = stream_id
+		ORDER BY recent.latest_rollup_at DESC, last_seen_at DESC, started_at DESC
+		LIMIT 1`, login, since.UTC())
+	rec, err := scanStream(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	rollups, err := s.RecentRollupsByStreamID(ctx, rec.StreamID, limit)
+	if err != nil {
+		return rec, nil, err
+	}
+	return rec, rollupsSince(rollups, since), nil
+}
+
+// RecentRollupBucketsByStreamID returns bounded aggregate buckets for a recent
+// time window. It is used by the public hub's long-range activity chart so the
+// portal can show 24h/7d/month views without returning raw rollups.
+func (s *Store) RecentRollupBucketsByStreamID(ctx context.Context, canonicalStreamID string, since time.Time, bucketMinutes, limit int) ([]MinuteRollup, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	canonicalStreamID = strings.TrimSpace(canonicalStreamID)
+	if canonicalStreamID == "" {
+		return nil, nil
+	}
+	if bucketMinutes <= 0 {
+		bucketMinutes = 1
+	}
+	if limit <= 0 || limit > 240 {
+		limit = 240
+	}
+	rows, err := s.db.Query(ctx, `
+		WITH bucketed AS (
+			SELECT
+				to_timestamp(floor(extract(epoch from minute_ts) / ($3::double precision * 60)) * ($3::double precision * 60)) AS bucket_ts,
+				minute_ts,
+				viewer_avg,
+				viewer_max,
+				viewer_latest,
+				viewer_samples,
+				chat_count,
+				total_emote_count,
+				seventv_emote_count
+			FROM analytics_minute_rollups
+			WHERE stream_id=$1 AND minute_ts >= $2
+		)
+		SELECT *
+		FROM (
+			SELECT
+				bucket_ts,
+				COALESCE(AVG(NULLIF(viewer_avg, 0)), 0)::int AS viewer_avg,
+				COALESCE(MAX(viewer_max), 0)::int AS viewer_max,
+				COALESCE(MAX(viewer_latest), 0)::int AS viewer_latest,
+				COALESCE(SUM(viewer_samples), 0)::int AS viewer_samples,
+				COALESCE(SUM(chat_count), 0)::int AS chat_count,
+				COALESCE(SUM(total_emote_count), 0)::int AS total_emote_count,
+				COALESCE(SUM(seventv_emote_count), 0)::int AS seventv_emote_count
+			FROM bucketed
+			GROUP BY bucket_ts
+			ORDER BY bucket_ts DESC
+			LIMIT $4
+		) recent
+		ORDER BY bucket_ts ASC`, canonicalStreamID, since.UTC(), bucketMinutes, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MinuteRollup
+	for rows.Next() {
+		var r MinuteRollup
+		if err := rows.Scan(&r.MinuteTS, &r.ViewerAvg, &r.ViewerMax, &r.ViewerLatest, &r.ViewerSamples, &r.ChatCount, &r.TotalEmoteCount, &r.SevenTVEmoteCount); err != nil {
+			return nil, err
+		}
+		r.Emotes = map[string]int{}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// AggregateRollupBucketsSince returns bounded all-stream aggregate buckets for
+// the public hub's longer activity windows. It intentionally omits emotes_json:
+// callers get aggregate chat/viewer/emote counts without raw rollup maps.
+func (s *Store) AggregateRollupBucketsSince(ctx context.Context, since time.Time, bucketMinutes, limit int) ([]MinuteRollup, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	if bucketMinutes <= 0 {
+		bucketMinutes = 1
+	}
+	if limit <= 0 || limit > 240 {
+		limit = 240
+	}
+	rows, err := s.db.Query(ctx, `
+		WITH bucketed AS (
+			SELECT
+				to_timestamp(floor(extract(epoch from minute_ts) / ($2::double precision * 60)) * ($2::double precision * 60)) AS bucket_ts,
+				viewer_avg,
+				viewer_max,
+				viewer_latest,
+				viewer_samples,
+				chat_count,
+				total_emote_count,
+				seventv_emote_count
+			FROM analytics_minute_rollups
+			WHERE minute_ts >= $1
+		)
+		SELECT *
+		FROM (
+			SELECT
+				bucket_ts,
+				COALESCE(AVG(NULLIF(viewer_avg, 0)), 0)::int AS viewer_avg,
+				COALESCE(MAX(viewer_max), 0)::int AS viewer_max,
+				COALESCE(MAX(viewer_latest), 0)::int AS viewer_latest,
+				COALESCE(SUM(viewer_samples), 0)::int AS viewer_samples,
+				COALESCE(SUM(chat_count), 0)::int AS chat_count,
+				COALESCE(SUM(total_emote_count), 0)::int AS total_emote_count,
+				COALESCE(SUM(seventv_emote_count), 0)::int AS seventv_emote_count
+			FROM bucketed
+			GROUP BY bucket_ts
+			ORDER BY bucket_ts DESC
+			LIMIT $3
+		) recent
+		ORDER BY bucket_ts ASC`, since.UTC(), bucketMinutes, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MinuteRollup
+	for rows.Next() {
+		var r MinuteRollup
+		if err := rows.Scan(&r.MinuteTS, &r.ViewerAvg, &r.ViewerMax, &r.ViewerLatest, &r.ViewerSamples, &r.ChatCount, &r.TotalEmoteCount, &r.SevenTVEmoteCount); err != nil {
+			return nil, err
+		}
+		r.Emotes = map[string]int{}
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -676,6 +979,11 @@ func (s *Store) UpsertStreamPlaceholder(ctx context.Context, streamID, broadcast
 	}
 	if title == "" {
 		title = "Syncing..."
+	}
+	if err := s.ensureStreamStubBeforeSessionResolve(
+		ctx, streamID, broadcasterID, login, title, "Live", startedAt, ViewerSourceUnknown,
+	); err != nil {
+		return err
 	}
 	resolved, err := s.ResolveOrCreateSession(ctx, SessionResolveInput{
 		Login:         login,
@@ -942,9 +1250,23 @@ func emoteImageURL(provider, id string) string {
 	return emoteimage.URL(provider, id, "1x")
 }
 
+// LookupProviderEmoteIDs maps synced emote-service UUIDs to upstream provider ids.
+func (s *Store) LookupProviderEmoteIDs(ctx context.Context, localIDs []string) (map[string]string, error) {
+	return s.lookupProviderEmoteIDs(ctx, localIDs, nil)
+}
+
 // LookupSevenTVProviderEmoteIDs maps synced emote-service UUIDs to 7TV provider ids.
 func (s *Store) LookupSevenTVProviderEmoteIDs(ctx context.Context, localIDs []string) (map[string]string, error) {
-	out := map[string]string{}
+	return s.lookupProviderEmoteIDs(ctx, localIDs, []string{"seventv", "7tv"})
+}
+
+type EmoteMetadata struct {
+	ZeroWidth bool
+	Animated  bool
+}
+
+func (s *Store) LookupEmoteMetadata(ctx context.Context, localIDs []string) (map[string]EmoteMetadata, error) {
+	out := map[string]EmoteMetadata{}
 	if s == nil || s.db == nil || len(localIDs) == 0 {
 		return out, nil
 	}
@@ -965,11 +1287,61 @@ func (s *Store) LookupSevenTVProviderEmoteIDs(ctx context.Context, localIDs []st
 		return out, nil
 	}
 	rows, err := s.db.Query(ctx, `
+		SELECT id::text, flags, animated
+		FROM emotes
+		WHERE id = ANY($1::uuid[])`, unique)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var localID string
+		var packedFlags int
+		var animated bool
+		if err := rows.Scan(&localID, &packedFlags, &animated); err != nil {
+			return nil, err
+		}
+		out[localID] = EmoteMetadata{
+			ZeroWidth: flags.IsZeroWidth(packedFlags),
+			Animated:  animated || flags.IsAnimated(packedFlags),
+		}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) lookupProviderEmoteIDs(ctx context.Context, localIDs []string, providers []string) (map[string]string, error) {
+	out := map[string]string{}
+	if s == nil || s.db == nil || len(localIDs) == 0 {
+		return out, nil
+	}
+	unique := make([]string, 0, len(localIDs))
+	seen := map[string]struct{}{}
+	for _, id := range localIDs {
+		id = strings.TrimSpace(id)
+		if !emoteimage.IsLocalEmoteID(id) {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return out, nil
+	}
+	query := `
 		SELECT id::text, provider_emote_id
 		FROM emotes
-		WHERE provider IN ('seventv', '7tv')
-		  AND id = ANY($1::uuid[])
-		  AND COALESCE(provider_emote_id, '') <> ''`, unique)
+		WHERE id = ANY($1::uuid[])
+		  AND COALESCE(provider_emote_id, '') <> ''`
+	args := []any{unique}
+	if len(providers) > 0 {
+		query += `
+		  AND provider = ANY($2::text[])`
+		args = append(args, providers)
+	}
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1133,12 +1505,14 @@ func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, ro
 			result = "error"
 			return err
 		}
+		chatSource, sourceConfidence, chatSourceDetail := bulkUpsertChatSourceForRollup(rollup)
 		batch.Queue(`
 			INSERT INTO analytics_minute_rollups (
 				stream_id, minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
-				chat_count, total_emote_count, seventv_emote_count, emotes_json
+				chat_count, total_emote_count, seventv_emote_count, emotes_json,
+				chat_source, source_confidence, chat_source_detail
 			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)
 			ON CONFLICT (stream_id, minute_ts) DO UPDATE SET
 				viewer_avg=CASE WHEN EXCLUDED.viewer_avg > 0 THEN EXCLUDED.viewer_avg ELSE analytics_minute_rollups.viewer_avg END,
 				viewer_max=GREATEST(analytics_minute_rollups.viewer_max, EXCLUDED.viewer_max),
@@ -1148,9 +1522,25 @@ func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, ro
 				total_emote_count=GREATEST(analytics_minute_rollups.total_emote_count, EXCLUDED.total_emote_count),
 				seventv_emote_count=GREATEST(analytics_minute_rollups.seventv_emote_count, EXCLUDED.seventv_emote_count),
 				emotes_json=EXCLUDED.emotes_json,
+				chat_source=CASE
+					WHEN COALESCE(analytics_minute_rollups.source_confidence,'') = 'canonical' THEN analytics_minute_rollups.chat_source
+					WHEN EXCLUDED.chat_count > 0 THEN EXCLUDED.chat_source
+					ELSE analytics_minute_rollups.chat_source
+				END,
+				source_confidence=CASE
+					WHEN COALESCE(analytics_minute_rollups.source_confidence,'') = 'canonical' THEN analytics_minute_rollups.source_confidence
+					WHEN EXCLUDED.chat_count > 0 THEN EXCLUDED.source_confidence
+					ELSE analytics_minute_rollups.source_confidence
+				END,
+				chat_source_detail=CASE
+					WHEN COALESCE(analytics_minute_rollups.source_confidence,'') = 'canonical' THEN analytics_minute_rollups.chat_source_detail
+					WHEN EXCLUDED.chat_count > 0 THEN EXCLUDED.chat_source_detail
+					ELSE analytics_minute_rollups.chat_source_detail
+				END,
 				updated_at=now()`,
 			streamID, rollup.MinuteTS, rollup.ViewerAvg, rollup.ViewerMax, rollup.ViewerLatest, rollup.ViewerSamples,
 			rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount, string(emotes),
+			chatSource, sourceConfidence, chatSourceDetail,
 		)
 		queued++
 	}
@@ -1222,16 +1612,21 @@ func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollu
 		batch.Queue(`
 			INSERT INTO analytics_minute_rollups (
 				stream_id, minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
-				chat_count, total_emote_count, seventv_emote_count, emotes_json
+				chat_count, total_emote_count, seventv_emote_count, emotes_json,
+				chat_source, source_confidence, chat_source_detail
 			)
-			VALUES ($1,$2,0,0,0,0,$3,$4,$5,$6::jsonb)
+			VALUES ($1,$2,0,0,0,0,$3,$4,$5,$6::jsonb,$7,$8,'')
 			ON CONFLICT (stream_id, minute_ts) DO UPDATE SET
 				chat_count=GREATEST(analytics_minute_rollups.chat_count, EXCLUDED.chat_count),
 				total_emote_count=GREATEST(analytics_minute_rollups.total_emote_count, EXCLUDED.total_emote_count),
 				seventv_emote_count=GREATEST(analytics_minute_rollups.seventv_emote_count, EXCLUDED.seventv_emote_count),
 				emotes_json=EXCLUDED.emotes_json,
+				chat_source=EXCLUDED.chat_source,
+				source_confidence=EXCLUDED.source_confidence,
+				chat_source_detail='',
 				updated_at=now()`,
-			streamID, rollup.MinuteTS, rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount, string(emotes),
+			streamID, rollup.MinuteTS, rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount,
+			string(emotes), RollupChatSourceGQL, SourceConfidenceCanonical,
 		)
 		queued++
 	}

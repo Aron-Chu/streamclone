@@ -46,6 +46,10 @@ func (h *Handler) listPulseWatchlist(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
+	if h.pulseHosted.Hosted && !pulsePrincipalCanWriteUserState(principal) {
+		h.requireHostedUserStatePrincipal(w, r)
+		return
+	}
 	items, err := h.store.ListPulseWatchlist(r.Context(), principal.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -61,6 +65,10 @@ func (h *Handler) addPulseWatchlist(w http.ResponseWriter, r *http.Request) {
 	principal, ok := pulsePrincipalFromContext(r.Context())
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.pulseHosted.Hosted && !pulsePrincipalCanWriteUserState(principal) {
+		h.requireHostedUserStatePrincipal(w, r)
 		return
 	}
 	var req addPulseWatchlistRequest
@@ -133,6 +141,10 @@ func (h *Handler) deletePulseWatchlist(w http.ResponseWriter, r *http.Request) {
 	principal, ok := pulsePrincipalFromContext(r.Context())
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.pulseHosted.Hosted && !pulsePrincipalCanWriteUserState(principal) {
+		h.requireHostedUserStatePrincipal(w, r)
 		return
 	}
 	login, ok := validLogin(chi.URLParam(r, "login"))

@@ -65,14 +65,14 @@ type PulseWatchlistSummaryRecap struct {
 }
 
 type PulseWatchlistSummaryMoment struct {
-	ID             string `json:"id"`
-	Login          string `json:"login"`
-	StreamID       string `json:"streamId"`
-	OffsetSeconds  *int   `json:"offsetSeconds,omitempty"`
-	Title          string `json:"title"`
-	SignalType     string `json:"signalType,omitempty"`
-	Confidence     string `json:"confidence,omitempty"`
-	Saved          bool   `json:"saved"`
+	ID            string `json:"id"`
+	Login         string `json:"login"`
+	StreamID      string `json:"streamId"`
+	OffsetSeconds *int   `json:"offsetSeconds,omitempty"`
+	Title         string `json:"title"`
+	SignalType    string `json:"signalType,omitempty"`
+	Confidence    string `json:"confidence,omitempty"`
+	Saved         bool   `json:"saved"`
 }
 
 type PulseWatchlistSummaryAttention struct {
@@ -159,7 +159,7 @@ func (h *Handler) watchlistSummaryStore() watchlistSummaryStore {
 
 func (h *Handler) watchlistSummaryContext() watchlistSummaryContext {
 	ctx := watchlistSummaryContext{
-		isTracked: func(string) bool { return false },
+		isTracked:       func(string) bool { return false },
 		backfillRunning: func(string) bool { return false },
 		backfillFailed:  func(string) bool { return false },
 	}

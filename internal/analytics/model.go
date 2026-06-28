@@ -18,31 +18,31 @@ type WatchResponse struct {
 }
 
 type StreamRecord struct {
-	StreamID         string     `json:"streamId"`
-	BroadcasterID    string     `json:"broadcasterId"`
-	Login            string     `json:"login"`
-	DisplayName      string     `json:"displayName,omitempty"`
-	ProfileImageURL  string     `json:"profileImageUrl,omitempty"`
-	Description      string     `json:"description,omitempty"`
-	Title            string     `json:"title,omitempty"`
-	Category         string     `json:"category,omitempty"`
-	Tags             []string   `json:"tags"`
-	Language         string     `json:"language,omitempty"`
-	ThumbnailURL     string     `json:"thumbnailUrl,omitempty"`
-	StartedAt        time.Time  `json:"startedAt"`
-	EndedAt          *time.Time `json:"endedAt,omitempty"`
-	LastSeenAt       time.Time  `json:"lastSeenAt"`
-	CurrentViewers   int        `json:"currentViewers"`
-	AvgViewers       int        `json:"avgViewers"`
-	PeakViewers      int        `json:"peakViewers"`
-	ViewerSamples    int        `json:"viewerSamples"`
-	ChatMessages     int64      `json:"chatMessages"`
-	TotalEmoteUses   int64      `json:"totalEmoteUses"`
-	SevenTVEmoteUses int64      `json:"seventvEmoteUses"`
-	VodID            string     `json:"vodId,omitempty"`
-	VodSource        string     `json:"vodSource,omitempty"`
-	CanonicalStreamID string    `json:"canonicalStreamId,omitempty"`
-	ViewerSource     string     `json:"viewerSource,omitempty"`
+	StreamID          string     `json:"streamId"`
+	BroadcasterID     string     `json:"broadcasterId"`
+	Login             string     `json:"login"`
+	DisplayName       string     `json:"displayName,omitempty"`
+	ProfileImageURL   string     `json:"profileImageUrl,omitempty"`
+	Description       string     `json:"description,omitempty"`
+	Title             string     `json:"title,omitempty"`
+	Category          string     `json:"category,omitempty"`
+	Tags              []string   `json:"tags"`
+	Language          string     `json:"language,omitempty"`
+	ThumbnailURL      string     `json:"thumbnailUrl,omitempty"`
+	StartedAt         time.Time  `json:"startedAt"`
+	EndedAt           *time.Time `json:"endedAt,omitempty"`
+	LastSeenAt        time.Time  `json:"lastSeenAt"`
+	CurrentViewers    int        `json:"currentViewers"`
+	AvgViewers        int        `json:"avgViewers"`
+	PeakViewers       int        `json:"peakViewers"`
+	ViewerSamples     int        `json:"viewerSamples"`
+	ChatMessages      int64      `json:"chatMessages"`
+	TotalEmoteUses    int64      `json:"totalEmoteUses"`
+	SevenTVEmoteUses  int64      `json:"seventvEmoteUses"`
+	VodID             string     `json:"vodId,omitempty"`
+	VodSource         string     `json:"vodSource,omitempty"`
+	CanonicalStreamID string     `json:"canonicalStreamId,omitempty"`
+	ViewerSource      string     `json:"viewerSource,omitempty"`
 }
 
 type MinuteRollup struct {
@@ -56,32 +56,39 @@ type MinuteRollup struct {
 	SevenTVEmoteCount int            `json:"seventvEmoteCount"`
 	Emotes            map[string]int `json:"emotes,omitempty"`
 	Missing           bool           `json:"missing,omitempty"`
+	ChatSource        string         `json:"chatSource,omitempty"`
+	SourceConfidence  string         `json:"sourceConfidence,omitempty"`
+	ChatSourceDetail  string         `json:"chatSourceDetail,omitempty"`
 }
 
 type TopEmote struct {
-	Key      string `json:"key"`
-	Name     string `json:"name"`
-	ID       string `json:"id,omitempty"`
-	Provider string `json:"provider,omitempty"`
-	ImageURL string `json:"imageUrl,omitempty"`
-	Count    int    `json:"count"`
+	Key       string `json:"key"`
+	Name      string `json:"name"`
+	ID        string `json:"id,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	ImageURL  string `json:"imageUrl,omitempty"`
+	Count     int    `json:"count"`
+	ZeroWidth bool   `json:"zeroWidth,omitempty"`
+	Animated  bool   `json:"animated,omitempty"`
 }
 
 type StreamDetailResponse struct {
-	Channel          string                `json:"channel"`
-	State            string                `json:"state"`
-	Stream           *StreamRecord         `json:"stream,omitempty"`
-	Rollups          []MinuteRollup        `json:"rollups"`
-	TopEmotes        []TopEmote            `json:"topEmotes"`
-	Sources          []SourceStatus        `json:"sources"`
-	UpdatedAt        int64                 `json:"updatedAt"`
-	VodID            string                `json:"vodId,omitempty"`
-	VodSource        string                `json:"vodSource,omitempty"`
-	SyncPhase        string                `json:"syncPhase,omitempty"`
-	ChatCoveragePct  float64               `json:"chatCoveragePct,omitempty"`
-	VodDurationSec   int                   `json:"vodDurationSec,omitempty"`
-	ChatCoverage     *ChatCoverageSummary  `json:"chatCoverage,omitempty"`
-	ViewerSource     string                `json:"viewerSource,omitempty"`
+	Channel         string                    `json:"channel"`
+	State           string                    `json:"state"`
+	Stream          *StreamRecord             `json:"stream,omitempty"`
+	Rollups         []MinuteRollup            `json:"rollups"`
+	TopEmotes       []TopEmote                `json:"topEmotes"`
+	Sources         []SourceStatus            `json:"sources"`
+	UpdatedAt       int64                     `json:"updatedAt"`
+	VodID           string                    `json:"vodId,omitempty"`
+	VodSource       string                    `json:"vodSource,omitempty"`
+	SyncPhase       string                    `json:"syncPhase,omitempty"`
+	ChatCoveragePct float64                   `json:"chatCoveragePct,omitempty"`
+	VodDurationSec  int                       `json:"vodDurationSec,omitempty"`
+	ChatCoverage    *ChatCoverageSummary      `json:"chatCoverage,omitempty"`
+	ChatSourceMeta  *StreamChatSourceMetadata `json:"chatSource,omitempty"`
+	ViewerSource    string                    `json:"viewerSource,omitempty"`
+	StoredArtifacts *StoredArtifactsSummary   `json:"storedArtifacts,omitempty"`
 }
 
 type StreamsResponse struct {
@@ -105,12 +112,13 @@ type StreamSummaryMetrics struct {
 }
 
 type StreamSummaryResponse struct {
-	Channel   string               `json:"channel"`
-	Stream    *StreamRecord        `json:"stream,omitempty"`
-	Metrics   StreamSummaryMetrics `json:"metrics"`
-	TopEmotes []TopEmote           `json:"topEmotes"`
-	Sources   []SourceStatus       `json:"sources"`
-	UpdatedAt int64                `json:"updatedAt"`
+	Channel         string                  `json:"channel"`
+	Stream          *StreamRecord           `json:"stream,omitempty"`
+	Metrics         StreamSummaryMetrics    `json:"metrics"`
+	TopEmotes       []TopEmote              `json:"topEmotes"`
+	Sources         []SourceStatus          `json:"sources"`
+	UpdatedAt       int64                   `json:"updatedAt"`
+	StoredArtifacts *StoredArtifactsSummary `json:"storedArtifacts,omitempty"`
 }
 
 type RankedStreamsResponse struct {

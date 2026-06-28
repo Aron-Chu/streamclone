@@ -68,6 +68,7 @@ type SyncService struct {
 	ttDirectHTTPStaleOnly         bool
 	ttDirectHTTPTimeoutMS         int
 	ttViewerSmoothWindow          int
+	ttUseProxy                    bool
 	directHTTP                    directHTTPTelemetry
 	trackerPrefetch               trackerPrefetchState
 	trackerScrapeCoalesce         *trackerScrapeCoalesce
@@ -88,6 +89,7 @@ type SyncService struct {
 	archiveExporter      SyncArchiveExporter
 	archiveTTExporter    ArchiveTTExporter
 	silverRawTTChartJSON bool
+	goldIVR              *GoldIVRService
 }
 
 var errTrackerAccessProtected = errors.New("tracker access protected")
@@ -142,6 +144,7 @@ func NewSyncService(
 	ttDirectHTTPStaleOnly bool,
 	ttDirectHTTPTimeoutMS int,
 	ttViewerSmoothWindow int,
+	ttUseProxy bool,
 ) *SyncService {
 	if trackerScrapeTimeoutMS <= 0 {
 		trackerScrapeTimeoutMS = 120000
@@ -257,8 +260,8 @@ func NewSyncService(
 		trackerScrapeTimeoutMS:        trackerScrapeTimeoutMS,
 		ttSyncTimeoutMS:               ttSyncTimeoutMS,
 		ttBackgroundRetryEnabled:      ttBackgroundRetryEnabled,
-		ttScrapeBackoffEnabled:          ttScrapeBackoffEnabled,
-		passTTMaxAge:                    passTTMaxAge,
+		ttScrapeBackoffEnabled:        ttScrapeBackoffEnabled,
+		passTTMaxAge:                  passTTMaxAge,
 		ttMaxAgeMSDefault:             ttMaxAgeMSDefault,
 		ttStaleMaxAgeMS:               ttStaleMaxAgeMS,
 		ttPrefetchEnabled:             ttPrefetchEnabled,
@@ -266,6 +269,7 @@ func NewSyncService(
 		ttDirectHTTPStaleOnly:         ttDirectHTTPStaleOnly,
 		ttDirectHTTPTimeoutMS:         ttDirectHTTPTimeoutMS,
 		ttViewerSmoothWindow:          ttViewerSmoothWindow,
+		ttUseProxy:                    ttUseProxy,
 		trackerPrefetch:               *newTrackerPrefetchState(),
 		trackerScrapeCoalesce:         newTrackerScrapeCoalesce(),
 		syncOwnerID:                   newSyncOwnerID(),
@@ -298,6 +302,29 @@ func (s *SyncService) WithSilverTTArchive(chartJSONEnabled bool) *SyncService {
 		s.silverRawTTChartJSON = chartJSONEnabled
 	}
 	return s
+}
+
+func (s *SyncService) WithGoldIVR(svc *GoldIVRService) *SyncService {
+	if s != nil {
+		s.goldIVR = svc
+	}
+	return s
+}
+
+// TryGoldIVRLiteBeforeGQL runs the IVR Gold Lite fast path; GQL canonical sync still follows.
+func (s *SyncService) TryGoldIVRLiteBeforeGQL(ctx context.Context, streamID, login string) GoldIVRAttemptResult {
+	if s == nil || s.goldIVR == nil {
+		return GoldIVRAttemptResult{Reason: "ivr_not_configured"}
+	}
+	return s.goldIVR.TryAccelerator(ctx, streamID, login)
+}
+
+// ReconcileGoldIVRShadowAfterGQL compares prior shadow IVR output to post-GQL canonical rollups.
+func (s *SyncService) ReconcileGoldIVRShadowAfterGQL(ctx context.Context, streamID, login string, shadow GoldIVRAttemptResult) (string, error) {
+	if s == nil || s.goldIVR == nil {
+		return "", nil
+	}
+	return s.goldIVR.ReconcileShadowAfterGQL(ctx, streamID, login, shadow)
 }
 
 // chatReplayPersistenceEnabled reports whether individual VOD chat messages
@@ -442,6 +469,20 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		if dbErr != nil {
 			s.log.Warn("failed to persist broadcaster_id before sync", "stream_id", streamID, "err", dbErr)
 		}
+	}
+
+	if hasStreamRecord && login != "" {
+		if startedAt.IsZero() && stream != nil {
+			startedAt = stream.StartedAt
+		}
+		if title == "" && stream != nil {
+			title = stream.Title
+		}
+		canonID, ensureErr := s.ensureAnalyticsStreamRow(ctx, streamID, broadcasterID, login, title, startedAt)
+		if ensureErr != nil {
+			return "", fmt.Errorf("ensure session before sync: %w", ensureErr)
+		}
+		streamID = canonID
 	}
 
 	if !hasStreamRecord && login != "" {
@@ -1013,6 +1054,13 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 
 	rollupWriteStart := time.Now()
 	chatMinutesExpected := countChatMinutesInMap(commentsMap)
+	if !viewersOnly && login != "" {
+		canonID, ensureErr := s.ensureAnalyticsStreamRow(ctx, streamID, broadcasterID, login, title, startedAt)
+		if ensureErr != nil {
+			return "", fmt.Errorf("ensure stream row before rollups: %w", ensureErr)
+		}
+		streamID = canonID
+	}
 	if !viewersOnly {
 		s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
 			cp.IndexPhase = "writing"
@@ -1055,19 +1103,9 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 			return "", fmt.Errorf("failed to save minute rollups to DB: %w", err)
 		}
 
-		segments := buildGameSegments(gameSegments, durationSeconds)
+		segments := buildGameSegments(s.resolveSyncGameSegments(ctx, streamID, vodID, category, durationSeconds, gameSegments), durationSeconds)
 		for i := range segments {
 			segments[i].StreamID = streamID
-		}
-		if login != "" {
-			canonID, ensureErr := s.ensureAnalyticsStreamRow(ctx, streamID, broadcasterID, login, title, startedAt)
-			if ensureErr != nil {
-				return "", fmt.Errorf("ensure stream row before game segments: %w", ensureErr)
-			}
-			streamID = canonID
-			for i := range segments {
-				segments[i].StreamID = streamID
-			}
 		}
 		if err = s.store.SaveGameSegments(ctx, streamID, segments); err != nil {
 			return "", fmt.Errorf("failed to save game segments to DB: %w", err)
@@ -1127,9 +1165,9 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 	msg := "Stream synced successfully"
 	if viewersOnly {
 		if len(viewerPoints) == 0 {
-			msg = "Chat/7TV unchanged — TwitchTracker viewer chart blocked (no minute-level viewers). Try again later or check streamclone-scraper logs."
+			msg = "Chat/emotes unchanged — TwitchTracker viewer chart blocked (no minute-level viewers). Try again later or check streamclone-scraper logs."
 		} else {
-			msg = "Viewer timeline synced from TwitchTracker (chat/7TV unchanged)"
+			msg = "Viewer timeline synced from TwitchTracker (chat/emotes unchanged)"
 		}
 	} else if len(viewerPoints) == 0 {
 		if vodID == "" {
@@ -1145,7 +1183,7 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		if NormalizeBroadcasterID(broadcasterID) == "" {
 			msg = "Viewer timeline synced; VOD chat skipped because broadcaster ID is missing. Re-sync after Helix credentials are set."
 		} else {
-			msg = "Viewer timeline synced; VOD was not found in Helix/TwitchTracker, so chat/7TV were skipped."
+			msg = "Viewer timeline synced; VOD was not found in Helix/TwitchTracker, so chat/emotes were skipped."
 		}
 	} else if chatComments == 0 {
 		msg = "Viewer timeline synced; Twitch VOD comments are unavailable right now."
@@ -1184,12 +1222,20 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		if summary.Partial {
 			msg = formatPartialChatCoverageMessage(vodID, summary)
 		}
+		if forceChat && chatComments > 0 {
+			if err := MarkStreamGQLCanonical(ctx, s.store, streamID, summary.CoveragePct); err != nil {
+				s.log.Warn("gql canonical metadata update failed", "stream_id", streamID, "err", err)
+			}
+		}
 	}
 	s.updateChatProgress(ctx, streamID, func(cp *SyncChatProgress) {
 		cp.Active = false
 		cp.IndexPhase = "done"
 	}, true)
 	s.log.Info("historical stream sync completed successfully", "stream_id", streamID, "chat_comments", chatComments, "vod_id", vodID)
+	if forceChat && chatComments == 0 {
+		return "", fmt.Errorf("gold chat sync: no VOD chat comments fetched (vod_id=%s)", vodID)
+	}
 	if html != "" && login != "" && s.archiveTTExporter != nil {
 		if err := s.archiveTTExporter.ExportTTDetail(ctx, login, streamID, []byte(html)); err != nil {
 			s.log.Warn("archive tt-detail export failed", "stream_id", streamID, "login", login, "err", err)
@@ -1468,6 +1514,9 @@ func (s *SyncService) doScrapeTwitchTracker(ctx context.Context, streamID, url s
 	}
 
 	path = ttScrapePathBrowser
+	if s.ttUseProxy {
+		path = ttScrapePathBrowserProxy
+	}
 	s.updateTrackerProgress(ctx, streamID, func(tp *SyncTrackerProgress) {
 		tp.Phase = "browser"
 		tp.Message = "Browser scrape for viewer chart (meta#ecs) — Camoufox / Cloudflare"
@@ -1486,7 +1535,7 @@ func (s *SyncService) doScrapeTwitchTracker(ctx context.Context, streamID, url s
 		"url":             url,
 		"formats":         []string{"rawHtml"},
 		"onlyMainContent": false,
-		"useProxy":        false, // datacenter proxies are Cloudflare-blocked on TwitchTracker
+		"useProxy":        s.ttUseProxy,
 		"timeout":         timeoutMS,
 		"maxAge":          maxAge,
 	})
@@ -1525,8 +1574,8 @@ func (s *SyncService) doScrapeTwitchTracker(ctx context.Context, streamID, url s
 				State string `json:"state"`
 			} `json:"protection"`
 		} `json:"data"`
-		Error    string `json:"error"`
-		Timing   *struct {
+		Error  string `json:"error"`
+		Timing *struct {
 			CacheHit bool `json:"cacheHit"`
 		} `json:"timing"`
 		Metadata *struct {
@@ -2373,7 +2422,7 @@ func (s *SyncService) persistEarlyViewerChart(
 		s.log.Warn("early viewer rollup write failed", "stream_id", streamID, "err", err)
 		return
 	}
-	segments := buildGameSegments(gameSegments, durationSeconds)
+	segments := buildGameSegments(s.resolveSyncGameSegments(ctx, streamID, "", "", durationSeconds, gameSegments), durationSeconds)
 	for i := range segments {
 		segments[i].StreamID = streamID
 	}

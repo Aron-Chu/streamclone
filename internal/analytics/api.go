@@ -24,23 +24,26 @@ import (
 var loginRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{2,24}$`)
 
 type Handler struct {
-	store         *Store
-	collector     *Collector
-	helix         *HelixClient
-	syncService   *SyncService
-	pulseBackfill *PulseBackfillManager
-	heatmapCache  *heatmap.Cache
-	timeseries    timeseries.Writer
-	rdb           *redis.Client
-	rateLimiter   *PulseRateLimiter
-	pulseHosted   PulseHostedConfig
-	pulseRuntime  PulseRuntimeConfig
-	cdnPublicBase string
-	statsGroup    singleflight.Group
-	statusGroup   singleflight.Group
-	storyboardCache *vodStoryboardCache
-	refreshStop   chan struct{}
-	refreshOnce   sync.Once
+	store            *Store
+	collector        *Collector
+	helix            *HelixClient
+	syncService      *SyncService
+	pulseBackfill    *PulseBackfillManager
+	heatmapCache     *heatmap.Cache
+	timeseries       timeseries.Writer
+	rdb              *redis.Client
+	rateLimiter      *PulseRateLimiter
+	pulseHosted      PulseHostedConfig
+	pulseRuntime     PulseRuntimeConfig
+	corpusRuntime    CorpusRuntimeConfig
+	emoteHistoryJobs EmoteHistoryJobConfig
+	cdnPublicBase    string
+	statsGroup       singleflight.Group
+	statusGroup      singleflight.Group
+	hubGroup         singleflight.Group
+	storyboardCache  *vodStoryboardCache
+	refreshStop      chan struct{}
+	refreshOnce      sync.Once
 }
 
 func NewHandler(store *Store, collector *Collector, helix *HelixClient, syncService *SyncService) *Handler {
@@ -69,11 +72,30 @@ func (h *Handler) pulseRuntimeConfig() PulseRuntimeConfig {
 	return h.pulseRuntime.withDefaults()
 }
 
+func (h *Handler) WithCorpusRuntime(cfg CorpusRuntimeConfig) *Handler {
+	h.corpusRuntime = cfg.withDefaults()
+	return h
+}
+
+func (h *Handler) WithEmoteHistoryJobs(cfg EmoteHistoryJobConfig) *Handler {
+	h.emoteHistoryJobs = cfg
+	return h
+}
+
+func (h *Handler) corpusRuntimeConfig() CorpusRuntimeConfig {
+	if h == nil {
+		return DefaultCorpusRuntimeConfig()
+	}
+	return h.corpusRuntime.withDefaults()
+}
+
 func (h *Handler) Routes(r chi.Router) {
 	h.PublicRoutes(r)
 	h.ExtensionRoutes(r)
 	h.PulseRoutes(r)
 	h.PortalRoutes(r)
+	h.EmoteHistoryRoutes(r)
+	h.CorpusRoutes(r)
 	r.Route("/v1/analytics", func(r chi.Router) {
 		r.Get("/always-tracked", h.getAlwaysTracked)
 		r.Post("/always-tracked", h.setAlwaysTracked)
@@ -92,6 +114,8 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/streams/{streamID}/sync/status", h.syncStreamStatus)
 		r.Get("/sync/active", h.listActiveSyncs)
 		r.Get("/tracking/snapshot", h.trackingSnapshot)
+		r.Get("/top100/readiness", h.top100Readiness)
+		r.Get("/top-roster/readiness", h.top100Readiness)
 		r.Get("/streams/{streamID}/games", h.getStreamGames)
 		r.Get("/streams/{streamID}/replay-heatmap", h.replayHeatmap)
 		r.Delete("/streams/{streamID}/replay-heatmap/cache", h.invalidateHeatmapCache)
@@ -289,14 +313,18 @@ func (h *Handler) streamSummary(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	metrics := summarizeStreamMetrics(stream, rollups)
+	timelineRollups := filterTimelineRollups(rollups)
+	metrics := summarizeStreamMetrics(stream, timelineRollups)
+	stored := h.storedArtifactsForStream(r.Context(), stream.StreamID)
+	sources := mergeStoredSources([]SourceStatus{{Source: "analytics_db", State: "ready"}}, stored)
 	writeJSON(w, http.StatusOK, StreamSummaryResponse{
-		Channel:   stream.Login,
-		Stream:    stream,
-		Metrics:   metrics,
-		TopEmotes: TopEmotesFromRollups(rollups, 25),
-		Sources:   []SourceStatus{{Source: "analytics_db", State: "ready"}},
-		UpdatedAt: time.Now().UnixMilli(),
+		Channel:         stream.Login,
+		Stream:          stream,
+		Metrics:         metrics,
+		TopEmotes:       TopEmotesFromRollups(timelineRollups, 25),
+		Sources:         sources,
+		UpdatedAt:       time.Now().UnixMilli(),
+		StoredArtifacts: ptrStoredArtifacts(stored),
 	})
 }
 
@@ -351,6 +379,7 @@ func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stre
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	rollups = filterTimelineRollups(rollups)
 	for i := range rollups {
 		rollups[i] = normalizeRollup(rollups[i], 200)
 	}
@@ -400,6 +429,18 @@ func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stre
 		}
 	}
 
+	stored := h.storedArtifactsForStream(r.Context(), stream.StreamID)
+	sources := mergeStoredSources([]SourceStatus{{Source: "analytics_db", State: "ready"}}, stored)
+
+	var chatSourceMeta *StreamChatSourceMetadata
+	if meta, err := h.store.GetStreamChatSourceMetadata(r.Context(), stream.StreamID); err == nil && meta != nil && meta.ChatSource != ChatSourceNone {
+		chatSourceMeta = meta
+		label, status := portalChatSourceLabel(*meta)
+		if label != "" {
+			sources = append(sources, SourceStatus{Source: meta.ChatSource, State: meta.SourceConfidence, Message: label + " — " + status})
+		}
+	}
+
 	writeJSON(w, status, StreamDetailResponse{
 		Channel:         stream.Login,
 		State:           responseState,
@@ -407,14 +448,16 @@ func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stre
 		Stream:          stream,
 		Rollups:         responseRollups,
 		TopEmotes:       topEmotes,
-		Sources:         []SourceStatus{{Source: "analytics_db", State: "ready"}},
+		Sources:         sources,
 		UpdatedAt:       time.Now().UnixMilli(),
 		VodID:           vodID,
 		VodSource:       vodSource,
 		ChatCoveragePct: chatCoverage.CoveragePct,
 		VodDurationSec:  vodDurationSec,
 		ChatCoverage:    &chatCoverage,
+		ChatSourceMeta:  chatSourceMeta,
 		ViewerSource:    persistedViewerSource(stream, rollups),
+		StoredArtifacts: ptrStoredArtifacts(stored),
 	})
 }
 
@@ -864,10 +907,19 @@ func (h *Handler) getStreamGames(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_stream_id"})
 		return
 	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
+		return
+	}
 	segments, err := h.store.GetGameSegments(r.Context(), streamID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if len(segments) == 0 {
+		if stream, streamErr := h.store.StreamByID(r.Context(), streamID); streamErr == nil {
+			segments = fallbackGameSegmentsForStream(stream)
+		}
 	}
 	if segments == nil {
 		segments = []GameSegment{}

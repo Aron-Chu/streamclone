@@ -2,11 +2,11 @@ package analytics
 
 // Tracking priority tiers for the analytics collector pool (higher = more important).
 const (
-	TrackPriorityIdleNoRef              = 0
-	TrackPriorityTopRoster              = 10
-	TrackPriorityManualWatch            = 30
-	TrackPriorityPrincipalAlwaysTrack   = 60
-	TrackPriorityGlobalProtected        = 80
+	TrackPriorityIdleNoRef            = 0
+	TrackPriorityTopRoster            = 10
+	TrackPriorityManualWatch          = 30
+	TrackPriorityPrincipalAlwaysTrack = 60
+	TrackPriorityGlobalProtected      = 80
 )
 
 func trackingPriorityCanPreempt(incoming, victim int) bool {

@@ -259,8 +259,85 @@ func (s *Store) WriteTop500MetadataSamples(ctx context.Context, samples []Top500
 		if err := upsertTop500CurrentTx(ctx, tx, sample.Current); err != nil {
 			return err
 		}
+		if err := upsertTop500StreamLifecycleTx(ctx, tx, sample); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
+}
+
+func upsertTop500StreamLifecycleTx(ctx context.Context, tx pgx.Tx, sample Top500MetadataSample) error {
+	snapshot := sample.Snapshot
+	current := sample.Current
+	streamID := strings.TrimSpace(valueOrEmpty(snapshot.StreamID))
+	login := normalizeLogin(current.Login)
+	if !snapshot.IsLive || streamID == "" || login == "" {
+		return nil
+	}
+	startedAt := current.StartedAt
+	if startedAt == nil || startedAt.IsZero() {
+		if snapshot.StartedAt != nil && !snapshot.StartedAt.IsZero() {
+			startedAt = snapshot.StartedAt
+		} else {
+			started := snapshot.SampledAt
+			if started.IsZero() {
+				started = time.Now().UTC()
+			}
+			startedAt = &started
+		}
+	}
+	lastSeenAt := snapshot.SampledAt
+	if lastSeenAt.IsZero() {
+		lastSeenAt = time.Now().UTC()
+	}
+	viewerCount := 0
+	if current.ViewerCount != nil {
+		viewerCount = *current.ViewerCount
+	} else if snapshot.ViewerCount != nil {
+		viewerCount = *snapshot.ViewerCount
+	}
+	tags, err := marshalTop500Tags(current.Tags)
+	if err != nil {
+		return err
+	}
+	displayName := strings.TrimSpace(current.DisplayName)
+	if displayName == "" {
+		displayName = strings.TrimSpace(sample.Channel.DisplayName)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO analytics_streams (
+			stream_id, canonical_stream_id, broadcaster_id, login, display_name, title, category, tags, language,
+			started_at, last_seen_at, current_viewers, peak_viewers, viewer_samples
+		)
+		VALUES ($1,$1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$11,1)
+		ON CONFLICT (stream_id) DO UPDATE SET
+			canonical_stream_id = COALESCE(NULLIF(analytics_streams.canonical_stream_id, ''), EXCLUDED.canonical_stream_id),
+			broadcaster_id = CASE
+				WHEN COALESCE(analytics_streams.broadcaster_id, '') IN ('', 'pending') THEN EXCLUDED.broadcaster_id
+				ELSE analytics_streams.broadcaster_id
+			END,
+			login = EXCLUDED.login,
+			display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), analytics_streams.display_name),
+			title = COALESCE(NULLIF(EXCLUDED.title, ''), analytics_streams.title),
+			category = COALESCE(NULLIF(EXCLUDED.category, ''), analytics_streams.category),
+			language = COALESCE(NULLIF(EXCLUDED.language, ''), analytics_streams.language),
+			tags = CASE WHEN EXCLUDED.tags <> '[]'::jsonb THEN EXCLUDED.tags ELSE analytics_streams.tags END,
+			started_at = LEAST(analytics_streams.started_at, EXCLUDED.started_at),
+			last_seen_at = GREATEST(analytics_streams.last_seen_at, EXCLUDED.last_seen_at),
+			ended_at = NULL,
+			current_viewers = EXCLUDED.current_viewers,
+			peak_viewers = GREATEST(analytics_streams.peak_viewers, EXCLUDED.peak_viewers),
+			viewer_samples = GREATEST(analytics_streams.viewer_samples, EXCLUDED.viewer_samples),
+			updated_at = now()`,
+		streamID, strings.TrimSpace(current.ChannelID), login, displayName, strings.TrimSpace(current.Title), strings.TrimSpace(current.CategoryName), string(tags), strings.TrimSpace(current.Language), *startedAt, lastSeenAt, viewerCount)
+	return err
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func upsertTop500LiveSnapshotTx(ctx context.Context, tx pgx.Tx, snapshot Top500LiveSnapshot) error {
@@ -408,6 +485,46 @@ func scanTop500Current(row pgx.Row) (*Top500Current, error) {
 		}
 	}
 	return &current, nil
+}
+
+// ListTop500LiveForPriorityWatch returns live Top-N roster rows ordered by viewer count.
+func (s *Store) ListTop500LiveForPriorityWatch(ctx context.Context, topN, limit int) ([]Top500Current, error) {
+	if topN <= 0 {
+		topN = DefaultTop500MetadataTopN
+	}
+	if limit <= 0 {
+		limit = topN
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT cur.channel_id, cur.login, cur.display_name, cur.rank, cur.coverage_source, cur.is_live, cur.stream_id,
+			cur.title, cur.category_id, cur.category_name, cur.started_at, cur.viewer_count, cur.language, cur.tags,
+			cur.sampled_at, cur.stale_after, cur.last_success_at, cur.last_error_code, cur.updated_at
+		FROM top500_current cur
+		INNER JOIN top500_channels ch ON ch.channel_id = cur.channel_id
+		WHERE ch.enabled = true
+			AND ch.source IN ('operator_seed', 'configured')
+			AND ch.rank <= $1
+			AND cur.is_live = true
+			AND cur.stream_id IS NOT NULL
+			AND btrim(cur.stream_id) <> ''
+		ORDER BY cur.viewer_count DESC NULLS LAST, cur.rank ASC, cur.login ASC
+		LIMIT $2`, topN, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]Top500Current, 0, limit)
+	for rows.Next() {
+		current, err := scanTop500Current(rows)
+		if err != nil {
+			return nil, err
+		}
+		if current != nil {
+			out = append(out, *current)
+		}
+	}
+	return out, rows.Err()
 }
 
 func validateTop500Channel(entry Top500Channel) error {

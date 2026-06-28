@@ -11,3 +11,24 @@ func (h *Handler) requirePulseWrite(w http.ResponseWriter) bool {
 	})
 	return false
 }
+
+func pulsePrincipalCanWriteUserState(principal PulsePrincipal) bool {
+	switch principal.Kind {
+	case "beta", "device", "user", "guest":
+		return principal.ID != ""
+	default:
+		return false
+	}
+}
+
+func (h *Handler) requireHostedUserStatePrincipal(w http.ResponseWriter, r *http.Request) (PulsePrincipal, bool) {
+	principal, ok := pulsePrincipalFromContext(r.Context())
+	if ok && pulsePrincipalCanWriteUserState(principal) {
+		return principal, true
+	}
+	writeJSON(w, http.StatusUnauthorized, map[string]string{
+		"error": "unauthorized",
+		"hint":  "Set X-Streamclone-Beta-Key or Authorization to save private Pulse data.",
+	})
+	return PulsePrincipal{}, false
+}

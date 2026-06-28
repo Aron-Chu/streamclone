@@ -132,16 +132,64 @@ func (s *SyncService) SyncPulseMissedChat(ctx context.Context, streamID, login, 
 		return err
 	}
 
-	pendingMinutes := 0
-	for minuteOffset, comments := range commentsMap {
-		if len(comments) == 0 || chatCache.has(minuteOffset) {
-			continue
+	finalize := summarizeMissedChatFinalize(rollupStart, commentsMap, chatCache)
+	diagnostics := s.missedChatDiagnostics(ctx, login, streamID, vodID, finalize, "")
+	if finalize.PendingMinutes == 0 {
+		if finalize.CommentsMatched > 0 && finalize.RollupsMatched > 0 {
+			if err := s.store.RefreshStreamSummaryWithMode(ctx, streamID, "pulse_backfill_cached_finalize"); err != nil {
+				s.setSyncPhase(ctx, streamID, SyncPhaseFailed, "Summary refresh failed", func(st *SyncStatus) {
+					st.Error = err.Error()
+					if st.Chat != nil {
+						st.Chat.Diagnostics = diagnostics
+					}
+				})
+				return err
+			}
+			s.log.Info("missed chat replay already finalized by incremental rollup flush",
+				"stream_id", streamID,
+				"vod_id", vodID,
+				"comments_matched", finalize.CommentsMatched,
+				"rollups_matched", finalize.RollupsMatched,
+				"query_start", diagnostics.QueryStart,
+				"query_end", diagnostics.QueryEnd,
+			)
+			s.setSyncPhase(ctx, streamID, SyncPhaseCompleted, "Missed moments loaded", func(st *SyncStatus) {
+				st.RollupsWritten = finalize.RollupsMatched
+				if st.Chat != nil {
+					st.Chat.Active = false
+					st.Chat.IndexPhase = "done"
+					st.Chat.RollupsExpected = finalize.RollupMinutes
+					st.Chat.SummaryRefreshDeferred = false
+					st.Chat.Message = "Minute rollups already written"
+					st.Chat.Diagnostics = diagnostics
+				}
+			})
+			return nil
 		}
-		pendingMinutes++
-	}
-	if pendingMinutes == 0 {
+
+		diagnostics = s.missedChatDiagnostics(ctx, login, streamID, vodID, finalize, ErrPulseBackfillNoData.Error())
+		s.log.Warn("no chat replay data in requested range",
+			"login", login,
+			"stream_id", streamID,
+			"vod_id", vodID,
+			"query_start", diagnostics.QueryStart,
+			"query_end", diagnostics.QueryEnd,
+			"offset_start", diagnostics.OffsetStart,
+			"offset_end", diagnostics.OffsetEnd,
+			"comments_matched", diagnostics.CommentsMatched,
+			"comments_total_for_stream", diagnostics.CommentsTotalForStream,
+			"rollups_matched", diagnostics.RollupsMatched,
+			"rollups_total_for_stream", diagnostics.RollupsTotalForStream,
+		)
 		s.setSyncPhase(ctx, streamID, SyncPhaseFailed, "No chat replay data for the missing range", func(st *SyncStatus) {
 			st.Error = ErrPulseBackfillNoData.Error()
+			if st.Chat != nil {
+				st.Chat.Active = false
+				st.Chat.IndexPhase = "done"
+				st.Chat.SummaryRefreshDeferred = false
+				st.Chat.Message = "No chat replay data for the requested range"
+				st.Chat.Diagnostics = diagnostics
+			}
 		})
 		return ErrPulseBackfillNoData
 	}
@@ -150,6 +198,8 @@ func (s *SyncService) SyncPulseMissedChat(ctx context.Context, streamID, login, 
 		if st.Chat != nil {
 			st.Chat.Active = false
 			st.Chat.IndexPhase = "writing"
+			st.Chat.RollupsExpected = finalize.RollupMinutes
+			st.Chat.Diagnostics = diagnostics
 		}
 	})
 	if err := s.writeChatRollupsOnly(ctx, streamID, login, rollupStart, commentsMap, chatCache); err != nil {
@@ -160,9 +210,86 @@ func (s *SyncService) SyncPulseMissedChat(ctx context.Context, streamID, login, 
 	}
 
 	s.setSyncPhase(ctx, streamID, SyncPhaseCompleted, "Missed moments loaded", func(st *SyncStatus) {
+		st.RollupsWritten = finalize.PendingMinutes
 		if st.Chat != nil {
+			st.Chat.Active = false
 			st.Chat.IndexPhase = "done"
+			st.Chat.SummaryRefreshDeferred = false
+			st.Chat.RollupsExpected = finalize.RollupMinutes
+			st.Chat.Diagnostics = diagnostics
 		}
 	})
 	return nil
+}
+
+type missedChatFinalizeSummary struct {
+	CommentsMatched int
+	RollupMinutes   int
+	RollupsMatched  int
+	PendingMinutes  int
+	OffsetStart     int
+	OffsetEnd       int
+	QueryStart      time.Time
+	QueryEnd        time.Time
+}
+
+func summarizeMissedChatFinalize(rollupStart time.Time, commentsMap map[int][]string, cache *chatRollupCache) missedChatFinalizeSummary {
+	summary := missedChatFinalizeSummary{OffsetStart: -1, OffsetEnd: -1}
+	firstMinute := 0
+	lastMinute := 0
+	for minuteOffset, comments := range commentsMap {
+		if len(comments) == 0 {
+			continue
+		}
+		summary.CommentsMatched += len(comments)
+		summary.RollupMinutes++
+		if summary.OffsetStart < 0 || minuteOffset < firstMinute {
+			firstMinute = minuteOffset
+			summary.OffsetStart = minuteOffset * 60
+		}
+		if summary.OffsetEnd < 0 || minuteOffset > lastMinute {
+			lastMinute = minuteOffset
+			summary.OffsetEnd = minuteOffset*60 + 59
+		}
+		if cache.has(minuteOffset) {
+			summary.RollupsMatched++
+			continue
+		}
+		summary.PendingMinutes++
+	}
+	if !rollupStart.IsZero() && summary.OffsetStart >= 0 {
+		summary.QueryStart = rollupStart.Add(time.Duration(firstMinute) * time.Minute)
+		summary.QueryEnd = rollupStart.Add(time.Duration(lastMinute+1) * time.Minute)
+	}
+	return summary
+}
+
+func (s *SyncService) missedChatDiagnostics(ctx context.Context, login, streamID, vodID string, summary missedChatFinalizeSummary, reason string) *SyncChatDiagnostics {
+	diagnostics := &SyncChatDiagnostics{
+		Login:           login,
+		StreamID:        streamID,
+		VodID:           vodID,
+		OffsetStart:     summary.OffsetStart,
+		OffsetEnd:       summary.OffsetEnd,
+		CommentsMatched: summary.CommentsMatched,
+		RollupsMatched:  summary.RollupsMatched,
+		RangeMode:       "offset",
+		Reason:          reason,
+	}
+	if !summary.QueryStart.IsZero() {
+		diagnostics.QueryStart = summary.QueryStart.UTC().Format(time.RFC3339)
+	}
+	if !summary.QueryEnd.IsZero() {
+		diagnostics.QueryEnd = summary.QueryEnd.UTC().Format(time.RFC3339)
+	}
+	if s == nil || s.store == nil || s.store.db == nil || strings.TrimSpace(streamID) == "" {
+		return diagnostics
+	}
+	if err := s.store.db.QueryRow(ctx, `SELECT COUNT(*) FROM analytics_vod_chat_messages WHERE stream_id=$1`, streamID).Scan(&diagnostics.CommentsTotalForStream); err != nil {
+		s.log.Warn("failed to count stream chat diagnostics", "stream_id", streamID, "err", err)
+	}
+	if err := s.store.db.QueryRow(ctx, `SELECT COUNT(*) FROM analytics_minute_rollups WHERE stream_id=$1 AND (chat_count > 0 OR seventv_emote_count > 0 OR total_emote_count > 0)`, streamID).Scan(&diagnostics.RollupsTotalForStream); err != nil {
+		s.log.Warn("failed to count stream rollup diagnostics", "stream_id", streamID, "err", err)
+	}
+	return diagnostics
 }

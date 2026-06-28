@@ -95,6 +95,24 @@ func TestComputePulseCoverageWaitingForVOD(t *testing.T) {
 	}
 }
 
+func TestComputePulseCoverageBackfillFailedAllowsRetry(t *testing.T) {
+	streamStart := time.Date(2026, 6, 22, 19, 0, 0, 0, time.UTC)
+	rollups := []heatmap.MinuteRollup{
+		{MinuteTS: streamStart.Add(3 * time.Minute), ChatCount: 12},
+		{MinuteTS: streamStart.Add(4 * time.Minute), ChatCount: 8},
+	}
+	cov := computePulseCoverage(rollups, streamStart, 240, false, "2803047218", false, true)
+	if cov.State != CoverageStateBackfillFailed {
+		t.Fatalf("state = %q, want %q", cov.State, CoverageStateBackfillFailed)
+	}
+	if !cov.CanBackfill {
+		t.Fatal("expected canBackfill after failed backfill with vod")
+	}
+	if !cov.ManualRetryAllowed {
+		t.Fatal("expected manualRetryAllowed after failed backfill with vod")
+	}
+}
+
 func TestRangeFullyCovered(t *testing.T) {
 	offsets := []int{0, 60, 120, 180}
 	if !rangeFullyCovered(offsets, 0, 180) {

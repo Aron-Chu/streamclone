@@ -285,11 +285,11 @@ func (c *HelixClient) VideoByStreamID(ctx context.Context, broadcasterID, stream
 		}
 		var resp struct {
 			Data []struct {
-				ID           string `json:"id"`
-				StreamID     string `json:"stream_id"`
-				Title        string `json:"title"`
-				CreatedAt    string `json:"created_at"`
-				Duration     string `json:"duration"`
+				ID        string `json:"id"`
+				StreamID  string `json:"stream_id"`
+				Title     string `json:"title"`
+				CreatedAt string `json:"created_at"`
+				Duration  string `json:"duration"`
 			} `json:"data"`
 			Pagination struct {
 				Cursor string `json:"cursor"`
@@ -355,6 +355,26 @@ func (c *HelixClient) VideoCreatedAt(ctx context.Context, videoID string) (time.
 		return time.Time{}, fmt.Errorf("parse helix created_at %q: %w", resp.Data[0].CreatedAt, err)
 	}
 	return createdAt, nil
+}
+
+func (c *HelixClient) VideoGameName(ctx context.Context, videoID string) (string, error) {
+	if !c.Enabled() || videoID == "" {
+		return "", nil
+	}
+	q := url.Values{}
+	q.Set("id", videoID)
+	var resp struct {
+		Data []struct {
+			GameName string `json:"game_name"`
+		} `json:"data"`
+	}
+	if err := c.get(ctx, "/videos", q, &resp); err != nil {
+		return "", err
+	}
+	if len(resp.Data) == 0 {
+		return "", nil
+	}
+	return strings.TrimSpace(resp.Data[0].GameName), nil
 }
 
 func (c *HelixClient) VideoDurationSeconds(ctx context.Context, videoID string) (int, error) {

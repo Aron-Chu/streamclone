@@ -79,12 +79,12 @@ func TestFillMissingRollupsUsesConsolidatedViewers(t *testing.T) {
 	endedAt := startedAt.Add(2 * time.Minute)
 	in := []MinuteRollup{
 		{
-			MinuteTS: startedAt.Add(time.Minute),
-			ViewerAvg: 3887,
-			ViewerMax: 3887,
-			ViewerLatest: 3887,
+			MinuteTS:      startedAt.Add(time.Minute),
+			ViewerAvg:     3887,
+			ViewerMax:     3887,
+			ViewerLatest:  3887,
 			ViewerSamples: 1,
-			Emotes: map[string]int{},
+			Emotes:        map[string]int{},
 		},
 	}
 	out := fillMissingRollups(in, startedAt, &endedAt)
@@ -99,10 +99,10 @@ func TestFillMissingRollupsUsesConsolidatedViewers(t *testing.T) {
 func TestSlimRollupsForChartOmitsEmotes(t *testing.T) {
 	start := time.Date(2026, 6, 7, 13, 25, 0, 0, time.UTC)
 	in := []MinuteRollup{{
-		MinuteTS:          start,
-		ViewerAvg:         100,
-		ChatCount:         5,
-		Emotes:            map[string]int{"seventv:1:KEKW": 2},
+		MinuteTS:  start,
+		ViewerAvg: 100,
+		ChatCount: 5,
+		Emotes:    map[string]int{"seventv:1:KEKW": 2},
 	}}
 	out := slimRollupsForChart(in, []string{"seventv:1:KEKW"})
 	if len(out) != 1 {

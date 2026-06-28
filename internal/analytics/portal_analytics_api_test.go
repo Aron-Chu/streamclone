@@ -77,7 +77,7 @@ func TestPortalStreamMinutesSanitizedShape(t *testing.T) {
 		SevenTVEmoteCount: 10,
 		Emotes:            map[string]int{"7tv:1:KEKW": 10},
 	}}
-	resp := portalMinutesFromRollups(stream, rollups)
+	resp := portalMinutesFromRollups(stream, rollups, false)
 	body, err := json.Marshal(resp)
 	if err != nil {
 		t.Fatal(err)
@@ -96,13 +96,22 @@ func TestPortalStreamMinutesSanitizedShape(t *testing.T) {
 	}
 }
 
+func TestPortalMinutesCacheKeyIncludesProvisionalFlag(t *testing.T) {
+	if portalMinutesCacheKey("abc", false) == portalMinutesCacheKey("abc", true) {
+		t.Fatal("cache keys must differ when includeProvisionalPeaks changes")
+	}
+	if !strings.Contains(portalMinutesCacheKey("abc", true), "provisional_peaks") {
+		t.Fatal("provisional peaks cache key suffix missing")
+	}
+}
+
 func TestPortalStreamMinutesEmptyRollups(t *testing.T) {
 	stream := &StreamRecord{
 		StreamID:  "123",
 		Login:     "xqc",
 		StartedAt: time.Date(2026, 6, 25, 18, 0, 0, 0, time.UTC),
 	}
-	resp := portalMinutesFromRollups(stream, nil)
+	resp := portalMinutesFromRollups(stream, nil, false)
 	if len(resp.Minutes) != 0 {
 		t.Fatalf("expected empty minutes, got %d", len(resp.Minutes))
 	}
@@ -115,6 +124,91 @@ func TestPortalStreamMinutesEmptyRollups(t *testing.T) {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("portal minutes must not contain %q", forbidden)
 		}
+	}
+}
+
+func TestPortalChannelEmotesSanitizedShape(t *testing.T) {
+	latestUsage := time.Date(2026, 6, 25, 19, 0, 0, 0, time.UTC)
+	resp := PortalChannelEmotesResponse{
+		Login:   "xqc",
+		Range:   "30d",
+		AsOf:    latestUsage,
+		Sources: []SourceStatus{{Source: "analytics_db", State: "ready"}},
+		Coverage: PortalEmoteCoverage{
+			ChatCoveragePct:      98.5,
+			MinutesWithData:      120,
+			NormalizedMinutes:    118,
+			IdentityResolvedRows: 50,
+			IdentityTotalRows:    52,
+		},
+		Freshness: PortalEmoteFreshness{
+			LatestUsageAt:        &latestUsage,
+			ProviderState:        "ready",
+			ProviderStalenessSec: 60,
+			UsageStalenessSec:    30,
+		},
+		IdentityResolutionPct: 96.15,
+		TotalEmoteUses:        400,
+		EmotesPerMinute:       3.39,
+		SevenTVSharePct:       82,
+		UniqueEmotes:          12,
+		TopEmotes: []PortalChannelEmote{{
+			Provider:           "seventv",
+			ProviderEmoteID:    "abc",
+			Name:               "KEKW",
+			UseCount:           120,
+			MinutesSeen:        42,
+			SharePct:           30,
+			IdentityResolution: "provider_id",
+			Confidence:         100,
+		}},
+		TopMoments: []PortalEmoteMoment{{
+			StreamID:        "stream-1",
+			StartedAt:       latestUsage.Add(-time.Hour),
+			OffsetSeconds:   120,
+			Href:            "/analytics/xqc/s/stream-1?t=120#emotes",
+			UseCount:        33,
+			TopEmoteName:    "KEKW",
+			Provider:        "seventv",
+			ProviderEmoteID: "abc",
+		}},
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.ToLower(string(body))
+	for _, required := range []string{"coverage", "freshness", "identityresolutionpct", "topemotes", "topmoments"} {
+		if !strings.Contains(raw, required) {
+			t.Fatalf("portal emotes response missing %q in %s", required, raw)
+		}
+	}
+	for _, forbidden := range []string{"rawchat", "chattext", "message", "fragments", "chatter", "username", "userlogin", "userid", "leaderboard", "operator", "gql", "corpus"} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("portal emotes response must not contain %q: %s", forbidden, raw)
+		}
+	}
+	assertJSONOmitsForbiddenFields(t, body, []string{"raw", "payload", "chatText", "message", "userId", "chatter", "chatterId", "userLogin", "individualChatterRankings", "leaderboard"})
+}
+
+func TestPortalChannelEmotesRouteStoreUnavailable(t *testing.T) {
+	h := &Handler{}
+	r := chi.NewRouter()
+	h.PortalRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/portal/analytics/channels/xqc/emotes?range=30d", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload["error"] != "store_unavailable" {
+		t.Fatalf("payload = %#v, want store_unavailable", payload)
 	}
 }
 
@@ -138,5 +232,35 @@ func TestAllowPortalSummaryRateLimitFailOpen(t *testing.T) {
 	ok, _ := rl.AllowPortalSummary(t.Context(), "principal-a")
 	if !ok {
 		t.Fatal("expected fail-open when redis nil")
+	}
+}
+
+func assertJSONOmitsForbiddenFields(t *testing.T, body []byte, forbidden []string) {
+	t.Helper()
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode public JSON: %v", err)
+	}
+	forbiddenSet := map[string]struct{}{}
+	for _, key := range forbidden {
+		forbiddenSet[strings.ToLower(key)] = struct{}{}
+	}
+	walkPublicJSONKeys(t, payload, forbiddenSet)
+}
+
+func walkPublicJSONKeys(t *testing.T, value any, forbidden map[string]struct{}) {
+	t.Helper()
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if _, blocked := forbidden[strings.ToLower(key)]; blocked {
+				t.Fatalf("public JSON contains forbidden field %q", key)
+			}
+			walkPublicJSONKeys(t, child, forbidden)
+		}
+	case []any:
+		for _, child := range typed {
+			walkPublicJSONKeys(t, child, forbidden)
+		}
 	}
 }

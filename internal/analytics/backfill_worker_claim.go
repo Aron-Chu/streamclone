@@ -39,29 +39,37 @@ func ClaimNextSQL(tierFilter []string) string {
 		FROM backfill_jobs gold
 		WHERE gold.status = 'queued' AND gold.next_run_at <= now()
 		  AND gold.tier IN ('gold','gold_full','gold_lite')
-		  AND EXISTS (
-			SELECT 1 FROM backfill_jobs silver
-			WHERE silver.tier = 'silver'
-			  AND silver.status = 'done'
-			  AND silver.export_status = 'confirmed'
-			  AND EXISTS (
-				WITH RECURSIVE canonical_path(stream_id, depth, path) AS (
-					SELECT silver.stream_id, 0, ARRAY[silver.stream_id]
-					UNION ALL
-					SELECT next_id, canonical_path.depth + 1, canonical_path.path || next_id
-					FROM canonical_path
-					CROSS JOIN LATERAL (
-						SELECT COALESCE(
-							(SELECT NULLIF(canonical_stream_id, '') FROM analytics_stream_aliases WHERE alias_stream_id = canonical_path.stream_id),
-							(SELECT NULLIF(canonical_stream_id, '') FROM analytics_streams WHERE stream_id = canonical_path.stream_id)
-						) AS next_id
-					) resolved
-					WHERE next_id IS NOT NULL
-					  AND next_id <> ALL(canonical_path.path)
-					  AND canonical_path.depth < 32
-				)
-				SELECT 1 FROM canonical_path WHERE stream_id = gold.stream_id
-			  )
+		  AND (
+			EXISTS (
+				SELECT 1 FROM top500_vod_inventory inv
+				WHERE inv.stream_id = gold.stream_id
+				  AND inv.gold_status IN ('queued','running','failed','not_queued')
+				  AND inv.availability_state IN ('discovered','eligible','queued','failed')
+			)
+			OR EXISTS (
+				SELECT 1 FROM backfill_jobs silver
+				WHERE silver.tier = 'silver'
+				  AND silver.status = 'done'
+				  AND silver.export_status = 'confirmed'
+				  AND EXISTS (
+					WITH RECURSIVE canonical_path(stream_id, depth, path) AS (
+						SELECT silver.stream_id, 0, ARRAY[silver.stream_id]
+						UNION ALL
+						SELECT next_id, canonical_path.depth + 1, canonical_path.path || next_id
+						FROM canonical_path
+						CROSS JOIN LATERAL (
+							SELECT COALESCE(
+								(SELECT NULLIF(canonical_stream_id, '') FROM analytics_stream_aliases WHERE alias_stream_id = canonical_path.stream_id),
+								(SELECT NULLIF(canonical_stream_id, '') FROM analytics_streams WHERE stream_id = canonical_path.stream_id)
+							) AS next_id
+						) resolved
+						WHERE next_id IS NOT NULL
+						  AND next_id <> ALL(canonical_path.path)
+						  AND canonical_path.depth < 32
+					)
+					SELECT 1 FROM canonical_path WHERE stream_id = gold.stream_id
+				  )
+			)
 		  )
 		ORDER BY gold.next_run_at ASC, gold.id ASC
 		FOR UPDATE OF gold SKIP LOCKED
