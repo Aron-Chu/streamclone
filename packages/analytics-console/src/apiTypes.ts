@@ -14,7 +14,17 @@ export interface AnalyticsStream {
   endedAt?: string | null
   currentViewers?: number
   peakViewers?: number
+  avgViewers?: number
+  viewerSamples?: number
+  chatMessages?: number
   vodId?: string
+}
+
+export interface ChatCoverageSummary {
+  coveragePct?: number
+  chatSpanMinutes?: number
+  streamSpanMinutes?: number
+  partial?: boolean
 }
 
 export interface AnalyticsMinuteRollup {
@@ -50,6 +60,8 @@ export interface AnalyticsStreamDetail {
   vodId?: string
   syncPhase?: string
   chatCoveragePct?: number
+  chatCoverage?: ChatCoverageSummary
+  viewerSource?: string
 }
 
 export interface AnalyticsStreamsResponse {
