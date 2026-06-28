@@ -13,10 +13,22 @@
 #   PULSE_SMOKE_SKIP_SSH     set 1 to skip DB fixture lookup via BearHost SSH
 set -euo pipefail
 
+require_jq() {
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "FAIL: jq is required for pulse-hosted-boundary-smoke (install jq or use legacy-rollback-host)" >&2
+    exit 1
+  fi
+}
+
+require_jq
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BASE="${PULSE_SMOKE_BASE_URL:-https://api.streampulse.stream}"
 BASE="${BASE%/}"
 BETA_KEY="${PULSE_BETA_KEY:-}"
+if [[ -z "${BETA_KEY}" && -n "${PULSE_BETA_KEYS:-}" ]]; then
+  BETA_KEY="${PULSE_BETA_KEYS%%,*}"
+fi
 STREAM_ID="${PULSE_SMOKE_STREAM_ID:-316860077047}"
 VOD_ID="${PULSE_SMOKE_VOD_ID:-2804592918}"
 STREAM_ROLLUPS="${PULSE_SMOKE_STREAM_ROLLUPS:-0}"
@@ -114,22 +126,12 @@ phase_a_public_boundary() {
   done
 
   emotes_tmp="$(mktemp)"
-  code="$(curl_code -o "${emotes_tmp}" "${BASE}/v1/public/emotes/overview?range=7d")"
+  code="$(curl -sS -o "${emotes_tmp}" -w '%{http_code}' "${BASE}/v1/public/emotes/overview?range=7d")"
   if [[ "${code}" == "404" ]]; then
     echo "FAIL: /v1/public/emotes/overview HTTP 404 (route not deployed)" >&2
     fail=1
   elif [[ "${code}" == "200" || "${code}" == "503" ]]; then
-    if ! python3 - "${emotes_tmp}" <<'PY' 2>/dev/null; then
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as f:
-    data = json.load(f)
-if not isinstance(data, dict):
-    raise SystemExit(1)
-# Accept overview contract or structured unavailable error payload.
-allowed = {"aggregateOnly", "state", "error", "schemaVersion", "unavailableReason"}
-if not any(k in data for k in allowed):
-    raise SystemExit(1)
-PY
+    if ! jq -e 'type == "object" and (.aggregateOnly != null or .state != null or .schemaVersion != null or .error != null or .unavailableReason != null)' "${emotes_tmp}" >/dev/null 2>&1; then
       echo "FAIL: /v1/public/emotes/overview HTTP ${code} but not valid JSON contract" >&2
       fail=1
     else
@@ -170,13 +172,7 @@ phase_b_chart_canary() {
     echo "FAIL: portal minutes HTTP ${code} (want 200)" >&2
     fail=1
   else
-    minute_count="$(python3 - "${minutes_tmp}" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as f:
-    data = json.load(f)
-print(len(data.get("minutes") or []))
-PY
-)"
+    minute_count="$(jq '.minutes | length' "${minutes_tmp}")"
     if [[ "${STREAM_ROLLUPS}" -gt 0 && "${minute_count}" -le 0 ]]; then
       echo "FAIL: portal minutes empty but DB rollups=${STREAM_ROLLUPS}" >&2
       fail=1
@@ -197,12 +193,7 @@ PY
     echo "FAIL: authorized stream detail HTTP ${code} (want 200)" >&2
     fail=1
   else
-    if ! python3 - "${detail_tmp}" <<'PY' 2>/dev/null; then
-import json, sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-if "rollups" not in data:
-    raise SystemExit(1)
-PY
+    if ! jq -e '.rollups' "${detail_tmp}" >/dev/null 2>&1; then
       echo "FAIL: authorized stream detail missing rollups" >&2
       fail=1
     else
@@ -229,7 +220,7 @@ phase_c_vod_canary() {
   local fail=0 vod_tmp code
 
   vod_tmp="$(mktemp)"
-  code="$(curl_code -o "${vod_tmp}" "${BASE}/v1/extension/pulse/vods/${VOD_ID}")"
+  code="$(curl -sS -o "${vod_tmp}" -w '%{http_code}' "${BASE}/v1/extension/pulse/vods/${VOD_ID}")"
   if [[ "${code}" == "404" ]]; then
     echo "FAIL: /v1/extension/pulse/vods/${VOD_ID} HTTP 404 (route or VOD not indexed)" >&2
     fail=1
@@ -237,19 +228,14 @@ phase_c_vod_canary() {
     echo "FAIL: VOD pulse HTTP ${code} (want 200 JSON)" >&2
     fail=1
   else
-    if ! python3 - "${vod_tmp}" "${VOD_ROLLUPS}" <<'PY' 2>/dev/null; then
-import json, sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-vod_rollups = int(sys.argv[2])
-status = str(data.get("coverageStatus") or "")
-if vod_rollups > 0:
-    if status not in {"ready", "partial", "syncing"}:
-        raise SystemExit(1)
-    timeline = data.get("timeline") or {}
-    points = timeline.get("points") or []
-    if len(points) <= 0:
-        raise SystemExit(1)
-PY
+    if ! jq -e --argjson vod_rollups "${VOD_ROLLUPS}" '
+      if ($vod_rollups | tonumber) > 0 then
+        (.coverageStatus | IN("ready","partial","syncing"))
+        and ((.timeline.points // []) | length) > 0
+      else
+        true
+      end
+    ' "${vod_tmp}" >/dev/null 2>&1; then
       echo "FAIL: VOD pulse missing coverage/timeline for vod with rollups=${VOD_ROLLUPS}" >&2
       fail=1
     else
