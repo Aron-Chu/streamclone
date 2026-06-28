@@ -152,6 +152,8 @@ func (h *Handler) PortalRoutes(r chi.Router) {
 		r.Get("/streams/{streamID}/recap", h.portalStreamRecap)
 		r.Get("/streams/{streamID}/minutes", h.portalStreamMinutes)
 		r.Get("/channels/{login}/emotes", h.portalChannelEmotes)
+		r.Get("/channels/{login}/streams", h.portalChannelStreams)
+		r.Get("/channels/{login}/live", h.portalChannelLive)
 	})
 }
 
@@ -494,6 +496,118 @@ func (h *Handler) portalCacheSet(ctx context.Context, key string, body []byte, t
 		return
 	}
 	_ = h.rdb.Set(ctx, key, body, ttl).Err()
+}
+
+type PortalChannelStreamsResponse struct {
+	Channel   string               `json:"channel"`
+	Items     []PortalStreamRecord `json:"items"`
+	Sources   []SourceStatus       `json:"sources"`
+	UpdatedAt int64                `json:"updatedAt"`
+}
+
+func (h *Handler) portalChannelStreams(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
+		return
+	}
+	login, ok := validLogin(chi.URLParam(r, "login"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_channel"})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	streams, err := h.store.StreamsByLogin(r.Context(), login, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stream_unavailable"})
+		return
+	}
+	items := make([]PortalStreamRecord, 0, len(streams))
+	for i := range streams {
+		items = append(items, *portalStreamRecordFrom(&streams[i]))
+	}
+	writeJSON(w, http.StatusOK, PortalChannelStreamsResponse{
+		Channel:   login,
+		Items:     items,
+		Sources:   []SourceStatus{{Source: "analytics_db", State: "ready"}},
+		UpdatedAt: time.Now().UnixMilli(),
+	})
+}
+
+type PortalChannelLiveResponse struct {
+	Channel   string              `json:"channel"`
+	State     string              `json:"state"`
+	Stream    *PortalStreamRecord `json:"stream,omitempty"`
+	Rollups   []PortalMinutePoint `json:"rollups"`
+	TopEmotes []TopEmote          `json:"topEmotes"`
+	Sources   []SourceStatus      `json:"sources"`
+	UpdatedAt int64               `json:"updatedAt"`
+	VodID     string              `json:"vodId,omitempty"`
+	SyncPhase string              `json:"syncPhase,omitempty"`
+}
+
+func (h *Handler) portalChannelLive(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeHostedPortalStreamAccess(w, r) {
+		return
+	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
+		return
+	}
+	login, ok := validLogin(chi.URLParam(r, "login"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_channel"})
+		return
+	}
+	stream, err := h.store.LatestStreamByLogin(r.Context(), login)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusOK, PortalChannelLiveResponse{
+				Channel:   login,
+				State:     "not_collected",
+				Rollups:   []PortalMinutePoint{},
+				TopEmotes: []TopEmote{},
+				Sources:   []SourceStatus{{Source: "analytics_db", State: "unavailable", Message: "No recent data"}},
+				UpdatedAt: time.Now().UnixMilli(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stream_unavailable"})
+		return
+	}
+	rollups, err := h.store.RollupsByStream(r.Context(), stream.StreamID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stream_unavailable"})
+		return
+	}
+	timeline := filterTimelineRollups(rollups)
+	points := portalMinutePointsFromRollups(stream, timeline)
+	topEmotes := TopEmotesFromRollups(timeline, 15)
+	topEmotes = h.rewriteHostedTopEmotes(r.Context(), topEmotes)
+	state := "historical"
+	if stream.EndedAt == nil {
+		state = "live"
+	}
+	syncPhase := ""
+	if h.syncService != nil {
+		if syncStatus, syncErr := h.syncService.GetSyncStatus(r.Context(), stream.StreamID); syncErr == nil && syncStatus != nil && !syncStatus.Phase.IsTerminal() && !syncStatus.Stale {
+			state = "syncing"
+			syncPhase = string(syncStatus.Phase)
+		}
+	}
+	writeJSON(w, http.StatusOK, PortalChannelLiveResponse{
+		Channel:   stream.Login,
+		State:     state,
+		Stream:    portalStreamRecordFrom(stream),
+		Rollups:   points,
+		TopEmotes: topEmotes,
+		Sources:   []SourceStatus{{Source: "analytics_db", State: "ready"}},
+		UpdatedAt: time.Now().UnixMilli(),
+		VodID:     strings.TrimSpace(stream.VodID),
+		SyncPhase: syncPhase,
+	})
 }
 
 func writePortalRateLimited(w http.ResponseWriter, retry time.Duration) {
