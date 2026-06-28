@@ -75,10 +75,16 @@ export function AnalyticsConsole() {
   const detail = detailQuery.data ?? undefined
   const isLive = !streamId && (detail?.state === 'live' || Boolean(liveQuery.data?.stream?.streamId))
 
-  const syncLabel = useMemo(
-    () => syncCtaLabel({ phase: syncQuery.data?.phase, viewerStatus: syncQuery.data?.viewerStatus }),
-    [syncQuery.data?.phase, syncQuery.data?.viewerStatus],
-  )
+  const syncLabel = useMemo(() => {
+    const rollups = detail?.rollups ?? []
+    const hasChat = rollups.some((row) => row.chatCount > 0 || row.totalEmoteCount > 0)
+    const hasViewers = rollups.some((row) => row.viewerSamples > 0 || row.viewerAvg > 0)
+    return syncCtaLabel({
+      syncing,
+      hasChatRollups: hasChat,
+      hasViewerSamples: hasViewers,
+    })
+  }, [detail?.rollups, syncing])
 
   async function handleSync() {
     if (!activeStreamId) return
