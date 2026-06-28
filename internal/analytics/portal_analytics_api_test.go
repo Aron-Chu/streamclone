@@ -227,6 +227,76 @@ func TestPortalStreamMinutesUnauthorizedHosted(t *testing.T) {
 	}
 }
 
+func TestHostedPortalChannelStreamsUnauthorizedWithoutAuth(t *testing.T) {
+	h := &Handler{
+		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret-one"}},
+	}
+	r := chi.NewRouter()
+	h.PortalRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/portal/analytics/channels/ludwig/streams", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload["error"] != "unauthorized" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	if strings.Contains(strings.ToLower(rec.Body.String()), `"items"`) {
+		t.Fatalf("unauthorized response must not include items, got %s", rec.Body.String())
+	}
+}
+
+func TestHostedPortalChannelStreamsAllowsBetaKey(t *testing.T) {
+	h := &Handler{
+		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret-one"}},
+	}
+	r := chi.NewRouter()
+	h.PortalRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/portal/analytics/channels/ludwig/streams", nil)
+	req.Header.Set("X-Streamclone-Beta-Key", "secret-one")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload["error"] != "store_unavailable" {
+		t.Fatalf("payload = %#v, want store_unavailable", payload)
+	}
+}
+
+func TestNonHostedPortalChannelStreamsAllowsGuest(t *testing.T) {
+	h := &Handler{
+		pulseHosted: PulseHostedConfig{Hosted: false},
+	}
+	r := chi.NewRouter()
+	h.PortalRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/portal/analytics/channels/ludwig/streams", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload["error"] != "store_unavailable" {
+		t.Fatalf("payload = %#v, want store_unavailable", payload)
+	}
+}
+
 func TestAllowPortalSummaryRateLimitFailOpen(t *testing.T) {
 	rl := NewPulseRateLimiter(nil, 10, 5)
 	ok, _ := rl.AllowPortalSummary(t.Context(), "principal-a")
