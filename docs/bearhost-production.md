@@ -176,7 +176,10 @@ Script-enforced gates replace ad-hoc “migrate then pray” steps. **Do not** `
 2. Push Commit A + Commit B (hosted auth boundary + gate scripts).
 3. `make bearhost-rsync`
 4. **`BEARHOST_ANALYTICS_GATE_REMOTE=1 make bearhost-analytics-predeploy-gate`** — **stop** if `BLOCK_ANALYTICS_RECREATE=1` (never bare gate from dev when local Docker is up).
-5. On VPS: `make migrate` (000050 required; 000051/000052 optional this batch).
+5. On VPS: `make migrate` (000045–000050 required; 000051/000052 optional this batch).
+
+**Migration chain parity:** Migrations **000045–000049** must remain in the repo whenever BearHost prod schema ≥ 45. `bearhost-rsync --delete` must not drop migration files that prod has already applied — otherwise `golang-migrate` fails at version 49 with “no migration found for version 49”.
+
 6. Re-run **`BEARHOST_ANALYTICS_GATE_REMOTE=1 make bearhost-analytics-predeploy-gate`** — require `ANALYTICS_DEPLOY_GATE=PASS` and `BLOCK_ANALYTICS_RECREATE=0`.
 7. `bash scripts/bearhost-pulse-api.sh` — gate runs automatically before analytics recreate (`BEARHOST_ANALYTICS_GATE_LOCAL=1` inside script; break-glass: `BEARHOST_SKIP_ANALYTICS_DEPLOY_GATE=1`).
 8. `bash scripts/pulse-hosted-boundary-smoke.sh` — require `PUBLIC_BOUNDARY=PASS`.
