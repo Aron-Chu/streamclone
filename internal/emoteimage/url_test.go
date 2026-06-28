@@ -55,12 +55,13 @@ func TestExtensionBrowserURLPrefersSevenTVCDN(t *testing.T) {
 func TestAbsolutizeHostedCDN(t *testing.T) {
 	base := "https://api.streampulse.stream/emotes"
 	localPath := "/emotes/75f49395-d5fc-41da-998c-880c6d8fddcb/1x.webp"
-	if got := AbsolutizeHostedCDN(base, localPath); got != base+localPath {
-		t.Fatalf("relative: got %q", got)
+	want := base + "/75f49395-d5fc-41da-998c-880c6d8fddcb/1x.webp"
+	if got := AbsolutizeHostedCDN(base, localPath); got != want {
+		t.Fatalf("relative: got %q want %q", got, want)
 	}
 	loopback := "http://localhost:8090/emotes/75f49395-d5fc-41da-998c-880c6d8fddcb/1x.webp"
-	if got := AbsolutizeHostedCDN(base, loopback); got != base+localPath {
-		t.Fatalf("loopback: got %q want %q", got, base+localPath)
+	if got := AbsolutizeHostedCDN(base, loopback); got != want {
+		t.Fatalf("loopback: got %q want %q", got, want)
 	}
 	if got := AbsolutizeHostedCDN("", localPath); got != localPath {
 		t.Fatalf("empty base unchanged: got %q", got)
@@ -71,7 +72,7 @@ func TestHostedBrowserURLUsesPublicBase(t *testing.T) {
 	base := "https://api.streampulse.stream/emotes"
 	localID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
 	got := HostedBrowserURL(base, "ffz", localID, "")
-	want := base + "/emotes/" + localID + "/1x.webp"
+	want := base + "/" + localID + "/1x.webp"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

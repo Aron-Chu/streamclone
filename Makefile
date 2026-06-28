@@ -582,6 +582,9 @@ bearhost-corpus-only:
 bearhost-rsync:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-rsync-to-vps.ps1
 
+bearhost-analytics-predeploy-gate:
+	@bash scripts/bearhost-analytics-predeploy-gate.sh
+
 local-vps-only:
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/bearhost-wsl-run.ps1 -Script local-vps-only.sh
 else
@@ -632,6 +635,9 @@ bearhost-corpus-only:
 bearhost-rsync:
 	@python3 -c "import pathlib; f=pathlib.Path('scripts/bearhost-rsync-to-vps.sh'); f.write_text(f.read_text().replace('\r\n','\n').replace('\r','\n'), encoding='utf-8')" 2>/dev/null || true
 	@bash scripts/bearhost-rsync-to-vps.sh
+
+bearhost-analytics-predeploy-gate:
+	@bash scripts/bearhost-analytics-predeploy-gate.sh
 
 local-vps-only:
 	@bash scripts/local-vps-only.sh

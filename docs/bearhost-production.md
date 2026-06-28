@@ -114,9 +114,77 @@ GOLD_IVR_ENABLED_CHANNEL_ALLOWLIST=ludwig
 
 Requires migration **000050** (`chat_source`, `source_confidence`, `chat_source_detail` on `analytics_minute_rollups`). Startup logs `gold_ivr effective config` from analytics and backfill.
 
+**HOLD:** Do not merge the IVR shadow overlay or recreate `analytics-workers` until migration 000050 passes preflight (`source_columns=3`).
+
+Read-only preflight (from dev machine):
+
+```bash
+bash scripts/bearhost-migration-000050-preflight.sh
+```
+
 Local proof: `bash scripts/bench/ivr-shadow-reconcile-proof.sh`. This is **not** IVR prod — artifacts only; GQL remains canonical.
 
+#### IVR shadow canary verification (read-only after deploy)
 
+Run on BearHost after corpus workers are up with `profile-bearhost-corpus-ivr-shadow.env` merged:
+
+```bash
+# 1) Corpus worker mode active
+docker compose ps | grep -E 'analytics-workers|analytics-1'
+
+# 2) Startup config (must match safe block)
+docker compose logs analytics-workers 2>&1 | grep -i 'gold_ivr effective' | tail -3
+# Expect: enabled=true shadow=true lite=false peaks_only=false canonical_replace=false allowlist=[ludwig]
+
+# 3) Shadow artifacts (no raw chat bodies)
+docker compose exec analytics-workers ls -la runtime/ivr-shadow/ 2>/dev/null | tail -10
+# JSON must include: shadow_only=true wrote_rollups=false updated_stream_metadata=false
+
+# 4) DB leakage check (requires migration 000050)
+docker exec streamclone-postgres-1 psql -U app -d streamclone -P pager=off -c "
+SELECT chat_source, source_confidence, COUNT(*)
+FROM analytics_minute_rollups
+WHERE chat_source='ivr'
+GROUP BY 1,2;"
+# Expect: zero rows
+```
+
+Switch back to Pulse API mode when done validating; BearHost runs one heavy mode at a time on 8 GB.
+
+### Hosted API boundary (Layer-2 timelines)
+
+When `PULSE_HOSTED_MODE=true`, unauthenticated clients must not read full minute timelines from legacy desktop routes. Gated paths:
+
+- `GET /v1/analytics/channels/{login}/live` — requires beta key or device token (including `?sparse=false`)
+- `GET /v1/analytics/streams/{streamID}` — requires beta key or device token
+- `GET /v1/analytics/streams/{streamID}/replay-heatmap` — same
+- `GET /v1/portal/analytics/streams/{streamID}/minutes` — same (portal sanitization)
+
+Public aggregate routes remain unauthenticated: `/v1/public/hub`, `/v1/public/emotes/overview` (after binary deploy).
+
+### Public emotes overview deploy
+
+Route: `GET /v1/public/emotes/overview?range=7d` registered in `internal/analytics/public_api.go`. A **404** on prod means the deployed analytics image predates the route — not a Caddy issue. After deploy, expect `200` with `state` in `ready|degraded|empty|unavailable` and `aggregateOnly:true`. Never raw chat or storage credentials.
+
+Migrations **000051/000052** (public emote materialization tables) are **optional** for this batch — the predeploy gate emits `MIGRATION_PUBLIC_EMOTES=WARN` when missing. Do not claim “Full Global Emotes ready” until those migrations are applied, the materializer has run, and smoke returns `200` with real aggregate data.
+
+### Mandatory Pulse analytics deploy order
+
+Script-enforced gates replace ad-hoc “migrate then pray” steps. **Do not** `force-recreate analytics` until migration **000050** passes the predeploy gate.
+
+1. **Pre-push review:** `git show --name-status 0b02ef6` — confirm Commit A scope before push.
+2. Push Commit A + Commit B (hosted auth boundary + gate scripts).
+3. `make bearhost-rsync`
+4. **`BEARHOST_ANALYTICS_GATE_REMOTE=1 make bearhost-analytics-predeploy-gate`** — **stop** if `BLOCK_ANALYTICS_RECREATE=1` (never bare gate from dev when local Docker is up).
+5. On VPS: `make migrate` (000050 required; 000051/000052 optional this batch).
+6. Re-run **`BEARHOST_ANALYTICS_GATE_REMOTE=1 make bearhost-analytics-predeploy-gate`** — require `ANALYTICS_DEPLOY_GATE=PASS` and `BLOCK_ANALYTICS_RECREATE=0`.
+7. `bash scripts/bearhost-pulse-api.sh` — gate runs automatically before analytics recreate (`BEARHOST_ANALYTICS_GATE_LOCAL=1` inside script; break-glass: `BEARHOST_SKIP_ANALYTICS_DEPLOY_GATE=1`).
+8. `bash scripts/pulse-hosted-boundary-smoke.sh` — require `PUBLIC_BOUNDARY=PASS`.
+9. Optional: `PULSE_BETA_KEY=... bash scripts/pulse-hosted-boundary-smoke.sh` for `CHART_CANARY` + `VOD_EXTENSION_CANARY`.
+
+**Do-not box:** IVR shadow overlay (`profile-bearhost-corpus-ivr-shadow.env`) remains **HOLD** until migration 000050 + analytics deploy + corpus workers + Ludwig artifacts + zero `chat_source=ivr` rows.
+
+Legacy scripts that grep `MIGRATION_000050=` should call `scripts/bearhost-migration-000050-preflight.sh` (thin wrapper around the full gate).
 
 ---
 

@@ -173,3 +173,26 @@ func (h *Handler) WithCDNPublicBase(base string) *Handler {
 	h.cdnPublicBase = strings.TrimSpace(base)
 	return h
 }
+
+// authorizeHostedStreamTimelineAccess rejects guest principals on hosted Layer-2
+// timeline routes (full minute rollups, heatmaps). Beta keys and device tokens pass.
+func (h *Handler) authorizeHostedStreamTimelineAccess(w http.ResponseWriter, r *http.Request) bool {
+	if h == nil || !h.pulseHosted.Hosted {
+		return true
+	}
+	principal, ok := pulsePrincipalFromContext(r.Context())
+	if !ok || strings.TrimSpace(principal.ID) == "" || principal.Kind == "guest" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return false
+	}
+	return true
+}
+
+func (h *Handler) pulseHostedStreamTimelineAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !h.authorizeHostedStreamTimelineAccess(w, r) {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
