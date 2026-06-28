@@ -26,17 +26,18 @@ type Input struct {
 }
 
 type StreamRecap struct {
-	StreamID           string      `json:"streamId"`
-	Login              string      `json:"login"`
-	VodID              *string     `json:"vodId,omitempty"`
-	DurationSeconds    int         `json:"durationSeconds"`
-	TotalMessages      int         `json:"totalMessages"`
-	PeakChatPerMin     int         `json:"peakChatPerMin"`
-	TopMoments         []Moment    `json:"topMoments"`
-	TopEmotes          []Emote     `json:"topEmotes"`
-	BiggestChatSpike   *ChatSpike  `json:"biggestChatSpike,omitempty"`
-	FunniestEmoteBurst *EmoteBurst `json:"funniestEmoteBurst,omitempty"`
-	ClipCandidates     []Moment    `json:"clipCandidates"`
+	StreamID              string      `json:"streamId"`
+	Login                 string      `json:"login"`
+	VodID                 *string     `json:"vodId,omitempty"`
+	DurationSeconds       int         `json:"durationSeconds"`
+	TotalMessages         int         `json:"totalMessages"`
+	PeakChatPerMin        int         `json:"peakChatPerMin"`
+	TopMoments            []Moment    `json:"topMoments"`
+	TopEmotes             []Emote     `json:"topEmotes"`
+	EmoteEnrichmentStatus string      `json:"emoteEnrichmentStatus,omitempty"`
+	BiggestChatSpike      *ChatSpike  `json:"biggestChatSpike,omitempty"`
+	FunniestEmoteBurst    *EmoteBurst `json:"funniestEmoteBurst,omitempty"`
+	ClipCandidates        []Moment    `json:"clipCandidates"`
 }
 
 type Moment struct {
@@ -44,12 +45,17 @@ type Moment struct {
 	Score         int      `json:"score"`
 	Reasons       []string `json:"reasons"`
 	TopEmotes     []Emote  `json:"topEmotes,omitempty"`
+	ChatCount     int      `json:"chatCount,omitempty"`
+	EmoteCount    int      `json:"emoteCount,omitempty"`
+	ViewerCount   int      `json:"viewerCount,omitempty"`
 }
 
 type Emote struct {
 	Code     string `json:"code"`
 	Count    int    `json:"count"`
 	Provider string `json:"provider,omitempty"`
+	ID       string `json:"id,omitempty"`
+	ImageURL string `json:"imageUrl,omitempty"`
 }
 
 type ChatSpike struct {
@@ -69,7 +75,7 @@ func Build(input Input) StreamRecap {
 		Login:           strings.ToLower(strings.TrimSpace(input.Login)),
 		VodID:           input.VodID,
 		DurationSeconds: input.DurationSeconds,
-		TopMoments:      topMoments(input.Points),
+		TopMoments:      topMoments(input.Points, input.Rollups, input.StartedAt),
 		TopEmotes:       topSevenTVEmotes(input.Rollups),
 	}
 	if recap.DurationSeconds <= 0 {
@@ -80,13 +86,13 @@ func Build(input Input) StreamRecap {
 	return recap
 }
 
-func topMoments(points []heatmap.ReplayHeatmapDetailPoint) []Moment {
+func topMoments(points []heatmap.ReplayHeatmapDetailPoint, rollups []heatmap.MinuteRollup, startedAt time.Time) []Moment {
 	items := make([]Moment, 0, len(points))
 	for _, point := range points {
 		if point.Score <= 0 {
 			continue
 		}
-		items = append(items, momentFromPoint(point))
+		items = append(items, momentFromPoint(point, rollups, startedAt))
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Score != items[j].Score {
@@ -100,17 +106,53 @@ func topMoments(points []heatmap.ReplayHeatmapDetailPoint) []Moment {
 	return items
 }
 
-func momentFromPoint(point heatmap.ReplayHeatmapDetailPoint) Moment {
+func momentFromPoint(point heatmap.ReplayHeatmapDetailPoint, rollups []heatmap.MinuteRollup, startedAt time.Time) Moment {
 	reason := strings.TrimSpace(point.Reason)
 	if reason == "" {
 		reason = heatmap.ReasonManual
 	}
-	return Moment{
+	moment := Moment{
 		OffsetSeconds: point.OffsetSeconds,
 		Score:         point.Score,
 		Reasons:       []string{reason},
 		TopEmotes:     convertHeatmapEmotes(point.TopEmotes),
 	}
+	if rollup, ok := rollupForMomentOffset(rollups, startedAt, point.OffsetSeconds); ok {
+		moment.ChatCount = rollup.ChatCount
+		moment.EmoteCount = rollupEmoteCount(rollup)
+		if rollup.ViewerAvg > 0 && rollup.ViewerSamples > 0 {
+			moment.ViewerCount = int(rollup.ViewerAvg)
+		}
+	}
+	return moment
+}
+
+func rollupForMomentOffset(rollups []heatmap.MinuteRollup, startedAt time.Time, offsetSeconds int) (heatmap.MinuteRollup, bool) {
+	for i, rollup := range rollups {
+		if rollup.Missing {
+			continue
+		}
+		if offsetForRollup(i, rollup, startedAt) == offsetSeconds {
+			return rollup, true
+		}
+	}
+	return heatmap.MinuteRollup{}, false
+}
+
+func rollupEmoteCount(rollup heatmap.MinuteRollup) int {
+	if rollup.TotalEmoteCount > 0 {
+		return rollup.TotalEmoteCount
+	}
+	total := 0
+	for _, count := range rollup.Emotes {
+		if count > 0 {
+			total += count
+		}
+	}
+	if total > 0 {
+		return total
+	}
+	return rollup.SevenTVEmoteCount
 }
 
 func convertHeatmapEmotes(in []heatmap.HeatmapEmote) []Emote {

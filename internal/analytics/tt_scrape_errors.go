@@ -7,30 +7,31 @@ import (
 
 // TT scrape outcome reason labels (Prometheus analytics_tt_scrape_* metrics).
 const (
-	TTScrapeReasonOK                 = "ok"
+	TTScrapeReasonOK                  = "ok"
 	TTScrapeReasonCloudflareChallenge = "cloudflare_challenge"
-	TTScrapeReasonTimeoutNavigation  = "timeout_navigation"
-	TTScrapeReasonTimeoutHighcharts  = "timeout_highcharts"
-	TTScrapeReasonMissingMetaECS     = "missing_meta_ecs"
-	TTScrapeReasonHTTP403            = "http_403"
-	TTScrapeReasonHTTP429            = "http_429"
-	TTScrapeReasonEmptyViewerSeries  = "empty_viewer_series"
-	TTScrapeReasonPartialChart       = "partial_chart"
-	TTScrapeReasonFlatTail           = "flat_tail"
-	TTScrapeReasonParseError         = "parse_error"
-	TTScrapeReasonBrowserCrash       = "browser_crash"
-	TTScrapeReasonProxyError         = "proxy_error"
-	TTScrapeReasonScraperUnreachable = "scraper_unreachable"
-	TTScrapeReasonScraperAPIError    = "scraper_api_error"
-	TTScrapeReasonEmptyHTML          = "empty_html"
-	TTScrapeReasonScrapeBackoff      = "scrape_backoff"
-	TTScrapeReasonOther              = "other"
+	TTScrapeReasonTimeoutNavigation   = "timeout_navigation"
+	TTScrapeReasonTimeoutHighcharts   = "timeout_highcharts"
+	TTScrapeReasonMissingMetaECS      = "missing_meta_ecs"
+	TTScrapeReasonHTTP403             = "http_403"
+	TTScrapeReasonHTTP429             = "http_429"
+	TTScrapeReasonEmptyViewerSeries   = "empty_viewer_series"
+	TTScrapeReasonPartialChart        = "partial_chart"
+	TTScrapeReasonFlatTail            = "flat_tail"
+	TTScrapeReasonParseError          = "parse_error"
+	TTScrapeReasonBrowserCrash        = "browser_crash"
+	TTScrapeReasonProxyError          = "proxy_error"
+	TTScrapeReasonScraperUnreachable  = "scraper_unreachable"
+	TTScrapeReasonScraperAPIError     = "scraper_api_error"
+	TTScrapeReasonEmptyHTML           = "empty_html"
+	TTScrapeReasonScrapeBackoff       = "scrape_backoff"
+	TTScrapeReasonOther               = "other"
 )
 
 const (
-	ttScrapePathDirectHTTP = "direct_http"
-	ttScrapePathBrowser    = "browser"
-	ttScrapePathUnknown    = "unknown"
+	ttScrapePathDirectHTTP   = "direct_http"
+	ttScrapePathBrowser      = "browser"
+	ttScrapePathBrowserProxy = "browser_proxy"
+	ttScrapePathUnknown      = "unknown"
 )
 
 // ClassifyTTScrapeError maps sync/scraper errors to a stable failure reason for metrics.

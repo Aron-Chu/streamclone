@@ -22,16 +22,18 @@ const (
 
 // PortalStreamDetail is a user-safe stream shell without minute rollups or raw chat.
 type PortalStreamDetail struct {
-	Channel         string               `json:"channel"`
-	State           string               `json:"state"`
-	Stream          *PortalStreamRecord  `json:"stream,omitempty"`
-	Sources         []SourceStatus       `json:"sources"`
-	UpdatedAt       int64                `json:"updatedAt"`
-	VodID           string               `json:"vodId,omitempty"`
-	SyncPhase       string               `json:"syncPhase,omitempty"`
-	ChatCoveragePct float64              `json:"chatCoveragePct,omitempty"`
-	AnalyticsQuality string              `json:"analyticsQuality,omitempty"`
-	DataSourceBadges []PortalDataSourceBadge `json:"dataSourceBadges,omitempty"`
+	Channel          string                    `json:"channel"`
+	State            string                    `json:"state"`
+	Stream           *PortalStreamRecord       `json:"stream,omitempty"`
+	Sources          []SourceStatus            `json:"sources"`
+	UpdatedAt        int64                     `json:"updatedAt"`
+	VodID            string                    `json:"vodId,omitempty"`
+	SyncPhase        string                    `json:"syncPhase,omitempty"`
+	ChatCoveragePct  float64                   `json:"chatCoveragePct,omitempty"`
+	ChatSourceMeta   *StreamChatSourceMetadata `json:"chatSource,omitempty"`
+	AnalyticsQuality string                    `json:"analyticsQuality,omitempty"`
+	DataSourceBadges []PortalDataSourceBadge   `json:"dataSourceBadges,omitempty"`
+	StoredArtifacts  *StoredArtifactsSummary   `json:"storedArtifacts,omitempty"`
 }
 
 type PortalStreamRecord struct {
@@ -78,6 +80,7 @@ type PortalStreamMinutesResponse struct {
 	StartedAt                  time.Time           `json:"startedAt"`
 	CoverageStartOffsetSeconds int                 `json:"coverageStartOffsetSeconds,omitempty"`
 	Minutes                    []PortalMinutePoint `json:"minutes"`
+	ProvisionalPeakMinutes     []PortalMinutePoint `json:"provisionalPeakMinutes,omitempty"`
 	UpdatedAt                  int64               `json:"updatedAt"`
 }
 
@@ -148,6 +151,7 @@ func (h *Handler) PortalRoutes(r chi.Router) {
 		r.Get("/streams/{streamID}/games", h.portalStreamGames)
 		r.Get("/streams/{streamID}/recap", h.portalStreamRecap)
 		r.Get("/streams/{streamID}/minutes", h.portalStreamMinutes)
+		r.Get("/channels/{login}/emotes", h.portalChannelEmotes)
 	})
 }
 
@@ -162,15 +166,37 @@ func portalMinuteOffsetSeconds(streamStart time.Time, rollup MinuteRollup) int {
 	return int(sec)
 }
 
-func portalMinutesFromRollups(stream *StreamRecord, rollups []MinuteRollup) PortalStreamMinutesResponse {
+func portalMinutesCacheKey(streamID string, includeProvisionalPeaks bool) string {
+	key := portalAnalyticsCachePrefix + "minutes:" + streamID
+	if includeProvisionalPeaks {
+		return key + ":provisional_peaks"
+	}
+	return key
+}
+
+func portalMinutesFromRollups(stream *StreamRecord, rollups []MinuteRollup, includeProvisionalPeaks bool) PortalStreamMinutesResponse {
+	timeline := filterTimelineRollups(rollups)
+	points := portalMinutePointsFromRollups(stream, timeline)
+	resp := PortalStreamMinutesResponse{
+		StreamID:  stream.StreamID,
+		Channel:   stream.Login,
+		StartedAt: stream.StartedAt,
+		Minutes:   points,
+		UpdatedAt: time.Now().UnixMilli(),
+	}
+	if coverageStart := portalCoverageStartOffset(stream, timeline); coverageStart >= 0 {
+		resp.CoverageStartOffsetSeconds = coverageStart
+	}
+	if includeProvisionalPeaks {
+		resp.ProvisionalPeakMinutes = portalMinutePointsFromRollups(stream, provisionalPeakCandidateRollups(rollups))
+	}
+	return resp
+}
+
+func portalMinutePointsFromRollups(stream *StreamRecord, rollups []MinuteRollup) []PortalMinutePoint {
 	points := make([]PortalMinutePoint, 0, len(rollups))
-	coverageStart := -1
 	for _, rollup := range rollups {
 		offset := portalMinuteOffsetSeconds(stream.StartedAt, rollup)
-		hasData := !rollup.Missing && (rollup.ChatCount > 0 || rollup.TotalEmoteCount > 0 || rollup.ViewerSamples > 0)
-		if hasData && coverageStart < 0 {
-			coverageStart = offset
-		}
 		viewer := rollup.ViewerLatest
 		if viewer == 0 {
 			viewer = rollup.ViewerMax
@@ -188,17 +214,19 @@ func portalMinutesFromRollups(stream *StreamRecord, rollups []MinuteRollup) Port
 			Missing:           rollup.Missing,
 		})
 	}
-	resp := PortalStreamMinutesResponse{
-		StreamID:  stream.StreamID,
-		Channel:   stream.Login,
-		StartedAt: stream.StartedAt,
-		Minutes:   points,
-		UpdatedAt: time.Now().UnixMilli(),
+	return points
+}
+
+func portalCoverageStartOffset(stream *StreamRecord, rollups []MinuteRollup) int {
+	coverageStart := -1
+	for _, rollup := range rollups {
+		offset := portalMinuteOffsetSeconds(stream.StartedAt, rollup)
+		hasData := !rollup.Missing && (rollup.ChatCount > 0 || rollup.TotalEmoteCount > 0 || rollup.ViewerSamples > 0)
+		if hasData && coverageStart < 0 {
+			coverageStart = offset
+		}
 	}
-	if coverageStart >= 0 {
-		resp.CoverageStartOffsetSeconds = coverageStart
-	}
-	return resp
+	return coverageStart
 }
 
 func (h *Handler) portalStreamDetail(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +245,7 @@ func (h *Handler) portalStreamDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rollups, _ := h.store.RollupsByStream(r.Context(), stream.StreamID)
-	metrics := summarizeStreamMetrics(stream, rollups)
+	metrics := summarizeStreamMetrics(stream, filterTimelineRollups(rollups))
 	state := "historical"
 	if stream.EndedAt == nil {
 		state = "live"
@@ -229,7 +257,17 @@ func (h *Handler) portalStreamDetail(w http.ResponseWriter, r *http.Request) {
 			syncPhase = string(syncStatus.Phase)
 		}
 	}
-	sources := []SourceStatus{{Source: "analytics_db", State: "ready"}}
+	stored := h.storedArtifactsForStream(r.Context(), stream.StreamID)
+	sources := mergeStoredSources([]SourceStatus{{Source: "analytics_db", State: "ready"}}, stored)
+	var chatSourceMeta *StreamChatSourceMetadata
+	badges := portalBadgesFromStored(stored, sources)
+	if meta, err := h.store.GetStreamChatSourceMetadata(r.Context(), stream.StreamID); err == nil && meta != nil && meta.ChatSource != ChatSourceNone {
+		chatSourceMeta = meta
+		label, status := portalChatSourceLabel(*meta)
+		if label != "" {
+			badges = append(badges, PortalDataSourceBadge{Source: meta.ChatSource, State: meta.SourceConfidence, Label: label + " — " + status})
+		}
+	}
 	writeJSON(w, http.StatusOK, PortalStreamDetail{
 		Channel:          stream.Login,
 		State:            state,
@@ -239,8 +277,10 @@ func (h *Handler) portalStreamDetail(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:        time.Now().UnixMilli(),
 		VodID:            strings.TrimSpace(stream.VodID),
 		ChatCoveragePct:  metrics.DataCoveragePct,
+		ChatSourceMeta:   chatSourceMeta,
 		AnalyticsQuality: portalQualityFromMetrics(metrics),
-		DataSourceBadges: portalBadgesFromSources(sources),
+		DataSourceBadges: badges,
+		StoredArtifacts:  &stored,
 	})
 }
 
@@ -282,17 +322,20 @@ func (h *Handler) portalStreamSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metrics := summarizeStreamMetrics(stream, rollups)
-	topEmotes := TopEmotesFromRollups(rollups, 15)
+	topEmotes := TopEmotesFromRollups(filterTimelineRollups(rollups), 15)
 	topEmotes = h.rewriteHostedTopEmotes(r.Context(), topEmotes)
+	stored := h.storedArtifactsForStream(r.Context(), stream.StreamID)
+	sources := mergeStoredSources([]SourceStatus{{Source: "analytics_db", State: "ready"}}, stored)
 	resp := map[string]any{
-		"channel": stream.Login,
-		"stream":  portalStreamRecordFrom(stream),
-		"metrics": metrics,
-		"topEmotes": topEmotes,
-		"sources":   []SourceStatus{{Source: "analytics_db", State: "ready"}},
-		"updatedAt": time.Now().UnixMilli(),
+		"channel":          stream.Login,
+		"stream":           portalStreamRecordFrom(stream),
+		"metrics":          metrics,
+		"topEmotes":        topEmotes,
+		"sources":          sources,
+		"updatedAt":        time.Now().UnixMilli(),
 		"analyticsQuality": portalQualityFromMetrics(metrics),
-		"dataSourceBadges": portalBadgesFromSources([]SourceStatus{{Source: "analytics_db", State: "ready"}}),
+		"dataSourceBadges": portalBadgesFromStored(stored, sources),
+		"storedArtifacts":  stored,
 	}
 	body, err := json.Marshal(resp)
 	if err != nil {
@@ -343,12 +386,20 @@ func (h *Handler) portalStreamRecap(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) portalStreamMinutes(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeHostedPortalStreamAccess(w, r) {
+		return
+	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
+		return
+	}
 	streamID := strings.TrimSpace(chi.URLParam(r, "streamID"))
 	if streamID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_stream_id"})
 		return
 	}
-	cacheKey := portalAnalyticsCachePrefix + "minutes:" + streamID
+	includePeaks := r.URL.Query().Get("includeProvisionalPeaks") == "true"
+	cacheKey := portalMinutesCacheKey(streamID, includePeaks)
 	if body, ok := h.portalCacheGet(r.Context(), cacheKey); ok {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "private, no-store")
@@ -371,7 +422,57 @@ func (h *Handler) portalStreamMinutes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stream_unavailable"})
 		return
 	}
-	resp := portalMinutesFromRollups(stream, rollups)
+	resp := portalMinutesFromRollups(stream, rollups, includePeaks)
+	body, err := json.Marshal(resp)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encode_failed"})
+		return
+	}
+	h.portalCacheSet(r.Context(), cacheKey, body, portalAnalyticsSummaryTTL)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Cache", "MISS")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+func (h *Handler) authorizeHostedPortalStreamAccess(w http.ResponseWriter, r *http.Request) bool {
+	if h == nil || !h.pulseHosted.Hosted {
+		return true
+	}
+	principal, ok := pulsePrincipalFromContext(r.Context())
+	if !ok || strings.TrimSpace(principal.ID) == "" || principal.Kind == "guest" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return false
+	}
+	return true
+}
+
+func (h *Handler) portalChannelEmotes(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
+		return
+	}
+	login := normalizeLogin(chi.URLParam(r, "login"))
+	if login == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_login"})
+		return
+	}
+	rangeDuration := parsePortalEmoteRange(r.URL.Query().Get("range"))
+	cacheKey := portalAnalyticsCachePrefix + "channel-emotes:" + login + ":" + formatEmoteRange(rangeDuration)
+	if body, ok := h.portalCacheGet(r.Context(), cacheKey); ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("X-Cache", "HIT")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+		return
+	}
+	resp, err := h.store.PortalChannelEmotes(r.Context(), login, rangeDuration)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "channel_emotes_unavailable"})
+		return
+	}
 	body, err := json.Marshal(resp)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encode_failed"})

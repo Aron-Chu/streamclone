@@ -6,11 +6,11 @@ import (
 )
 
 const (
-	fixtureSilverAllowLogin       = "shroud"
-	fixtureSilverStaleLogin       = "stale_meta"
-	fixtureSilverNoStreamLogin    = "no_stream"
-	fixtureSilverDuplicateLogin   = "dup_skip"
-	fixtureSilverBudgetLogin      = "budget_skip"
+	fixtureSilverAllowLogin     = "shroud"
+	fixtureSilverStaleLogin     = "stale_meta"
+	fixtureSilverNoStreamLogin  = "no_stream"
+	fixtureSilverDuplicateLogin = "dup_skip"
+	fixtureSilverBudgetLogin    = "budget_skip"
 )
 
 // FixtureSilverCandidateReader returns deterministic local-only candidates for LOAD-003c dry-run.

@@ -7,7 +7,7 @@ import (
 )
 
 type trackerPrefetchState struct {
-	mu      sync.Mutex
+	mu       sync.Mutex
 	inflight map[string]struct{}
 }
 

@@ -164,13 +164,29 @@ func TestEmoteEnsureDictionaryUsable(t *testing.T) {
 	}
 }
 
+func TestDefaultEmoteEnsureProvidersIncludesBTTV(t *testing.T) {
+	got := defaultEmoteEnsureProviders()
+	want := []string{"seventv", "twitch", "ffz", "bttv"}
+	if len(got) != len(want) {
+		t.Fatalf("providers = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("providers = %+v, want %+v", got, want)
+		}
+	}
+}
+
 func TestEmoteSyncSnapshotMessages(t *testing.T) {
 	ready := emoteSyncSnapshotForState(EmoteSyncReady, true, "fresh", nil)
-	if ready.Message != "7TV synced" {
+	if ready.Provider != "multi" {
+		t.Fatalf("ready provider = %q", ready.Provider)
+	}
+	if ready.Message != "Emotes synced" {
 		t.Fatalf("ready message = %q", ready.Message)
 	}
 	stale := emoteSyncSnapshotForState(EmoteSyncStale, false, "cache", nil)
-	if stale.Message != "7TV stale — using cached set" {
+	if stale.Message != "Emotes stale — using cached set" {
 		t.Fatalf("stale message = %q", stale.Message)
 	}
 	unavailable := emoteSyncSnapshotForState(EmoteSyncUnavailable, false, "", nil)

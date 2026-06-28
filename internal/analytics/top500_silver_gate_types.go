@@ -18,12 +18,12 @@ const (
 
 // SilverGateConfig holds runtime settings for the Top500 selective silver gate.
 type SilverGateConfig struct {
-	Enabled         bool
-	DryRun          bool
-	WriteEnabled    bool
-	MaxCandidates   int
+	Enabled          bool
+	DryRun           bool
+	WriteEnabled     bool
+	MaxCandidates    int
 	MaxEnqueuePerRun int
-	Interval        time.Duration
+	Interval         time.Duration
 }
 
 // SilverGateCandidate is an in-memory candidate for selective silver enqueue.
@@ -71,26 +71,26 @@ type SilverBudgetSnapshot struct {
 type SilverGateDecisionReason string
 
 const (
-	SilverGateAllowEnqueue            SilverGateDecisionReason = "allow_enqueue"
-	SilverGateSkipNotCandidate        SilverGateDecisionReason = "skip_not_candidate"
-	SilverGateSkipMetadataStale       SilverGateDecisionReason = "skip_metadata_stale"
-	SilverGateSkipMissingStreamID     SilverGateDecisionReason = "skip_missing_stream_id"
-	SilverGateSkipAlreadyDone         SilverGateDecisionReason = "skip_already_done"
-	SilverGateSkipDuplicateJob        SilverGateDecisionReason = "skip_duplicate_job"
-	SilverGateSkipChannelCooldown     SilverGateDecisionReason = "skip_channel_cooldown"
-	SilverGateSkipRecentFailure       SilverGateDecisionReason = "skip_recent_failure"
-	SilverGateSkipGlobalBackoff       SilverGateDecisionReason = "skip_global_backoff"
-	SilverGateSkipDailyBudget           SilverGateDecisionReason = "skip_daily_budget"
-	SilverGateSkipRunningLimit          SilverGateDecisionReason = "skip_running_limit"
-	SilverGateSkipQueueFull             SilverGateDecisionReason = "skip_queue_full"
-	SilverGateSkipDiskGuard             SilverGateDecisionReason = "skip_disk_guard"
-	SilverGateSkipBackupGuard           SilverGateDecisionReason = "skip_backup_guard"
-	SilverGateSkipArchiveGuard          SilverGateDecisionReason = "skip_archive_guard"
-	SilverGateSkipAlertingGuard         SilverGateDecisionReason = "skip_alerting_guard"
-	SilverGateSkipCorpusUnhealthy       SilverGateDecisionReason = "skip_corpus_unhealthy"
-	SilverGateSkipHostedUnhealthy       SilverGateDecisionReason = "skip_hosted_unhealthy"
-	SilverGateSkipCounterUnavailable    SilverGateDecisionReason = "skip_counter_unavailable"
-	SilverGateSkipCounterStale          SilverGateDecisionReason = "skip_counter_stale"
+	SilverGateAllowEnqueue           SilverGateDecisionReason = "allow_enqueue"
+	SilverGateSkipNotCandidate       SilverGateDecisionReason = "skip_not_candidate"
+	SilverGateSkipMetadataStale      SilverGateDecisionReason = "skip_metadata_stale"
+	SilverGateSkipMissingStreamID    SilverGateDecisionReason = "skip_missing_stream_id"
+	SilverGateSkipAlreadyDone        SilverGateDecisionReason = "skip_already_done"
+	SilverGateSkipDuplicateJob       SilverGateDecisionReason = "skip_duplicate_job"
+	SilverGateSkipChannelCooldown    SilverGateDecisionReason = "skip_channel_cooldown"
+	SilverGateSkipRecentFailure      SilverGateDecisionReason = "skip_recent_failure"
+	SilverGateSkipGlobalBackoff      SilverGateDecisionReason = "skip_global_backoff"
+	SilverGateSkipDailyBudget        SilverGateDecisionReason = "skip_daily_budget"
+	SilverGateSkipRunningLimit       SilverGateDecisionReason = "skip_running_limit"
+	SilverGateSkipQueueFull          SilverGateDecisionReason = "skip_queue_full"
+	SilverGateSkipDiskGuard          SilverGateDecisionReason = "skip_disk_guard"
+	SilverGateSkipBackupGuard        SilverGateDecisionReason = "skip_backup_guard"
+	SilverGateSkipArchiveGuard       SilverGateDecisionReason = "skip_archive_guard"
+	SilverGateSkipAlertingGuard      SilverGateDecisionReason = "skip_alerting_guard"
+	SilverGateSkipCorpusUnhealthy    SilverGateDecisionReason = "skip_corpus_unhealthy"
+	SilverGateSkipHostedUnhealthy    SilverGateDecisionReason = "skip_hosted_unhealthy"
+	SilverGateSkipCounterUnavailable SilverGateDecisionReason = "skip_counter_unavailable"
+	SilverGateSkipCounterStale       SilverGateDecisionReason = "skip_counter_stale"
 )
 
 // SilverGateResult is the pure evaluation outcome for one candidate.

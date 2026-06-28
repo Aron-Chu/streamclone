@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/redis/go-redis/v9"
+
+	"streamclone/internal/emoteimage"
 )
 
 type Entry struct {
@@ -40,12 +42,19 @@ func (d *Dict) EmoteURL(emoteID, scale string) string {
 	return fmt.Sprintf("%s/%s/%s.webp", d.cdnBase, emoteID, scale)
 }
 
+func (d *Dict) BrowserURL(emoteID, provider, providerEmoteID, scale string) string {
+	if providerEmoteID != "" {
+		return emoteimage.ExtensionBrowserURL(provider, emoteID, providerEmoteID)
+	}
+	return d.EmoteURL(emoteID, scale)
+}
+
 func (d *Dict) Rebuild(ctx context.Context, login string, emotes []EmoteEntry) error {
 	key := channelKey(login)
 	pipe := d.rdb.Pipeline()
 	pipe.Del(ctx, key)
 	for _, e := range emotes {
-		val, err := marshalEntry(d.EmoteURL(e.EmoteID, "1x"), e.ZeroWidth, e.EmoteID, e.Provider)
+		val, err := marshalEntry(d.BrowserURL(e.EmoteID, e.Provider, e.ProviderEmoteID, "1x"), e.ZeroWidth, e.EmoteID, e.Provider)
 		if err != nil {
 			return err
 		}
@@ -89,10 +98,11 @@ func (d *Dict) RemoveEmote(ctx context.Context, login, name string) error {
 }
 
 type EmoteEntry struct {
-	Name      string
-	EmoteID   string
-	ZeroWidth bool
-	Provider  string
+	Name            string
+	EmoteID         string
+	ProviderEmoteID string
+	ZeroWidth       bool
+	Provider        string
 }
 
 func marshalEntry(url string, zw bool, id string, provider string) (string, error) {

@@ -41,10 +41,10 @@ type extensionAuthDeviceResponse struct {
 }
 
 type extensionMeResponse struct {
-	PrincipalID     string              `json:"principalId"`
-	PrincipalKind   string              `json:"principalKind"`
-	WatchlistCount  int                 `json:"watchlistCount"`
-	Caps            extensionMeCaps     `json:"caps"`
+	PrincipalID    string          `json:"principalId"`
+	PrincipalKind  string          `json:"principalKind"`
+	WatchlistCount int             `json:"watchlistCount"`
+	Caps           extensionMeCaps `json:"caps"`
 }
 
 type extensionMeCaps struct {
@@ -167,15 +167,13 @@ func (h *Handler) pulseHostedAuthMiddleware(next http.Handler) http.Handler {
 				return
 			}
 		}
-		id, kind, ok := principalFromRequest(r, h.pulseHosted)
-		if !ok {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{
-				"error": "unauthorized",
-				"hint":  "Set X-Streamclone-Beta-Key or Authorization: Bearer device token",
-			})
+		if id, kind, ok := principalFromRequest(r, h.pulseHosted); ok {
+			ctx := context.WithValue(r.Context(), pulsePrincipalCtxKey{}, PulsePrincipal{ID: id, Kind: kind})
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
-		ctx := context.WithValue(r.Context(), pulsePrincipalCtxKey{}, PulsePrincipal{ID: id, Kind: kind})
+		principal := guestPulsePrincipal(r)
+		ctx := context.WithValue(r.Context(), pulsePrincipalCtxKey{}, principal)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -186,7 +184,7 @@ func (h *Handler) extensionAuthDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal, ok := pulsePrincipalFromContext(r.Context())
-	if !ok || principal.Kind != "beta" {
+	if !ok || strings.TrimSpace(principal.ID) == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}

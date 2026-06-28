@@ -16,26 +16,28 @@ const (
 )
 
 type PublicStatsResponse struct {
-	StreamsTracked         int64     `json:"streamsTracked"`
-	MomentsDetected        int64     `json:"momentsDetected"`
-	ChatMessagesProcessed  int64     `json:"chatMessagesProcessed"`
-	EmotesIndexed          int64     `json:"emotesIndexed"`
-	VodsAnalyzed           int64     `json:"vodsAnalyzed"`
-	UpdatedAt              time.Time `json:"updatedAt"`
+	StreamsTracked        int64     `json:"streamsTracked"`
+	MomentsDetected       int64     `json:"momentsDetected"`
+	ChatMessagesProcessed int64     `json:"chatMessagesProcessed"`
+	EmotesIndexed         int64     `json:"emotesIndexed"`
+	VodsAnalyzed          int64     `json:"vodsAnalyzed"`
+	UpdatedAt             time.Time `json:"updatedAt"`
 }
 
 type PublicStatusResponse struct {
-	Status    string     `json:"status"`
-	API       string     `json:"api"`
-	Degraded  bool       `json:"degraded"`
-	Incident  *string    `json:"incident"`
-	UpdatedAt time.Time  `json:"updatedAt"`
+	Status    string    `json:"status"`
+	API       string    `json:"api"`
+	Degraded  bool      `json:"degraded"`
+	Incident  *string   `json:"incident"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func (h *Handler) PublicRoutes(r chi.Router) {
 	r.Route("/v1/public", func(r chi.Router) {
 		r.Get("/stats", h.getPublicStats)
 		r.Get("/status", h.getPublicStatus)
+		r.Get("/hub", h.getPublicHub)
+		r.Get("/emotes/overview", h.getPublicEmotesOverview)
 	})
 }
 
@@ -68,6 +70,8 @@ func (h *Handler) publicCacheRefreshLoop(ctx context.Context) {
 func (h *Handler) refreshPublicCaches(ctx context.Context) {
 	_, _, _ = h.loadPublicStats(ctx, true)
 	_, _, _ = h.loadPublicStatus(ctx, true)
+	_, _, _ = h.loadPublicHub(ctx, true, publicHubOptions{})
+	_, _, _ = h.loadPublicEmotesOverview(ctx, true, parsePublicEmotesRange(""))
 }
 
 func (h *Handler) getPublicStats(w http.ResponseWriter, r *http.Request) {

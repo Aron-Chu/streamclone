@@ -28,8 +28,8 @@ func TestRewriteHostedExtensionEmoteURLs(t *testing.T) {
 		Provider: "ffz",
 		ImageURL: emoteimage.URL("ffz", localID, "1x"),
 	}}
-	outFFZ := rewriteHostedExtensionEmoteURLs(ffz, nil, base)
-	if outFFZ[0].ImageURL != base+"/emotes/"+localID+"/1x.webp" {
+	outFFZ := rewriteHostedExtensionEmoteURLs(ffz, map[string]string{localID: "12345"}, base)
+	if outFFZ[0].ImageURL != "https://cdn.frankerfacez.com/emoticon/12345/4" {
 		t.Fatalf("ffz hosted: got %q", outFFZ[0].ImageURL)
 	}
 }

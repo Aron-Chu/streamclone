@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,18 +43,23 @@ type ExtensionHealthResponse struct {
 }
 
 type ExtensionHealthDegraded struct {
-	VODLookup    bool `json:"vodLookup"`
-	Backfill     bool `json:"backfill"`
-	LiveTracking bool `json:"liveTracking"`
-	BFFCache     bool `json:"bffCache"`
+	VODLookup     bool `json:"vodLookup"`
+	Backfill      bool `json:"backfill"`
+	LiveTracking  bool `json:"liveTracking"`
+	BFFCache      bool `json:"bffCache"`
 	ActionsPaused bool `json:"actionsPaused,omitempty"`
 }
 
 type ExtensionHealthRoutes struct {
-	PulseChannel bool `json:"pulseChannel"`
+	PulseChannel  bool `json:"pulseChannel"`
 	PulseCoverage bool `json:"pulseCoverage"`
-	VodHint      bool `json:"vodHint"`
-	Backfill     bool `json:"backfill"`
+	Streams       bool `json:"streams,omitempty"`
+	VodHint       bool `json:"vodHint"`
+	StreamHint    bool `json:"streamHint,omitempty"`
+	Backfill      bool `json:"backfill"`
+	Track         bool `json:"track,omitempty"`
+	SyncRecent    bool `json:"syncRecent,omitempty"`
+	Jobs          bool `json:"jobs,omitempty"`
 }
 
 type ExtensionHealthCapabilities struct {
@@ -66,11 +72,13 @@ type ExtensionHealthCapabilities struct {
 }
 
 type ExtensionEmote struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	ImageURL string `json:"imageUrl"`
-	Count    int    `json:"count"`
-	Provider string `json:"provider"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	ImageURL  string `json:"imageUrl"`
+	Count     int    `json:"count"`
+	Provider  string `json:"provider"`
+	ZeroWidth bool   `json:"zeroWidth,omitempty"`
+	Animated  bool   `json:"animated,omitempty"`
 }
 
 type ExtensionRollup struct {
@@ -102,24 +110,62 @@ type ExtensionPeak struct {
 	TopEmotes      []ExtensionEmote `json:"topEmotes,omitempty"`
 }
 
+type ExtensionPastStream struct {
+	StreamID         string                  `json:"streamId"`
+	VodID            string                  `json:"vodId,omitempty"`
+	Title            string                  `json:"title,omitempty"`
+	Category         string                  `json:"category,omitempty"`
+	StartedAt        time.Time               `json:"startedAt"`
+	EndedAt          *time.Time              `json:"endedAt,omitempty"`
+	DurationSeconds  int                     `json:"durationSeconds,omitempty"`
+	IsCurrentLive    bool                    `json:"isCurrentLive,omitempty"`
+	HasRollups       bool                    `json:"hasRollups"`
+	RollupPointCount int                     `json:"rollupPointCount"`
+	CoverageState    string                  `json:"coverageState"`
+	ThumbnailURL     string                  `json:"thumbnailUrl,omitempty"`
+	Source           string                  `json:"source"`
+	StoredArtifacts  *StoredArtifactsSummary `json:"storedArtifacts,omitempty"`
+}
+
+type ExtensionPastStreamsResponse struct {
+	Login     string                `json:"login"`
+	Items     []ExtensionPastStream `json:"items"`
+	UpdatedAt int64                 `json:"updatedAt"`
+}
+
+type ExtensionGameSegment struct {
+	ID              int    `json:"id,omitempty"`
+	GameName        string `json:"gameName"`
+	OffsetSeconds   int    `json:"offsetSeconds"`
+	DurationSeconds int    `json:"durationSeconds"`
+}
+
 type ExtensionPulseResponse struct {
-	Login                      string            `json:"login"`
-	IsLive                     bool              `json:"isLive"`
-	Tracking                   bool              `json:"tracking"`
-	StreamID                   string            `json:"streamId,omitempty"`
-	VodID                      *string           `json:"vodId"`
-	StartedAt                  *time.Time        `json:"startedAt,omitempty"`
-	CurrentOffsetSeconds       int               `json:"currentOffsetSeconds"`
-	CoverageStartOffsetSeconds int               `json:"coverageStartOffsetSeconds"`
-	Coverage                   ExtensionCoverage `json:"coverage"`
-	TopEmotes                  []ExtensionEmote  `json:"topEmotes,omitempty"`
-	Rollups                    []ExtensionRollup `json:"rollups"`
-	FullRollups                []ExtensionRollup `json:"fullRollups,omitempty"`
-	Lanes                      ExtensionLanes    `json:"lanes"`
-	Peaks                      []ExtensionPeak   `json:"peaks"`
-	Recap                      any               `json:"recap"`
-	EmoteSync                  EmoteSyncSnapshot `json:"emoteSync"`
-	HelixEnabled               bool              `json:"helixEnabled,omitempty"`
+	Login                      string                  `json:"login"`
+	IsLive                     bool                    `json:"isLive"`
+	Tracking                   bool                    `json:"tracking"`
+	StreamID                   string                  `json:"streamId,omitempty"`
+	VodID                      *string                 `json:"vodId"`
+	StartedAt                  *time.Time              `json:"startedAt,omitempty"`
+	EndedAt                    *time.Time              `json:"endedAt,omitempty"`
+	Title                      string                  `json:"title,omitempty"`
+	Category                   string                  `json:"category,omitempty"`
+	PeakViewers                int                     `json:"peakViewers,omitempty"`
+	DurationSeconds            int                     `json:"durationSeconds,omitempty"`
+	PeakEmotePerMin            int                     `json:"peakEmotePerMin,omitempty"`
+	CurrentOffsetSeconds       int                     `json:"currentOffsetSeconds"`
+	CoverageStartOffsetSeconds int                     `json:"coverageStartOffsetSeconds"`
+	Coverage                   ExtensionCoverage       `json:"coverage"`
+	TopEmotes                  []ExtensionEmote        `json:"topEmotes,omitempty"`
+	Rollups                    []ExtensionRollup       `json:"rollups"`
+	FullRollups                []ExtensionRollup       `json:"fullRollups,omitempty"`
+	Lanes                      ExtensionLanes          `json:"lanes"`
+	Peaks                      []ExtensionPeak         `json:"peaks"`
+	Recap                      any                     `json:"recap"`
+	EmoteSync                  EmoteSyncSnapshot       `json:"emoteSync"`
+	HelixEnabled               bool                    `json:"helixEnabled,omitempty"`
+	Games                      []ExtensionGameSegment  `json:"games,omitempty"`
+	StoredArtifacts            *StoredArtifactsSummary `json:"storedArtifacts,omitempty"`
 }
 
 func (h *Handler) WithRedis(rdb *redis.Client) *Handler {
@@ -130,15 +176,17 @@ func (h *Handler) WithRedis(rdb *redis.Client) *Handler {
 func (h *Handler) ExtensionRoutes(r chi.Router) {
 	r.Route("/v1/extension", func(r chi.Router) {
 		r.Get("/health", h.extensionHealth)
-		if h.pulseHosted.Hosted {
-			r.With(h.pulseBetaKeyMiddleware, h.pulsePrincipalMiddleware).Post("/auth/device", h.extensionAuthDevice)
-		}
 		r.Group(func(r chi.Router) {
 			if h.pulseHosted.Hosted {
 				r.Use(h.pulseHostedAuthMiddleware)
 			}
+			if h.pulseHosted.Hosted {
+				r.Post("/auth/device", h.extensionAuthDevice)
+			}
 			r.Get("/me", h.extensionMe)
 			r.Get("/pulse/channels/{login}", h.extensionPulseChannel)
+			r.Get("/pulse/vods/{vodId}", h.extensionPulseVod)
+			r.Get("/pulse/channels/{login}/streams", h.extensionPulseChannelStreams)
 			r.Get("/pulse/channels/{login}/coverage", h.extensionPulseChannelCoverage)
 			r.Post("/pulse/channels/{login}/vod-hint", h.extensionPulseVodHint)
 			r.Post("/pulse/channels/{login}/vod-retry", h.extensionPulseVodRetry)
@@ -191,9 +239,13 @@ func (h *Handler) extensionHealthPayload() ExtensionHealthResponse {
 		},
 		Routes: ExtensionHealthRoutes{
 			PulseChannel:  true,
-			PulseCoverage: true, // read-only GET /pulse/channels/{login}/coverage route exists; not Phase 1B sampler
+			PulseCoverage: true,
+			Streams:       true,
 			VodHint:       true,
+			StreamHint:    true,
 			Backfill:      true,
+			Track:         liveTracking,
+			Jobs:          true,
 		},
 		Capabilities: ExtensionHealthCapabilities{
 			LiveTracking:          liveTracking,
@@ -250,6 +302,95 @@ func (h *Handler) extensionPulseChannel(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("X-Cache", "MISS")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+func (h *Handler) extensionPulseChannelStreams(w http.ResponseWriter, r *http.Request) {
+	login, ok := validLogin(chi.URLParam(r, "login"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_channel"})
+		return
+	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 20 {
+		limit = 5
+	}
+	streams, err := h.store.StreamsByLogin(r.Context(), login, maxInt(limit+4, 8))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	items := h.buildExtensionPastStreams(r.Context(), streams, limit)
+	writeJSON(w, http.StatusOK, ExtensionPastStreamsResponse{
+		Login:     login,
+		Items:     items,
+		UpdatedAt: time.Now().UnixMilli(),
+	})
+}
+
+func (h *Handler) buildExtensionPastStreams(ctx context.Context, streams []StreamRecord, limit int) []ExtensionPastStream {
+	if limit <= 0 {
+		limit = 5
+	}
+	items := make([]ExtensionPastStream, 0, minInt(limit, len(streams)))
+	for _, stream := range streams {
+		if len(items) >= limit {
+			break
+		}
+		if stream.EndedAt == nil && len(items) > 0 {
+			continue
+		}
+		item := h.buildExtensionPastStream(ctx, stream)
+		items = append(items, item)
+	}
+	return items
+}
+
+func (h *Handler) buildExtensionPastStream(ctx context.Context, stream StreamRecord) ExtensionPastStream {
+	rollupPointCount := 0
+	if h.store != nil {
+		if rollups, err := h.store.RollupsByStream(ctx, stream.StreamID); err == nil {
+			for _, rollup := range rollups {
+				if rollup.Missing {
+					continue
+				}
+				if rollup.ChatCount > 0 || rollup.TotalEmoteCount > 0 || rollup.SevenTVEmoteCount > 0 || rollup.ViewerSamples > 0 {
+					rollupPointCount++
+				}
+			}
+		}
+	}
+	coverageState := "no_rollups"
+	if rollupPointCount > 0 {
+		coverageState = "synced"
+	} else if stream.EndedAt == nil && strings.TrimSpace(stream.VodID) == "" {
+		coverageState = "waiting_for_vod"
+	} else if strings.TrimSpace(stream.VodID) == "" {
+		coverageState = "vod_unavailable"
+	}
+	durationSeconds := 0
+	if stream.EndedAt != nil && !stream.StartedAt.IsZero() && stream.EndedAt.After(stream.StartedAt) {
+		durationSeconds = int(stream.EndedAt.Sub(stream.StartedAt).Seconds())
+	}
+	return ExtensionPastStream{
+		StreamID:         stream.StreamID,
+		VodID:            strings.TrimSpace(stream.VodID),
+		Title:            stream.Title,
+		Category:         stream.Category,
+		StartedAt:        stream.StartedAt,
+		EndedAt:          stream.EndedAt,
+		DurationSeconds:  durationSeconds,
+		IsCurrentLive:    stream.EndedAt == nil,
+		HasRollups:       rollupPointCount > 0,
+		RollupPointCount: rollupPointCount,
+		CoverageState:    coverageState,
+		ThumbnailURL:     stream.ThumbnailURL,
+		Source:           "db_streams",
+		StoredArtifacts:  ptrStoredArtifacts(h.storedArtifactsForStream(ctx, stream.StreamID)),
+	}
 }
 
 type extensionVodHintRequest struct {
@@ -350,16 +491,31 @@ func (h *Handler) reconcileExtensionLiveStream(
 		return stream, false, nil
 	}
 	isLive := stream.EndedAt == nil
-	if isLive || !tracking || h.helix == nil || !h.helix.Enabled() || !h.pulseRuntimeConfig().HelixLiveEnabled {
+	if !tracking || h.helix == nil || !h.helix.Enabled() || !h.pulseRuntimeConfig().HelixLiveEnabled {
 		return stream, isLive, nil
 	}
 	liveMap, err := h.helix.StreamsByLogin(ctx, []string{login})
 	if err != nil {
-		return stream, false, nil
+		return stream, isLive, nil
 	}
 	liveStream, onTwitch := liveMap[login]
 	if !onTwitch {
+		if isLive && h.store != nil && stream.StreamID != "" {
+			endedAt := time.Now().UTC()
+			if err := h.store.CloseStream(ctx, stream.StreamID, endedAt); err != nil {
+				return stream, true, nil
+			}
+			if refreshed, err := h.store.LatestStreamByLogin(ctx, login); err == nil {
+				return refreshed, refreshed.EndedAt == nil, nil
+			}
+			closed := *stream
+			closed.EndedAt = &endedAt
+			return &closed, false, nil
+		}
 		return stream, false, nil
+	}
+	if isLive && liveStream.ID == stream.StreamID {
+		return stream, true, nil
 	}
 	profiles, _ := h.helix.UsersByLogin(ctx, []string{login})
 	now := time.Now().UTC()
@@ -393,6 +549,7 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 	if err != nil {
 		return ExtensionPulseResponse{}, err
 	}
+	rollups = filterTimelineRollups(rollups)
 	for i := range rollups {
 		rollups[i] = normalizeRollup(rollups[i], 200)
 	}
@@ -470,6 +627,8 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 	}
 	coverage := computePulseCoverage(heatmapRollups, streamStart, currentOffset, isLive, vodIDStr, backfillRunning, backfillFailed)
 	coverage = enrichExtensionCoverage(coverage, coverageStart, vodIDStr, isLive)
+	stored := h.storedArtifactsForStream(ctx, stream.StreamID)
+	coverage = enrichCoverageWithStoredArtifacts(coverage, stored, vodIDStr, isLive)
 	var recap any
 	if !isLive {
 		built, err := h.buildPulseStreamRecap(ctx, stream.StreamID)
@@ -491,6 +650,31 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 		TopEmotesFromRollups(storeRollupsFromHeatmap(heatmapRollups), 8),
 	)
 
+	var games []ExtensionGameSegment
+	if stream.StreamID != "" {
+		if segments, err := h.store.GetGameSegments(ctx, stream.StreamID); err == nil {
+			games = convertGameSegmentsForExtension(segments)
+		}
+	}
+
+	durationSeconds := currentOffset
+	if durationSeconds <= 0 && stream.EndedAt != nil && !streamStart.IsZero() {
+		durationSeconds = int(stream.EndedAt.Sub(streamStart).Seconds())
+	}
+	category := strings.TrimSpace(stream.Category)
+	if category == "" && !isLive && vodIDStr != "" && h.helix != nil && h.helix.Enabled() {
+		if helixCategory, err := h.helix.VideoGameName(ctx, vodIDStr); err == nil {
+			category = strings.TrimSpace(helixCategory)
+		}
+	}
+	games = resolveExtensionGames(games, !isLive, durationSeconds, category)
+
+	var endedAtPtr *time.Time
+	if stream.EndedAt != nil {
+		t := stream.EndedAt.UTC()
+		endedAtPtr = &t
+	}
+
 	payload := ExtensionPulseResponse{
 		Login:                      login,
 		IsLive:                     isLive,
@@ -498,6 +682,12 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 		StreamID:                   stream.StreamID,
 		VodID:                      vodPtr,
 		StartedAt:                  startedAtPtr,
+		EndedAt:                    endedAtPtr,
+		Title:                      strings.TrimSpace(stream.Title),
+		Category:                   category,
+		PeakViewers:                stream.PeakViewers,
+		DurationSeconds:            durationSeconds,
+		PeakEmotePerMin:            peakEmotePerMinFromHeatmapRollups(heatmapRollups),
 		CurrentOffsetSeconds:       currentOffset,
 		CoverageStartOffsetSeconds: coverageStart,
 		Coverage:                   coverage,
@@ -509,9 +699,73 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 		Recap:                      recap,
 		EmoteSync:                  h.extensionEmoteSync(ctx, login, tracking),
 		HelixEnabled:               h.helix != nil && h.helix.Enabled(),
+		Games:                      games,
+		StoredArtifacts:            &stored,
 	}
 	h.rewriteExtensionPulseEmoteURLs(ctx, &payload)
 	return payload, nil
+}
+
+func peakEmotePerMinFromHeatmapRollups(rollups []heatmap.MinuteRollup) int {
+	peak := 0
+	for _, r := range rollups {
+		if r.Missing {
+			continue
+		}
+		total := r.TotalEmoteCount
+		if total <= 0 {
+			total = r.SevenTVEmoteCount
+		}
+		if total > peak {
+			peak = total
+		}
+	}
+	return peak
+}
+
+// resolveExtensionGames synthesizes a single full-stream segment when TT segments
+// are missing but category is known (Helix /videos game_name or stream row).
+func resolveExtensionGames(
+	segments []ExtensionGameSegment,
+	offline bool,
+	durationSeconds int,
+	category string,
+) []ExtensionGameSegment {
+	if len(segments) > 0 || !offline || durationSeconds <= 0 {
+		return segments
+	}
+	gameName := strings.TrimSpace(category)
+	if gameName == "" {
+		return segments
+	}
+	return []ExtensionGameSegment{{
+		GameName:        gameName,
+		OffsetSeconds:   0,
+		DurationSeconds: durationSeconds,
+	}}
+}
+
+func convertGameSegmentsForExtension(segments []GameSegment) []ExtensionGameSegment {
+	if len(segments) == 0 {
+		return nil
+	}
+	out := make([]ExtensionGameSegment, 0, len(segments))
+	for _, seg := range segments {
+		name := strings.TrimSpace(seg.GameName)
+		if name == "" {
+			continue
+		}
+		out = append(out, ExtensionGameSegment{
+			ID:              seg.ID,
+			GameName:        name,
+			OffsetSeconds:   seg.OffsetSeconds,
+			DurationSeconds: seg.DurationSeconds,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (h *Handler) extensionEmoteSync(ctx context.Context, login string, tracking bool) EmoteSyncSnapshot {
@@ -804,11 +1058,13 @@ func convertTopEmotesToExtension(in []TopEmote) []ExtensionEmote {
 			continue
 		}
 		out = append(out, ExtensionEmote{
-			ID:       emote.ID,
-			Name:     emote.Name,
-			ImageURL: emote.ImageURL,
-			Count:    emote.Count,
-			Provider: emote.Provider,
+			ID:        emote.ID,
+			Name:      emote.Name,
+			ImageURL:  emote.ImageURL,
+			Count:     emote.Count,
+			Provider:  emote.Provider,
+			ZeroWidth: emote.ZeroWidth,
+			Animated:  emote.Animated,
 		})
 	}
 	if len(out) == 0 {
@@ -841,30 +1097,41 @@ func convertExtensionEmotes(in []heatmap.HeatmapEmote) []ExtensionEmote {
 }
 
 func (h *Handler) rewriteExtensionPulseEmoteURLs(ctx context.Context, payload *ExtensionPulseResponse) {
-	if payload == nil || h == nil || h.store == nil {
+	if payload == nil || h == nil {
 		return
 	}
-	localIDs := collectExtensionSevenTVLocalIDs(payload)
-	if len(localIDs) == 0 {
+	base := h.hostedEmoteCDNBase()
+	var lookup map[string]string
+	var metadata map[string]EmoteMetadata
+	if h.store != nil {
+		localIDs := collectExtensionProviderLocalIDs(payload)
+		if len(localIDs) > 0 {
+			lookup, _ = h.store.LookupProviderEmoteIDs(ctx, localIDs)
+			metadata, _ = h.store.LookupEmoteMetadata(ctx, localIDs)
+		}
+	}
+	if lookup == nil {
+		lookup = map[string]string{}
+	}
+	if metadata == nil {
+		metadata = map[string]EmoteMetadata{}
+	}
+	if base == "" && len(lookup) == 0 && len(metadata) == 0 {
 		return
 	}
-	lookup, err := h.store.LookupSevenTVProviderEmoteIDs(ctx, localIDs)
-	if err != nil || len(lookup) == 0 {
-		return
-	}
-	payload.TopEmotes = rewriteExtensionEmoteURLs(payload.TopEmotes, lookup)
+	payload.TopEmotes = decorateExtensionEmotes(payload.TopEmotes, lookup, metadata, base)
 	for i := range payload.Rollups {
-		payload.Rollups[i].TopEmotes = rewriteExtensionEmoteURLs(payload.Rollups[i].TopEmotes, lookup)
+		payload.Rollups[i].TopEmotes = decorateExtensionEmotes(payload.Rollups[i].TopEmotes, lookup, metadata, base)
 	}
 	for i := range payload.FullRollups {
-		payload.FullRollups[i].TopEmotes = rewriteExtensionEmoteURLs(payload.FullRollups[i].TopEmotes, lookup)
+		payload.FullRollups[i].TopEmotes = decorateExtensionEmotes(payload.FullRollups[i].TopEmotes, lookup, metadata, base)
 	}
 	for i := range payload.Peaks {
-		payload.Peaks[i].TopEmotes = rewriteExtensionEmoteURLs(payload.Peaks[i].TopEmotes, lookup)
+		payload.Peaks[i].TopEmotes = decorateExtensionEmotes(payload.Peaks[i].TopEmotes, lookup, metadata, base)
 	}
 }
 
-func collectExtensionSevenTVLocalIDs(payload *ExtensionPulseResponse) []string {
+func collectExtensionProviderLocalIDs(payload *ExtensionPulseResponse) []string {
 	if payload == nil {
 		return nil
 	}
@@ -872,10 +1139,6 @@ func collectExtensionSevenTVLocalIDs(payload *ExtensionPulseResponse) []string {
 	var out []string
 	add := func(emotes []ExtensionEmote) {
 		for _, emote := range emotes {
-			provider := strings.ToLower(strings.TrimSpace(emote.Provider))
-			if provider != "seventv" && provider != "7tv" {
-				continue
-			}
 			id := strings.TrimSpace(emote.ID)
 			if !emoteimage.IsLocalEmoteID(id) {
 				continue
@@ -901,19 +1164,7 @@ func collectExtensionSevenTVLocalIDs(payload *ExtensionPulseResponse) []string {
 }
 
 func rewriteExtensionEmoteURLs(emotes []ExtensionEmote, lookup map[string]string) []ExtensionEmote {
-	if len(emotes) == 0 || len(lookup) == 0 {
-		return emotes
-	}
-	out := make([]ExtensionEmote, len(emotes))
-	copy(out, emotes)
-	for i := range out {
-		providerID, ok := lookup[strings.TrimSpace(out[i].ID)]
-		if !ok {
-			continue
-		}
-		out[i].ImageURL = emoteimage.ExtensionBrowserURL(out[i].Provider, out[i].ID, providerID)
-	}
-	return out
+	return rewriteHostedExtensionEmoteURLs(emotes, lookup, "")
 }
 
 // rollupAtOffset returns the minute rollup aligned with a heatmap point offset.

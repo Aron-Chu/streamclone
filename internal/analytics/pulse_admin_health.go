@@ -45,7 +45,6 @@ type AdminPulseConfig struct {
 	TopRosterPollEnabled   bool `json:"topRosterPollEnabled"`
 }
 
-
 func (h *Handler) adminPulseHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, h.adminPulseHealthPayload())
 }

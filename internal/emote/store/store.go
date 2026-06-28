@@ -327,11 +327,12 @@ func (s *Store) GetChannelByActiveSet(ctx context.Context, setID string) (*Chann
 }
 
 type ChannelEmote struct {
-	Name     string
-	EmoteID  string
-	IsGlobal bool
-	Flags    int
-	Provider string
+	Name            string
+	EmoteID         string
+	ProviderEmoteID string
+	IsGlobal        bool
+	Flags           int
+	Provider        string
 }
 
 type ProviderEmoteSummary struct {
@@ -450,7 +451,7 @@ func (s *Store) GetChannelSevenTVProviderSetID(ctx context.Context, login string
 func (s *Store) GetChannelEmotes(ctx context.Context, login string) ([]ChannelEmote, error) {
 	rows, err := s.db.Query(ctx, `
 		WITH ranked AS (
-			SELECT COALESCE(i.alias, e.name) AS name, e.id AS emote_id, e.is_global, e.flags,
+			SELECT COALESCE(i.alias, e.name) AS name, e.id AS emote_id, COALESCE(e.provider_emote_id, '') AS provider_emote_id, e.is_global, e.flags,
 				COALESCE(e.provider, 'custom') AS provider,
 				CASE COALESCE(e.provider, 'custom')
 					WHEN 'twitch' THEN 1
@@ -466,7 +467,7 @@ func (s *Store) GetChannelEmotes(ctx context.Context, login string) ([]ChannelEm
 			JOIN emotes e ON e.id = i.emote_id
 			WHERE c.login=$1 AND e.status=1 AND i.status=1
 			UNION ALL
-			SELECT e.name, e.id, e.is_global, e.flags, COALESCE(e.provider, 'custom') AS provider,
+			SELECT e.name, e.id, COALESCE(e.provider_emote_id, '') AS provider_emote_id, e.is_global, e.flags, COALESCE(e.provider, 'custom') AS provider,
 				CASE COALESCE(e.provider, 'custom')
 					WHEN 'twitch' THEN 1
 					WHEN 'seventv' THEN 2
@@ -478,7 +479,7 @@ func (s *Store) GetChannelEmotes(ctx context.Context, login string) ([]ChannelEm
 			FROM emotes e
 			WHERE e.is_global=true AND e.status=1
 		)
-		SELECT name, emote_id, is_global, flags, provider
+		SELECT name, emote_id, provider_emote_id, is_global, flags, provider
 		FROM ranked
 		ORDER BY provider_rank, name`, login,
 	)
@@ -490,7 +491,7 @@ func (s *Store) GetChannelEmotes(ctx context.Context, login string) ([]ChannelEm
 	var result []ChannelEmote
 	for rows.Next() {
 		var ce ChannelEmote
-		if err := rows.Scan(&ce.Name, &ce.EmoteID, &ce.IsGlobal, &ce.Flags, &ce.Provider); err != nil {
+		if err := rows.Scan(&ce.Name, &ce.EmoteID, &ce.ProviderEmoteID, &ce.IsGlobal, &ce.Flags, &ce.Provider); err != nil {
 			return nil, err
 		}
 		result = append(result, ce)

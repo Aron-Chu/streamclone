@@ -39,10 +39,10 @@ type AdminPulseJobsResponse struct {
 }
 
 type AdminPulseAbuseResponse struct {
-	WatchRateLimitPerMin     int `json:"watchRateLimitPerMin"`
-	BackfillRateLimitPerHour int `json:"backfillRateLimitPerHour"`
-	SummaryRateLimitPerMin   int `json:"summaryRateLimitPerMin"`
-	RateLimitKeysSampled     int `json:"rateLimitKeysSampled,omitempty"`
+	WatchRateLimitPerMin     int    `json:"watchRateLimitPerMin"`
+	BackfillRateLimitPerHour int    `json:"backfillRateLimitPerHour"`
+	SummaryRateLimitPerMin   int    `json:"summaryRateLimitPerMin"`
+	RateLimitKeysSampled     int    `json:"rateLimitKeysSampled,omitempty"`
 	Note                     string `json:"note,omitempty"`
 }
 

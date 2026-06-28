@@ -63,7 +63,7 @@ func (h *Handler) buildPulseStreamRecap(ctx context.Context, streamID string) (p
 		startedAt = stream.StartedAt
 	}
 
-	return pulserecap.Build(pulserecap.Input{
+	recap := pulserecap.Build(pulserecap.Input{
 		StreamID:        stream.StreamID,
 		Login:           stream.Login,
 		VodID:           vodID,
@@ -71,5 +71,7 @@ func (h *Handler) buildPulseStreamRecap(ctx context.Context, streamID string) (p
 		DurationSeconds: duration,
 		Rollups:         rollups,
 		Points:          detail.Points,
-	}), nil
+	})
+	h.enrichRecapTopEmotes(ctx, &recap, storeRollupsFromHeatmap(rollups))
+	return recap, nil
 }

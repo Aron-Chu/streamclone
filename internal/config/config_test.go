@@ -38,6 +38,46 @@ func TestTop500MetadataConfigDefaultsDisabled(t *testing.T) {
 	}
 }
 
+func TestPublicEmoteProviderRefreshConfigDefaultsDisabled(t *testing.T) {
+	clearPublicEmoteProviderRefreshEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PublicEmoteProviderRefreshEnabled {
+		t.Fatal("PublicEmoteProviderRefreshEnabled default = true, want false")
+	}
+	if cfg.PublicEmoteProviderRefreshInterval != 15*time.Minute {
+		t.Fatalf("PublicEmoteProviderRefreshInterval = %s, want 15m", cfg.PublicEmoteProviderRefreshInterval)
+	}
+}
+
+func clearPublicEmoteProviderRefreshEnv(t *testing.T) {
+	t.Helper()
+	keys := []string{"PUBLIC_EMOTE_PROVIDER_REFRESH_ENABLED", "PUBLIC_EMOTE_PROVIDER_REFRESH_INTERVAL"}
+	previous := make(map[string]string, len(keys))
+	present := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		value, ok := os.LookupEnv(key)
+		if ok {
+			previous[key] = value
+			present[key] = true
+			if err := os.Unsetenv(key); err != nil {
+				t.Fatalf("unset %s: %v", key, err)
+			}
+		}
+	}
+	t.Cleanup(func() {
+		for _, key := range keys {
+			if present[key] {
+				_ = os.Setenv(key, previous[key])
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		}
+	})
+}
+
 func TestTop500MetadataConfigOverridesAndCaps(t *testing.T) {
 	clearTop500Env(t)
 	t.Setenv("TOP500_METADATA_ENABLED", "true")
@@ -58,8 +98,8 @@ func TestTop500MetadataConfigOverridesAndCaps(t *testing.T) {
 	if !cfg.Top500MetadataEnabled || cfg.Top500MetadataDryRun || !cfg.Top500MetadataWriteEnabled {
 		t.Fatalf("unexpected top500 booleans: enabled=%v dryRun=%v write=%v", cfg.Top500MetadataEnabled, cfg.Top500MetadataDryRun, cfg.Top500MetadataWriteEnabled)
 	}
-	if cfg.Top500MetadataTopN != 100 {
-		t.Fatalf("Top500MetadataTopN = %d, want cap 100", cfg.Top500MetadataTopN)
+	if cfg.Top500MetadataTopN != 500 {
+		t.Fatalf("Top500MetadataTopN = %d, want cap 500", cfg.Top500MetadataTopN)
 	}
 	if cfg.Top500MetadataBatchSize != 100 {
 		t.Fatalf("Top500MetadataBatchSize = %d, want cap 100", cfg.Top500MetadataBatchSize)
@@ -75,9 +115,74 @@ func TestTop500MetadataConfigOverridesAndCaps(t *testing.T) {
 	}
 }
 
+func TestCorpusTargetTopNAliasesLegacyTop500Config(t *testing.T) {
+	clearTop500Env(t)
+	t.Setenv("CORPUS_TARGET_TOP_N", "1000")
+	t.Setenv("LIVE_ADMISSION_TOP_N", "1000")
+	t.Setenv("MAX_ACTIVE_IRC_CHANNELS", "75")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CorpusTargetTopN != 1000 {
+		t.Fatalf("CorpusTargetTopN = %d, want 1000", cfg.CorpusTargetTopN)
+	}
+	if cfg.Top500MetadataTopN != 1000 {
+		t.Fatalf("Top500MetadataTopN = %d, want 1000", cfg.Top500MetadataTopN)
+	}
+	if cfg.PulseTop500AdmissionTopN != 1000 {
+		t.Fatalf("PulseTop500AdmissionTopN = %d, want 1000", cfg.PulseTop500AdmissionTopN)
+	}
+	if cfg.Top500GoldVODInventoryTopN != 1000 {
+		t.Fatalf("Top500GoldVODInventoryTopN = %d, want 1000", cfg.Top500GoldVODInventoryTopN)
+	}
+	if cfg.SilverEnqueueTopN != 1000 {
+		t.Fatalf("SilverEnqueueTopN = %d, want 1000", cfg.SilverEnqueueTopN)
+	}
+	if cfg.PulseMaxActiveChannels != 75 {
+		t.Fatalf("PulseMaxActiveChannels = %d, want 75", cfg.PulseMaxActiveChannels)
+	}
+}
+
+func TestGoldParallelScanConfigDefaultsAndCaps(t *testing.T) {
+	clearTop500Env(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GoldMaxParallelVODs != 2 || cfg.GoldMaxSegmentsPerVOD != 4 || cfg.GoldGlobalGQLRPM != 120 || cfg.GoldPerVODGQLRPM != 30 || cfg.GoldSegmentSizeSeconds != 600 || cfg.GoldRetryMax != 3 || cfg.GoldLeaseTTLSeconds != 120 {
+		t.Fatalf("unexpected gold defaults: parallel=%d segments=%d globalRPM=%d perVodRPM=%d segment=%d retry=%d lease=%d",
+			cfg.GoldMaxParallelVODs, cfg.GoldMaxSegmentsPerVOD, cfg.GoldGlobalGQLRPM, cfg.GoldPerVODGQLRPM, cfg.GoldSegmentSizeSeconds, cfg.GoldRetryMax, cfg.GoldLeaseTTLSeconds)
+	}
+
+	clearTop500Env(t)
+	t.Setenv("GOLD_MAX_PARALLEL_VODS", "99")
+	t.Setenv("GOLD_MAX_SEGMENTS_PER_VOD", "99")
+	t.Setenv("GOLD_GLOBAL_GQL_RPM", "0")
+	t.Setenv("GOLD_PER_VOD_GQL_RPM", "0")
+	t.Setenv("GOLD_SEGMENT_SIZE_SECONDS", "12")
+	t.Setenv("GOLD_RETRY_MAX", "99")
+	t.Setenv("GOLD_LEASE_TTL_SECONDS", "5")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GoldMaxParallelVODs != 16 || cfg.GoldMaxSegmentsPerVOD != 64 || cfg.GoldGlobalGQLRPM != 120 || cfg.GoldPerVODGQLRPM != 30 || cfg.GoldSegmentSizeSeconds != 60 || cfg.GoldRetryMax != 10 || cfg.GoldLeaseTTLSeconds != 30 {
+		t.Fatalf("unexpected gold caps: parallel=%d segments=%d globalRPM=%d perVodRPM=%d segment=%d retry=%d lease=%d",
+			cfg.GoldMaxParallelVODs, cfg.GoldMaxSegmentsPerVOD, cfg.GoldGlobalGQLRPM, cfg.GoldPerVODGQLRPM, cfg.GoldSegmentSizeSeconds, cfg.GoldRetryMax, cfg.GoldLeaseTTLSeconds)
+	}
+}
+
 func clearTop500Env(t *testing.T) {
 	t.Helper()
 	keys := []string{
+		"CORPUS_TARGET_TOP_N",
+		"LIVE_ADMISSION_TOP_N",
+		"MAX_ACTIVE_IRC_CHANNELS",
+		"PULSE_MAX_ACTIVE_CHANNELS",
+		"PULSE_TOP500_ADMISSION_TOP_N",
+		"SILVER_ENQUEUE_TOP_N",
+		"TOP500_GOLD_VOD_TOP_N",
 		"TOP500_METADATA_ENABLED",
 		"TOP500_METADATA_DRY_RUN",
 		"TOP500_METADATA_TOP_N",
@@ -89,6 +194,13 @@ func clearTop500Env(t *testing.T) {
 		"TOP500_METADATA_DB_P95_HOLD_MS",
 		"TOP500_METADATA_ROLLBACK_DB_P95_MS",
 		"TOP500_METADATA_ROLLBACK_DISK_FREE_PERCENT",
+		"GOLD_MAX_PARALLEL_VODS",
+		"GOLD_MAX_SEGMENTS_PER_VOD",
+		"GOLD_GLOBAL_GQL_RPM",
+		"GOLD_PER_VOD_GQL_RPM",
+		"GOLD_SEGMENT_SIZE_SECONDS",
+		"GOLD_RETRY_MAX",
+		"GOLD_LEASE_TTL_SECONDS",
 	}
 	previous := make(map[string]string, len(keys))
 	present := make(map[string]bool, len(keys))

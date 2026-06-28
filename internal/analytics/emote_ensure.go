@@ -84,7 +84,7 @@ func (c *EmoteEnsureClient) enabled() bool {
 }
 
 func defaultEmoteEnsureProviders() []string {
-	return []string{"seventv", "twitch", "ffz"}
+	return []string{"seventv", "twitch", "ffz", "bttv"}
 }
 
 func (c *EmoteEnsureClient) EnsureOnce(ctx context.Context, login, broadcasterID string) (emoteEnsureResponse, int, error) {
@@ -467,7 +467,7 @@ func (e *LiveEmoteEnsurer) Snapshot(ctx context.Context, login string, tracking 
 func emoteSyncSnapshotForState(state EmoteSyncState, eventAPI bool, source string, lastSynced *time.Time) EmoteSyncSnapshot {
 	return EmoteSyncSnapshot{
 		State:          state,
-		Provider:       "7tv",
+		Provider:       "multi",
 		LastSyncedAt:   lastSynced,
 		EventAPIActive: eventAPI,
 		Source:         source,
@@ -478,17 +478,17 @@ func emoteSyncSnapshotForState(state EmoteSyncState, eventAPI bool, source strin
 func emoteSyncMessage(state EmoteSyncState, source string) string {
 	switch state {
 	case EmoteSyncReady:
-		return "7TV synced"
+		return "Emotes synced"
 	case EmoteSyncSyncing:
-		return "7TV syncing…"
+		return "Emotes syncing…"
 	case EmoteSyncStale:
 		if source == "cache" {
-			return "7TV stale — using cached set"
+			return "Emotes stale — using cached set"
 		}
-		return "7TV stale — refresh in progress"
+		return "Emotes stale — refresh in progress"
 	case EmoteSyncUnavailable:
-		return "7TV unavailable — showing aggregate emote spikes only"
+		return "Emotes unavailable — showing aggregate emote spikes only"
 	default:
-		return "7TV aggregate only — emote identity syncing"
+		return "Emote aggregate only — identity syncing"
 	}
 }

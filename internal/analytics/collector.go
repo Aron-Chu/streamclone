@@ -38,19 +38,19 @@ type channelJoiner interface {
 }
 
 type Collector struct {
-	store        RollupStore
-	helix        StreamProvider
-	irc          channelJoiner
-	enricher     *enrich.Enricher
-	log          *slog.Logger
-	maxTracked   int
-	pollInterval time.Duration
-	retention    time.Duration
-	topEmotes    int
-	idleTTL      time.Duration
+	store                 RollupStore
+	helix                 StreamProvider
+	irc                   channelJoiner
+	enricher              *enrich.Enricher
+	log                   *slog.Logger
+	maxTracked            int
+	pollInterval          time.Duration
+	retention             time.Duration
+	topEmotes             int
+	idleTTL               time.Duration
 	pulseCacheInvalidator func(ctx context.Context, login, streamID string, includeHeatmap bool)
 	// nowClock supports fake-clock VOD finalization tests; defaults to time.Now().UTC.
-	nowClock func() time.Time
+	nowClock            func() time.Time
 	goLiveByStream      sync.Map // streamID -> pulseGoLiveObservation
 	firstRollupRecorded sync.Map // streamID -> struct{}
 
@@ -672,16 +672,21 @@ func (c *Collector) pollOnce(ctx context.Context) {
 		if live {
 			wasOffline := tracked.currentStreamID == ""
 			tracked.offlinePolls = 0
-			tracked.currentStreamID = stream.ID
+			helixStreamID := stream.ID
 			c.mu.Unlock()
 			if wasOffline {
 				c.irc.Join(c.runCtx, login)
 			}
 			if err := c.store.UpsertLiveStream(ctx, stream, profiles[login], now); err != nil {
-				c.log.Warn("analytics upsert stream failed", "stream_id", stream.ID, "err", err)
+				c.log.Warn("analytics upsert stream failed", "stream_id", helixStreamID, "err", err)
 				continue
 			}
-			c.addViewerSample(stream.ID, now, stream.ViewerCount)
+			c.mu.Lock()
+			if tracked := c.tracked[login]; tracked != nil {
+				tracked.currentStreamID = helixStreamID
+			}
+			c.mu.Unlock()
+			c.addViewerSample(helixStreamID, now, stream.ViewerCount)
 			continue
 		}
 		tracked.offlinePolls++

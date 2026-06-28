@@ -13,14 +13,14 @@ import (
 func TestParseTwitchTrackerFixtures(t *testing.T) {
 	fixtureDir := filepath.Join("testdata", "twitchtracker")
 	cases := []struct {
-		file              string
-		expectedDuration  int
-		expectedPeak      int
-		expectedAvg       int
-		minPointCount     int
-		expectComplete    bool
-		maxPeakDeltaPct   float64
-		maxAvgDeltaPct    float64
+		file             string
+		expectedDuration int
+		expectedPeak     int
+		expectedAvg      int
+		minPointCount    int
+		expectComplete   bool
+		maxPeakDeltaPct  float64
+		maxAvgDeltaPct   float64
 	}{
 		{
 			file:             "can-donk-2026-06-07.meta.html",

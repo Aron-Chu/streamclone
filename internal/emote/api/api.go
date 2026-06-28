@@ -19,8 +19,8 @@ import (
 	"streamclone/internal/emote/flags"
 	"streamclone/internal/emote/objstore"
 	"streamclone/internal/emote/seeder"
-	emotesync "streamclone/internal/emote/sync"
 	"streamclone/internal/emote/store"
+	emotesync "streamclone/internal/emote/sync"
 )
 
 const maxUploadBytes = 5 << 20
@@ -448,7 +448,7 @@ func mergeProviders(base []seeder.Provider, extra []seeder.Provider) []seeder.Pr
 
 func normalizeProviders(raw []string) ([]seeder.Provider, error) {
 	if len(raw) == 0 {
-		return []seeder.Provider{seeder.ProviderSevenTV}, nil
+		return []seeder.Provider{seeder.ProviderSevenTV, seeder.ProviderTwitch, seeder.ProviderFFZ, seeder.ProviderBTTV}, nil
 	}
 	seen := make(map[seeder.Provider]struct{}, len(raw))
 	providers := make([]seeder.Provider, 0, len(raw))
@@ -683,10 +683,11 @@ func (h *Handler) rebuildChannelDictionary(ctx context.Context, login string) er
 	entries := make([]dict.EmoteEntry, 0, len(emotes))
 	for _, e := range emotes {
 		entries = append(entries, dict.EmoteEntry{
-			Name:      e.Name,
-			EmoteID:   e.EmoteID,
-			ZeroWidth: flags.IsZeroWidth(e.Flags),
-			Provider:  e.Provider,
+			Name:            e.Name,
+			EmoteID:         e.EmoteID,
+			ProviderEmoteID: e.ProviderEmoteID,
+			ZeroWidth:       flags.IsZeroWidth(e.Flags),
+			Provider:        e.Provider,
 		})
 	}
 	return h.d.Rebuild(ctx, login, entries)
@@ -823,9 +824,11 @@ func (h *Handler) setActiveSet(w http.ResponseWriter, r *http.Request) {
 			var entries []dict.EmoteEntry
 			for _, e := range emotes {
 				entries = append(entries, dict.EmoteEntry{
-					Name:      e.Name,
-					EmoteID:   e.EmoteID,
-					ZeroWidth: flags.IsZeroWidth(e.Flags),
+					Name:            e.Name,
+					EmoteID:         e.EmoteID,
+					ProviderEmoteID: e.ProviderEmoteID,
+					ZeroWidth:       flags.IsZeroWidth(e.Flags),
+					Provider:        e.Provider,
 				})
 			}
 			_ = h.d.Rebuild(r.Context(), channel.Login, entries)
@@ -854,20 +857,22 @@ func (h *Handler) listChannelEmotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type item struct {
-		Name     string `json:"name"`
-		EmoteID  string `json:"emote_id"`
-		URL      string `json:"url"`
-		ZW       bool   `json:"zw"`
-		Provider string `json:"provider"`
+		Name            string `json:"name"`
+		EmoteID         string `json:"emote_id"`
+		ProviderEmoteID string `json:"provider_emote_id,omitempty"`
+		URL             string `json:"url"`
+		ZW              bool   `json:"zw"`
+		Provider        string `json:"provider"`
 	}
 	result := make([]item, 0, len(emotes))
 	for _, e := range emotes {
 		result = append(result, item{
-			Name:     e.Name,
-			EmoteID:  e.EmoteID,
-			URL:      h.d.EmoteURL(e.EmoteID, "1x"),
-			ZW:       flags.IsZeroWidth(e.Flags),
-			Provider: e.Provider,
+			Name:            e.Name,
+			EmoteID:         e.EmoteID,
+			ProviderEmoteID: e.ProviderEmoteID,
+			URL:             h.d.BrowserURL(e.EmoteID, e.Provider, e.ProviderEmoteID, "1x"),
+			ZW:              flags.IsZeroWidth(e.Flags),
+			Provider:        e.Provider,
 		})
 	}
 	writeJSON(w, http.StatusOK, result)

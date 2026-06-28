@@ -43,6 +43,9 @@ func TestBuildAggregatesRecap(t *testing.T) {
 	if len(recap.ClipCandidates) != 3 || recap.ClipCandidates[0].Score != 95 {
 		t.Fatalf("bad clip candidates: %+v", recap.ClipCandidates)
 	}
+	if recap.TopMoments[0].ChatCount != 40 || recap.TopMoments[0].EmoteCount != 9 {
+		t.Fatalf("top moment metrics = chat:%d emote:%d, want 40/9", recap.TopMoments[0].ChatCount, recap.TopMoments[0].EmoteCount)
+	}
 }
 
 func TestBuildDoesNotFakeMissingSevenTVNames(t *testing.T) {

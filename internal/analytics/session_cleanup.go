@@ -9,14 +9,15 @@ import (
 
 // SessionCleanupReport summarizes one-shot prefetch stub / alias cleanup.
 type SessionCleanupReport struct {
-	Logins              []string `json:"logins"`
-	DryRun              bool     `json:"dryRun,omitempty"`
-	OrphanAliasesMerged []string `json:"orphanAliasesMerged"`
-	AliasesFlattened    []string `json:"aliasesFlattened"`
-	AliasCyclesRepaired []string `json:"aliasCyclesRepaired"`
-	BackfillJobsRekeyed []string `json:"backfillJobsRekeyed"`
-	StubSessionsMerged  int      `json:"stubSessionsMerged"`
-	Errors              []string `json:"errors,omitempty"`
+	Logins              []string               `json:"logins"`
+	DryRun              bool                   `json:"dryRun,omitempty"`
+	OrphanAliasesMerged []string               `json:"orphanAliasesMerged"`
+	AliasesFlattened    []string               `json:"aliasesFlattened"`
+	AliasCyclesRepaired []string               `json:"aliasCyclesRepaired"`
+	BackfillJobsRekeyed []string               `json:"backfillJobsRekeyed"`
+	StubSessionsMerged  int                    `json:"stubSessionsMerged"`
+	SessionIntegrity    SessionIntegrityReport `json:"sessionIntegrity,omitempty"`
+	Errors              []string               `json:"errors,omitempty"`
 }
 
 type SessionCleanupOptions struct {
@@ -57,6 +58,13 @@ func (s *Store) CleanupSessionStubsWithOptions(ctx context.Context, logins []str
 	}
 	if len(report.Logins) == 0 {
 		return report, nil
+	}
+
+	integrity, err := s.RepairMissingSessionRows(ctx, report.Logins, opts.DryRun)
+	if err != nil {
+		report.Errors = append(report.Errors, err.Error())
+	} else {
+		report.SessionIntegrity = integrity
 	}
 
 	flattened, cycles, err := s.normalizeSessionAliases(ctx, report.Logins, opts.DryRun)
@@ -109,7 +117,7 @@ func (s *Store) CleanupSessionStubsWithOptions(ctx context.Context, logins []str
 	return report, nil
 }
 
-// ResolveSessionCleanupLogins returns explicit logins when provided; otherwise unions env and DB always-tracked rows.
+// ResolveSessionCleanupLogins returns explicit logins when provided; otherwise unions env, DB always-tracked, and backfill job rows.
 func (s *Store) ResolveSessionCleanupLogins(ctx context.Context, explicit []string, envTracked []string) ([]string, error) {
 	if len(explicit) > 0 {
 		return normalizeLoginList(explicit), nil
@@ -121,12 +129,40 @@ func (s *Store) ResolveSessionCleanupLogins(ctx context.Context, explicit []stri
 			return nil, err
 		}
 		merged = append(merged, dbLogins...)
+
+		backfillLogins, err := s.backfillJobLogins(ctx)
+		if err != nil {
+			return nil, err
+		}
+		merged = append(merged, backfillLogins...)
 	}
 	out := normalizeLoginList(merged)
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no logins selected for session cleanup")
 	}
 	return out, nil
+}
+
+func (s *Store) backfillJobLogins(ctx context.Context) ([]string, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT DISTINCT login
+		FROM backfill_jobs
+		WHERE COALESCE(login, '') <> ''
+		ORDER BY login ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logins []string
+	for rows.Next() {
+		var login string
+		if err := rows.Scan(&login); err != nil {
+			return nil, err
+		}
+		logins = append(logins, login)
+	}
+	return logins, rows.Err()
 }
 
 func normalizeLoginList(logins []string) []string {
@@ -253,7 +289,7 @@ func (s *Store) listBackfillJobRekeys(ctx context.Context, logins []string) ([]b
 		SELECT id, stream_id, status
 		FROM backfill_jobs
 		WHERE login = ANY($1)
-		  AND status IN ('queued', 'failed', 'done')
+		  AND status IN ('queued', 'running', 'failed', 'done')
 		ORDER BY id ASC`, logins)
 	if err != nil {
 		return nil, err

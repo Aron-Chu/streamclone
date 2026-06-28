@@ -109,30 +109,47 @@ type SyncPhaseTiming struct {
 
 // SyncChatProgress tracks VOD GQL comment paging (runs in parallel with tracker scrape).
 type SyncChatProgress struct {
-	Active                 bool   `json:"active,omitempty"`
+	Active                 bool                 `json:"active,omitempty"`
+	VodID                  string               `json:"vodId,omitempty"`
+	FetchMode              string               `json:"fetchMode,omitempty"` // parallel | serial
+	Concurrency            int                  `json:"concurrency,omitempty"`
+	EffectiveSegmentSec    int                  `json:"effectiveSegmentSec,omitempty"`
+	InitialSegments        int                  `json:"initialSegments,omitempty"`
+	SegmentsTotal          int                  `json:"segmentsTotal,omitempty"`
+	SegmentsDone           int                  `json:"segmentsDone,omitempty"`
+	SegmentsIncomplete     int                  `json:"segmentsIncomplete,omitempty"`
+	HotSplits              int                  `json:"hotSplits,omitempty"`
+	HotSegmentSplitReason  string               `json:"hotSegmentSplitReason,omitempty"`
+	AutoClosedSegments     int                  `json:"autoClosedSegments,omitempty"`
+	CleanupPhase           string               `json:"cleanupPhase,omitempty"` // initial | parallel_cleanup | serial_retry
+	CommentsFetched        int                  `json:"commentsFetched,omitempty"`
+	CommentsSaved          int                  `json:"commentsSaved,omitempty"`
+	TimelineSec            int                  `json:"timelineSec,omitempty"`
+	VodDurationSec         int                  `json:"vodDurationSec,omitempty"`
+	StreamDurationSec      int                  `json:"streamDurationSec,omitempty"`
+	RollupsExpected        int                  `json:"rollupsExpected,omitempty"`
+	SummaryRefreshDeferred bool                 `json:"summaryRefreshDeferred,omitempty"`
+	IndexPhase             string               `json:"indexPhase,omitempty"` // fetching | tokenizing | writing | finalizing | done
+	GQLPages               int                  `json:"gqlPages,omitempty"`
+	Throttled              bool                 `json:"throttled,omitempty"`
+	Message                string               `json:"message,omitempty"`
+	Diagnostics            *SyncChatDiagnostics `json:"diagnostics,omitempty"`
+}
+
+type SyncChatDiagnostics struct {
+	Login                  string `json:"login,omitempty"`
+	StreamID               string `json:"streamId,omitempty"`
 	VodID                  string `json:"vodId,omitempty"`
-	FetchMode              string `json:"fetchMode,omitempty"` // parallel | serial
-	Concurrency            int    `json:"concurrency,omitempty"`
-	EffectiveSegmentSec    int    `json:"effectiveSegmentSec,omitempty"`
-	InitialSegments        int    `json:"initialSegments,omitempty"`
-	SegmentsTotal          int    `json:"segmentsTotal,omitempty"`
-	SegmentsDone           int    `json:"segmentsDone,omitempty"`
-	SegmentsIncomplete     int    `json:"segmentsIncomplete,omitempty"`
-	HotSplits              int    `json:"hotSplits,omitempty"`
-	HotSegmentSplitReason  string `json:"hotSegmentSplitReason,omitempty"`
-	AutoClosedSegments     int    `json:"autoClosedSegments,omitempty"`
-	CleanupPhase           string `json:"cleanupPhase,omitempty"` // initial | parallel_cleanup | serial_retry
-	CommentsFetched        int    `json:"commentsFetched,omitempty"`
-	CommentsSaved          int    `json:"commentsSaved,omitempty"`
-	TimelineSec            int    `json:"timelineSec,omitempty"`
-	VodDurationSec         int    `json:"vodDurationSec,omitempty"`
-	StreamDurationSec      int    `json:"streamDurationSec,omitempty"`
-	RollupsExpected        int    `json:"rollupsExpected,omitempty"`
-	SummaryRefreshDeferred bool   `json:"summaryRefreshDeferred,omitempty"`
-	IndexPhase             string `json:"indexPhase,omitempty"` // fetching | tokenizing | writing | finalizing | done
-	GQLPages               int    `json:"gqlPages,omitempty"`
-	Throttled              bool   `json:"throttled,omitempty"`
-	Message                string `json:"message,omitempty"`
+	QueryStart             string `json:"queryStart,omitempty"`
+	QueryEnd               string `json:"queryEnd,omitempty"`
+	OffsetStart            int    `json:"offsetStart"`
+	OffsetEnd              int    `json:"offsetEnd"`
+	CommentsMatched        int    `json:"commentsMatched"`
+	CommentsTotalForStream int    `json:"commentsTotalForStream,omitempty"`
+	RollupsMatched         int    `json:"rollupsMatched"`
+	RollupsTotalForStream  int    `json:"rollupsTotalForStream,omitempty"`
+	RangeMode              string `json:"rangeMode,omitempty"`
+	Reason                 string `json:"reason,omitempty"`
 }
 
 // SyncTrackerProgress tracks TwitchTracker browser scrape (parallel with chat on first sync).

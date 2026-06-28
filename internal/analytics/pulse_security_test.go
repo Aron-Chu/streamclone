@@ -1,7 +1,6 @@
 package analytics
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,20 +30,16 @@ func TestWatchUnauthorizedHosted(t *testing.T) {
 	h.Routes(r)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/analytics/channels/xqc/watch", nil)
+	req.RemoteAddr = "203.0.113.9:1234"
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("guest watch must not return 401, got %d", rec.Code)
 	}
 }
 
 func TestWatchInvalidBetaKeyHosted(t *testing.T) {
 	const validKey = "secret-one"
-	want401 := map[string]string{
-		"error": "unauthorized",
-		"hint":  "Set X-Streamclone-Beta-Key or Authorization: Bearer device token",
-	}
-
 	h := &Handler{
 		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{validKey}},
 		collector:   NewCollector(nil, fakeProvider{}, &fakeJoiner{}, nil, nilLogger(), 5, time.Second, time.Hour, 10),
@@ -54,17 +49,11 @@ func TestWatchInvalidBetaKeyHosted(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/analytics/channels/xqc/watch", nil)
 	req.Header.Set("X-Streamclone-Beta-Key", "wrong-key")
+	req.RemoteAddr = "203.0.113.10:1234"
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-	var got map[string]string
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatalf("decode 401 body: %v", err)
-	}
-	if got["error"] != want401["error"] || got["hint"] != want401["hint"] {
-		t.Fatalf("401 body = %#v, want %#v", got, want401)
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("wrong beta key should fall back to guest, got 401")
 	}
 }
 

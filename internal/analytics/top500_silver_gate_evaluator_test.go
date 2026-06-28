@@ -36,7 +36,11 @@ func TestEvaluateSilverGateSkips(t *testing.T) {
 		{"channel_cooldown", base, func() SilverBudgetSnapshot { b := budget; b.InChannelCooldown = true; return b }(), SilverGateSkipChannelCooldown},
 		{"recent_failure", base, func() SilverBudgetSnapshot { b := budget; b.InFailureBackoff = true; return b }(), SilverGateSkipRecentFailure},
 		{"global_backoff", base, func() SilverBudgetSnapshot { b := budget; b.GlobalTTBackoffActive = true; return b }(), SilverGateSkipGlobalBackoff},
-		{"daily_budget", base, func() SilverBudgetSnapshot { b := budget; b.SilverEnqueuedToday = SilverGateGlobalMaxEnqueuePerDay; return b }(), SilverGateSkipDailyBudget},
+		{"daily_budget", base, func() SilverBudgetSnapshot {
+			b := budget
+			b.SilverEnqueuedToday = SilverGateGlobalMaxEnqueuePerDay
+			return b
+		}(), SilverGateSkipDailyBudget},
 		{"running_limit", base, func() SilverBudgetSnapshot { b := budget; b.SilverRunningNow = SilverGateGlobalMaxRunning; return b }(), SilverGateSkipRunningLimit},
 		{"queue_full", base, func() SilverBudgetSnapshot { b := budget; b.SilverQueueDepth = SilverGateGlobalMaxQueueDepth; return b }(), SilverGateSkipQueueFull},
 		{"disk_guard", base, func() SilverBudgetSnapshot { b := budget; b.DiskGuardActive = true; return b }(), SilverGateSkipDiskGuard},

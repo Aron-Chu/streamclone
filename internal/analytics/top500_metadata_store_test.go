@@ -253,6 +253,14 @@ func setupTop500Store(t *testing.T) (context.Context, *Store) {
 	t.Cleanup(pool.Close)
 
 	store := NewStore(pool)
+	analyticsMigrationPath := filepath.Join("..", "..", "migrations", "000005_analytics.up.sql")
+	analyticsMigrationSQL, err := os.ReadFile(analyticsMigrationPath)
+	if err != nil {
+		t.Fatalf("read analytics migration: %v", err)
+	}
+	if _, err := pool.Exec(ctx, string(analyticsMigrationSQL)); err != nil {
+		t.Fatalf("apply analytics migration: %v", err)
+	}
 	migrationPath := filepath.Join("..", "..", "migrations", "000044_top500_metadata.up.sql")
 	migrationSQL, err := os.ReadFile(migrationPath)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,28 +94,50 @@ func main() {
 				os.Exit(2)
 			}
 		case "sessions":
-			if len(os.Args) < 3 || os.Args[2] != "cleanup" {
-				fmt.Println("Usage: backfill sessions cleanup [--dry-run] [--login=ohnepixel]")
+			if len(os.Args) < 3 {
+				fmt.Println("Usage: backfill sessions audit|cleanup [--dry-run] [--login=ohnepixel]")
 				os.Exit(2)
 			}
-			explicit, dryRun := sessionCleanupArgsFromCLI(os.Args[3:])
-			logins, err := store.ResolveSessionCleanupLogins(ctx, explicit, cfg.AlwaysTrackedChannels)
-			if err != nil {
-				logger.Error("resolve cleanup logins failed", "err", err)
-				os.Exit(1)
-			}
-			report, err := store.CleanupSessionStubsWithOptions(ctx, logins, analytics.SessionCleanupOptions{DryRun: dryRun})
-			if err != nil {
-				logger.Error("session cleanup failed", "err", err)
-				os.Exit(1)
-			}
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			_ = enc.Encode(report)
-			if len(report.Errors) > 0 {
+			switch os.Args[2] {
+			case "audit":
+				explicit, _ := sessionCleanupArgsFromCLI(os.Args[3:])
+				logins, err := store.ResolveSessionCleanupLogins(ctx, explicit, cfg.AlwaysTrackedChannels)
+				if err != nil {
+					logger.Error("resolve audit logins failed", "err", err)
+					os.Exit(1)
+				}
+				report, err := store.AuditSessionIntegrity(ctx, logins)
+				if err != nil {
+					logger.Error("session audit failed", "err", err)
+					os.Exit(1)
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(report)
+				return
+			case "cleanup":
+				explicit, dryRun := sessionCleanupArgsFromCLI(os.Args[3:])
+				logins, err := store.ResolveSessionCleanupLogins(ctx, explicit, cfg.AlwaysTrackedChannels)
+				if err != nil {
+					logger.Error("resolve cleanup logins failed", "err", err)
+					os.Exit(1)
+				}
+				report, err := store.CleanupSessionStubsWithOptions(ctx, logins, analytics.SessionCleanupOptions{DryRun: dryRun})
+				if err != nil {
+					logger.Error("session cleanup failed", "err", err)
+					os.Exit(1)
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(report)
+				if len(report.Errors) > 0 {
+					os.Exit(2)
+				}
+				return
+			default:
+				fmt.Println("Usage: backfill sessions audit|cleanup [--dry-run] [--login=ohnepixel]")
 				os.Exit(2)
 			}
-			return
 		case "coverage":
 			if len(os.Args) < 3 {
 				fmt.Println("Usage: backfill coverage report")
@@ -167,7 +190,7 @@ func main() {
 		case "jobs":
 			jobsCLI := analytics.NewJobsCLI(pool, cfg.ArchiveJobHeartbeatInterval, cfg.ArchiveJobStaleAfter, cfg.ArchiveJobEventLogEnabled)
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel|reclaim-stale")
+				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel|reclaim-stale|cleanup [--apply]")
 				os.Exit(2)
 			}
 			switch os.Args[2] {
@@ -236,8 +259,35 @@ func main() {
 				}
 				fmt.Printf("reclaim-stale ok failed=%d requeued=%d stale_after=%s\n", failed, requeued, cfg.BackfillStaleRunningAfter)
 				return
+			case "cleanup":
+				report, err := analytics.CleanupBackfillQueue(ctx, pool, analytics.BackfillCleanupOptions{
+					DryRun:            dryRunFromArgs(os.Args[3:]),
+					StaleRunningAfter: cfg.BackfillStaleRunningAfter,
+				})
+				if err != nil {
+					logger.Error("jobs cleanup failed", "err", err)
+					os.Exit(1)
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(report)
+				return
+			case "maintenance":
+				report, err := analytics.RunBackfillQueueMaintenance(ctx, pool, analytics.BackfillQueueMaintenanceOptions{
+					StaleRunningAfter: cfg.BackfillStaleRunningAfter,
+					RequeueFailedMax:  cfg.BackfillRequeueFailedMaxPerRun,
+					RepairSessionsMax: cfg.BackfillRepairSessionsMaxPerRun,
+				})
+				if err != nil {
+					logger.Error("jobs maintenance failed", "err", err)
+					os.Exit(1)
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(report)
+				return
 			default:
-				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel|reclaim-stale")
+				fmt.Println("Usage: backfill jobs list|show|retry-failed|resume|cancel|reclaim-stale|cleanup|maintenance [--apply]")
 				os.Exit(2)
 			}
 		case "silver":
@@ -277,8 +327,69 @@ func main() {
 			}
 		case "gold":
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: backfill gold enqueue --stream-id=<id> [--login=] | backfill gold eval --stream-id=<id>")
+				fmt.Println("Usage: backfill gold enqueue --stream-id=<id> [--login=] | backfill gold eval --stream-id=<id> | backfill gold run-once [--no-archive] | backfill gold shadow-reconcile run-once|fixture | backfill gold inventory run-once|coverage")
 				os.Exit(2)
+			}
+			if os.Args[2] == "shadow-reconcile" {
+				if len(os.Args) < 4 {
+					fmt.Println("Usage: backfill gold shadow-reconcile run-once --stream-id=<id> --login=<login> [--no-archive]")
+					fmt.Println("       backfill gold shadow-reconcile fixture --channel=<login> --vod=<vod_id> [--broadcaster-id=] [--no-archive]")
+					os.Exit(2)
+				}
+				switch os.Args[3] {
+				case "run-once":
+					streamID, login, noArchive := shadowReconcileArgsFromCLI(os.Args[4:])
+					result, err := runGoldShadowReconcileOnce(ctx, cfg, pool, logger, streamID, login, noArchive)
+					printGoldShadowReconcileResult(result)
+					if err != nil {
+						logger.Error("gold shadow-reconcile run-once failed", "err", err)
+						os.Exit(1)
+					}
+					return
+				case "fixture":
+					channel, vodID, broadcasterID, startedAt, endedAt, noArchive := shadowReconcileFixtureArgsFromCLI(os.Args[4:])
+					result, err := runGoldShadowReconcileFixture(ctx, cfg, pool, logger, channel, vodID, broadcasterID, startedAt, endedAt, noArchive)
+					printGoldShadowReconcileResult(result)
+					if err != nil {
+						logger.Error("gold shadow-reconcile fixture failed", "err", err)
+						os.Exit(1)
+					}
+					return
+				default:
+					fmt.Println("Usage: backfill gold shadow-reconcile run-once|fixture ...")
+					os.Exit(2)
+				}
+			}
+			if os.Args[2] == "inventory" {
+				if len(os.Args) < 4 {
+					fmt.Println("Usage: backfill gold inventory run-once|coverage [--enqueue]")
+					os.Exit(2)
+				}
+				switch os.Args[3] {
+				case "run-once":
+					result, err := runGoldInventoryOnce(ctx, cfg, pool, directEnqueueFromArgs(os.Args[4:]))
+					if err != nil {
+						logger.Error("gold inventory run-once failed", "err", err)
+						os.Exit(1)
+					}
+					enc := json.NewEncoder(os.Stdout)
+					enc.SetIndent("", "  ")
+					_ = enc.Encode(result)
+					return
+				case "coverage":
+					result, err := analytics.BuildTop500GoldVODInventoryCoverage(ctx, pool)
+					if err != nil {
+						logger.Error("gold inventory coverage failed", "err", err)
+						os.Exit(1)
+					}
+					enc := json.NewEncoder(os.Stdout)
+					enc.SetIndent("", "  ")
+					_ = enc.Encode(result)
+					return
+				default:
+					fmt.Println("Usage: backfill gold inventory run-once|coverage [--enqueue]")
+					os.Exit(2)
+				}
 			}
 			dbAlways, err := store.GetAlwaysTracked(ctx)
 			if err != nil {
@@ -320,8 +431,16 @@ func main() {
 				enc.SetIndent("", "  ")
 				_ = enc.Encode(result)
 				return
+			case "run-once":
+				noArchive := !goldArchiveRequired(cfg, os.Args[3:])
+				if err := runGoldWorkerOnce(ctx, cfg, pool, logger, noArchive); err != nil {
+					logger.Error("gold run-once failed", "err", err)
+					os.Exit(1)
+				}
+				fmt.Println("gold run-once completed")
+				return
 			default:
-				fmt.Println("Usage: backfill gold enqueue --stream-id=<id> [--login=] | backfill gold eval --stream-id=<id>")
+				fmt.Println("Usage: backfill gold enqueue --stream-id=<id> [--login=] | backfill gold eval --stream-id=<id> | backfill gold run-once | backfill gold inventory run-once|coverage")
 				os.Exit(2)
 			}
 		}
@@ -330,14 +449,48 @@ func main() {
 	fmt.Println("backfill worker runs inside analytics when BACKFILL_ENABLED=true")
 	fmt.Println("gold enqueuer runs inside analytics when GOLD_BACKFILL_ENABLED=true")
 	fmt.Println("bronze indexer runs inside analytics when BRONZE_ENABLED=true")
-	fmt.Println("Use: backfill status | backfill jobs list|show|retry-failed|resume|cancel|reclaim-stale | backfill coverage report | backfill silver enqueue-from-bronze | backfill gold enqueue|eval | backfill bronze status | backfill bronze run-once | backfill bronze vod-range --login=<channel> | backfill sessions cleanup [--dry-run] [--login=...]")
+	fmt.Println("Use: backfill status | ... | backfill gold enqueue|eval|run-once|shadow-reconcile|inventory | ...")
 }
 
-func newArchiveBlobStore(cfg config.Config) (archive.BlobStore, error) {
-	if !cfg.ArchiveEnabled || cfg.ArchiveStorageProvider != "azure" {
-		return nil, fmt.Errorf("archive azure export must be enabled (ARCHIVE_ENABLED=true)")
+func runGoldWorkerOnce(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, noArchive bool) error {
+	if !noArchive && (!cfg.ArchiveEnabled || cfg.ArchiveStorageProvider != "azure") {
+		return fmt.Errorf("archive azure export must be enabled (ARCHIVE_ENABLED=true) or pass --no-archive / set GOLD_ARCHIVE_REQUIRED=false")
 	}
-	return archive.NewBlobStore(cfg.ArchiveBlobStoreConfig())
+	rdb, err := newBackfillRedis(cfg)
+	if err != nil {
+		return err
+	}
+	defer rdb.Close()
+
+	syncService, err := newBackfillSyncService(cfg, pool, rdb, logger, !noArchive)
+	if err != nil {
+		return err
+	}
+
+	var archiveSyncExporter *archive.SyncExporter
+	if !noArchive {
+		blob, err := archive.NewBlobStore(cfg.ArchiveBlobStoreConfig())
+		if err != nil {
+			return err
+		}
+		archiveWriter := archive.NewWriter(blob, archive.NewManifestStore(pool))
+		pgxArchiveDB := archive.NewPgxAnalyticsDB(pool)
+		emoteExporter := archive.NewEmoteExporter(archiveWriter, archive.NewPgxEmoteSnapshotDB(pool))
+		vodChatDB := archive.NewVODChatDBWithProvenance(pgxArchiveDB, emoteExporter)
+		archiveSyncExporter = archive.NewSyncExporter(archiveWriter, vodChatDB)
+	}
+
+	worker := analytics.NewBackfillWorker(pool, syncService, archiveSyncExporter, 0).
+		WithWorkerOptions(analytics.BackfillWorkerOptions{
+			Name:              "gold-run-once",
+			TierFilter:        []string{"gold", "gold_full", "gold_lite"},
+			StaleRunningAfter: cfg.BackfillStaleRunningAfter,
+			HeartbeatInterval: cfg.BackfillHeartbeatInterval,
+		}).
+		WithGoldSyncTimeout(time.Duration(cfg.GoldSyncTimeoutMS)*time.Millisecond).
+		WithVODChatExporter(archiveSyncExporter).
+		WithGoldLiteExporter(archiveSyncExporter, cfg.GoldLiteRequireRollups)
+	return worker.RunOnce(ctx)
 }
 
 type bronzeVODRangeResult struct {
@@ -432,6 +585,49 @@ func goldArgsFromCLI(args []string) (streamID, login string) {
 		}
 	}
 	return streamID, login
+}
+
+func dryRunFromArgs(args []string) bool {
+	for _, arg := range args {
+		if arg == "--apply" {
+			return false
+		}
+	}
+	return true
+}
+
+func directEnqueueFromArgs(args []string) bool {
+	for _, arg := range args {
+		if arg == "--enqueue" {
+			return true
+		}
+	}
+	return false
+}
+
+func runGoldInventoryOnce(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, directEnqueue bool) (analytics.Top500GoldVODInventoryResult, error) {
+	blob, err := newArchiveBlobStore(cfg)
+	if err != nil {
+		return analytics.Top500GoldVODInventoryResult{}, err
+	}
+	if !directEnqueue {
+		directEnqueue = cfg.Top500GoldVODInventoryDirectEnqueue
+	}
+	if directEnqueue && !cfg.GoldFullEnabled {
+		return analytics.Top500GoldVODInventoryResult{}, fmt.Errorf("direct Gold enqueue requires GOLD_FULL_ENABLED=true")
+	}
+	builder := analytics.NewTop500GoldVODInventory(
+		pool,
+		analytics.NewArchiveVODCatalog(blob),
+		analytics.Top500GoldVODInventoryConfig{
+			SinceDays:     cfg.Top500GoldVODInventorySinceDays,
+			TopN:          cfg.Top500GoldVODInventoryTopN,
+			MaxPerRun:     cfg.Top500GoldVODInventoryMaxPerRun,
+			DirectEnqueue: directEnqueue,
+			Interval:      cfg.Top500GoldVODInventoryInterval,
+		},
+	)
+	return builder.RunOnce(ctx)
 }
 
 func sessionCleanupArgsFromCLI(args []string) ([]string, bool) {

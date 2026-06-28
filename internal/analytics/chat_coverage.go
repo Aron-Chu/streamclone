@@ -19,6 +19,10 @@ const chatCoveragePartialThreshold = 0.35
 
 // chatCoverageSummary computes chat span vs stream span for UI warnings and sync messages.
 func chatCoverageSummary(rollups []MinuteRollup, stream *StreamRecord, vodDurationSec int) ChatCoverageSummary {
+	return chatCoverageSummaryFromRollups(filterTimelineRollups(rollups), stream, vodDurationSec)
+}
+
+func chatCoverageSummaryFromRollups(rollups []MinuteRollup, stream *StreamRecord, vodDurationSec int) ChatCoverageSummary {
 	out := ChatCoverageSummary{VodDurationSec: vodDurationSec}
 	if len(rollups) == 0 {
 		return out

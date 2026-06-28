@@ -12,6 +12,10 @@ func IsZeroWidth(f int) bool {
 	return f&ZeroWidth != 0
 }
 
+func IsAnimated(f int) bool {
+	return f&Animated != 0
+}
+
 func FromSevenTV(setItemFlags, dataFlags int) bool {
 	return setItemFlags&SevenTVZeroWidth != 0 || dataFlags&SevenTVZeroWidth != 0
 }

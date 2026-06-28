@@ -78,6 +78,10 @@ func (h *Handler) PulseRoutes(r chi.Router) {
 }
 
 func (h *Handler) listPulseBookmarks(w http.ResponseWriter, r *http.Request) {
+	if h.pulseHosted.Hosted && h.store == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
 	filter := ListPulseBookmarksFilter{
 		Login:    strings.TrimSpace(strings.ToLower(r.URL.Query().Get("login"))),
 		StreamID: strings.TrimSpace(r.URL.Query().Get("streamId")),
@@ -99,9 +103,8 @@ func (h *Handler) listPulseBookmarks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if h.pulseHosted.Hosted {
-		principal, ok := pulsePrincipalFromContext(r.Context())
+		principal, ok := h.requireHostedUserStatePrincipal(w, r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
 		filter.PrincipalID = principal.ID
@@ -129,9 +132,8 @@ func (h *Handler) createPulseBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.pulseHosted.Hosted {
-		principal, ok := pulsePrincipalFromContext(r.Context())
+		principal, ok := h.requireHostedUserStatePrincipal(w, r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
 		bookmark.PrincipalID = &principal.ID
@@ -164,7 +166,15 @@ func (h *Handler) updatePulseBookmark(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	updated, err := h.store.UpdatePulseBookmark(r.Context(), id, label, notes, scopedPrincipalID(r, h))
+	principalID := scopedPrincipalID(r, h)
+	if h.pulseHosted.Hosted {
+		principal, ok := h.requireHostedUserStatePrincipal(w, r)
+		if !ok {
+			return
+		}
+		principalID = principal.ID
+	}
+	updated, err := h.store.UpdatePulseBookmark(r.Context(), id, label, notes, principalID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "bookmark_not_found"})
@@ -185,7 +195,15 @@ func (h *Handler) deletePulseBookmark(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_id"})
 		return
 	}
-	if err := h.store.DeletePulseBookmark(r.Context(), id, scopedPrincipalID(r, h)); err != nil {
+	principalID := scopedPrincipalID(r, h)
+	if h.pulseHosted.Hosted {
+		principal, ok := h.requireHostedUserStatePrincipal(w, r)
+		if !ok {
+			return
+		}
+		principalID = principal.ID
+	}
+	if err := h.store.DeletePulseBookmark(r.Context(), id, principalID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -23,13 +24,19 @@ const defaultStaleReclaimerInterval = 5 * time.Minute
 
 const reclaimRunningOnStartupSQL = `
 	UPDATE backfill_jobs
-	SET status='queued', next_run_at=now(),
+	SET status=CASE WHEN attempt + 1 >= 3 THEN 'failed' ELSE 'queued' END,
+	    export_status=CASE WHEN attempt + 1 >= 3 THEN 'failed' ELSE export_status END,
+	    next_run_at=CASE WHEN attempt + 1 >= 3 THEN next_run_at ELSE now() END,
+	    attempt=attempt + 1,
 	    error=COALESCE(error,'') || ' [startup reclaim]', updated_at=now()
 	WHERE status='running'`
 
 const backfillPanicRequeueSQL = `
 	UPDATE backfill_jobs
-	SET status='queued', next_run_at=now(),
+	SET status=CASE WHEN attempt + 1 >= 3 THEN 'failed' ELSE 'queued' END,
+	    export_status=CASE WHEN attempt + 1 >= 3 THEN 'failed' ELSE export_status END,
+	    next_run_at=CASE WHEN attempt + 1 >= 3 THEN next_run_at ELSE now() END,
+	    attempt=attempt + 1,
 	    error=COALESCE(error,'') || ' [panic reclaim]', updated_at=now()
 	WHERE id=$1 AND status='running'`
 
@@ -183,6 +190,15 @@ func isGoldFullTier(tier string) bool {
 	}
 }
 
+func isGoldWorkerTier(tier string) bool {
+	switch strings.ToLower(strings.TrimSpace(tier)) {
+	case "gold", "gold_full", "gold_lite":
+		return true
+	default:
+		return false
+	}
+}
+
 func (w *BackfillWorker) RunOnce(ctx context.Context) error {
 	_, err := w.runOnce(ctx)
 	return err
@@ -212,9 +228,105 @@ func (w *BackfillWorker) runOnce(ctx context.Context) (processed bool, err error
 	stopHeartbeat := w.startJobHeartbeat(ctx, job.ID)
 	defer stopHeartbeat()
 
-	jobStreamID := job.StreamID
-	if canonicalID, resolveErr := NewStore(w.db).ResolveCanonicalStreamID(ctx, job.StreamID); resolveErr == nil && canonicalID != "" {
-		jobStreamID = canonicalID
+	finishJob := func(outcome backfillOutcome) error {
+		var finishErr error
+		if outcome.requeue {
+			_, finishErr = w.db.Exec(ctx, `
+				UPDATE backfill_jobs
+				SET status=$2, export_status=$3, error=NULLIF($4,''), attempt=$5, next_run_at=$6, stream_id=$7, updated_at=now()
+				WHERE id=$1`, job.ID, outcome.status, outcome.exportStatus, outcome.errMsg, outcome.attempt, outcome.nextRunAt, job.StreamID)
+		} else {
+			_, finishErr = w.db.Exec(ctx, `
+				UPDATE backfill_jobs
+				SET status=$2, export_status=$3, error=NULLIF($4,''), attempt=$5, stream_id=$6, updated_at=now()
+				WHERE id=$1`, job.ID, outcome.status, outcome.exportStatus, outcome.errMsg, outcome.attempt, job.StreamID)
+		}
+		jobFinished = true
+		markGoldVODInventoryOutcome(ctx, w.db, *job, outcome)
+		metrics.RefreshBackfillJobGauges(ctx, w.db, w.staleRunningAfter)
+		w.updateArchiveItem(ctx, job.ID, outcome.status, outcome.errMsg)
+		if outcome.status == "done" || outcome.status == "failed" {
+			metrics.RecordBackfillJobCompleted(job.Tier, outcome.status)
+		}
+		return finishErr
+	}
+
+	jobStreamID, skipped, canonicalizeErr := w.canonicalizeClaimedBackfillJob(ctx, job)
+	if skipped {
+		jobFinished = true
+		metrics.RefreshBackfillJobGauges(ctx, w.db, w.staleRunningAfter)
+		w.updateArchiveItem(ctx, job.ID, "skipped", "[alias worker] duplicate active canonical backfill job exists")
+		return true, canonicalizeErr
+	}
+	if canonicalizeErr != nil {
+		now := time.Now()
+		outcome := resolveBackfillOutcome(*job, canonicalizeErr, now)
+		if strings.EqualFold(job.Tier, "silver") {
+			outcome = resolveSilverBackfillOutcome(*job, canonicalizeErr, now)
+		} else if isGoldWorkerTier(job.Tier) {
+			outcome = resolveGoldBackfillOutcome(*job, canonicalizeErr, now)
+		}
+		return true, finishJob(outcome)
+	}
+	if isGoldWorkerTier(job.Tier) {
+		if err := NewStore(w.db).EnsureSessionForStream(ctx, jobStreamID); err != nil {
+			outcome := resolveGoldBackfillOutcome(*job, fmt.Errorf("ensure session before gold sync: %w", err), time.Now())
+			return true, finishJob(outcome)
+		}
+		var ivrResult GoldIVRAttemptResult
+		if w.sync != nil {
+			ivrResult = w.sync.TryGoldIVRLiteBeforeGQL(ctx, jobStreamID, job.Login)
+		}
+		viewersOnly, forceChat := backfillSyncParams(job.Tier)
+		syncCtx := ctx
+		if isGoldFullTier(job.Tier) && w.goldSyncTimeout > 0 {
+			var cancel context.CancelFunc
+			syncCtx, cancel = context.WithTimeout(ctx, w.goldSyncTimeout)
+			defer cancel()
+		}
+		_, syncErr := w.sync.SyncHistoricalStream(syncCtx, jobStreamID, job.Login, viewersOnly, forceChat, "")
+		if syncErr == nil && ivrResult.ShadowOnly && w.sync != nil {
+			if _, recErr := w.sync.ReconcileGoldIVRShadowAfterGQL(ctx, jobStreamID, job.Login, ivrResult); recErr != nil {
+				slog.Warn("gold ivr shadow reconciliation failed", "stream_id", jobStreamID, "err", recErr)
+			}
+		}
+		var outcome backfillOutcome
+		if syncErr != nil && strings.EqualFold(job.Tier, "silver") {
+			outcome = resolveSilverBackfillOutcome(*job, syncErr, time.Now())
+		} else if isGoldWorkerTier(job.Tier) {
+			outcome = resolveGoldBackfillOutcome(*job, syncErr, time.Now())
+		} else {
+			outcome = resolveBackfillOutcome(*job, syncErr, time.Now())
+		}
+		if syncErr == nil {
+			job.StreamID = jobStreamID
+		}
+		if syncErr == nil && w.exporter != nil {
+			if err := w.exporter.ExportSync(ctx, jobStreamID, job.Login, backfillExportLabel(job.Tier)); err != nil {
+				if isGoldFullTier(job.Tier) {
+					outcome = resolveGoldBackfillOutcome(*job, err, time.Now())
+					if !outcome.requeue {
+						outcome.exportStatus = "failed"
+					}
+				} else {
+					outcome.exportStatus = "failed"
+					outcome.errMsg = err.Error()
+				}
+			} else if strings.EqualFold(job.Tier, "gold_lite") && w.goldLiteExporter != nil {
+				if err := w.goldLiteExporter.ExportGoldLite(ctx, jobStreamID, w.goldLiteRequireRollups); err != nil {
+					outcome.exportStatus = "failed"
+					outcome.errMsg = err.Error()
+				}
+			} else if isGoldFullTier(job.Tier) && w.vodChatExporter != nil {
+				if err := w.vodChatExporter.ExportVODChat(ctx, jobStreamID); err != nil {
+					outcome = resolveGoldBackfillOutcome(*job, err, time.Now())
+					if !outcome.requeue {
+						outcome.exportStatus = "failed"
+					}
+				}
+			}
+		}
+		return true, finishJob(outcome)
 	}
 	viewersOnly, forceChat := backfillSyncParams(job.Tier)
 	syncCtx := ctx
@@ -227,6 +339,8 @@ func (w *BackfillWorker) runOnce(ctx context.Context) (processed bool, err error
 	var outcome backfillOutcome
 	if syncErr != nil && strings.EqualFold(job.Tier, "silver") {
 		outcome = resolveSilverBackfillOutcome(*job, syncErr, time.Now())
+	} else if isGoldWorkerTier(job.Tier) {
+		outcome = resolveGoldBackfillOutcome(*job, syncErr, time.Now())
 	} else {
 		outcome = resolveBackfillOutcome(*job, syncErr, time.Now())
 	}
@@ -235,8 +349,15 @@ func (w *BackfillWorker) runOnce(ctx context.Context) (processed bool, err error
 	}
 	if syncErr == nil && w.exporter != nil {
 		if err := w.exporter.ExportSync(ctx, jobStreamID, job.Login, backfillExportLabel(job.Tier)); err != nil {
-			outcome.exportStatus = "failed"
-			outcome.errMsg = err.Error()
+			if isGoldFullTier(job.Tier) {
+				outcome = resolveGoldBackfillOutcome(*job, err, time.Now())
+				if !outcome.requeue {
+					outcome.exportStatus = "failed"
+				}
+			} else {
+				outcome.exportStatus = "failed"
+				outcome.errMsg = err.Error()
+			}
 		} else if strings.EqualFold(job.Tier, "gold_lite") && w.goldLiteExporter != nil {
 			if err := w.goldLiteExporter.ExportGoldLite(ctx, jobStreamID, w.goldLiteRequireRollups); err != nil {
 				outcome.exportStatus = "failed"
@@ -244,32 +365,55 @@ func (w *BackfillWorker) runOnce(ctx context.Context) (processed bool, err error
 			}
 		} else if isGoldFullTier(job.Tier) && w.vodChatExporter != nil {
 			if err := w.vodChatExporter.ExportVODChat(ctx, jobStreamID); err != nil {
-				outcome.exportStatus = "failed"
-				outcome.errMsg = err.Error()
+				outcome = resolveGoldBackfillOutcome(*job, err, time.Now())
+				if !outcome.requeue {
+					outcome.exportStatus = "failed"
+				}
 			}
 		}
 	}
-	if outcome.requeue {
+	return true, finishJob(outcome)
+}
+
+func (w *BackfillWorker) canonicalizeClaimedBackfillJob(ctx context.Context, job *BackfillJob) (string, bool, error) {
+	if w == nil || w.db == nil || job == nil {
+		return "", false, nil
+	}
+	jobStreamID := job.StreamID
+	canonicalID, err := NewStore(w.db).ResolveCanonicalStreamID(ctx, job.StreamID)
+	if err != nil {
+		return jobStreamID, false, fmt.Errorf("resolve canonical stream id for backfill job %d: %w", job.ID, err)
+	}
+	if canonicalID == "" || canonicalID == job.StreamID {
+		return jobStreamID, false, nil
+	}
+	tag, err := w.db.Exec(ctx, `
+		UPDATE backfill_jobs
+		SET stream_id=$2, updated_at=now()
+		WHERE id=$1
+		  AND status='running'
+		  AND NOT EXISTS (
+			SELECT 1 FROM backfill_jobs existing
+			WHERE existing.id <> backfill_jobs.id
+			  AND existing.stream_id = $2
+			  AND existing.status IN ('queued', 'running')
+		  )`, job.ID, canonicalID)
+	if err != nil {
+		return jobStreamID, false, fmt.Errorf("rekey backfill job %d %s -> %s: %w", job.ID, job.StreamID, canonicalID, err)
+	}
+	if tag.RowsAffected() == 0 {
 		_, err = w.db.Exec(ctx, `
 			UPDATE backfill_jobs
-			SET status=$2, export_status=$3, error=NULLIF($4,''), attempt=$5, next_run_at=$6, stream_id=$7, updated_at=now()
-			WHERE id=$1`, job.ID, outcome.status, outcome.exportStatus, outcome.errMsg, outcome.attempt, outcome.nextRunAt, job.StreamID)
-		jobFinished = true
-		metrics.RefreshBackfillJobGauges(ctx, w.db, w.staleRunningAfter)
-		w.updateArchiveItem(ctx, job.ID, outcome.status, outcome.errMsg)
-		return true, err
+			SET status='skipped',
+			    export_status='skipped',
+			    error='[alias worker] duplicate active canonical backfill job exists',
+			    updated_at=now()
+			WHERE id=$1
+			  AND status='running'`, job.ID)
+		return jobStreamID, true, err
 	}
-	_, err = w.db.Exec(ctx, `
-		UPDATE backfill_jobs
-		SET status=$2, export_status=$3, error=NULLIF($4,''), attempt=$5, stream_id=$6, updated_at=now()
-		WHERE id=$1`, job.ID, outcome.status, outcome.exportStatus, outcome.errMsg, outcome.attempt, job.StreamID)
-	jobFinished = true
-	metrics.RefreshBackfillJobGauges(ctx, w.db, w.staleRunningAfter)
-	w.updateArchiveItem(ctx, job.ID, outcome.status, outcome.errMsg)
-	if outcome.status == "done" || outcome.status == "failed" {
-		metrics.RecordBackfillJobCompleted(job.Tier, outcome.status)
-	}
-	return true, err
+	job.StreamID = canonicalID
+	return canonicalID, false, nil
 }
 
 // ReclaimRunningOnStartup requeues every running backfill job once at worker startup.
@@ -341,15 +485,8 @@ type backfillOutcome struct {
 func resolveBackfillOutcome(job BackfillJob, syncErr error, now time.Time) backfillOutcome {
 	nextAttempt := job.Attempt + 1
 	if syncErr != nil {
-		if isSyncTimeoutError(syncErr) && nextAttempt < maxBackfillSyncAttempts {
-			return backfillOutcome{
-				status:       "queued",
-				exportStatus: job.ExportStatus,
-				errMsg:       syncErr.Error(),
-				attempt:      nextAttempt,
-				nextRunAt:    now.Add(backfillRetryDelay(nextAttempt)),
-				requeue:      true,
-			}
+		if isSyncTimeoutError(syncErr) {
+			return resolveRetriableBackfillOutcome(job, syncErr.Error(), now)
 		}
 		return backfillOutcome{
 			status:       "failed",
@@ -361,6 +498,42 @@ func resolveBackfillOutcome(job BackfillJob, syncErr error, now time.Time) backf
 	return backfillOutcome{
 		status:       "done",
 		exportStatus: "confirmed",
+		attempt:      nextAttempt,
+	}
+}
+
+func resolveGoldBackfillOutcome(job BackfillJob, syncErr error, now time.Time) backfillOutcome {
+	if syncErr == nil {
+		return resolveBackfillOutcome(job, nil, now)
+	}
+	if isRetriableGoldFailure(syncErr.Error()) {
+		return resolveRetriableBackfillOutcome(job, syncErr.Error(), now)
+	}
+	nextAttempt := job.Attempt + 1
+	return backfillOutcome{
+		status:       "failed",
+		exportStatus: "failed",
+		errMsg:       syncErr.Error(),
+		attempt:      nextAttempt,
+	}
+}
+
+func resolveRetriableBackfillOutcome(job BackfillJob, errMsg string, now time.Time) backfillOutcome {
+	nextAttempt := job.Attempt + 1
+	if nextAttempt < maxBackfillSyncAttempts {
+		return backfillOutcome{
+			status:       "queued",
+			exportStatus: job.ExportStatus,
+			errMsg:       errMsg,
+			attempt:      nextAttempt,
+			nextRunAt:    now.Add(backfillRetryDelay(nextAttempt)),
+			requeue:      true,
+		}
+	}
+	return backfillOutcome{
+		status:       "failed",
+		exportStatus: "failed",
+		errMsg:       errMsg,
 		attempt:      nextAttempt,
 	}
 }
@@ -420,6 +593,12 @@ func (w *BackfillWorker) claimNext(ctx context.Context) (*BackfillJob, error) {
 	_, err = tx.Exec(ctx, `UPDATE backfill_jobs SET status='running', updated_at=now() WHERE id=$1`, job.ID)
 	if err != nil {
 		return nil, err
+	}
+	if isGoldFullTier(job.Tier) {
+		_, _ = tx.Exec(ctx, `
+			UPDATE top500_vod_inventory
+			SET gold_status='running', gold_backfill_job_id=$2, updated_at=now()
+			WHERE stream_id=$1`, job.StreamID, job.ID)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err

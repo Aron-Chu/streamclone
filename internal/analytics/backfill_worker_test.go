@@ -97,6 +97,46 @@ func TestResolveBackfillOutcomeNonTimeoutFailsImmediately(t *testing.T) {
 	}
 }
 
+func TestResolveGoldBackfillOutcomeTransientRequeues(t *testing.T) {
+	now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	job := BackfillJob{Tier: "gold", Attempt: 0, ExportStatus: "pending"}
+	syncErr := errors.New("twitch gql service unavailable: 503")
+	got := resolveGoldBackfillOutcome(job, syncErr, now)
+	if got.status != "queued" || !got.requeue {
+		t.Fatalf("transient gold error should requeue, got %+v", got)
+	}
+	if got.attempt != 1 {
+		t.Fatalf("attempt = %d, want 1", got.attempt)
+	}
+	if !got.nextRunAt.Equal(now.Add(60 * time.Second)) {
+		t.Fatalf("next_run_at = %v", got.nextRunAt)
+	}
+}
+
+func TestResolveGoldBackfillOutcomePermanentFails(t *testing.T) {
+	job := BackfillJob{Tier: "gold", Attempt: 0, ExportStatus: "pending"}
+	syncErr := errors.New("gold chat sync: no VOD chat comments fetched (vod_id=abc)")
+	got := resolveGoldBackfillOutcome(job, syncErr, time.Now())
+	if got.status != "failed" || got.requeue {
+		t.Fatalf("permanent gold error should fail, got %+v", got)
+	}
+	if got.exportStatus != "failed" {
+		t.Fatalf("export_status = %q, want failed", got.exportStatus)
+	}
+}
+
+func TestResolveGoldBackfillOutcomeTransientFailsAfterMaxAttempts(t *testing.T) {
+	job := BackfillJob{Tier: "gold", Attempt: maxBackfillSyncAttempts - 1, ExportStatus: "pending"}
+	syncErr := errors.New("archive upload: bad gateway")
+	got := resolveGoldBackfillOutcome(job, syncErr, time.Now())
+	if got.status != "failed" || got.requeue {
+		t.Fatalf("final transient gold attempt should fail, got %+v", got)
+	}
+	if got.attempt != maxBackfillSyncAttempts {
+		t.Fatalf("attempt = %d, want %d", got.attempt, maxBackfillSyncAttempts)
+	}
+}
+
 func TestBackfillSyncParamsGold(t *testing.T) {
 	viewersOnly, forceChat := backfillSyncParams("gold")
 	if viewersOnly || !forceChat {
@@ -157,14 +197,17 @@ func TestIsGoldWorkerTierFilter(t *testing.T) {
 
 func TestClaimNextSQLGoldReadiness(t *testing.T) {
 	sql := ClaimNextSQL([]string{"gold", "gold_full", "gold_lite"})
-	if !strings.Contains(sql, "EXISTS") {
-		t.Fatal("gold claim SQL should require silver readiness")
+	if !strings.Contains(sql, "top500_vod_inventory") {
+		t.Fatal("gold claim SQL should allow inventory-backed gold targets")
 	}
 	if !strings.Contains(sql, "export_status = 'confirmed'") {
-		t.Fatal("gold claim SQL should require confirmed silver export")
+		t.Fatal("gold claim SQL should preserve confirmed silver export path")
 	}
 	if !strings.Contains(sql, "WITH RECURSIVE canonical_path") {
 		t.Fatal("gold claim SQL should resolve silver aliases transitively")
+	}
+	if !strings.Contains(sql, "OR EXISTS") {
+		t.Fatal("gold claim SQL should allow silver or inventory readiness")
 	}
 }
 
@@ -230,8 +273,14 @@ func TestReclaimRunningOnStartupSQL(t *testing.T) {
 	if !strings.Contains(sql, "[startup reclaim]") {
 		t.Fatal("startup reclaim SQL should tag error message")
 	}
-	if !strings.Contains(sql, "status='queued'") {
-		t.Fatal("startup reclaim SQL should requeue jobs")
+	if !strings.Contains(sql, "else 'queued'") {
+		t.Fatal("startup reclaim SQL should requeue jobs below retry cap")
+	}
+	if !strings.Contains(sql, "attempt=attempt + 1") {
+		t.Fatal("startup reclaim SQL should consume an attempt")
+	}
+	if !strings.Contains(sql, "then 'failed'") {
+		t.Fatal("startup reclaim SQL should fail jobs at retry cap")
 	}
 }
 
@@ -242,6 +291,12 @@ func TestBackfillPanicRequeueSQL(t *testing.T) {
 	}
 	if !strings.Contains(sql, "status='running'") {
 		t.Fatal("panic requeue SQL should only affect running jobs")
+	}
+	if !strings.Contains(sql, "attempt=attempt + 1") {
+		t.Fatal("panic requeue SQL should consume an attempt")
+	}
+	if !strings.Contains(sql, "then 'failed'") {
+		t.Fatal("panic requeue SQL should fail jobs at retry cap")
 	}
 }
 

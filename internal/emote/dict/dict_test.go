@@ -83,3 +83,14 @@ func TestMarshalReloadDelta(t *testing.T) {
 		t.Fatalf("unexpected action: %+v", m)
 	}
 }
+
+func TestBrowserURLPrefersProviderCDN(t *testing.T) {
+	d := New(nil, "http://localhost:8090/emotes")
+	localID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
+	if got := d.BrowserURL(localID, "bttv", "abcdef", "1x"); got != "https://cdn.betterttv.net/emote/abcdef/3x" {
+		t.Fatalf("provider cdn url = %q", got)
+	}
+	if got := d.BrowserURL(localID, "bttv", "", "1x"); got != "http://localhost:8090/emotes/"+localID+"/1x.webp" {
+		t.Fatalf("fallback url = %q", got)
+	}
+}

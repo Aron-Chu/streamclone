@@ -8,10 +8,10 @@ import (
 )
 
 type cacheInvalidateRecorder struct {
-	mu        sync.Mutex
-	bff       []string
-	heatmap   []string
-	fullBoth  []string
+	mu       sync.Mutex
+	bff      []string
+	heatmap  []string
+	fullBoth []string
 }
 
 func (r *cacheInvalidateRecorder) hook(includeHeatmap bool) func(ctx context.Context, login, streamID string, heatmap bool) {

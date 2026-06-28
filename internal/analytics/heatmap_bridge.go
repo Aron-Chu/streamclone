@@ -18,6 +18,7 @@ func (h *Handler) consolidateForHeatmap(ctx context.Context, streamID string) ([
 	if err != nil {
 		return nil, time.Time{}, err
 	}
+	rawRollups = filterTimelineRollups(rawRollups)
 
 	consolidated := consolidateRollupsByMinute(rawRollups)
 
