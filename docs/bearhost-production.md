@@ -183,7 +183,7 @@ Script-enforced gates replace ad-hoc “migrate then pray” steps. **Do not** `
 6. Re-run **`BEARHOST_ANALYTICS_GATE_REMOTE=1 make bearhost-analytics-predeploy-gate`** — require `ANALYTICS_DEPLOY_GATE=PASS` and `BLOCK_ANALYTICS_RECREATE=0`.
 7. `bash scripts/bearhost-pulse-api.sh` — gate runs automatically before analytics recreate (`BEARHOST_ANALYTICS_GATE_LOCAL=1` inside script; break-glass: `BEARHOST_SKIP_ANALYTICS_DEPLOY_GATE=1`).
 8. `bash scripts/pulse-hosted-boundary-smoke.sh` — require `PUBLIC_BOUNDARY=PASS`.
-9. Optional: `PULSE_BETA_KEY=... bash scripts/pulse-hosted-boundary-smoke.sh` for `CHART_CANARY` + `VOD_EXTENSION_CANARY`.
+9. Optional chart/VOD canary: `bash scripts/pulse-hosted-boundary-smoke-auth.sh` (loads beta key from BearHost via SSH; never prints key) or `PULSE_BETA_KEY=... bash scripts/pulse-hosted-boundary-smoke.sh`.
 
 **Do-not box:** IVR shadow overlay (`profile-bearhost-corpus-ivr-shadow.env`) remains **HOLD** until migration 000050 + analytics deploy + corpus workers + Ludwig artifacts + zero `chat_source=ivr` rows.
 
