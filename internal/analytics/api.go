@@ -96,7 +96,6 @@ func (h *Handler) Routes(r chi.Router) {
 	h.PortalRoutes(r)
 	h.EmoteHistoryRoutes(r)
 	h.CorpusRoutes(r)
-	h.PublicEmoteMaterializationRoutes(r)
 	r.Route("/v1/analytics", func(r chi.Router) {
 		r.Get("/always-tracked", h.getAlwaysTracked)
 		r.Post("/always-tracked", h.setAlwaysTracked)
