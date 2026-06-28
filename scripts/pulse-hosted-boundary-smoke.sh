@@ -115,7 +115,9 @@ phase_a_public_boundary() {
   for path in \
     "/v1/analytics/channels/ludwig/live" \
     "/v1/analytics/channels/ludwig/live?sparse=false" \
-    "/v1/analytics/streams/${STREAM_ID}"; do
+    "/v1/analytics/streams/${STREAM_ID}" \
+    "/v1/portal/analytics/channels/ludwig/live" \
+    "/v1/portal/analytics/channels/ludwig/streams"; do
     code="$(curl_code "${BASE}${path}")"
     if [[ "${code}" != "401" ]]; then
       echo "FAIL: ${path} HTTP ${code} (want 401 unauthenticated)" >&2

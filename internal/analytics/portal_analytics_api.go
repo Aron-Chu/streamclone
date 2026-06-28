@@ -506,6 +506,9 @@ type PortalChannelStreamsResponse struct {
 }
 
 func (h *Handler) portalChannelStreams(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeHostedPortalStreamAccess(w, r) {
+		return
+	}
 	if h.store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
 		return
