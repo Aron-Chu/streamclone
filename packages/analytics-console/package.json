@@ -1,6 +1,6 @@
 {
   "name": "@streamclone/analytics-console",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./src/index.tsx",
@@ -17,8 +17,11 @@
   ],
   "peerDependencies": {
     "@streamclone/pulse-core": "*",
+    "@tanstack/react-query": "^5.90.0",
     "react": "^18.3.0",
-    "react-dom": "^18.3.0"
+    "react-dom": "^18.3.0",
+    "react-router-dom": "^7.9.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "18.3.18",
