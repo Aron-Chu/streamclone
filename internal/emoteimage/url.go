@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	twitchCDNTemplate = "https://static-cdn.jtvnw.net/emoticons/v2/%s/default/dark/2.0"
+	twitchCDNTemplate  = "https://static-cdn.jtvnw.net/emoticons/v2/%s/default/dark/2.0"
 	sevenTVCDNTemplate = "https://cdn.7tv.app/emote/%s/4x.webp"
 	ffzCDNTemplate     = "https://cdn.frankerfacez.com/emoticon/%s/4"
 	bttvCDNTemplate    = "https://cdn.betterttv.net/emote/%s/3x"
@@ -79,12 +79,19 @@ func AbsolutizeHostedCDN(cdnBase, url string) string {
 		return url
 	}
 	if strings.HasPrefix(url, "/emotes/") {
+		if strings.HasSuffix(cdnBase, "/emotes") {
+			return cdnBase + strings.TrimPrefix(url, "/emotes")
+		}
 		return cdnBase + url
 	}
 	lower := strings.ToLower(url)
 	if strings.HasPrefix(lower, "http://localhost:") || strings.HasPrefix(lower, "http://127.0.0.1:") {
 		if idx := strings.Index(url, "/emotes/"); idx >= 0 {
-			return cdnBase + url[idx:]
+			suffix := url[idx:]
+			if strings.HasSuffix(cdnBase, "/emotes") {
+				return cdnBase + strings.TrimPrefix(suffix, "/emotes")
+			}
+			return cdnBase + suffix
 		}
 	}
 	return url
@@ -103,6 +110,12 @@ func ExtensionBrowserURL(provider, localID, providerEmoteID string) string {
 	providerEmoteID = strings.TrimSpace(providerEmoteID)
 	if (provider == "seventv" || provider == "7tv") && providerEmoteID != "" {
 		return fmt.Sprintf(sevenTVCDNTemplate, providerEmoteID)
+	}
+	if (provider == "ffz" || provider == "frankerfacez") && providerEmoteID != "" {
+		return fmt.Sprintf(ffzCDNTemplate, providerEmoteID)
+	}
+	if (provider == "bttv" || provider == "betterttv") && providerEmoteID != "" {
+		return fmt.Sprintf(bttvCDNTemplate, providerEmoteID)
 	}
 	return URL(provider, localID, "1x")
 }

@@ -96,6 +96,7 @@ func (h *Handler) Routes(r chi.Router) {
 	h.PortalRoutes(r)
 	h.EmoteHistoryRoutes(r)
 	h.CorpusRoutes(r)
+	h.PublicEmoteMaterializationRoutes(r)
 	r.Route("/v1/analytics", func(r chi.Router) {
 		r.Get("/always-tracked", h.getAlwaysTracked)
 		r.Post("/always-tracked", h.setAlwaysTracked)
@@ -104,10 +105,21 @@ func (h *Handler) Routes(r chi.Router) {
 		} else {
 			r.Post("/channels/{login}/watch", h.watchChannel)
 		}
-		r.Get("/channels/{login}/live", h.channelLive)
 		r.Get("/channels/{login}/streams", h.channelStreams)
 		r.Get("/channels/{login}/streams/ranked", h.channelStreamsRanked)
-		r.Get("/streams/{streamID}", h.streamDetail)
+		if h.pulseHosted.Hosted {
+			r.Group(func(r chi.Router) {
+				r.Use(h.pulseHostedAuthMiddleware)
+				r.Use(h.pulseHostedStreamTimelineAuthMiddleware)
+				r.Get("/channels/{login}/live", h.channelLive)
+				r.Get("/streams/{streamID}", h.streamDetail)
+				r.Get("/streams/{streamID}/replay-heatmap", h.replayHeatmap)
+			})
+		} else {
+			r.Get("/channels/{login}/live", h.channelLive)
+			r.Get("/streams/{streamID}", h.streamDetail)
+			r.Get("/streams/{streamID}/replay-heatmap", h.replayHeatmap)
+		}
 		r.Get("/streams/{streamID}/summary", h.streamSummary)
 		r.Post("/streams/{streamID}/prefetch-tracker", h.prefetchTracker)
 		r.Post("/streams/{streamID}/sync", h.syncStream)
@@ -117,7 +129,6 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/top100/readiness", h.top100Readiness)
 		r.Get("/top-roster/readiness", h.top100Readiness)
 		r.Get("/streams/{streamID}/games", h.getStreamGames)
-		r.Get("/streams/{streamID}/replay-heatmap", h.replayHeatmap)
 		r.Delete("/streams/{streamID}/replay-heatmap/cache", h.invalidateHeatmapCache)
 		r.Get("/vods/{vodId}/storyboard-thumb", h.vodStoryboardThumb)
 		r.Get("/timeseries/status", h.timeseriesStatus)
@@ -192,6 +203,9 @@ func (h *Handler) watchChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) channelLive(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeHostedStreamTimelineAccess(w, r) {
+		return
+	}
 	login, ok := validLogin(chi.URLParam(r, "login"))
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_channel"})
@@ -373,6 +387,9 @@ func (h *Handler) writeMissingStreamDetail(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *Handler) writeStreamDetail(w http.ResponseWriter, r *http.Request, stream *StreamRecord, status int) {
+	if !h.authorizeHostedStreamTimelineAccess(w, r) {
+		return
+	}
 	sparse := r == nil || r.URL.Query().Get("sparse") != "false"
 	rollups, err := h.store.RollupsByStream(r.Context(), stream.StreamID)
 	if err != nil {

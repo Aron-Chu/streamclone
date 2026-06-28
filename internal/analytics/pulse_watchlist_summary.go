@@ -117,6 +117,10 @@ func (h *Handler) getPulseWatchlistSummary(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
+	if h.pulseHosted.Hosted && principal.Kind == "guest" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
 
 	loginHint := strings.TrimSpace(r.URL.Query().Get("login"))
 	if loginHint != "" {

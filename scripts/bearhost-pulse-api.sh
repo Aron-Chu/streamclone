@@ -50,6 +50,17 @@ bearhost_compose --profile scraper stop "${PULSE_STOP[@]}" 2>/dev/null || true
 echo "==> bearhost-pulse-api: ensure Pulse API services"
 bearhost_compose_pulse up -d "${PULSE_KEEP[@]}"
 
+if [[ "${BEARHOST_SKIP_ANALYTICS_DEPLOY_GATE:-}" != "1" ]]; then
+  echo "==> bearhost-pulse-api: predeploy gate (migration 000050 required)"
+  BEARHOST_ANALYTICS_GATE_LOCAL=1 bash "${ROOT}/scripts/bearhost-analytics-predeploy-gate.sh" || {
+    echo "ABORT: analytics recreate blocked — apply migration 000050 first (make migrate)" >&2
+    echo "Break-glass: BEARHOST_SKIP_ANALYTICS_DEPLOY_GATE=1 bash scripts/bearhost-pulse-api.sh" >&2
+    exit 1
+  }
+else
+  echo "WARN: BEARHOST_SKIP_ANALYTICS_DEPLOY_GATE=1 — skipping predeploy gate" >&2
+fi
+
 echo "==> bearhost-pulse-api: recreate analytics (Tier-0 + hosted env)"
 bearhost_compose_pulse up -d --force-recreate --no-deps analytics pulse-caddy
 

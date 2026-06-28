@@ -46,8 +46,16 @@ func (h *Handler) listPulseWatchlist(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
+	if h.pulseHosted.Hosted && principal.Kind == "guest" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
 	if h.pulseHosted.Hosted && !pulsePrincipalCanWriteUserState(principal) {
 		h.requireHostedUserStatePrincipal(w, r)
+		return
+	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
 		return
 	}
 	items, err := h.store.ListPulseWatchlist(r.Context(), principal.ID)

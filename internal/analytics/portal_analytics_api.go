@@ -437,15 +437,7 @@ func (h *Handler) portalStreamMinutes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) authorizeHostedPortalStreamAccess(w http.ResponseWriter, r *http.Request) bool {
-	if h == nil || !h.pulseHosted.Hosted {
-		return true
-	}
-	principal, ok := pulsePrincipalFromContext(r.Context())
-	if !ok || strings.TrimSpace(principal.ID) == "" || principal.Kind == "guest" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return false
-	}
-	return true
+	return h.authorizeHostedStreamTimelineAccess(w, r)
 }
 
 func (h *Handler) portalChannelEmotes(w http.ResponseWriter, r *http.Request) {

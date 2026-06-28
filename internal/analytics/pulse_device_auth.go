@@ -188,6 +188,10 @@ func (h *Handler) extensionAuthDevice(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
+	if h.pulseHosted.Hosted && principal.Kind == "guest" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
 	var req extensionAuthDeviceRequest
 	if r.Body != nil {
 		dec := json.NewDecoder(r.Body)
