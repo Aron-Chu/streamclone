@@ -1,0 +1,56 @@
+Corpus PR 0B canary — streampulse-vps (2026-07-01)
+====================================================
+
+## Operator actions completed
+
+1. Merged PR #31 (gold_vod_segments durable ledger + 0B-2/0B-3) → origin/master @ d8c5d3e
+2. Deployed corpus workers to streampulse-vps with:
+   - GOLD_VOD_SEGMENTS_ENABLED=true
+   - ANALYTICS_VOD_GQL_CONCURRENCY=2 (required for parallel path / ledger writes)
+   - BACKFILL_GOLD_WORKER_COUNT=1 (single worker canary)
+3. Fixed compose env precedence: removed GOLD_VOD_SEGMENTS_ENABLED and
+   ANALYTICS_VOD_GQL_CONCURRENCY* from docker-compose `environment` block so
+   profile-streampulse-vps-corpus.local.env values apply (compose defaults were
+   forcing false/1).
+
+Deploy command (WSL):
+  CANARY_GOLD_VOD_SEGMENTS=1 bash scripts/streampulse-vps-corpus-deploy.sh
+
+## Canary start
+
+- UTC: 2026-07-01T20:19:11Z (analytics-workers recreated with correct env)
+- Host: streampulse-vps (23.173.152.156)
+- BearHost Postgres SoT (read-only MCP)
+
+## Segment ledger (first activity ~20:19–20:21 UTC)
+
+  status   | n
+  ---------+---
+  done     | 17
+  failed   | 1
+  queued   | 1
+
+  vod_id      | min_off | max_off | segments
+  ------------+---------+---------+----------
+  2802832984  | 0       | 9891    | 19
+
+lease_owner cleared on done rows (expected after completion).
+
+## Public API boundary
+
+/v1/public/hub — aggregate corpusPipeline only; no gold_vod_segments / lease keys.
+
+## 24h soak gate (IN PROGRESS)
+
+Started: 2026-07-01T20:19:11Z
+Ends (target): 2026-07-02T20:19:11Z
+
+Monitor (read-only):
+  SELECT status, count(*) FROM gold_vod_segments GROUP BY 1;
+  SELECT tier, status, count(*) FROM backfill_jobs WHERE tier LIKE 'gold%' GROUP BY 1,2;
+
+Rollback:
+  Set GOLD_VOD_SEGMENTS_ENABLED=false in profile-streampulse-vps-corpus.local.env
+  docker compose -f deploy/docker-compose.streampulse-vps-corpus.yml up -d --force-recreate analytics-workers
+
+Do NOT widen to second worker or GQL concurrency >2 until soak checklist §9 passes.
