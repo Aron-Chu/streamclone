@@ -56,12 +56,18 @@ func TestSyncServiceGoldVODSegmentsBlockCompletionDisabled(t *testing.T) {
 	}
 }
 
-func TestBackfillWorkerApplyGoldSegmentCompletionGateSkipsWhenSyncFailed(t *testing.T) {
-	w := &BackfillWorker{sync: &SyncService{goldVODSegmentsEnabled: true, store: &Store{}}}
-	syncErr := errors.New("sync failed")
-	got := w.applyGoldSegmentCompletionGate(t.Context(), &BackfillJob{Tier: "gold", ID: 1}, "stream-1", syncErr)
-	if got != syncErr {
-		t.Fatalf("got %v, want original sync err", got)
+func TestSyncServiceGoldVODSegmentsBlockCompletionZeroRows(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	applyGoldVODSegmentMigration(t, ctx, store)
+
+	svc := &SyncService{goldVODSegmentsEnabled: true, store: store}
+	err := svc.goldVODSegmentsBlockCompletion(ctx, 4242, "stream-zero")
+	if err == nil {
+		t.Fatal("expected zero-row ledger error")
+	}
+	want := "gold vod segments ledger empty for job 4242"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want substring %q", err.Error(), want)
 	}
 }
 
@@ -70,6 +76,29 @@ func TestBackfillWorkerApplyGoldSegmentCompletionGateSkipsGoldLite(t *testing.T)
 	got := w.applyGoldSegmentCompletionGate(t.Context(), &BackfillJob{Tier: "gold_lite", ID: 1}, "stream-1", nil)
 	if got != nil {
 		t.Fatalf("gold_lite should skip gate: %v", got)
+	}
+}
+
+func TestBackfillWorkerApplyGoldSegmentCompletionGateZeroRowsGold(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	applyGoldVODSegmentMigration(t, ctx, store)
+
+	w := &BackfillWorker{sync: &SyncService{goldVODSegmentsEnabled: true, store: store}}
+	got := w.applyGoldSegmentCompletionGate(ctx, &BackfillJob{Tier: "gold", ID: 5150}, "stream-1", nil)
+	if got == nil {
+		t.Fatal("expected zero-row ledger error for gold tier")
+	}
+	if !strings.Contains(got.Error(), "gold vod segments ledger empty for job 5150") {
+		t.Fatalf("unexpected error: %v", got)
+	}
+}
+
+func TestBackfillWorkerApplyGoldSegmentCompletionGateSkipsWhenSyncFailed(t *testing.T) {
+	w := &BackfillWorker{sync: &SyncService{goldVODSegmentsEnabled: true, store: &Store{}}}
+	syncErr := errors.New("sync failed")
+	got := w.applyGoldSegmentCompletionGate(t.Context(), &BackfillJob{Tier: "gold", ID: 1}, "stream-1", syncErr)
+	if got != syncErr {
+		t.Fatalf("got %v, want original sync err", got)
 	}
 }
 

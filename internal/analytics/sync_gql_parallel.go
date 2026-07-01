@@ -1062,6 +1062,9 @@ func (s *SyncService) gqlScheduleHintsForStream(ctx context.Context, streamID st
 }
 
 func (s *SyncService) fetchVODComments(ctx context.Context, streamID, login, videoID string, commentsMap map[int][]string, vodDurationSec, chatAlignSec int, rollupStartFn func() time.Time, chatCache *chatRollupCache, scheduleHints gqlFetchScheduleHints) error {
+	if s != nil && s.goldVODSegmentsEnabled && s.vodGQLConcurrency <= 1 {
+		return fmt.Errorf("gold vod segments enabled requires VOD GQL concurrency > 1")
+	}
 	estimatedComments := s.estimatedStreamComments(ctx, streamID)
 	fetchMode := "serial"
 	concurrency := 1
@@ -1937,7 +1940,14 @@ func (s *SyncService) fetchGQLSegment(
 				OffsetSec: splitAt,
 			}
 			if state.goldLedger != nil {
-				state.goldLedger.onHotSplit(beforeSplit, splitAt, tail)
+				if err := state.goldLedger.onHotSplit(beforeSplit, splitAt, tail); err != nil {
+					s.log.Warn("gold vod hot-split parent retirement failed",
+						"stream_id", state.streamID,
+						"vod_id", videoID,
+						"segment_key", state.goldLedger.segmentKey(beforeSplit),
+						"err", err,
+					)
+				}
 			}
 			seg.EndSec = splitAt - 1
 			if state.goldLedger != nil {
