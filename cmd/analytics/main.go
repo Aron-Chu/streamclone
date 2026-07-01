@@ -302,6 +302,13 @@ func main() {
 	}
 	goldIVR := analytics.NewGoldIVRService(ivrCfg, store, nil, logger)
 	syncService = syncService.WithGoldIVR(goldIVR)
+	syncService = syncService.WithGoldVODSegments(
+		cfg.GoldVODSegmentsEnabled,
+		cfg.GoldMaxSegmentsPerVOD,
+		cfg.GoldRetryMax,
+		cfg.GoldLeaseTTLSeconds,
+		"",
+	)
 	analytics.LogGoldIVREffectiveConfig(logger, ivrCfg, cfg.GoldIVREnabledChannelAllowlist)
 
 	startArchiveWorkers(ctx, cfg, pool, syncService, archiveSyncExporter, archiveWriter, logger)

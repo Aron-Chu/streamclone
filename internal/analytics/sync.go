@@ -90,6 +90,12 @@ type SyncService struct {
 	archiveTTExporter    ArchiveTTExporter
 	silverRawTTChartJSON bool
 	goldIVR              *GoldIVRService
+
+	goldVODSegmentsEnabled bool
+	goldMaxSegmentsPerVOD  int
+	goldRetryMax           int
+	goldLeaseTTL           time.Duration
+	goldVODSegmentOwner    string
 }
 
 var errTrackerAccessProtected = errors.New("tracker access protected")
@@ -308,6 +314,28 @@ func (s *SyncService) WithGoldIVR(svc *GoldIVRService) *SyncService {
 	if s != nil {
 		s.goldIVR = svc
 	}
+	return s
+}
+
+// WithGoldVODSegments enables durable gold_vod_segments ledger writes during parallel VOD GQL fetch.
+func (s *SyncService) WithGoldVODSegments(enabled bool, maxSegmentsPerVOD, retryMax, leaseTTLSeconds int, owner string) *SyncService {
+	if s == nil {
+		return s
+	}
+	s.goldVODSegmentsEnabled = enabled
+	if maxSegmentsPerVOD <= 0 {
+		maxSegmentsPerVOD = 4
+	}
+	s.goldMaxSegmentsPerVOD = maxSegmentsPerVOD
+	if retryMax <= 0 {
+		retryMax = 3
+	}
+	s.goldRetryMax = retryMax
+	if leaseTTLSeconds <= 0 {
+		leaseTTLSeconds = 120
+	}
+	s.goldLeaseTTL = time.Duration(leaseTTLSeconds) * time.Second
+	s.goldVODSegmentOwner = strings.TrimSpace(owner)
 	return s
 }
 

@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -539,6 +540,22 @@ type vodCommentsFetchState struct {
 	pendingRollupMu     sync.Mutex
 	pendingRollupSegs   []gqlSegmentProgress
 	lastPendingRollupAt time.Time
+
+	goldLedger *goldVODFetchLedger
+}
+
+func stateSnapshotSegments(segments []*gqlSegmentProgress) []gqlSegmentProgress {
+	if len(segments) == 0 {
+		return nil
+	}
+	out := make([]gqlSegmentProgress, 0, len(segments))
+	for _, seg := range segments {
+		if seg == nil {
+			continue
+		}
+		out = append(out, *seg)
+	}
+	return out
 }
 
 func gqlSegmentPointers(segs []gqlSegmentProgress) []*gqlSegmentProgress {
@@ -796,6 +813,9 @@ func (st *vodCommentsFetchState) finishSegment(seg *gqlSegmentProgress, offset i
 	seg.OffsetSec = offset
 	if !wasDone {
 		metrics.AnalyticsVODGQLSegments.WithLabelValues("completed").Inc()
+	}
+	if st.goldLedger != nil && !wasDone {
+		st.goldLedger.completeSegment(*seg, 0)
 	}
 	if st.commentsMap != nil || st.onSegmentDone != nil {
 		st.commentsMapMu.Lock()
@@ -1389,6 +1409,17 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 		}
 	}
 
+	goldLedger := s.goldVODFetchLedger(ctx, streamID, login, videoID)
+	if goldLedger != nil {
+		if err := goldLedger.upsertPlansForSegments(stateSnapshotSegments(segments)); err != nil {
+			s.log.Warn("gold vod segment plan upsert failed",
+				"stream_id", streamID,
+				"video_id", videoID,
+				"err", err,
+			)
+		}
+	}
+
 	coord := newGQLRateCoordinator(s.vodGQLConcurrencyMin, s.vodGQLConcurrencyMax, s.vodGQLConcurrency)
 	var gqlPageCount atomic.Int64
 	requestStats := &gqlRequestStats{}
@@ -1455,6 +1486,7 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 		sanitizeCfg:         s.chatReplayCfg,
 		enricher:            s.enricher,
 		replayEnabled:       s.chatReplayEnabled,
+		goldLedger:          goldLedger,
 	}
 	if s.vodGQLIncrementalDB || s.chatReplayEnabled {
 		onSegmentDone = func(seg gqlSegmentProgress) {
@@ -1718,6 +1750,21 @@ func (s *SyncService) runGQLSegmentWorkerPass(
 				}
 				workerLabel := fmt.Sprintf("%d", workerID)
 				if err := s.fetchGQLSegment(ctx, videoID, seg, state, coord, integrityFails, pages, workerLabel); err != nil {
+					if errors.Is(err, errGoldSegmentRetryLater) {
+						state.workQueue.push(segIdx, segmentSchedulePriority(*seg, state.scheduleHints))
+						select {
+						case <-ctx.Done():
+							state.workQueue.release()
+							return
+						case <-time.After(200 * time.Millisecond):
+						}
+						state.workQueue.release()
+						continue
+					}
+					if errors.Is(err, errGoldSegmentSkip) {
+						state.workQueue.release()
+						continue
+					}
 					s.log.Warn("segment fetch failed",
 						"stream_id", streamID,
 						"segment", segIdx,
@@ -1747,6 +1794,20 @@ func (s *SyncService) fetchGQLSegment(
 	if offset < seg.StartSec {
 		offset = seg.StartSec
 	}
+	if state.goldLedger != nil {
+		if err := state.goldLedger.beginSegment(seg); err != nil {
+			if errors.Is(err, errGoldSegmentSkip) {
+				return errGoldSegmentSkip
+			}
+			return err
+		}
+	}
+	var fetchErr error
+	defer func() {
+		if fetchErr != nil && state.goldLedger != nil {
+			state.goldLedger.failSegment(*seg, fetchErr)
+		}
+	}()
 	useCursor := false
 	cursorFailed := false
 	nextCursor := ""
@@ -1759,7 +1820,8 @@ func (s *SyncService) fetchGQLSegment(
 			return nil
 		}
 		if integrityFails.Load() >= vodCommentsParallelMaxFail {
-			return fmt.Errorf("integrity threshold reached")
+			fetchErr = fmt.Errorf("integrity threshold reached")
+			return fetchErr
 		}
 		if offset > seg.EndSec {
 			state.finishSegment(seg, offset)
@@ -1767,7 +1829,8 @@ func (s *SyncService) fetchGQLSegment(
 		}
 
 		if err := coord.Wait(ctx); err != nil {
-			return err
+			fetchErr = err
+			return fetchErr
 		}
 
 		pageStartOffset := offset
@@ -1780,7 +1843,8 @@ func (s *SyncService) fetchGQLSegment(
 		if err != nil {
 			seg.OffsetSec = offset
 			state.saveParallel(true)
-			return err
+			fetchErr = err
+			return fetchErr
 		}
 		if isGQLIntegrityError(gqlResp) {
 			if useCursor {
@@ -1796,12 +1860,14 @@ func (s *SyncService) fetchGQLSegment(
 			integrityFails.Add(1)
 			seg.OffsetSec = offset
 			state.saveParallel(true)
-			return fmt.Errorf("gql video comments integrity error")
+			fetchErr = fmt.Errorf("gql video comments integrity error")
+			return fetchErr
 		}
 		if len(gqlResp.Errors) > 0 {
 			seg.OffsetSec = offset
 			state.saveParallel(true)
-			return fmt.Errorf("gql video comments error: %s", gqlResp.Errors[0].Message)
+			fetchErr = fmt.Errorf("gql video comments error: %s", gqlResp.Errors[0].Message)
+			return fetchErr
 		}
 		if gqlResp.Data.Video == nil || gqlResp.Data.Video.Comments == nil {
 			state.finishSegment(seg, offset)
@@ -1854,12 +1920,27 @@ func (s *SyncService) fetchGQLSegment(
 		)
 		if reason != "" && lastOffset < seg.EndSec-60 {
 			splitAt := lastOffset + 1
+			beforeSplit := *seg
 			tail := gqlSegmentProgress{
 				StartSec:  splitAt,
-				EndSec:    seg.EndSec,
+				EndSec:    beforeSplit.EndSec,
 				OffsetSec: splitAt,
 			}
+			if state.goldLedger != nil {
+				state.goldLedger.onHotSplit(beforeSplit, splitAt, tail)
+			}
 			seg.EndSec = splitAt - 1
+			if state.goldLedger != nil {
+				if err := state.goldLedger.beginSegment(seg); err != nil && !errors.Is(err, errGoldSegmentSkip) {
+					s.log.Warn("gold segment hot-split claim failed",
+						"stream_id", state.streamID,
+						"vod_id", videoID,
+						"start_sec", seg.StartSec,
+						"end_sec", seg.EndSec,
+						"err", err,
+					)
+				}
+			}
 			state.recordHotSplit(reason)
 			metrics.AnalyticsVODGQLHotSplitsTotal.WithLabelValues(reason).Inc()
 			tailIdx := state.appendSegment(tail)

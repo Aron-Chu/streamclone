@@ -230,6 +230,7 @@ type Config struct {
 	GoldSegmentSizeSeconds              int           `env:"GOLD_SEGMENT_SIZE_SECONDS" envDefault:"600"`
 	GoldRetryMax                        int           `env:"GOLD_RETRY_MAX" envDefault:"3"`
 	GoldLeaseTTLSeconds                 int           `env:"GOLD_LEASE_TTL_SECONDS" envDefault:"120"`
+	GoldVODSegmentsEnabled              bool          `env:"GOLD_VOD_SEGMENTS_ENABLED" envDefault:"false"`
 
 	PulseTop500AdmissionEnabled  bool          `env:"PULSE_TOP500_ADMISSION_ENABLED" envDefault:"false"`
 	PulseTop500AdmissionTopN     int           `env:"PULSE_TOP500_ADMISSION_TOP_N" envDefault:"100"`

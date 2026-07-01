@@ -284,6 +284,7 @@ func (w *BackfillWorker) runOnce(ctx context.Context) (processed bool, err error
 			syncCtx, cancel = context.WithTimeout(ctx, w.goldSyncTimeout)
 			defer cancel()
 		}
+		syncCtx = WithGoldBackfillJobID(syncCtx, job.ID)
 		_, syncErr := w.sync.SyncHistoricalStream(syncCtx, jobStreamID, job.Login, viewersOnly, forceChat, "")
 		if syncErr == nil && ivrResult.ShadowOnly && w.sync != nil {
 			if _, recErr := w.sync.ReconcileGoldIVRShadowAfterGQL(ctx, jobStreamID, job.Login, ivrResult); recErr != nil {
