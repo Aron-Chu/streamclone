@@ -69,6 +69,10 @@ docs/images/channel-frames/
 docs/images/qa/
 deploy/tmp-*
 deploy/env/oauth-bundle.env
+# Local proxy/scraper credentials (never commit)
+scraper.env
+# Machine-specific deploy overlays (templates stay tracked under deploy/env/)
+deploy/env/*.local.env
 deploy/env/release-bundle.env
 deploy/env/helm-local.yaml
 # helm-local.example.yaml and charts/pulse/ are tracked; helm-local.yaml stays private
