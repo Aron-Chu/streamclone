@@ -24,6 +24,36 @@
 	}
 	respond @admin_blocked 404
 
+	@pulse_api_blocked {
+		path \
+			/v1/analytics/streams/*/chat-replay \
+			/v1/analytics/streams/*/chat-replay/* \
+			/v1/analytics/streams/*/chat-messages \
+			/v1/analytics/streams/*/chat-messages/* \
+			/v1/analytics/channels/*/chat-logs \
+			/v1/analytics/channels/*/chat-logs/* \
+			/v1/analytics/chat/ingest \
+			/v1/analytics/chat/ingest/* \
+			/v1/analytics/tracking/snapshot \
+			/v1/analytics/top100/readiness \
+			/v1/analytics/top-roster/readiness \
+			/v1/corpus/readiness \
+			/v1/corpus/readiness/* \
+			/v1/internal/corpus/readiness \
+			/v1/internal/corpus/readiness/* \
+			/v1/internal/emote-history/readiness \
+			/metrics \
+			/metrics/* \
+			/v1/analytics/streams/*/sync \
+			/v1/analytics/streams/*/sync/* \
+			/v1/analytics/streams/*/sync/status \
+			/v1/analytics/streams/*/sync/status/* \
+			/v1/analytics/streams/*/prefetch-tracker \
+			/v1/analytics/streams/*/prefetch-tracker/* \
+			/v1/analytics/sync/active
+	}
+	respond @pulse_api_blocked 404
+
 	@analytics {
 		path_regexp analytics ^/v1/(analytics|extension|pulse|public|portal)(/|$)
 	}
@@ -40,7 +70,7 @@
 	reverse_proxy @metadata metadata:8080
 
 	@health {
-		path /healthz /readyz /metrics
+		path /healthz /readyz
 	}
 	reverse_proxy @health analytics:8080
 
