@@ -3,6 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/lib/deploy-rsync.sh
+source "${ROOT}/scripts/lib/deploy-rsync.sh"
 BEARHOST="${BEARHOST:-141.11.243.103}"
 WORKER="${WORKER:-23.173.152.156}"
 BEARHOST_KEY="${BEARHOST_KEY:-${HOME}/.ssh/id_ed25519_bearhost_streamclone}"
@@ -33,20 +35,15 @@ if [[ "${SKIP_QUEUE_SNAPSHOT}" != "1" ]]; then
 fi
 
 echo "==> streampulse-vps: rsync local repo"
+require_clean_deploy_tree "${ROOT}"
+deploy_rsync_excludes
 ssh_worker "apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io rsync; mkdir -p ${WORKER_APP}"
-rsync -avz \
-  --exclude .git \
-  --exclude node_modules \
-  --exclude frontend/node_modules \
-  --exclude .env \
-  --exclude .env.local \
-  --exclude runtime \
-  --exclude pg-data \
-  --exclude .codegraph \
+rsync -avz --delete "${RSYNC_EXCLUDES[@]}" \
   --exclude .uv-python \
   --exclude dist \
   -e "ssh -i ${WORKER_KEY} -o BatchMode=yes" \
   "${ROOT}/" "root@${WORKER}:${WORKER_APP}/"
+record_deployed_sha "${ROOT}" "${WORKER_APP}" "root@${WORKER}" "${WORKER_KEY}"
 
 SCRAPER_ROOT="${SCRAPER_ROOT:-$(cd "${ROOT}/../streamclone-scraper" 2>/dev/null && pwd || true)}"
 if [[ -z "${SCRAPER_ROOT}" || ! -d "${SCRAPER_ROOT}" ]]; then
