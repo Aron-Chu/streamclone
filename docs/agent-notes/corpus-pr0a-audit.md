@@ -14,7 +14,7 @@
 | Migration `000049_gold_vod_segments` present locally? | **Yes** (restored from `origin/master` in PR 0B-1) |
 | `GOLD_PER_VOD_GQL_RPM` wired into GQL throttle? | **No** — config parsed only; production uses `ANALYTICS_VOD_GQL_*` + in-process `gqlRateCoordinator` |
 | `gold_vod_rate_limits` | **Dead reference** — no migration/table/tests/writes; **recommend remove SELECT in PR 0B** |
-| `gold_vod_segments` store wired to production? | **Yes when `GOLD_VOD_SEGMENTS_ENABLED=true`** (PR 0B-2 implemented locally; pending commit) |
+| `gold_vod_segments` store wired to production? | **Yes when `GOLD_VOD_SEGMENTS_ENABLED=true`** (PR 0B-2, commit `2bb6662` + audit fixes) |
 | Public API changes needed for PR 0B? | **No** for sensitivity; segment ledger is internal-only |
 
 ---
@@ -266,8 +266,7 @@ Complete **before opening PR 0B** (Gate 0 + 0B prerequisites):
 
 ### PR 0B-2 — production wiring
 
-- [x] Implemented locally: `GOLD_VOD_SEGMENTS_ENABLED` (default `false`), ledger hooks in `fetchVODCommentsParallel`
-- [ ] Committed / deployed
+- [x] Committed (`2bb6662` + audit fixes): complete after flush; `comments_fetched` from shard; skip checkpoint-done upserts
 - [ ] Hosted canary per `docs/agent-notes/corpus-0b2-hosted-verify.md`
 
 ### PR 0B-2 split (original checklist)

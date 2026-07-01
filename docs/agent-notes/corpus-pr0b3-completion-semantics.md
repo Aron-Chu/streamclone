@@ -29,7 +29,7 @@ BackfillWorker.runOnce (gold tiers)
 |-------|------------|------------|
 | Parallel fetch start | `UpsertGoldVODSegmentPlans` | `queued` rows per window |
 | Worker picks segment | `ClaimGoldVODSegmentByKey` | `running` + lease |
-| Segment success | `CompleteGoldVODSegment` | `done` |
+| Segment success | `CompleteGoldVODSegment` | `done` (after rollup/replay flush; `comments_fetched` from shard) |
 | Segment error | `FailGoldVODSegment` | `failed` or `dead_letter` |
 | Hot split | `FailGoldVODSegment` (old key) + upsert child windows | Parent rescheduled; tail `queued` |
 

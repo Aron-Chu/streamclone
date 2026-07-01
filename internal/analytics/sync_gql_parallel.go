@@ -541,7 +541,8 @@ type vodCommentsFetchState struct {
 	pendingRollupSegs   []gqlSegmentProgress
 	lastPendingRollupAt time.Time
 
-	goldLedger *goldVODFetchLedger
+	goldLedger     *goldVODFetchLedger
+	goldForceFlush func(gqlSegmentProgress)
 }
 
 func stateSnapshotSegments(segments []*gqlSegmentProgress) []gqlSegmentProgress {
@@ -814,15 +815,13 @@ func (st *vodCommentsFetchState) finishSegment(seg *gqlSegmentProgress, offset i
 	if !wasDone {
 		metrics.AnalyticsVODGQLSegments.WithLabelValues("completed").Inc()
 	}
-	if st.goldLedger != nil && !wasDone {
-		st.goldLedger.completeSegment(*seg, 0)
-	}
+	startMinute, endMinute := segmentAlignedMinuteBounds(*seg, st.chatAlignSec)
+	segmentComments := st.shardedComments.countMinuteRange(startMinute, endMinute)
 	if st.commentsMap != nil || st.onSegmentDone != nil {
 		st.commentsMapMu.Lock()
 		defer st.commentsMapMu.Unlock()
 	}
 	if st.commentsMap != nil {
-		startMinute, endMinute := segmentAlignedMinuteBounds(*seg, st.chatAlignSec)
 		st.shardedComments.extractMinuteRangeInto(st.commentsMap, startMinute, endMinute)
 	}
 	if st.onSegmentDone != nil {
@@ -830,6 +829,12 @@ func (st *vodCommentsFetchState) finishSegment(seg *gqlSegmentProgress, offset i
 	}
 	if st.saveParallel != nil {
 		st.saveParallel(true)
+	}
+	if st.goldLedger != nil && !wasDone {
+		if st.goldForceFlush != nil {
+			st.goldForceFlush(*seg)
+		}
+		st.goldLedger.completeSegment(*seg, segmentComments)
 	}
 }
 
@@ -1488,6 +1493,11 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 		replayEnabled:       s.chatReplayEnabled,
 		goldLedger:          goldLedger,
 	}
+	if goldLedger != nil && s.vodGQLIncrementalDB {
+		state.goldForceFlush = func(_ gqlSegmentProgress) {
+			s.flushPendingRollupSegments(ctx, state, true)
+		}
+	}
 	if s.vodGQLIncrementalDB || s.chatReplayEnabled {
 		onSegmentDone = func(seg gqlSegmentProgress) {
 			if s.chatReplayEnabled && s.chatReplaySink != nil {
@@ -1756,7 +1766,7 @@ func (s *SyncService) runGQLSegmentWorkerPass(
 						case <-ctx.Done():
 							state.workQueue.release()
 							return
-						case <-time.After(200 * time.Millisecond):
+						case <-time.After(2 * time.Second):
 						}
 						state.workQueue.release()
 						continue
