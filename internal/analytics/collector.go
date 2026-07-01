@@ -473,6 +473,27 @@ func (c *Collector) TrackedStreamID(login string) string {
 	return ""
 }
 
+// ForceUntrack stops IRC collection for login immediately (lease release / collector handoff).
+func (c *Collector) ForceUntrack(login string) {
+	if c == nil {
+		return
+	}
+	login = normalizeLogin(login)
+	if login == "" {
+		return
+	}
+	var part bool
+	c.mu.Lock()
+	if _, ok := c.tracked[login]; ok {
+		delete(c.tracked, login)
+		part = true
+	}
+	c.mu.Unlock()
+	if part && c.irc != nil {
+		c.irc.Part(context.Background(), login)
+	}
+}
+
 func (c *Collector) evictIdleChannels(now time.Time) {
 	var evict []string
 	c.mu.Lock()
