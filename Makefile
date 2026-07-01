@@ -24,6 +24,8 @@ PORTS ?= 8090
 CODEGRAPH_VENV ?= .codegraph/.venv
 CODEGRAPH_PY ?= $(CODEGRAPH_VENV)/bin/python
 CODEGRAPH_DB ?= .codegraph/streamclone.kuzu
+CODEGRAPH_PULSE_REPO ?= ../streamclone-pulse
+CODEGRAPH_PULSE_DB ?= $(CODEGRAPH_PULSE_REPO)/.codegraph/streamclone-pulse.kuzu
 
 ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 
@@ -35,12 +37,12 @@ ENV_RELOAD_SERVICES ?= chat metadata analytics emote storygraph frontend
 	helm-pulse-wire helm-pulse-check helm-pulse helm-pulse-sync-token helm-pulse-watch \
 	pulse pulse-on pulse-off pulse-check pulse-down pulse-watch \
 	test vet build tidy integration-up integration-down integration-test \
-	test-video test-analytics test-emote test-storygraph test-metadata \
+	test-video test-analytics test-analytics-gold-segments test-emote test-storygraph test-metadata \
 	test-pulse-emote rebuild-analytics-emote restart-analytics \
 	smoke-pulse-emote pulse-emote-pick-stream smoke-pulse-emote-gold smoke-pulse-emote-gold-fail \
 	go-test-docker go-vet-docker go-build-docker \
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
-	clipper-test clipper-restart codegraph-install codegraph codegraph-full codegraph-smoke codegraph-incremental codegraph-mcp mcp-setup codex-setup codex-sync-skills \
+	clipper-test clipper-restart codegraph-install codegraph codegraph-full codegraph-smoke codegraph-incremental codegraph-mcp codegraph-pulse mcp-setup codex-setup codex-sync-skills \
 	context-snapshots context-verify \
 	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
 	frontend-restart frontend-refresh frontend-logs compose-config-check azure-scraper-config-check azure-archive-plane-config-check bearhost-config-check bearhost-config-check-local bearhost-config-check-release bearhost-rsync bearhost bearhost-help bearhost-bronze-status bearhost-corpus-only grafana grafana-up grafana-stop grafana-setup grafana-sync grafana-watch grafana-archive-status grafana-watch-install grafana-watch-install-cron grafana-watch-uninstall grafana-watch-uninstall-cron bearhost-grafana bearhost-grafana-up bearhost-grafana-stop bearhost-grafana-setup bearhost-grafana-tunnel bearhost-grafana-tunnel-start bearhost-grafana-tunnel-stop bearhost-grafana-sync bearhost-observability-enable bearhost-observability-status bearhost-observability-up bearhost-observability-down local-vps-only check check-quick \
@@ -76,7 +78,7 @@ help:
 	@printf 'Quality: make check-quick | make check | test | vet | build | clipper-test | smoke | agent-smoke\n'
 	@printf 'Pulse emote (A+ path): make rebuild-analytics-emote | test-pulse-emote | smoke-pulse-emote\n'
 	@printf '  make pulse-emote-pick-stream | smoke-pulse-emote-gold LOGIN=... STREAM_ID=...\n'
-	@printf 'Agent MCP: make mcp-setup | make codex-setup | codegraph | bash scripts/mcp-preflight.sh\n'
+	@printf 'Agent MCP: make mcp-setup | make mcp-verify | make codex-setup | codegraph | bash scripts/mcp-preflight.sh\n'
 	@printf '          make test-video | test-analytics | test-emote | test-storygraph | test-metadata\n'
 	@printf '          make frontend-test | frontend-audit | compose-config-check\n'
 	@printf '          make frontend-refresh  Build + migrate + restart frontend/chat/analytics\n'
@@ -303,6 +305,9 @@ test-video:
 test-analytics:
 	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/analytics/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/analytics/...
 
+test-analytics-gold-segments: integration-up
+	INTEGRATION=1 $(GO) test ./internal/analytics/... -run 'GoldVODSegmentStore|GoldVODSegmentKey|PlanGoldVOD' -count=1 -timeout 120s
+
 test-pulse-emote:
 	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/analytics/... -run 'TestRequireReadyForGold|TestCollectorStartKicks|TestWatchReturns|TestLiveEmote|TestEmoteSync' -count=1 || \
 		docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/analytics/... -run 'TestRequireReadyForGold|TestCollectorStartKicks|TestWatchReturns|TestLiveEmote|TestEmoteSync' -count=1
@@ -389,10 +394,20 @@ codegraph-incremental:
 codegraph-mcp:
 	PYTHONPATH=. $(CODEGRAPH_PY) tools/codegraph/codegraph_mcp.py --repo "$(CURDIR)" --db "$(CURDIR)/$(CODEGRAPH_DB)"
 
+codegraph-pulse:
+	@test -x $(CODEGRAPH_PY) || $(MAKE) codegraph-install
+	@test -d "$(CODEGRAPH_PULSE_REPO)" || (echo "streamclone-pulse not found at $(CODEGRAPH_PULSE_REPO)" && exit 1)
+	@mkdir -p "$(dir $(CODEGRAPH_PULSE_DB))"
+	PYTHONPATH=. $(CODEGRAPH_PY) tools/codegraph/codegraph_ingest.py --repo "$(CODEGRAPH_PULSE_REPO)" --db "$(CODEGRAPH_PULSE_DB)"
+
 mcp-setup: codegraph-install codegraph
 	@bash scripts/mcp-preflight.sh
 	@printf '\nNext: copy .cursor/mcp.recommended.json.example → .cursor/mcp.json (gitignored)\n'
 	@printf 'Codex: make codex-setup — see docs/CODEX.md\n'
+
+mcp-verify:
+	@bash scripts/mcp-preflight.sh
+	@printf '\nMCP preflight OK (no codegraph rebuild). Stale graph: make codegraph | full stack: make mcp-setup\n'
 
 context-snapshots:
 	@bash scripts/context/all.sh
@@ -448,6 +463,9 @@ frontend-build:
 
 frontend-test:
 	cd frontend && npm test
+
+packages-pulse-core-test:
+	cd packages/pulse-core && npm test
 
 frontend-audit:
 	cd frontend && npm audit --audit-level=high
@@ -649,7 +667,7 @@ bearhost-cron-install:
 archive-restore-drill:
 	@bash scripts/archive-restore-drill.sh
 
-check-quick: test vet frontend-test compose-config-check
+check-quick: test vet frontend-test packages-pulse-core-test compose-config-check
 
 check: security-scan frontend-build frontend-audit frontend-test clipper-test test vet build compose-config-check
 

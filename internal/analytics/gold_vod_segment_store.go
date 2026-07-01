@@ -171,6 +171,121 @@ func (s *Store) ClaimGoldVODSegment(ctx context.Context, owner string, leaseTTL 
 	return &claim, nil
 }
 
+func (s *Store) GoldVODSegmentStatusByKey(ctx context.Context, segmentKey string) (status string, found bool, err error) {
+	if s == nil || s.db == nil {
+		return "", false, nil
+	}
+	segmentKey = strings.TrimSpace(segmentKey)
+	if segmentKey == "" {
+		return "", false, nil
+	}
+	err = s.db.QueryRow(ctx, `
+		SELECT status
+		FROM gold_vod_segments
+		WHERE segment_key = $1`, segmentKey).Scan(&status)
+	if err == pgx.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return strings.TrimSpace(status), true, nil
+}
+
+func (s *Store) ClaimGoldVODSegmentByKey(ctx context.Context, segmentKey, owner string, leaseTTL time.Duration, maxSegmentsPerVOD int) (*GoldVODSegmentClaim, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	segmentKey = strings.TrimSpace(segmentKey)
+	owner = strings.TrimSpace(owner)
+	if segmentKey == "" || owner == "" {
+		return nil, nil
+	}
+	leaseSeconds := durationSeconds(leaseTTL, 120)
+	if maxSegmentsPerVOD <= 0 {
+		maxSegmentsPerVOD = 1
+	}
+	var claim GoldVODSegmentClaim
+	var backfillJobID int64
+	var hasBackfillJobID bool
+	var heartbeatAt time.Time
+	var hasHeartbeatAt bool
+	err := s.db.QueryRow(ctx, `
+		WITH target AS (
+			SELECT id, vod_id
+			FROM gold_vod_segments
+			WHERE segment_key = $1
+		),
+		running_count AS (
+			SELECT COUNT(*)::int AS n
+			FROM gold_vod_segments active
+			JOIN target ON active.vod_id = target.vod_id
+			WHERE active.status = 'running'
+			  AND COALESCE(active.lease_expires_at, '-infinity'::timestamptz) > now()
+			  AND active.segment_key <> $1
+		)
+		UPDATE gold_vod_segments s
+		SET status = 'running',
+		    attempt = s.attempt + 1,
+		    lease_owner = $2,
+		    lease_expires_at = now() + make_interval(secs => $3),
+		    heartbeat_at = now(),
+		    error = '',
+		    updated_at = now()
+		FROM target, running_count rc
+		WHERE s.id = target.id
+		  AND (
+		    s.status IN ('queued','failed')
+		    OR (s.status = 'running' AND COALESCE(s.lease_expires_at, '-infinity'::timestamptz) <= now())
+		  )
+		  AND s.attempt < s.max_attempts
+		  AND rc.n < $4
+		RETURNING s.id, s.segment_key, s.vod_id, s.stream_id, s.login,
+		          COALESCE(s.backfill_job_id, 0), s.backfill_job_id IS NOT NULL,
+		          s.strategy_version, s.start_offset_seconds, s.end_offset_seconds,
+		          s.attempt, s.lease_owner, s.lease_expires_at, s.cursor,
+		          s.comments_fetched, s.status, s.max_attempts, s.error,
+		          s.created_at, s.updated_at, COALESCE(s.heartbeat_at, 'epoch'::timestamptz), s.heartbeat_at IS NOT NULL`,
+		segmentKey, owner, leaseSeconds, maxSegmentsPerVOD,
+	).Scan(
+		&claim.ID,
+		&claim.SegmentKey,
+		&claim.VODID,
+		&claim.StreamID,
+		&claim.Login,
+		&backfillJobID,
+		&hasBackfillJobID,
+		&claim.StrategyVersion,
+		&claim.StartOffsetSeconds,
+		&claim.EndOffsetSeconds,
+		&claim.Attempt,
+		&claim.LeaseOwner,
+		&claim.LeaseExpiresAt,
+		&claim.Cursor,
+		&claim.CommentsFetched,
+		&claim.Status,
+		&claim.MaxAttempts,
+		&claim.Error,
+		&claim.CreatedAt,
+		&claim.UpdatedAt,
+		&heartbeatAt,
+		&hasHeartbeatAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if hasBackfillJobID {
+		claim.BackfillJobID = &backfillJobID
+	}
+	if hasHeartbeatAt {
+		claim.HeartbeatAt = &heartbeatAt
+	}
+	return &claim, nil
+}
+
 func (s *Store) HeartbeatGoldVODSegment(ctx context.Context, id int64, owner string, leaseTTL time.Duration) (bool, error) {
 	if s == nil || s.db == nil || id <= 0 {
 		return false, nil
@@ -286,10 +401,18 @@ func (s *Store) CorpusGoldSegmentSummary(ctx context.Context) (CorpusGoldSegment
 	if err := rows.Err(); err != nil {
 		return out, err
 	}
-	_ = s.db.QueryRow(ctx, `
+	// Rate-limit readiness uses recent segment failures (PR 0A: gold_vod_rate_limits table was never migrated).
+	if err := s.db.QueryRow(ctx, `
 		SELECT COUNT(*)::int
-		FROM gold_vod_rate_limits
-		WHERE last_limited_at IS NOT NULL
-		  AND reset_at > now()`).Scan(&out.RateLimitedBuckets)
+		FROM gold_vod_segments
+		WHERE status IN ('failed', 'running')
+		  AND (
+		    lower(error) LIKE '%rate limit%'
+		    OR lower(error) LIKE '%429%'
+		    OR lower(error) LIKE '%throttl%'
+		  )
+		  AND updated_at > now() - interval '15 minutes'`).Scan(&out.RateLimitedBuckets); err != nil {
+		out.RateLimitedBuckets = 0
+	}
 	return out, nil
 }
