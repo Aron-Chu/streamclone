@@ -3,6 +3,8 @@
 **Source:** `streamclone-hosted-data` MCP + `GET /v1/public/hub`
 **Flag state:** `GOLD_VOD_SEGMENTS_ENABLED` expected **false** on prod (pre-canary).
 
+**Refresh:** Re-run steps 1–4 after merging `feat/corpus-0b-safe-batch` (live graph isolation). Hosted MCP was unavailable during the 2026-07-01 safe-batch pass — use queries in [`corpus-0b-safe-batch.md`](corpus-0b-safe-batch.md) if MCP is down.
+
 ## Checklist steps 1–4
 
 | Check | Result |
