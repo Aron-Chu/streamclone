@@ -14,7 +14,7 @@
 | Migration `000049_gold_vod_segments` present locally? | **Yes** (restored from `origin/master` in PR 0B-1) |
 | `GOLD_PER_VOD_GQL_RPM` wired into GQL throttle? | **No** — config parsed only; production uses `ANALYTICS_VOD_GQL_*` + in-process `gqlRateCoordinator` |
 | `gold_vod_rate_limits` | **Dead reference** — no migration/table/tests/writes; **recommend remove SELECT in PR 0B** |
-| `gold_vod_segments` store wired to production? | **No** — store + tests only; Gold still uses in-memory parallel segments in `sync_gql_parallel.go` |
+| `gold_vod_segments` store wired to production? | **Yes when `GOLD_VOD_SEGMENTS_ENABLED=true`** (PR 0B-2 implemented locally; pending commit) |
 | Public API changes needed for PR 0B? | **No** for sensitivity; segment ledger is internal-only |
 
 ---
@@ -255,9 +255,22 @@ Complete **before opening PR 0B** (Gate 0 + 0B prerequisites):
 - [x] Confirm `migrations/000049_gold_vod_segments.up.sql` on disk
 - [ ] Confirm BearHost / streampulse-vps Postgres has `000049` applied (normal migrate path)
 - [x] PR 0A audit published (`docs/agent-notes/corpus-pr0a-audit.md`)
-- [ ] `gold_vod_rate_limits` decision accepted: **remove SELECT** (this audit)
+- [x] `gold_vod_rate_limits` decision accepted: **remove SELECT** (PR 0B-1 `b3bc4b6`)
 
 ### PR 0B-1 — migration + tests + dead query
+
+- [x] Restore migrations `000045`–`000049` on disk (commit `b3bc4b6`)
+- [x] Remove `gold_vod_rate_limits` SELECT from `CorpusGoldSegmentSummary`
+- [x] Add `make test-analytics-gold-segments` + nightly workflow
+- [ ] Confirm BearHost / streampulse-vps Postgres has `000049` applied (operator)
+
+### PR 0B-2 — production wiring
+
+- [x] Implemented locally: `GOLD_VOD_SEGMENTS_ENABLED` (default `false`), ledger hooks in `fetchVODCommentsParallel`
+- [ ] Committed / deployed
+- [ ] Hosted canary per `docs/agent-notes/corpus-0b2-hosted-verify.md`
+
+### PR 0B-2 split (original checklist)
 
 - [x] Restore migrations `000045`–`000049` on disk (from `origin/master`)
 - [x] Remove `gold_vod_rate_limits` SELECT from `CorpusGoldSegmentSummary` (segment error evidence instead)
@@ -267,16 +280,17 @@ Complete **before opening PR 0B** (Gate 0 + 0B prerequisites):
 
 ### PR 0B-2 — wire durable segment ledger (additive)
 
-- [ ] Call `PlanGoldVODSegments` + `UpsertGoldVODSegmentPlans` at Gold job start (map `GOLD_SEGMENT_SIZE_SECONDS` or `ANALYTICS_VOD_GQL_SEGMENT_SECONDS`)
-- [ ] Replace or mirror in-memory segment queue with `ClaimGoldVODSegment` / `CompleteGoldVODSegment` / `FailGoldVODSegment` in `fetchVODCommentsParallel` lifecycle
-- [ ] Pass `GOLD_MAX_SEGMENTS_PER_VOD`, `GOLD_LEASE_TTL_SECONDS`, `GOLD_RETRY_MAX` from config into store calls
-- [ ] Wire `cfg.Gold*` env vars in `cmd/analytics/main.go` (or document single source: `ANALYTICS_VOD_GQL_*`)
-- [ ] Keep existing checkpoint + in-memory path working behind rollout flag (requirements rollback plan)
-- [ ] Hosted verification: non-zero `gold_vod_segments` rows during Gold job (MCP `postgres_query` read-only)
+- [x] `PlanGoldVODSegments` + `UpsertGoldVODSegmentPlans` at parallel fetch start (flag on)
+- [x] `ClaimGoldVODSegmentByKey` / `CompleteGoldVODSegment` / `FailGoldVODSegment` in fetch lifecycle
+- [x] `GOLD_MAX_SEGMENTS_PER_VOD`, `GOLD_LEASE_TTL_SECONDS`, `GOLD_RETRY_MAX` via `WithGoldVODSegments`
+- [x] `GOLD_VOD_SEGMENTS_ENABLED` wired in `cmd/analytics/main.go` (default false)
+- [x] Rollback: flag false; checkpoints + in-memory path unchanged when disabled
+- [ ] Committed / deployed / hosted canary (`docs/agent-notes/corpus-0b2-hosted-verify.md`)
 
 ### PR 0B-3 — completion semantics
 
-- [ ] `resolveGoldBackfillOutcome` / job finish must not mark `done` when durable segments remain `queued|running|failed` (not `done|skipped|dead_letter`)
+- [x] Design note: `docs/agent-notes/corpus-pr0b3-completion-semantics.md`
+- [ ] `resolveGoldBackfillOutcome` / job finish must not mark `done` when durable segments remain unresolved
 - [ ] Reclaim expired leases (`status=running` + stale `lease_expires_at`) — integration test proof
 
 ### Post-0B (not blocking 0B start)
