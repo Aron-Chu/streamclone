@@ -167,6 +167,27 @@ func (l *goldVODFetchLedger) beginSegment(seg *gqlSegmentProgress) error {
 	return nil
 }
 
+func (l *goldVODFetchLedger) heartbeatSegment(seg gqlSegmentProgress) {
+	if l == nil || l.svc == nil || l.svc.store == nil {
+		return
+	}
+	key := l.segmentKey(seg)
+	l.mu.Lock()
+	claimID := l.activeClaimID[key]
+	l.mu.Unlock()
+	if claimID <= 0 {
+		return
+	}
+	if _, err := l.svc.store.HeartbeatGoldVODSegment(l.ctx, claimID, l.owner, l.leaseTTL); err != nil {
+		l.svc.log.Warn("gold vod segment heartbeat failed",
+			"stream_id", l.streamID,
+			"vod_id", l.vodID,
+			"segment_key", key,
+			"err", err,
+		)
+	}
+}
+
 func (l *goldVODFetchLedger) completeSegment(seg gqlSegmentProgress, commentsFetched int) {
 	if l == nil || l.svc == nil || l.svc.store == nil {
 		return

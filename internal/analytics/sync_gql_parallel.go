@@ -1846,6 +1846,10 @@ func (s *SyncService) fetchGQLSegment(
 			return fetchErr
 		}
 
+		if state.goldLedger != nil {
+			state.goldLedger.heartbeatSegment(*seg)
+		}
+
 		pageStartOffset := offset
 		reqBody := buildVideoCommentsGQLRequest(videoID, gqlVideoCommentsSHA256, useCursor, offset, nextCursor)
 		gqlResp, err := s.postGQLVideoComments(ctx, reqBody, coord, state.requestStats)
