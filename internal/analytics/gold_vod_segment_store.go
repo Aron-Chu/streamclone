@@ -286,10 +286,18 @@ func (s *Store) CorpusGoldSegmentSummary(ctx context.Context) (CorpusGoldSegment
 	if err := rows.Err(); err != nil {
 		return out, err
 	}
-	_ = s.db.QueryRow(ctx, `
+	// Rate-limit readiness uses recent segment failures (PR 0A: gold_vod_rate_limits table was never migrated).
+	if err := s.db.QueryRow(ctx, `
 		SELECT COUNT(*)::int
-		FROM gold_vod_rate_limits
-		WHERE last_limited_at IS NOT NULL
-		  AND reset_at > now()`).Scan(&out.RateLimitedBuckets)
+		FROM gold_vod_segments
+		WHERE status IN ('failed', 'running')
+		  AND (
+		    lower(error) LIKE '%rate limit%'
+		    OR lower(error) LIKE '%429%'
+		    OR lower(error) LIKE '%throttl%'
+		  )
+		  AND updated_at > now() - interval '15 minutes'`).Scan(&out.RateLimitedBuckets); err != nil {
+		out.RateLimitedBuckets = 0
+	}
 	return out, nil
 }
