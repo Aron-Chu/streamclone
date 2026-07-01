@@ -73,6 +73,7 @@ func isRetriableGoldFailure(errMsg string) bool {
 		"gateway timeout",
 		"missing from analytics_streams",
 		"ensure session before gold sync",
+		"gold vod segments incomplete",
 	}
 	for _, needle := range retriable {
 		if strings.Contains(msg, needle) {
