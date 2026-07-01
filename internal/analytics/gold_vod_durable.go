@@ -219,21 +219,36 @@ func (l *goldVODFetchLedger) failSegment(seg gqlSegmentProgress, cause error) {
 	}
 }
 
-func (l *goldVODFetchLedger) onHotSplit(beforeSplit gqlSegmentProgress, splitAt int, tail gqlSegmentProgress) {
+func (l *goldVODFetchLedger) onHotSplit(beforeSplit gqlSegmentProgress, splitAt int, tail gqlSegmentProgress) error {
 	if l == nil {
-		return
+		return nil
 	}
 	key := l.segmentKey(beforeSplit)
 	l.mu.Lock()
 	parentClaimID := l.activeClaimID[key]
 	delete(l.activeClaimID, key)
 	l.mu.Unlock()
-	if parentClaimID > 0 {
-		_, _ = l.svc.store.FailGoldVODSegment(l.ctx, parentClaimID, l.owner, "hot_split rescheduled", time.Minute)
-	}
 	shrunk := beforeSplit
 	shrunk.EndSec = splitAt - 1
-	_ = l.upsertPlansForSegments([]gqlSegmentProgress{shrunk, tail})
+	if err := l.upsertPlansForSegments([]gqlSegmentProgress{shrunk, tail}); err != nil {
+		if parentClaimID > 0 {
+			l.mu.Lock()
+			l.activeClaimID[key] = parentClaimID
+			l.mu.Unlock()
+		}
+		return fmt.Errorf("gold vod hot-split child upsert: %w", err)
+	}
+	if parentClaimID <= 0 {
+		return nil
+	}
+	skipped, err := l.svc.store.SkipGoldVODSegment(l.ctx, parentClaimID, l.owner, "hot_split rescheduled")
+	if err != nil {
+		return fmt.Errorf("gold vod hot-split parent skip: %w", err)
+	}
+	if !skipped {
+		return fmt.Errorf("gold vod hot-split parent skip: claim %d not skipped", parentClaimID)
+	}
+	return nil
 }
 
 func sanitizeGoldSegmentError(err error) string {

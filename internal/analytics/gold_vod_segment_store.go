@@ -352,6 +352,39 @@ func (s *Store) FailGoldVODSegment(ctx context.Context, id int64, owner, errMsg 
 	return tag.RowsAffected() > 0, nil
 }
 
+func (s *Store) SkipGoldVODSegment(ctx context.Context, id int64, owner, reason string) (bool, error) {
+	if s == nil || s.db == nil || id <= 0 {
+		return false, nil
+	}
+	tag, err := s.db.Exec(ctx, `
+		UPDATE gold_vod_segments
+		SET status = 'skipped',
+		    lease_owner = '',
+		    lease_expires_at = NULL,
+		    heartbeat_at = NULL,
+		    error = left($3, 500),
+		    updated_at = now()
+		WHERE id = $1
+		  AND status = 'running'
+		  AND lease_owner = $2`, id, strings.TrimSpace(owner), strings.TrimSpace(reason))
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+func (s *Store) GoldVODSegmentJobRowCount(ctx context.Context, jobID int64) (int, error) {
+	if s == nil || s.db == nil || jobID <= 0 {
+		return 0, nil
+	}
+	var count int
+	err := s.db.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM gold_vod_segments
+		WHERE backfill_job_id = $1`, jobID).Scan(&count)
+	return count, err
+}
+
 func durationSeconds(value time.Duration, fallback int) int {
 	if value <= 0 {
 		return fallback
