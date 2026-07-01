@@ -104,6 +104,29 @@ func TestSummarizeChannelWindowSynced(t *testing.T) {
 	}
 }
 
+func TestHubLiveActivityCountsExcludeCorpusRollups(t *testing.T) {
+	chat, emotes, seven := hubLiveActivityCounts(MinuteRollup{
+		ChatCount: 100, ChatSource: RollupChatSourceGQL, SourceConfidence: SourceConfidenceCanonical,
+		TotalEmoteCount: 50, SevenTVEmoteCount: 10,
+	})
+	if chat != 0 || emotes != 0 || seven != 0 {
+		t.Fatalf("gql rollup leaked into hub activity: chat=%d emotes=%d seven=%d", chat, emotes, seven)
+	}
+	chat, emotes, seven = hubLiveActivityCounts(MinuteRollup{
+		ChatCount: 12, ChatSource: RollupChatSourceLive, SourceConfidence: SourceConfidenceVerified,
+		TotalEmoteCount: 8, SevenTVEmoteCount: 3,
+	})
+	if chat != 12 || emotes != 8 || seven != 3 {
+		t.Fatalf("live rollup counts wrong: chat=%d emotes=%d seven=%d", chat, emotes, seven)
+	}
+	if hubLiveViewerRollup(MinuteRollup{ChatSource: RollupChatSourceGQL}) {
+		t.Fatal("gql viewer rollup should be excluded")
+	}
+	if !hubLiveViewerRollup(MinuteRollup{ChatSource: RollupChatSourceLive}) {
+		t.Fatal("live viewer rollup should be included")
+	}
+}
+
 func TestHubRollupEmoteCountFallsBackToMapAndSevenTV(t *testing.T) {
 	if got := hubRollupEmoteCount(MinuteRollup{
 		TotalEmoteCount:   0,

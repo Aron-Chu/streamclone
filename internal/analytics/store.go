@@ -711,7 +711,9 @@ func (s *Store) RecentRollupBucketsByStreamID(ctx context.Context, canonicalStre
 				viewer_samples,
 				chat_count,
 				total_emote_count,
-				seventv_emote_count
+				seventv_emote_count,
+				chat_source,
+				source_confidence
 			FROM analytics_minute_rollups
 			WHERE stream_id=$1 AND minute_ts >= $2
 		)
@@ -719,13 +721,13 @@ func (s *Store) RecentRollupBucketsByStreamID(ctx context.Context, canonicalStre
 		FROM (
 			SELECT
 				bucket_ts,
-				COALESCE(AVG(NULLIF(viewer_avg, 0)), 0)::int AS viewer_avg,
-				COALESCE(MAX(viewer_max), 0)::int AS viewer_max,
-				COALESCE(MAX(viewer_latest), 0)::int AS viewer_latest,
-				COALESCE(SUM(viewer_samples), 0)::int AS viewer_samples,
-				COALESCE(SUM(chat_count), 0)::int AS chat_count,
-				COALESCE(SUM(total_emote_count), 0)::int AS total_emote_count,
-				COALESCE(SUM(seventv_emote_count), 0)::int AS seventv_emote_count
+				COALESCE(AVG(NULLIF(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_avg ELSE NULL END, 0)), 0)::int AS viewer_avg,
+				COALESCE(MAX(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_max ELSE NULL END), 0)::int AS viewer_max,
+				COALESCE(MAX(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_latest ELSE NULL END), 0)::int AS viewer_latest,
+				COALESCE(SUM(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_samples ELSE 0 END), 0)::int AS viewer_samples,
+				COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN chat_count ELSE 0 END), 0)::int AS chat_count,
+				COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN total_emote_count ELSE 0 END), 0)::int AS total_emote_count,
+				COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN seventv_emote_count ELSE 0 END), 0)::int AS seventv_emote_count
 			FROM bucketed
 			GROUP BY bucket_ts
 			ORDER BY bucket_ts DESC
@@ -771,7 +773,9 @@ func (s *Store) AggregateRollupBucketsSince(ctx context.Context, since time.Time
 				viewer_samples,
 				chat_count,
 				total_emote_count,
-				seventv_emote_count
+				seventv_emote_count,
+				chat_source,
+				source_confidence
 			FROM analytics_minute_rollups
 			WHERE minute_ts >= $1
 		)
@@ -779,13 +783,13 @@ func (s *Store) AggregateRollupBucketsSince(ctx context.Context, since time.Time
 		FROM (
 			SELECT
 				bucket_ts,
-				COALESCE(AVG(NULLIF(viewer_avg, 0)), 0)::int AS viewer_avg,
-				COALESCE(MAX(viewer_max), 0)::int AS viewer_max,
-				COALESCE(MAX(viewer_latest), 0)::int AS viewer_latest,
-				COALESCE(SUM(viewer_samples), 0)::int AS viewer_samples,
-				COALESCE(SUM(chat_count), 0)::int AS chat_count,
-				COALESCE(SUM(total_emote_count), 0)::int AS total_emote_count,
-				COALESCE(SUM(seventv_emote_count), 0)::int AS seventv_emote_count
+				COALESCE(AVG(NULLIF(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_avg ELSE NULL END, 0)), 0)::int AS viewer_avg,
+				COALESCE(MAX(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_max ELSE NULL END), 0)::int AS viewer_max,
+				COALESCE(MAX(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_latest ELSE NULL END), 0)::int AS viewer_latest,
+				COALESCE(SUM(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_samples ELSE 0 END), 0)::int AS viewer_samples,
+				COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN chat_count ELSE 0 END), 0)::int AS chat_count,
+				COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN total_emote_count ELSE 0 END), 0)::int AS total_emote_count,
+				COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN seventv_emote_count ELSE 0 END), 0)::int AS seventv_emote_count
 			FROM bucketed
 			GROUP BY bucket_ts
 			ORDER BY bucket_ts DESC

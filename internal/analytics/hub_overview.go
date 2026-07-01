@@ -513,10 +513,13 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 				pt = &HubActivityPoint{T: bucket}
 				activity[bucket] = pt
 			}
-			pt.Chat += ru.ChatCount
-			pt.Emotes += hubRollupEmoteCount(ru)
-			pt.SevenTV += ru.SevenTVEmoteCount
-			pt.Viewers += pickViewer(ru)
+			chat, emotes, sevenTV := hubLiveActivityCounts(ru)
+			pt.Chat += chat
+			pt.Emotes += emotes
+			pt.SevenTV += sevenTV
+			if hubLiveViewerRollup(ru) {
+				pt.Viewers += pickViewer(ru)
+			}
 		}
 	}
 
@@ -989,6 +992,21 @@ func windowTrendPct(rollups []MinuteRollup) float64 {
 	}
 	delta := float64(recent-prior) / float64(prior) * 100
 	return round2(math.Max(-100, math.Min(500, delta)))
+}
+
+func hubLiveActivityCounts(ru MinuteRollup) (chat, emotes, sevenTV int) {
+	if !isLiveChatRollup(ru) {
+		return 0, 0, 0
+	}
+	return ru.ChatCount, hubRollupEmoteCount(ru), ru.SevenTVEmoteCount
+}
+
+func hubLiveViewerRollup(ru MinuteRollup) bool {
+	switch ru.ChatSource {
+	case RollupChatSourceGQL, RollupChatSourceIVR, ChatSourceMixed:
+		return false
+	}
+	return true
 }
 
 func hubRollupEmoteCount(ru MinuteRollup) int {

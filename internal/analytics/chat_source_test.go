@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,6 +63,14 @@ func TestPortalChatSourceLabel(t *testing.T) {
 	label, status := portalChatSourceLabel(StreamChatSourceMetadata{ChatSource: ChatSourceIVR})
 	if label != "IVR accelerated" || status == "" {
 		t.Fatalf("ivr label=%q status=%q", label, status)
+	}
+}
+
+func TestPublicLiveActivitySQLPredicatesExcludeCorpus(t *testing.T) {
+	for _, pred := range []string{sqlPublicLiveChatMinutePredicate, sqlPublicLiveViewerRollupPredicate} {
+		if !strings.Contains(pred, "'gql'") || !strings.Contains(pred, "'ivr'") {
+			t.Fatalf("predicate missing corpus exclusions: %q", pred)
+		}
 	}
 }
 

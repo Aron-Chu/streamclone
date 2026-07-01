@@ -34,6 +34,20 @@ const (
 	RollupDetailIVRPeaksOnly = "ivr_peaks_only"
 )
 
+// sqlPublicLiveChatMinutePredicate matches isLiveChatRollup for public hub SQL aggregations.
+const sqlPublicLiveChatMinutePredicate = `(
+	chat_count > 0
+	AND COALESCE(chat_source, '') NOT IN ('gql', 'ivr', 'mixed')
+	AND (
+		COALESCE(chat_source, '') = 'live'
+		OR COALESCE(source_confidence, '') = 'verified'
+		OR (COALESCE(chat_source, '') = '' AND viewer_samples > 0)
+	)
+)`
+
+// sqlPublicLiveViewerRollupPredicate excludes corpus/import chat rows from viewer aggregates.
+const sqlPublicLiveViewerRollupPredicate = `COALESCE(chat_source, '') NOT IN ('gql', 'ivr', 'mixed')`
+
 // StreamChatSourceMetadata is persisted on analytics_streams for API honesty.
 type StreamChatSourceMetadata struct {
 	ChatState         string          `json:"chatState"`
