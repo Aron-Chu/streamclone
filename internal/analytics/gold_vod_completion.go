@@ -88,9 +88,20 @@ func (s *Store) GoldVODSegmentUnresolvedSummary(ctx context.Context, jobID int64
 	return out, err
 }
 
+func goldVODSegmentsLedgerEmptyError(jobID int64) error {
+	return fmt.Errorf("gold vod segments ledger empty for job %d", jobID)
+}
+
 func (s *SyncService) goldVODSegmentsBlockCompletion(ctx context.Context, jobID int64, streamID string) error {
 	if s == nil || !s.goldVODSegmentsEnabled || s.store == nil || jobID <= 0 {
 		return nil
+	}
+	jobRows, err := s.store.GoldVODSegmentJobRowCount(ctx, jobID)
+	if err != nil {
+		return fmt.Errorf("gold vod segments completion check: %w", err)
+	}
+	if jobRows == 0 {
+		return goldVODSegmentsLedgerEmptyError(jobID)
 	}
 	summary, err := s.store.GoldVODSegmentUnresolvedSummary(ctx, jobID, streamID)
 	if err != nil {

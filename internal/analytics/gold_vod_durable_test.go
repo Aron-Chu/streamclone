@@ -56,3 +56,161 @@ func TestGoldVODSegmentRetryLaterIsDistinct(t *testing.T) {
 	}
 	_ = time.Second
 }
+
+func TestGoldVODFetchLedgerHotSplitRetiresParent(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	applyGoldVODSegmentMigration(t, ctx, store)
+
+	jobID := int64(9101)
+	vodID := "vod-hot-1"
+	streamID := "stream-hot-1"
+	plans := PlanGoldVODSegments(vodID, streamID, "xqc", 3600, 600, "")
+	if _, err := store.UpsertGoldVODSegmentPlans(ctx, plans, &jobID, 3); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	owner := "worker-hot-a"
+	claim, err := store.ClaimGoldVODSegmentByKey(ctx, plans[0].SegmentKey, owner, time.Minute, 4)
+	if err != nil || claim == nil {
+		t.Fatalf("claim parent: %+v err=%v", claim, err)
+	}
+
+	svc := &SyncService{
+		goldVODSegmentsEnabled: true,
+		store:                  store,
+		goldRetryMax:           3,
+		goldLeaseTTL:           time.Minute,
+		goldMaxSegmentsPerVOD:  4,
+		goldVODSegmentOwner:    owner,
+	}
+	ledger := svc.goldVODFetchLedger(WithGoldBackfillJobID(ctx, jobID), streamID, "xqc", vodID)
+	parentSeg := gqlSegmentProgress{StartSec: 0, EndSec: 1199, OffsetSec: 0}
+	ledger.mu.Lock()
+	ledger.activeClaimID[ledger.segmentKey(parentSeg)] = claim.ID
+	ledger.mu.Unlock()
+
+	splitAt := 600
+	tail := gqlSegmentProgress{StartSec: splitAt, EndSec: 1199, OffsetSec: splitAt}
+	if err := ledger.onHotSplit(parentSeg, splitAt, tail); err != nil {
+		t.Fatalf("onHotSplit: %v", err)
+	}
+
+	status, found, err := store.GoldVODSegmentStatusByKey(ctx, plans[0].SegmentKey)
+	if err != nil {
+		t.Fatalf("parent status: %v", err)
+	}
+	if !found || status != "skipped" {
+		t.Fatalf("parent status = %q found=%v, want skipped", status, found)
+	}
+
+	summary, err := store.GoldVODSegmentUnresolvedSummary(ctx, jobID, streamID)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if summary.Failed != 0 || summary.Running != 0 {
+		t.Fatalf("parent should not block completion, got %+v", summary)
+	}
+	if summary.Queued < 1 {
+		t.Fatalf("expected child segments queued, got %+v", summary)
+	}
+}
+
+func TestGoldVODFetchLedgerHotSplitChildUpsertFailPreservesParent(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	applyGoldVODSegmentMigration(t, ctx, store)
+
+	jobID := int64(9102)
+	vodID := "vod-hot-2"
+	streamID := "stream-hot-2"
+	plans := PlanGoldVODSegments(vodID, streamID, "xqc", 3600, 600, "")
+	if _, err := store.UpsertGoldVODSegmentPlans(ctx, plans, &jobID, 3); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	owner := "worker-hot-b"
+	claim, err := store.ClaimGoldVODSegmentByKey(ctx, plans[0].SegmentKey, owner, time.Minute, 4)
+	if err != nil || claim == nil {
+		t.Fatalf("claim parent: %+v err=%v", claim, err)
+	}
+
+	cancelled, cancel := context.WithCancel(WithGoldBackfillJobID(ctx, jobID))
+	cancel()
+	svc := &SyncService{
+		goldVODSegmentsEnabled: true,
+		store:                  store,
+		goldRetryMax:           3,
+		goldLeaseTTL:           time.Minute,
+		goldMaxSegmentsPerVOD:  4,
+		goldVODSegmentOwner:    owner,
+	}
+	ledger := svc.goldVODFetchLedger(cancelled, streamID, "xqc", vodID)
+	parentSeg := gqlSegmentProgress{StartSec: 0, EndSec: 1199, OffsetSec: 0}
+	ledger.mu.Lock()
+	ledger.activeClaimID[ledger.segmentKey(parentSeg)] = claim.ID
+	ledger.mu.Unlock()
+
+	if err := ledger.onHotSplit(parentSeg, 600, gqlSegmentProgress{StartSec: 600, EndSec: 1199, OffsetSec: 600}); err == nil {
+		t.Fatal("expected child upsert failure")
+	}
+
+	status, found, err := store.GoldVODSegmentStatusByKey(ctx, plans[0].SegmentKey)
+	if err != nil {
+		t.Fatalf("parent status: %v", err)
+	}
+	if !found || status != "running" {
+		t.Fatalf("parent status = %q found=%v, want running", status, found)
+	}
+}
+
+func TestGoldVODFetchLedgerHotSplitSkipFailKeepsParentBlocking(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	applyGoldVODSegmentMigration(t, ctx, store)
+
+	jobID := int64(9103)
+	vodID := "vod-hot-3"
+	streamID := "stream-hot-3"
+	plans := PlanGoldVODSegments(vodID, streamID, "xqc", 3600, 600, "")
+	if _, err := store.UpsertGoldVODSegmentPlans(ctx, plans, &jobID, 3); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	owner := "worker-hot-c"
+	claim, err := store.ClaimGoldVODSegmentByKey(ctx, plans[0].SegmentKey, owner, time.Minute, 4)
+	if err != nil || claim == nil {
+		t.Fatalf("claim parent: %+v err=%v", claim, err)
+	}
+
+	svc := &SyncService{
+		goldVODSegmentsEnabled: true,
+		store:                  store,
+		goldRetryMax:           3,
+		goldLeaseTTL:           time.Minute,
+		goldMaxSegmentsPerVOD:  4,
+		goldVODSegmentOwner:    "worker-hot-wrong",
+	}
+	ledger := svc.goldVODFetchLedger(WithGoldBackfillJobID(ctx, jobID), streamID, "xqc", vodID)
+	parentSeg := gqlSegmentProgress{StartSec: 0, EndSec: 1199, OffsetSec: 0}
+	ledger.mu.Lock()
+	ledger.activeClaimID[ledger.segmentKey(parentSeg)] = claim.ID
+	ledger.mu.Unlock()
+
+	if err := ledger.onHotSplit(parentSeg, 600, gqlSegmentProgress{StartSec: 600, EndSec: 1199, OffsetSec: 600}); err == nil {
+		t.Fatal("expected parent skip failure")
+	}
+
+	status, found, err := store.GoldVODSegmentStatusByKey(ctx, plans[0].SegmentKey)
+	if err != nil {
+		t.Fatalf("parent status: %v", err)
+	}
+	if !found || status != "running" {
+		t.Fatalf("parent status = %q found=%v, want running", status, found)
+	}
+
+	summary, err := store.GoldVODSegmentUnresolvedSummary(ctx, jobID, streamID)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if !summary.BlocksCompletion() || summary.Running != 1 {
+		t.Fatalf("parent running lease should block, got %+v", summary)
+	}
+}

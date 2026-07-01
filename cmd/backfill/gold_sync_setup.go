@@ -117,7 +117,17 @@ func newBackfillSyncService(
 	goldIVR := analytics.NewGoldIVRService(goldIVRConfigFromApp(cfg), store, nil, logger)
 	analytics.LogGoldIVREffectiveConfig(logger, goldIVRConfigFromApp(cfg), cfg.GoldIVREnabledChannelAllowlist)
 	syncService = syncService.WithGoldIVR(goldIVR)
+	enabled, maxSegments, retryMax, leaseTTL, owner := goldVODSegmentOptsFromConfig(cfg)
+	syncService = syncService.WithGoldVODSegments(enabled, maxSegments, retryMax, leaseTTL, owner)
 	return syncService, nil
+}
+
+func goldVODSegmentOptsFromConfig(cfg config.Config) (enabled bool, maxSegmentsPerVOD, retryMax, leaseTTLSeconds int, owner string) {
+	return cfg.GoldVODSegmentsEnabled,
+		cfg.GoldMaxSegmentsPerVOD,
+		cfg.GoldRetryMax,
+		cfg.GoldLeaseTTLSeconds,
+		""
 }
 
 func goldArchiveRequired(cfg config.Config, args []string) bool {
