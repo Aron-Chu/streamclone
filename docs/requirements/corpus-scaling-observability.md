@@ -373,15 +373,16 @@ Suggested split if needed:
 
 - [x] **0B-1 committed** (`b3bc4b6`): migrations `000045`–`000049`, segment rate-limit readiness, `make test-analytics-gold-segments`, nightly workflow.
 - [x] **0B-2 committed** (`2bb6662` + audit fixes): `GOLD_VOD_SEGMENTS_ENABLED=false` default; durable ledger completes after rollup flush with per-segment `comments_fetched`.
+- [x] **0B-3 implemented** — `gold_vod_completion.go`; `BackfillWorker.applyGoldSegmentCompletionGate` blocks `done` when durable segments remain unresolved (`GOLD_VOD_SEGMENTS_ENABLED` only).
 - [ ] **0B-2 deployed / hosted canary** — see `docs/agent-notes/corpus-0b2-hosted-verify.md`.
-- [x] **0B-3 design note** — `docs/agent-notes/corpus-pr0b3-completion-semantics.md` (no runtime).
+- [x] **0B-3 design + runtime** — `docs/agent-notes/corpus-pr0b3-completion-semantics.md`.
 
 ### PR 0B+ (acceptance)
 
 - [ ] `origin/master` synced; migration `000049` present locally and applied on prod.
 - [ ] Hosted MCP smoke passes; corpus queue snapshots documented baseline.
 - [ ] `gold_vod_segments` populated during Gold jobs; claim/complete/fail/reclaim proven.
-- [ ] Gold job cannot mark `done` with unresolved segment failures (after PR 0B-3 or equivalent completion hook).
+- [x] Gold job cannot mark `done` with unresolved segment failures (PR 0B-3 completion gate; flag-gated).
 - [ ] Public hub graph source semantics tested: live graph does not silently include `chat_source=gql|ivr`.
 - [ ] Internal coverage API exposes stream/VOD/segment operational metadata only under internal auth.
 - [ ] Known-empty requires successful fetch evidence, not merely missing rollup rows.
