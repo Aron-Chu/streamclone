@@ -373,7 +373,7 @@ Suggested split if needed:
 
 - [x] **0B-1 committed** (`b3bc4b6`): migrations `000045`–`000049`, segment rate-limit readiness, `make test-analytics-gold-segments`, nightly workflow.
 - [x] **0B-2 committed** (`2bb6662` + audit fixes): `GOLD_VOD_SEGMENTS_ENABLED=false` default; durable ledger completes after rollup flush with per-segment `comments_fetched`.
-- [x] **0B-3 committed** (`d76c1af`): completion gate blocks `done` when durable segments unresolved.
+- [x] **0B-3 committed** — completion gate on PR #31 (`feat/corpus-0b-gold-segments`).
 - [ ] **0B stack deployed / hosted canary** — see `docs/agent-notes/corpus-0b2-hosted-verify.md` and `docs/agent-notes/corpus-hosted-baseline-2026-07-01.md`.
 
 ### PR 0B+ (acceptance)

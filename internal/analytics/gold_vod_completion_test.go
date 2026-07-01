@@ -210,3 +210,32 @@ func TestGoldVODSegmentUnresolvedSummaryRunningBlocks(t *testing.T) {
 		t.Fatalf("running lease should block, got %+v", summary)
 	}
 }
+
+func TestGoldVODSegmentUnresolvedSummaryExpiredLeaseStillBlocks(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	applyGoldVODSegmentMigration(t, ctx, store)
+
+	jobID := int64(9005)
+	plans := PlanGoldVODSegments("vod-expired-1", "stream-expired-1", "xqc", 600, 600, "")
+	if _, err := store.UpsertGoldVODSegmentPlans(ctx, plans, &jobID, 3); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	claim, err := store.ClaimGoldVODSegmentByKey(ctx, plans[0].SegmentKey, "worker-a", time.Minute, 2)
+	if err != nil || claim == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := store.db.Exec(ctx, `
+		UPDATE gold_vod_segments
+		SET lease_expires_at = now() - interval '5 minutes'
+		WHERE id = $1`, claim.ID); err != nil {
+		t.Fatalf("expire lease: %v", err)
+	}
+
+	summary, err := store.GoldVODSegmentUnresolvedSummary(ctx, jobID, "stream-expired-1")
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if summary.Running != 1 || !summary.BlocksCompletion() {
+		t.Fatalf("expired running lease should still block job done, got %+v", summary)
+	}
+}

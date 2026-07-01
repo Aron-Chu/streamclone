@@ -262,7 +262,11 @@ Complete **before opening PR 0B** (Gate 0 + 0B prerequisites):
 - [x] Restore migrations `000045`–`000049` on disk (commit `b3bc4b6`)
 - [x] Remove `gold_vod_rate_limits` SELECT from `CorpusGoldSegmentSummary`
 - [x] Add `make test-analytics-gold-segments` + nightly workflow
-- [ ] Confirm BearHost / streampulse-vps Postgres has `000049` applied (operator)
+- [ ] Confirm BearHost / streampulse-vps Postgres has `000049` applied (operator) — hosted `to_regclass` verified 2026-07-01
+
+### PR 0B stack (open)
+
+- PR: https://github.com/Aron-Chu/streamclone/pull/31 (`feat/corpus-0b-gold-segments`)
 
 ### PR 0B-2 — production wiring
 
@@ -290,7 +294,7 @@ Complete **before opening PR 0B** (Gate 0 + 0B prerequisites):
 
 - [x] Design note: `docs/agent-notes/corpus-pr0b3-completion-semantics.md`
 - [x] `BackfillWorker.applyGoldSegmentCompletionGate` blocks `done` when durable segments remain unresolved (flag on, gold full tier)
-- [ ] Reclaim expired leases (`status=running` + stale `lease_expires_at`) — integration test proof
+- [x] Reclaim expired leases (`status=running` + stale `lease_expires_at`) — store reclaim in `ClaimGoldVODSegment*`; completion gate blocks `running` rows (`gold_vod_completion_test.go`)
 
 ### Post-0B (not blocking 0B start)
 

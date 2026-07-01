@@ -34,6 +34,6 @@
 
 ## Next operator steps
 
-1. Push/deploy PR 0B stack (`b3bc4b6` … `d76c1af`) to streampulse-vps corpus workers.
-2. Run migrate on BearHost if not already at `000049`.
+1. Merge/deploy [PR #31](https://github.com/Aron-Chu/streamclone/pull/31) (`feat/corpus-0b-gold-segments`) to streampulse-vps corpus workers.
+2. Confirm BearHost Postgres at migration `000049`+ (hosted baseline verified 2026-07-01).
 3. Canary: `GOLD_VOD_SEGMENTS_ENABLED=true` on **one** worker; complete checklist §5–9 in [`corpus-0b2-hosted-verify.md`](corpus-0b2-hosted-verify.md).
