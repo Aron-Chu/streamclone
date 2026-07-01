@@ -289,7 +289,7 @@ func (h *Handler) buildCorpusReadinessReport(ctx context.Context) CorpusReadines
 		report.Components.Database = component(CorpusStatusHealthy, "Postgres is reachable")
 	}
 
-	topRoster, err := h.buildTop100ReadinessReport(ctx, cfg.TargetTopN, cfg.LiveAdmissionEnabled)
+	topRoster, err := h.buildTop100ReadinessReport(ctx, cfg.TargetTopN, cfg.LiveAdmissionEnabled, ReadinessReportOptions{})
 	if err != nil {
 		report.Components.Metadata = component(CorpusStatusCritical, "Top-N metadata query failed", "metadata_query_failed")
 		report.Components.LiveAdmission = component(CorpusStatusCritical, "live admission cannot be evaluated", "metadata_query_failed")

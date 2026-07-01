@@ -132,7 +132,7 @@ func TestBuildTop100ReadinessRowMetadataWithoutChat(t *testing.T) {
 		SampledAt:  now.Add(-2 * time.Minute),
 		StaleAfter: now.Add(15 * time.Minute),
 		StartedAt:  ptrTime(now.Add(-30 * time.Minute)),
-	}, now)
+	}, now, false)
 	if row.ReadinessState != Top100ReadinessCapacityBlocked {
 		t.Fatalf("readiness state = %q, want %q", row.ReadinessState, Top100ReadinessCapacityBlocked)
 	}
@@ -159,7 +159,7 @@ func TestBuildTop100ReadinessRowMetadataOnly(t *testing.T) {
 		SampledAt:  now.Add(-90 * time.Second),
 		StaleAfter: now.Add(15 * time.Minute),
 		StartedAt:  ptrTime(now.Add(-20 * time.Minute)),
-	}, now)
+	}, now, false)
 	if row.ReadinessState != Top100ReadinessMetadataOnly {
 		t.Fatalf("readiness state = %q, want %q", row.ReadinessState, Top100ReadinessMetadataOnly)
 	}

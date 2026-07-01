@@ -67,7 +67,13 @@ type Top100ReadinessReport struct {
 	RecentAdmissions []TopRosterAdmissionAttempt `json:"recentAdmissions,omitempty"`
 }
 
-func (h *Handler) buildTop100ReadinessReport(ctx context.Context, topN int, admissionEnabled bool) (Top100ReadinessReport, error) {
+// ReadinessReportOptions tunes expensive readiness report work.
+type ReadinessReportOptions struct {
+	// SkipRollups avoids per-channel RollupsByStream loads (public hub summary only).
+	SkipRollups bool
+}
+
+func (h *Handler) buildTop100ReadinessReport(ctx context.Context, topN int, admissionEnabled bool, opts ReadinessReportOptions) (Top100ReadinessReport, error) {
 	report := Top100ReadinessReport{
 		GeneratedAt:      time.Now().UTC(),
 		TopN:             topN,
@@ -92,7 +98,7 @@ func (h *Handler) buildTop100ReadinessReport(ctx context.Context, topN int, admi
 	now := report.GeneratedAt
 	rows := make([]Top100ReadinessRow, 0, len(live))
 	for _, current := range live {
-		row := buildTop100ReadinessRow(ctx, h, current, now)
+		row := buildTop100ReadinessRow(ctx, h, current, now, opts.SkipRollups)
 		rows = append(rows, row)
 		updateTop100ReadinessSummary(&report.Summary, row, current, now)
 	}
@@ -109,7 +115,7 @@ func (h *Handler) buildTop100ReadinessReport(ctx context.Context, topN int, admi
 	return report, nil
 }
 
-func buildTop100ReadinessRow(ctx context.Context, h *Handler, current Top500Current, now time.Time) Top100ReadinessRow {
+func buildTop100ReadinessRow(ctx context.Context, h *Handler, current Top500Current, now time.Time, skipRollups bool) Top100ReadinessRow {
 	login := normalizeLogin(current.Login)
 	streamID := ""
 	if current.StreamID != nil {
@@ -143,7 +149,7 @@ func buildTop100ReadinessRow(ctx context.Context, h *Handler, current Top500Curr
 			row.AdmissionAttemptedAt = &attemptedAt
 		}
 	}
-	if streamID != "" && h.store != nil {
+	if !skipRollups && streamID != "" && h.store != nil {
 		rollups := top100ReadinessRollups(ctx, h, login, streamID, now)
 		if rollups != nil {
 			row.RollupCount = len(rollups)

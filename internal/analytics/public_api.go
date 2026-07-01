@@ -71,6 +71,7 @@ func (h *Handler) refreshPublicCaches(ctx context.Context) {
 	_, _, _ = h.loadPublicStats(ctx, true)
 	_, _, _ = h.loadPublicStatus(ctx, true)
 	_, _, _ = h.loadPublicHub(ctx, true, publicHubOptions{})
+	_, _, _ = h.loadPublicHub(ctx, true, publicHubOptions{ActivityWindowMinutes: 7 * 24 * 60})
 	_, _, _ = h.loadPublicEmotesOverview(ctx, true, parsePublicEmotesRange(""))
 }
 
