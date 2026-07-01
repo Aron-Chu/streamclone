@@ -337,6 +337,9 @@ func (w *BackfillWorker) runOnce(ctx context.Context) (processed bool, err error
 		syncCtx, cancel = context.WithTimeout(ctx, w.goldSyncTimeout)
 		defer cancel()
 	}
+	if isGoldFullTier(job.Tier) {
+		syncCtx = WithGoldBackfillJobID(syncCtx, job.ID)
+	}
 	_, syncErr := w.sync.SyncHistoricalStream(syncCtx, jobStreamID, job.Login, viewersOnly, forceChat, "")
 	syncErr = w.applyGoldSegmentCompletionGate(ctx, job, jobStreamID, syncErr)
 	var outcome backfillOutcome
