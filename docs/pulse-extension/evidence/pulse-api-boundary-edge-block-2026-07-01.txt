@@ -1,0 +1,64 @@
+Pulse API edge boundary hotfix — BearHost (2026-07-01)
+======================================================
+
+Commit: a1cca29
+Deploy: surgical scp deploy/Caddyfile.pulse-api + pulse-caddy recreate only (no broad rsync)
+Smoke: PULSE_SMOKE_BASE_URL=https://api.streampulse.stream
+Deploy UTC: 2026-07-01T21:12:34Z (pulse-caddy recreate on BearHost)
+
+C1 mitigated: raw chat-replay / chat-logs / ingest / purge blocked at edge
+H1 mitigated: tracking/snapshot, top100/top-roster readiness, corpus/readiness, metrics, sync triggers blocked at edge
+
+Blocked-route smoke: PASS (all 17 routes 404)
+Intentional public: healthz 200, /v1/public/hub 200, POST .../watch 202 — reachable
+Spot-check: GET /v1/analytics/streams/319229690460/chat-replay?limit=1 → 404 (was 200 with raw chat)
+bearhost-pulse-api.sh: PASS (hostedMode true, version v0.3.0-rc4)
+
+Note: PUBLIC_BOUNDARY=FAIL in smoke script due to pre-existing portal path checks
+(/v1/portal/analytics/channels/ludwig/* returns 404 not 401). Unrelated to Caddy edge block;
+all blocked-route assertions passed.
+
+==> pulse-hosted-boundary-smoke.sh output
+==> Pulse hosted boundary smoke: https://api.streampulse.stream
+==> DB-backed fixtures: stream_id=317614106469 rollups=17986 vod_id=2797170064 vod_rollups=17986
+==> Phase A: public boundary (https://api.streampulse.stream)
+OK: /v1/extension/health HTTP 200
+OK: /v1/analytics/channels/ludwig/live HTTP 401
+OK: /v1/analytics/channels/ludwig/live?sparse=false HTTP 401
+OK: /v1/analytics/streams/317614106469 HTTP 401
+FAIL: /v1/portal/analytics/channels/ludwig/live HTTP 404 (want 401 unauthenticated)
+FAIL: /v1/portal/analytics/channels/ludwig/streams HTTP 404 (want 401 unauthenticated)
+OK: /v1/public/emotes/overview HTTP 404 (atlas retired)
+==> Phase A: blocked hosted edge routes
+OK: GET /v1/analytics/streams/999999/chat-replay?limit=1 HTTP 404 (blocked)
+OK: GET /v1/analytics/streams/999999/chat-replay/ HTTP 404 (blocked)
+OK: GET /v1/analytics/channels/ludwig/chat-logs/messages HTTP 404 (blocked)
+OK: DELETE /v1/analytics/streams/999999/chat-messages HTTP 404 (blocked)
+OK: POST /v1/analytics/chat/ingest HTTP 404 (blocked)
+OK: GET /v1/analytics/tracking/snapshot HTTP 404 (blocked)
+OK: GET /v1/analytics/top100/readiness HTTP 404 (blocked)
+OK: GET /v1/analytics/top-roster/readiness?topN=500 HTTP 404 (blocked)
+OK: GET /v1/corpus/readiness HTTP 404 (blocked)
+OK: GET /v1/internal/corpus/readiness HTTP 404 (blocked)
+OK: GET /metrics HTTP 404 (blocked)
+OK: GET /metrics/ HTTP 404 (blocked)
+OK: POST /v1/analytics/streams/999999/sync HTTP 404 (blocked)
+OK: GET /v1/analytics/sync/active HTTP 404 (blocked)
+OK: POST /v1/analytics/streams/999999/prefetch-tracker HTTP 404 (blocked)
+OK: GET /v1/analytics/streams/999999/sync/status HTTP 404 (blocked)
+OK: POST /v1/analytics/streams/999999/sync/status HTTP 404 (blocked)
+==> Phase A: intentional public routes (must not be 404)
+OK: GET /healthz HTTP 200 (not blocked)
+OK: GET /v1/public/hub?activityWindow=30m HTTP 200 (not blocked)
+OK: POST /v1/analytics/channels/ludwig/watch HTTP 202 (not blocked)
+==> Phase B: chart canary SKIP (set PULSE_BETA_KEY)
+==> Phase C: VOD extension canary (vod_id=2797170064, rollups=17986)
+OK: VOD pulse HTTP 200
+==> portal path guard (streampulse-web)
+WARN: streamcloneAnalytics still references /v1/analytics/streams (portal uses gated client)
+OK: streampulse-web/src has no stray raw analytics stream routes
+
+FIXTURE_SOURCE=db
+PUBLIC_BOUNDARY=FAIL
+CHART_CANARY=SKIP
+VOD_EXTENSION_CANARY=PASS
