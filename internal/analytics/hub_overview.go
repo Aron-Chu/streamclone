@@ -19,6 +19,7 @@ import (
 const (
 	publicHubCacheKeyPrefix = "sp:public:hub"
 	publicHubCacheTTL       = 30 * time.Second
+	publicHubLongCacheTTL   = 5 * time.Minute
 
 	// Per-login profile-image cache. Many channels enter the tracking pool via
 	// metadata/top-500 paths that never persisted a profile_image_url, so the
@@ -231,7 +232,7 @@ func (h *Handler) loadPublicHub(ctx context.Context, forceRefresh bool, opts pub
 		payload := h.buildPublicHub(ctx, opts)
 		if h.rdb != nil {
 			body, _ := json.Marshal(payload)
-			_ = h.rdb.Set(ctx, cacheKey, body, publicHubCacheTTL).Err()
+			_ = h.rdb.Set(ctx, cacheKey, body, publicHubCacheTTLForOptions(opts)).Err()
 		}
 		return payload, nil
 	})
@@ -285,6 +286,14 @@ func normalizePublicHubOptions(opts publicHubOptions) publicHubOptions {
 
 func publicHubCacheKey(opts publicHubOptions) string {
 	return publicHubCacheKeyPrefix + ":activity:" + strconv.Itoa(normalizePublicHubOptions(opts).ActivityWindowMinutes)
+}
+
+func publicHubCacheTTLForOptions(opts publicHubOptions) time.Duration {
+	opts = normalizePublicHubOptions(opts)
+	if opts.ActivityWindowMinutes > hubActivityWindowMinutes {
+		return publicHubLongCacheTTL
+	}
+	return publicHubCacheTTL
 }
 
 func hubActivityBucketMinutes(windowMinutes int) int {
@@ -473,6 +482,7 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 	activityBucketMinutes := hubActivityBucketMinutes(activityWindow)
 	activitySince := now.Add(-time.Duration(activityWindow) * time.Minute)
 	recentSince := now.Add(-time.Duration(hubActivityWindowMinutes+5) * time.Minute)
+	longActivityWindow := activityWindow > hubActivityWindowMinutes
 
 	for i, rec := range live {
 		rec, loadedRollups, rollups := h.hubRecentRollupWindow(ctx, rec, recentSince, hubActivityWindowMinutes+5)
@@ -503,8 +513,10 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 			}
 		}
 		activityRollups := rollupsSince(loadedRollups, activitySince)
-		if bucketed, err := h.store.RecentRollupBucketsByStreamID(ctx, rec.StreamID, activitySince, activityBucketMinutes, hubActivityMaxPoints); err == nil {
-			activityRollups = bucketed
+		if !longActivityWindow && h.store != nil {
+			if bucketed, err := h.store.RecentRollupBucketsByStreamID(ctx, rec.StreamID, activitySince, activityBucketMinutes, hubActivityMaxPoints); err == nil {
+				activityRollups = bucketed
+			}
 		}
 		for _, ru := range activityRollups {
 			bucket := ru.MinuteTS.UTC().Truncate(time.Minute).UnixMilli()
@@ -855,7 +867,7 @@ func (h *Handler) buildHubCorpusPipeline(ctx context.Context, now time.Time) Hub
 
 	// Errors (e.g. roster tables absent in local dev) degrade to zeroed counts;
 	// collector capacity is still populated from the in-memory snapshot.
-	report, err := h.buildTop100ReadinessReport(ctx, topN, cfg.LiveAdmissionEnabled)
+	report, err := h.buildTop100ReadinessReport(ctx, topN, cfg.LiveAdmissionEnabled, ReadinessReportOptions{SkipRollups: true})
 	if err != nil {
 		pipeline.State = CorpusStatusDegraded
 	}

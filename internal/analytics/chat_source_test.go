@@ -84,6 +84,9 @@ func TestIsLiveChatRollup(t *testing.T) {
 	if isLiveChatRollup(MinuteRollup{ChatCount: 5, ChatSource: RollupChatSourceGQL, SourceConfidence: SourceConfidenceCanonical}) {
 		t.Fatal("gql canonical must not be live")
 	}
+	if isLiveChatRollup(MinuteRollup{ChatCount: 5, ChatSource: ChatSourceMixed, SourceConfidence: SourceConfidenceProvisional}) {
+		t.Fatal("mixed source must not be live rollup")
+	}
 	if !isLiveChatRollup(MinuteRollup{ChatCount: 3, ViewerSamples: 10}) {
 		t.Fatal("legacy viewer_samples should imply live")
 	}

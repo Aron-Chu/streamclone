@@ -17,7 +17,7 @@ func (h *Handler) top100Readiness(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	admissionEnabled := h.corpusRuntimeConfig().LiveAdmissionEnabled
-	report, err := h.buildTop100ReadinessReport(r.Context(), topN, admissionEnabled)
+	report, err := h.buildTop100ReadinessReport(r.Context(), topN, admissionEnabled, ReadinessReportOptions{})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

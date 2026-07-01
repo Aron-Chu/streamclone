@@ -127,6 +127,18 @@ func TestHubLiveActivityCountsExcludeCorpusRollups(t *testing.T) {
 	}
 }
 
+func TestPublicHubCacheTTLForOptions(t *testing.T) {
+	if got := publicHubCacheTTLForOptions(publicHubOptions{}); got != publicHubCacheTTL {
+		t.Fatalf("default window TTL = %s, want %s", got, publicHubCacheTTL)
+	}
+	if got := publicHubCacheTTLForOptions(publicHubOptions{ActivityWindowMinutes: hubActivityWindowMinutes}); got != publicHubCacheTTL {
+		t.Fatalf("30m window TTL = %s, want %s", got, publicHubCacheTTL)
+	}
+	if got := publicHubCacheTTLForOptions(publicHubOptions{ActivityWindowMinutes: 7 * 24 * 60}); got != publicHubLongCacheTTL {
+		t.Fatalf("7d window TTL = %s, want %s", got, publicHubLongCacheTTL)
+	}
+}
+
 func TestHubRollupEmoteCountFallsBackToMapAndSevenTV(t *testing.T) {
 	if got := hubRollupEmoteCount(MinuteRollup{
 		TotalEmoteCount:   0,
