@@ -50,6 +50,20 @@ func (m *gqlCommentsMap) mergeInto(dst map[int][]string) {
 	}
 }
 
+func (m *gqlCommentsMap) countMinuteRange(startMinute, endMinute int) int {
+	if startMinute > endMinute {
+		return 0
+	}
+	total := 0
+	for minute := startMinute; minute <= endMinute; minute++ {
+		shard := &m.shards[uint32(minute)%gqlDedupeShards]
+		shard.mu.Lock()
+		total += len(shard.data[minute])
+		shard.mu.Unlock()
+	}
+	return total
+}
+
 // extractMinuteRangeInto moves minute buckets into dst so incremental rollup patches
 // can read comments before the final parallel merge.
 func (m *gqlCommentsMap) extractMinuteRangeInto(dst map[int][]string, startMinute, endMinute int) {

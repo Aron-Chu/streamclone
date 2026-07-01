@@ -84,6 +84,22 @@ func TestGQLCommentDeduperEmptyIDStillCountsOncePerRow(t *testing.T) {
 	}
 }
 
+func TestGQLCommentsMapCountMinuteRange(t *testing.T) {
+	var m gqlCommentsMap
+	m.append(1, "a")
+	m.append(1, "b")
+	m.append(2, "c")
+	if got := m.countMinuteRange(1, 1); got != 2 {
+		t.Fatalf("count minute 1 = %d, want 2", got)
+	}
+	if got := m.countMinuteRange(0, 2); got != 3 {
+		t.Fatalf("count range = %d, want 3", got)
+	}
+	if got := m.countMinuteRange(5, 6); got != 0 {
+		t.Fatalf("empty range = %d, want 0", got)
+	}
+}
+
 func TestGQLCommentDeduperRollupMinuteCount(t *testing.T) {
 	var count atomic.Int64
 	state := &vodCommentsFetchState{

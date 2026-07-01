@@ -95,7 +95,7 @@ func (l *goldVODFetchLedger) upsertPlansForSegments(segs []gqlSegmentProgress) e
 	}
 	plans := make([]GoldVODSegmentPlan, 0, len(segs))
 	for _, seg := range segs {
-		if seg.EndSec <= seg.StartSec {
+		if seg.Done || seg.EndSec <= seg.StartSec {
 			continue
 		}
 		plans = append(plans, GoldVODSegmentPlan{
