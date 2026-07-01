@@ -7,7 +7,7 @@
 
 - PR 0B-1 merged (`000049` migration chain on disk).
 - PR 0B-2 deployed (`feat(analytics): wire gold_vod_segments into parallel GQL fetch`).
-- Migration `000049` applied on BearHost Postgres (normal migrate path).
+- [x] Migration `000049` applied on BearHost Postgres (hosted `to_regclass` 2026-07-01).
 - Corpus worker profile has `GOLD_VOD_SEGMENTS_ENABLED=false` until this checklist completes baseline steps 1–4.
 
 ---
@@ -124,4 +124,4 @@ Set `GOLD_VOD_SEGMENTS_ENABLED=false` on canary worker; restart. Migration stays
 
 - [ ] 24h canary: no growth in `dead_letter` without operator action.
 - [ ] Grafana: `analytics_vod_gql_throttle_total` / `analytics_vod_gql_backoff_seconds_total` stable vs baseline.
-- [ ] No false `backfill_jobs.status=done` with unresolved segments (full gate in PR 0B-3).
+- [ ] No false `backfill_jobs.status=done` with unresolved segments (PR 0B-3 completion gate; verify after canary deploy with flag on).
