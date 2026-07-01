@@ -289,7 +289,7 @@ Complete **before opening PR 0B** (Gate 0 + 0B prerequisites):
 ### PR 0B-3 — completion semantics
 
 - [x] Design note: `docs/agent-notes/corpus-pr0b3-completion-semantics.md`
-- [ ] `resolveGoldBackfillOutcome` / job finish must not mark `done` when durable segments remain unresolved
+- [x] `BackfillWorker.applyGoldSegmentCompletionGate` blocks `done` when durable segments remain unresolved (flag on, gold full tier)
 - [ ] Reclaim expired leases (`status=running` + stale `lease_expires_at`) — integration test proof
 
 ### Post-0B (not blocking 0B start)

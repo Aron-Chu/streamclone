@@ -1,6 +1,6 @@
-# PR 0B-3 — Gold completion semantics (design note, read-only)
+# PR 0B-3 — Gold completion semantics
 
-**Status:** Design only — **no runtime code in this note.**
+**Status:** Implemented (`gold_vod_completion.go`, `BackfillWorker.applyGoldSegmentCompletionGate`).
 **Depends on:** PR 0B-2 (`GOLD_VOD_SEGMENTS_ENABLED` wiring) deployed with canary soak.
 
 ---

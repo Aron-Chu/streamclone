@@ -286,6 +286,7 @@ func (w *BackfillWorker) runOnce(ctx context.Context) (processed bool, err error
 		}
 		syncCtx = WithGoldBackfillJobID(syncCtx, job.ID)
 		_, syncErr := w.sync.SyncHistoricalStream(syncCtx, jobStreamID, job.Login, viewersOnly, forceChat, "")
+		syncErr = w.applyGoldSegmentCompletionGate(ctx, job, jobStreamID, syncErr)
 		if syncErr == nil && ivrResult.ShadowOnly && w.sync != nil {
 			if _, recErr := w.sync.ReconcileGoldIVRShadowAfterGQL(ctx, jobStreamID, job.Login, ivrResult); recErr != nil {
 				slog.Warn("gold ivr shadow reconciliation failed", "stream_id", jobStreamID, "err", recErr)
@@ -337,6 +338,7 @@ func (w *BackfillWorker) runOnce(ctx context.Context) (processed bool, err error
 		defer cancel()
 	}
 	_, syncErr := w.sync.SyncHistoricalStream(syncCtx, jobStreamID, job.Login, viewersOnly, forceChat, "")
+	syncErr = w.applyGoldSegmentCompletionGate(ctx, job, jobStreamID, syncErr)
 	var outcome backfillOutcome
 	if syncErr != nil && strings.EqualFold(job.Tier, "silver") {
 		outcome = resolveSilverBackfillOutcome(*job, syncErr, time.Now())
