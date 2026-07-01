@@ -176,7 +176,7 @@ Script-enforced gates replace ad-hoc “migrate then pray” steps. **Do not** `
 2. Push Commit A + Commit B (hosted auth boundary + gate scripts).
 3. `make bearhost-rsync`
 4. **`BEARHOST_ANALYTICS_GATE_REMOTE=1 make bearhost-analytics-predeploy-gate`** — **stop** if `BLOCK_ANALYTICS_RECREATE=1` (never bare gate from dev when local Docker is up).
-5. On VPS: `make migrate` (000045–000050 required; 000051/000052 optional this batch).
+5. On VPS: `make migrate` (000045–000050 required; through **000058** when shipping emote-materialization retirement).
 
 **Migration chain parity:** Migrations **000045–000049** must remain in the repo whenever BearHost prod schema ≥ 45. `bearhost-rsync --delete` must not drop migration files that prod has already applied — otherwise `golang-migrate` fails at version 49 with “no migration found for version 49”.
 

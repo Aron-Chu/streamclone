@@ -89,7 +89,7 @@ curl_body() {
 
 phase_a_public_boundary() {
   local fail=0
-  local code health_tmp emotes_tmp
+  local code health_tmp
 
   echo "==> Phase A: public boundary (${BASE})"
 
@@ -127,23 +127,14 @@ phase_a_public_boundary() {
     fi
   done
 
-  emotes_tmp="$(mktemp)"
-  code="$(curl -sS -o "${emotes_tmp}" -w '%{http_code}' "${BASE}/v1/public/emotes/overview?range=7d")"
-  if [[ "${code}" == "404" ]]; then
-    echo "FAIL: /v1/public/emotes/overview HTTP 404 (route not deployed)" >&2
+  # Emote Atlas retired (migration 000058): public emotes routes must not be live.
+  code="$(curl_code "${BASE}/v1/public/emotes/overview?range=7d")"
+  if [[ "${code}" != "404" && "${code}" != "410" ]]; then
+    echo "FAIL: /v1/public/emotes/overview HTTP ${code} (want 404/410 after atlas retirement)" >&2
     fail=1
-  elif [[ "${code}" == "200" || "${code}" == "503" ]]; then
-    if ! jq -e 'type == "object" and (.aggregateOnly != null or .state != null or .schemaVersion != null or .error != null or .unavailableReason != null)' "${emotes_tmp}" >/dev/null 2>&1; then
-      echo "FAIL: /v1/public/emotes/overview HTTP ${code} but not valid JSON contract" >&2
-      fail=1
-    else
-      echo "OK: /v1/public/emotes/overview HTTP ${code} (not 404)"
-    fi
   else
-    echo "FAIL: /v1/public/emotes/overview HTTP ${code} (want 200 or 503 JSON)" >&2
-    fail=1
+    echo "OK: /v1/public/emotes/overview HTTP ${code} (atlas retired)"
   fi
-  rm -f "${emotes_tmp}"
 
   if [[ "${fail}" -eq 0 ]]; then
     PUBLIC_BOUNDARY=PASS
