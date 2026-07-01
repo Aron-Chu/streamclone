@@ -87,6 +87,32 @@ curl_body() {
   curl -sS -o "${out}" "$@"
 }
 
+expect_blocked() {
+  local method="$1"
+  local path="$2"
+  local code
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -X "${method}" "${BASE}${path}")"
+  if [[ "${code}" != "404" && "${code}" != "403" ]]; then
+    echo "FAIL: ${method} ${path} HTTP ${code} (want 404/403 blocked)" >&2
+    return 1
+  fi
+  echo "OK: ${method} ${path} HTTP ${code} (blocked)"
+  return 0
+}
+
+expect_not_blocked() {
+  local method="$1"
+  local path="$2"
+  local code
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -X "${method}" "${BASE}${path}")"
+  if [[ "${code}" == "404" ]]; then
+    echo "FAIL: ${method} ${path} HTTP 404 (must remain reachable)" >&2
+    return 1
+  fi
+  echo "OK: ${method} ${path} HTTP ${code} (not blocked)"
+  return 0
+}
+
 phase_a_public_boundary() {
   local fail=0
   local code health_tmp
@@ -134,6 +160,48 @@ phase_a_public_boundary() {
     fail=1
   else
     echo "OK: /v1/public/emotes/overview HTTP ${code} (atlas retired)"
+  fi
+
+  echo "==> Phase A: blocked hosted edge routes"
+  local blocked_fail=0
+  local method path
+  while IFS=$'\t' read -r method path; do
+    [[ -z "${method}" ]] && continue
+    if ! expect_blocked "${method}" "${path}"; then
+      blocked_fail=1
+    fi
+  done <<'BLOCKED_ROUTES'
+GET	/v1/analytics/streams/999999/chat-replay?limit=1
+GET	/v1/analytics/streams/999999/chat-replay/
+GET	/v1/analytics/channels/ludwig/chat-logs/messages
+DELETE	/v1/analytics/streams/999999/chat-messages
+POST	/v1/analytics/chat/ingest
+GET	/v1/analytics/tracking/snapshot
+GET	/v1/analytics/top100/readiness
+GET	/v1/analytics/top-roster/readiness?topN=500
+GET	/v1/corpus/readiness
+GET	/v1/internal/corpus/readiness
+GET	/metrics
+GET	/metrics/
+POST	/v1/analytics/streams/999999/sync
+GET	/v1/analytics/sync/active
+POST	/v1/analytics/streams/999999/prefetch-tracker
+GET	/v1/analytics/streams/999999/sync/status
+POST	/v1/analytics/streams/999999/sync/status
+BLOCKED_ROUTES
+  if [[ "${blocked_fail}" -ne 0 ]]; then
+    fail=1
+  fi
+
+  echo "==> Phase A: intentional public routes (must not be 404)"
+  if ! expect_not_blocked GET /healthz; then
+    fail=1
+  fi
+  if ! expect_not_blocked GET '/v1/public/hub?activityWindow=30m'; then
+    fail=1
+  fi
+  if ! expect_not_blocked POST /v1/analytics/channels/ludwig/watch; then
+    fail=1
   fi
 
   if [[ "${fail}" -eq 0 ]]; then
