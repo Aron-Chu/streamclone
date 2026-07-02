@@ -10,7 +10,7 @@
 # env templates only — never commit live .env.local etc.
 .env.*
 !.env.example
-!.env.dev
+!.env.*.example
 deploy/env/.env.pulse-local
 deploy/env/.env.silver-gate-local
 node_modules/
@@ -44,6 +44,7 @@ cookies.txt
 .cursor/plans/
 scripts/.figma-bridge-deps/
 scratch/
+scripts/tmp/
 weppy-project-sync/
 .tmp/
 .playwright-mcp/
@@ -91,6 +92,7 @@ runtime/clipper-twitch.env
 # local output / scratch
 *.bin
 tmp-*.bin
+/storygraph
 /analytics
 /tmp-vod-*.json
 /tmp-probe-hls.sh
@@ -98,6 +100,7 @@ out.json
 *.log.json
 test.md
 **/testdata/rapid/*.fail
+**/testdata/rapid/**/*.fail
 # runtime data
 *.sqlite
 *.sqlite3
@@ -118,6 +121,14 @@ Thumbs.db
 /debug-mcp-*.txt
 /mcp-*.txt
 /pw-*.png
+/pulse-wire-*.png
+
+# Generated editor/plugin bundles
+tools/figma-mcp-bridge-plugin/dist/
+
+# Generated agent/skill mirrors (source of truth lives under .cursor/skills)
+/.agents/skills/
+/.github/skills/
 
 .gocache/
 .gomodcache/
