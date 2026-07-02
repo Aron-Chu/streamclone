@@ -70,9 +70,40 @@ func (h *Handler) publicCacheRefreshLoop(ctx context.Context) {
 func (h *Handler) refreshPublicCaches(ctx context.Context) {
 	_, _, _ = h.loadPublicStats(ctx, true)
 	_, _, _ = h.loadPublicStatus(ctx, true)
-	_, _, _ = h.loadPublicHub(ctx, true, publicHubOptions{})
-	_, _, _ = h.loadPublicHub(ctx, true, publicHubOptions{ActivityWindowMinutes: 7 * 24 * 60})
+	if h.shouldForceRefreshPublicHub(publicHubOptions{}) {
+		_, _, _ = h.loadPublicHub(ctx, true, publicHubOptions{})
+	}
+	if h.shouldForceRefreshPublicHub(publicHubOptions{ActivityWindowMinutes: 7 * 24 * 60}) {
+		_, _, _ = h.loadPublicHub(ctx, true, publicHubOptions{ActivityWindowMinutes: 7 * 24 * 60})
+	}
 	_, _, _ = h.loadPublicEmotesOverview(ctx, true, parsePublicEmotesRange(""))
+}
+
+func (h *Handler) shouldForceRefreshPublicHub(opts publicHubOptions) bool {
+	if h == nil {
+		return false
+	}
+	opts = normalizePublicHubOptions(opts)
+	key := publicHubCacheKey(opts)
+	ttl := publicHubCacheTTLForOptions(opts)
+	now := time.Now()
+	h.hubRefreshMu.Lock()
+	defer h.hubRefreshMu.Unlock()
+	if h.hubLastRefresh == nil {
+		h.hubLastRefresh = make(map[string]time.Time)
+	}
+	if last, ok := h.hubLastRefresh[key]; ok && now.Sub(last) < ttl {
+		return false
+	}
+	h.hubLastRefresh[key] = now
+	return true
+}
+
+func shouldForceRefreshPublicHubAt(last time.Time, now time.Time, opts publicHubOptions) bool {
+	if last.IsZero() {
+		return true
+	}
+	return now.Sub(last) >= publicHubCacheTTLForOptions(opts)
 }
 
 func (h *Handler) getPublicStats(w http.ResponseWriter, r *http.Request) {

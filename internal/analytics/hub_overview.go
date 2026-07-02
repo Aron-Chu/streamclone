@@ -492,12 +492,13 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 		if len(rollups) == 0 {
 			windows = append(windows, channelWindow{record: rec, viewers: rec.CurrentViewers, coverageState: "stats_only"})
 		} else {
-			win := summarizeChannelWindow(rec, rollups)
+			win := summarizeChannelWindow(rec, filterPublicHubLiveRollups(rollups))
 			windows = append(windows, win)
 		}
 
+		liveRollups := filterPublicHubLiveRollups(rollups)
 		perMinuteEmote := map[int64]int{}
-		for _, ru := range rollups {
+		for _, ru := range liveRollups {
 			emoteCount := hubRollupEmoteCount(ru)
 			bucket := ru.MinuteTS.UTC().Truncate(time.Minute).UnixMilli()
 			perMinuteEmote[bucket] += emoteCount
@@ -939,6 +940,7 @@ func applyHubTierCount(counts *HubTierCounts, status string, n int) {
 
 func summarizeChannelWindow(rec *StreamRecord, rollups []MinuteRollup) channelWindow {
 	win := channelWindow{record: rec, viewers: rec.CurrentViewers, coverageState: "stats_only"}
+	rollups = filterPublicHubLiveRollups(rollups)
 	if len(rollups) == 0 {
 		return win
 	}
@@ -980,6 +982,7 @@ func summarizeChannelWindow(rec *StreamRecord, rollups []MinuteRollup) channelWi
 // windowTrendPct compares activity (chat+emotes) in the most recent 5 minutes
 // against the prior 5 minutes, returning a bounded percentage delta.
 func windowTrendPct(rollups []MinuteRollup) float64 {
+	rollups = filterPublicHubLiveRollups(rollups)
 	n := len(rollups)
 	if n < 4 {
 		return 0
@@ -1019,6 +1022,20 @@ func hubLiveViewerRollup(ru MinuteRollup) bool {
 		return false
 	}
 	return true
+}
+
+// filterPublicHubLiveRollups keeps only live IRC / verified rows for hub KPIs.
+func filterPublicHubLiveRollups(rollups []MinuteRollup) []MinuteRollup {
+	if len(rollups) == 0 {
+		return rollups
+	}
+	out := make([]MinuteRollup, 0, len(rollups))
+	for _, ru := range rollups {
+		if isLiveChatRollup(ru) || (hubLiveViewerRollup(ru) && ru.ViewerSamples > 0) {
+			out = append(out, ru)
+		}
+	}
+	return out
 }
 
 func hubRollupEmoteCount(ru MinuteRollup) int {
