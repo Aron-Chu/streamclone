@@ -133,7 +133,7 @@ Evidence from repo + `origin/master` archaeology. Local checkouts may be behind 
 - **Sync `master` with `origin/master`** before authoring migrations (avoid `000049` collision).
 - **No write-capable production DB MCP** — `streamclone-hosted-data` is inspect-only (`app_readonly`, SELECT/WITH guard).
 - **No laptop scraper/corpus** unless an explicit ADR reverses `.kiro/steering/laptopworker-hosting.md`.
-- **No second worker identity** until PR 0B (durable segments) + PR 2 (gap detection) land.
+- **Second worker (2026-07-02):** BearHost may run a **silver-only** remote worker against streampulse-vps SoT over Tailscale (`deploy/docker-compose.bearhost-corpus-remote-worker.yml`). VPS keeps a single Gold canary worker; do not add a second worker on VPS without metrics review.
 - **No mobile proxies** unless hosted metrics show Cloudflare/403/429 dominates **after** identity-scoped backoff is measured.
 
 ---
@@ -342,9 +342,11 @@ Suggested split if needed:
 
 ### PR 2 — Coverage ledger + gap detection
 
-- Derive `top500_vod_inventory.gold_status` from segment ledger where possible.
-- Known-empty vs missing classification.
-- Internal gap list + requeue endpoint.
+**Status (2026-07-02):** In progress on `feat/corpus-pr2-gap-detection`.
+
+- Derive `top500_vod_inventory.gold_status` from segment ledger where possible (`SyncTop500GoldStatusFromSegments`).
+- Known-empty vs missing classification (`classifyCorpusGoldGap`, `known_empty` on terminal empty segments).
+- Internal gap list + requeue endpoint (`GET/POST /v1/internal/corpus/gaps`, `GET /v1/internal/corpus/workers`).
 
 ### PR 3 — Internal corpus detail API
 

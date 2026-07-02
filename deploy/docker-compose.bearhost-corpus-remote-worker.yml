@@ -1,0 +1,78 @@
+# BearHost remote corpus worker — drains streampulse-vps SoT over Tailscale.
+# Silver-focused by default (lighter on 8 GB rollback host). Does not run API/Caddy.
+#
+# Prereqs:
+#   1. VPS production exposes Postgres/Redis on tailnet (see streampulse-vps-production-tailnet-db.sh)
+#   2. cp deploy/env/profile-bearhost-corpus-remote-worker.env.example \
+#         deploy/env/profile-bearhost-corpus-remote-worker.local.env
+#   3. Set DATABASE_URL / REDIS_URL to streampulse-vps tailnet endpoints
+#
+# Run on BearHost:
+#   bash scripts/bearhost-corpus-remote-worker.sh
+name: streamclone-bearhost-remote-worker
+
+services:
+  scraper:
+    build:
+      context: ../../streamclone-scraper
+      dockerfile: Dockerfile
+    container_name: bearhost-remote-scraper
+    restart: unless-stopped
+    env_file:
+      - path: env/profile-bearhost-corpus-remote-worker.local.env
+        required: false
+    environment:
+      SCRAPER_API_KEY: ${SCRAPER_API_KEY:-local-dev-key}
+      SCRAPER_MAX_CONCURRENT: ${SCRAPER_MAX_CONCURRENT:-1}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  analytics-workers:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args: { SERVICE: analytics }
+    container_name: bearhost-remote-analytics-workers
+    restart: unless-stopped
+    env_file:
+      - path: env/profile-bearhost-corpus-remote-worker.local.env
+        required: false
+    environment:
+      HTTP_ADDR: ":8080"
+      LOG_LEVEL: info
+      SCRAPER_API_URL: http://scraper:8000/v2/scrape
+      SCRAPER_API_KEY: ${SCRAPER_API_KEY:-local-dev-key}
+      TIMESERIES_ENABLED: "false"
+      CORPUS_WORKERS_ENABLED: "1"
+      TIER0_ENABLED: "false"
+      PULSE_COLLECTOR_ENABLED: "false"
+      PULSE_MAX_ACTIVE_CHANNELS: "0"
+      MAX_CONCURRENT_TRACKED_CHANNELS: "0"
+      # Silver drain on BearHost; VPS worker keeps Gold canary.
+      GOLD_BACKFILL_ENABLED: "false"
+      BACKFILL_GOLD_WORKER_ENABLED: "false"
+      GOLD_VOD_SEGMENTS_ENABLED: "false"
+      BACKFILL_ENABLED: "true"
+      BACKFILL_SILVER_WORKER_COUNT: ${BACKFILL_SILVER_WORKER_COUNT:-1}
+      BACKFILL_GOLD_WORKER_COUNT: "0"
+      SILVER_AUTO_ENQUEUE_ENABLED: ${SILVER_AUTO_ENQUEUE_ENABLED:-true}
+      SILVER_ENQUEUE_SINCE_DAYS: ${SILVER_ENQUEUE_SINCE_DAYS:-60}
+      SILVER_ENQUEUE_TOP_N: ${SILVER_ENQUEUE_TOP_N:-200}
+      SILVER_ENQUEUE_MAX_PER_RUN: ${SILVER_ENQUEUE_MAX_PER_RUN:-25}
+      ANALYTICS_VOD_GQL_CONCURRENCY: "0"
+      ANALYTICS_VOD_GQL_CONCURRENCY_MAX: "0"
+      ANALYTICS_PASS_TT_MAXAGE: "true"
+      ANALYTICS_TT_SCRAPE_BACKOFF_ENABLED: "true"
+    depends_on:
+      scraper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
