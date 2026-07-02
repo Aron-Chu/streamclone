@@ -25,6 +25,20 @@ export interface SetupWelcome {
   setupGuideUrl?: string
 }
 
+export interface TwitchDayClip {
+  id: string
+  url: string
+  title: string
+  thumbnailUrl?: string
+  durationSeconds?: number
+  viewCount?: number
+  creatorName?: string
+}
+
+export interface TwitchDayClipsResponse {
+  items: TwitchDayClip[]
+}
+
 export interface AnalyticsApi {
   ensureChannelEmotes(login: string, twitchId: string, providers?: string[]): Promise<unknown>
   getAnalyticsStream(streamId: string, opts?: AnalyticsStreamOptions): Promise<unknown | null>
@@ -45,6 +59,7 @@ export interface AnalyticsApi {
   getReplayHeatmap(streamId: string, window?: number, channel?: string): Promise<unknown | null>
   getReplayHeatmapDetail(streamId: string, window?: number, channel?: string): Promise<unknown | null>
   getVodStoryboardThumb(vodId: string, offsetSec: number): Promise<unknown | null>
+  getTwitchDayClips(login: string, startedAt: string, endedAt: string): Promise<TwitchDayClipsResponse>
   getSetupWelcome(): Promise<SetupWelcome>
 }
 

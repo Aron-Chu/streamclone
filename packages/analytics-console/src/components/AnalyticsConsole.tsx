@@ -15,7 +15,13 @@ import {
 import { useAnalyticsLive } from '../hooks/useAnalyticsLive.ts'
 import { syncCtaLabel } from '../utils/syncLabel.ts'
 
-export function AnalyticsConsole() {
+export interface AnalyticsConsoleProps {
+  mode?: 'public' | 'local' | string
+  showGameSegments?: boolean
+  buildSessionPath?: (login: string, streamId: string) => string
+}
+
+export function AnalyticsConsole(_props: AnalyticsConsoleProps = {}) {
   const navigate = useNavigate()
   const { login = '', streamId = '' } = useParams<{ login: string; streamId?: string }>()
   const channelLogin = login.trim().toLowerCase()
