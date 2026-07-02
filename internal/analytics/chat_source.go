@@ -150,7 +150,7 @@ func isLiveChatRollup(r MinuteRollup) bool {
 	switch r.ChatSource {
 	case RollupChatSourceLive:
 		return true
-	case RollupChatSourceGQL, RollupChatSourceIVR:
+	case RollupChatSourceGQL, RollupChatSourceIVR, ChatSourceMixed:
 		return false
 	}
 	if r.SourceConfidence == SourceConfidenceVerified {

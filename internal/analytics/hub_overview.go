@@ -19,6 +19,7 @@ import (
 const (
 	publicHubCacheKeyPrefix = "sp:public:hub"
 	publicHubCacheTTL       = 30 * time.Second
+	publicHubLongCacheTTL   = 5 * time.Minute
 
 	// Per-login profile-image cache. Many channels enter the tracking pool via
 	// metadata/top-500 paths that never persisted a profile_image_url, so the
@@ -231,7 +232,7 @@ func (h *Handler) loadPublicHub(ctx context.Context, forceRefresh bool, opts pub
 		payload := h.buildPublicHub(ctx, opts)
 		if h.rdb != nil {
 			body, _ := json.Marshal(payload)
-			_ = h.rdb.Set(ctx, cacheKey, body, publicHubCacheTTL).Err()
+			_ = h.rdb.Set(ctx, cacheKey, body, publicHubCacheTTLForOptions(opts)).Err()
 		}
 		return payload, nil
 	})
@@ -285,6 +286,14 @@ func normalizePublicHubOptions(opts publicHubOptions) publicHubOptions {
 
 func publicHubCacheKey(opts publicHubOptions) string {
 	return publicHubCacheKeyPrefix + ":activity:" + strconv.Itoa(normalizePublicHubOptions(opts).ActivityWindowMinutes)
+}
+
+func publicHubCacheTTLForOptions(opts publicHubOptions) time.Duration {
+	opts = normalizePublicHubOptions(opts)
+	if opts.ActivityWindowMinutes > hubActivityWindowMinutes {
+		return publicHubLongCacheTTL
+	}
+	return publicHubCacheTTL
 }
 
 func hubActivityBucketMinutes(windowMinutes int) int {
@@ -473,6 +482,7 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 	activityBucketMinutes := hubActivityBucketMinutes(activityWindow)
 	activitySince := now.Add(-time.Duration(activityWindow) * time.Minute)
 	recentSince := now.Add(-time.Duration(hubActivityWindowMinutes+5) * time.Minute)
+	longActivityWindow := activityWindow > hubActivityWindowMinutes
 
 	for i, rec := range live {
 		rec, loadedRollups, rollups := h.hubRecentRollupWindow(ctx, rec, recentSince, hubActivityWindowMinutes+5)
@@ -482,12 +492,13 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 		if len(rollups) == 0 {
 			windows = append(windows, channelWindow{record: rec, viewers: rec.CurrentViewers, coverageState: "stats_only"})
 		} else {
-			win := summarizeChannelWindow(rec, rollups)
+			win := summarizeChannelWindow(rec, filterPublicHubLiveRollups(rollups))
 			windows = append(windows, win)
 		}
 
+		liveRollups := filterPublicHubLiveRollups(rollups)
 		perMinuteEmote := map[int64]int{}
-		for _, ru := range rollups {
+		for _, ru := range liveRollups {
 			emoteCount := hubRollupEmoteCount(ru)
 			bucket := ru.MinuteTS.UTC().Truncate(time.Minute).UnixMilli()
 			perMinuteEmote[bucket] += emoteCount
@@ -503,8 +514,10 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 			}
 		}
 		activityRollups := rollupsSince(loadedRollups, activitySince)
-		if bucketed, err := h.store.RecentRollupBucketsByStreamID(ctx, rec.StreamID, activitySince, activityBucketMinutes, hubActivityMaxPoints); err == nil {
-			activityRollups = bucketed
+		if !longActivityWindow && h.store != nil {
+			if bucketed, err := h.store.RecentRollupBucketsByStreamID(ctx, rec.StreamID, activitySince, activityBucketMinutes, hubActivityMaxPoints); err == nil {
+				activityRollups = bucketed
+			}
 		}
 		for _, ru := range activityRollups {
 			bucket := ru.MinuteTS.UTC().Truncate(time.Minute).UnixMilli()
@@ -855,7 +868,7 @@ func (h *Handler) buildHubCorpusPipeline(ctx context.Context, now time.Time) Hub
 
 	// Errors (e.g. roster tables absent in local dev) degrade to zeroed counts;
 	// collector capacity is still populated from the in-memory snapshot.
-	report, err := h.buildTop100ReadinessReport(ctx, topN, cfg.LiveAdmissionEnabled)
+	report, err := h.buildTop100ReadinessReport(ctx, topN, cfg.LiveAdmissionEnabled, ReadinessReportOptions{SkipRollups: true})
 	if err != nil {
 		pipeline.State = CorpusStatusDegraded
 	}
@@ -927,6 +940,7 @@ func applyHubTierCount(counts *HubTierCounts, status string, n int) {
 
 func summarizeChannelWindow(rec *StreamRecord, rollups []MinuteRollup) channelWindow {
 	win := channelWindow{record: rec, viewers: rec.CurrentViewers, coverageState: "stats_only"}
+	rollups = filterPublicHubLiveRollups(rollups)
 	if len(rollups) == 0 {
 		return win
 	}
@@ -968,6 +982,7 @@ func summarizeChannelWindow(rec *StreamRecord, rollups []MinuteRollup) channelWi
 // windowTrendPct compares activity (chat+emotes) in the most recent 5 minutes
 // against the prior 5 minutes, returning a bounded percentage delta.
 func windowTrendPct(rollups []MinuteRollup) float64 {
+	rollups = filterPublicHubLiveRollups(rollups)
 	n := len(rollups)
 	if n < 4 {
 		return 0
@@ -1007,6 +1022,20 @@ func hubLiveViewerRollup(ru MinuteRollup) bool {
 		return false
 	}
 	return true
+}
+
+// filterPublicHubLiveRollups keeps only live IRC / verified rows for hub KPIs.
+func filterPublicHubLiveRollups(rollups []MinuteRollup) []MinuteRollup {
+	if len(rollups) == 0 {
+		return rollups
+	}
+	out := make([]MinuteRollup, 0, len(rollups))
+	for _, ru := range rollups {
+		if isLiveChatRollup(ru) || (hubLiveViewerRollup(ru) && ru.ViewerSamples > 0) {
+			out = append(out, ru)
+		}
+	}
+	return out
 }
 
 func hubRollupEmoteCount(ru MinuteRollup) int {

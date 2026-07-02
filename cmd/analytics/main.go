@@ -398,6 +398,9 @@ func main() {
 			}
 		}
 		analytics.StartStaleBackfillReclaimer(ctx, pool, staleLease, 5*time.Minute, logger)
+		if cfg.GoldVODSegmentsEnabled {
+			analytics.StartStaleGoldVODSegmentReclaimer(ctx, pool, 0, 0, logger)
+		}
 		if cfg.BackfillQueueMaintenanceEnabled {
 			analytics.StartBackfillQueueMaintainer(ctx, pool, cfg.BackfillQueueMaintenanceInterval, analytics.BackfillQueueMaintenanceOptions{
 				StaleRunningAfter: staleLease,

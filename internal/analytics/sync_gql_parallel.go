@@ -1846,6 +1846,10 @@ func (s *SyncService) fetchGQLSegment(
 			return fetchErr
 		}
 
+		if state.goldLedger != nil {
+			state.goldLedger.heartbeatSegment(*seg)
+		}
+
 		pageStartOffset := offset
 		reqBody := buildVideoCommentsGQLRequest(videoID, gqlVideoCommentsSHA256, useCursor, offset, nextCursor)
 		gqlResp, err := s.postGQLVideoComments(ctx, reqBody, coord, state.requestStats)
@@ -2002,6 +2006,20 @@ func (s *SyncService) fetchGQLSegmentSerial(
 	if offset < seg.StartSec {
 		offset = seg.StartSec
 	}
+	if state.goldLedger != nil {
+		if err := state.goldLedger.beginSegment(seg); err != nil {
+			if errors.Is(err, errGoldSegmentSkip) {
+				return errGoldSegmentSkip
+			}
+			return err
+		}
+	}
+	var fetchErr error
+	defer func() {
+		if fetchErr != nil && state.goldLedger != nil {
+			state.goldLedger.failSegment(*seg, fetchErr)
+		}
+	}()
 	useCursor := false
 	cursorFailed := false
 	nextCursor := ""
@@ -2018,7 +2036,12 @@ func (s *SyncService) fetchGQLSegmentSerial(
 		}
 
 		if err := coord.Wait(ctx); err != nil {
-			return err
+			fetchErr = err
+			return fetchErr
+		}
+
+		if state.goldLedger != nil {
+			state.goldLedger.heartbeatSegment(*seg)
 		}
 
 		reqBody := buildVideoCommentsGQLRequest(videoID, gqlVideoCommentsSHA256, useCursor, offset, nextCursor)
@@ -2029,7 +2052,8 @@ func (s *SyncService) fetchGQLSegmentSerial(
 		if err != nil {
 			seg.OffsetSec = offset
 			state.saveParallel(true)
-			return err
+			fetchErr = err
+			return fetchErr
 		}
 		if isGQLIntegrityError(gqlResp) {
 			if useCursor {
@@ -2049,12 +2073,14 @@ func (s *SyncService) fetchGQLSegmentSerial(
 			}
 			seg.OffsetSec = offset
 			state.saveParallel(true)
-			return fmt.Errorf("gql video comments integrity error")
+			fetchErr = fmt.Errorf("gql video comments integrity error")
+			return fetchErr
 		}
 		if len(gqlResp.Errors) > 0 {
 			seg.OffsetSec = offset
 			state.saveParallel(true)
-			return fmt.Errorf("gql video comments error: %s", gqlResp.Errors[0].Message)
+			fetchErr = fmt.Errorf("gql video comments error: %s", gqlResp.Errors[0].Message)
+			return fetchErr
 		}
 		if gqlResp.Data.Video == nil || gqlResp.Data.Video.Comments == nil {
 			state.finishSegment(seg, offset)

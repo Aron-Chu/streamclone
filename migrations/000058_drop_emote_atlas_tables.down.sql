@@ -1,0 +1,1 @@
+﻿-- Down migration intentionally omitted: Emote Atlas retirement is forward-only.
