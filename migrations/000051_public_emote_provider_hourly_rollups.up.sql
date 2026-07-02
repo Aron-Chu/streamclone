@@ -8,8 +8,13 @@ CREATE TABLE IF NOT EXISTS public_emote_provider_hourly_rollups (
     emote_minutes BIGINT NOT NULL CHECK (emote_minutes >= 0),
     coverage_pct DOUBLE PRECISION NOT NULL CHECK (coverage_pct >= 0 AND coverage_pct <= 100),
     confidence DOUBLE PRECISION NOT NULL CHECK (confidence >= 0 AND confidence <= 100),
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (bucket_hour, corpus_key, provider)
 );
 
 CREATE INDEX IF NOT EXISTS idx_public_emote_provider_hourly_rollups_bucket
     ON public_emote_provider_hourly_rollups (bucket_hour DESC);
+
+-- Idempotent for DBs that applied an earlier 000051 without generated_at.
+ALTER TABLE public_emote_provider_hourly_rollups
+    ADD COLUMN IF NOT EXISTS generated_at TIMESTAMPTZ NOT NULL DEFAULT now();
