@@ -478,6 +478,41 @@ func (s *Store) rekeyStreamChildRows(ctx context.Context, tx pgx.Tx, fromID, toI
 		return err
 	}
 	_, err = tx.Exec(ctx, `
+		INSERT INTO analytics_minute_peaks (
+			stream_id, minute_ts, chat_count, total_emote_count, seventv_emote_count,
+			emotes_json, chat_source, source_confidence, updated_at
+		)
+		SELECT $2, minute_ts, chat_count, total_emote_count, seventv_emote_count,
+			emotes_json, chat_source, source_confidence, updated_at
+		FROM analytics_minute_peaks
+		WHERE stream_id = $1
+		ON CONFLICT (stream_id, minute_ts) DO UPDATE SET
+			chat_count = GREATEST(analytics_minute_peaks.chat_count, EXCLUDED.chat_count),
+			total_emote_count = GREATEST(analytics_minute_peaks.total_emote_count, EXCLUDED.total_emote_count),
+			seventv_emote_count = GREATEST(analytics_minute_peaks.seventv_emote_count, EXCLUDED.seventv_emote_count),
+			emotes_json = CASE
+				WHEN EXCLUDED.chat_count >= analytics_minute_peaks.chat_count THEN EXCLUDED.emotes_json
+				ELSE analytics_minute_peaks.emotes_json
+			END,
+			chat_source = CASE
+				WHEN EXCLUDED.chat_count >= analytics_minute_peaks.chat_count THEN EXCLUDED.chat_source
+				ELSE analytics_minute_peaks.chat_source
+			END,
+			source_confidence = CASE
+				WHEN EXCLUDED.chat_count >= analytics_minute_peaks.chat_count THEN EXCLUDED.source_confidence
+				ELSE analytics_minute_peaks.source_confidence
+			END,
+			updated_at = now()`,
+		fromID, toID,
+	)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM analytics_minute_peaks WHERE stream_id = $1`, fromID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
 		UPDATE stream_game_segments SET stream_id = $2 WHERE stream_id = $1 AND NOT EXISTS (
 			SELECT 1 FROM stream_game_segments existing
 			WHERE existing.stream_id = $2 AND existing.offset_seconds = stream_game_segments.offset_seconds

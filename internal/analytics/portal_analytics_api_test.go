@@ -83,11 +83,12 @@ func TestPortalStreamMinutesSanitizedShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := strings.ToLower(string(body))
-	for _, forbidden := range []string{"emotes", "rollups", "messages", "operator", "gql", "corpus", "archive"} {
+	for _, forbidden := range []string{"rollups", "messages", "operator", "gql", "corpus", "archive"} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("portal minutes must not contain %q", forbidden)
 		}
 	}
+	assertJSONOmitsForbiddenFields(t, body, []string{"emotes"})
 	if len(resp.Minutes) != 1 || resp.Minutes[0].OffsetSeconds != 120 {
 		t.Fatalf("unexpected minute offset: %+v", resp.Minutes)
 	}
@@ -120,11 +121,48 @@ func TestPortalStreamMinutesEmptyRollups(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := strings.ToLower(string(body))
-	for _, forbidden := range []string{"emotes", "rollups", "messages"} {
+	for _, forbidden := range []string{"rollups", "messages"} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("portal minutes must not contain %q", forbidden)
 		}
 	}
+	assertJSONOmitsForbiddenFields(t, body, []string{"emotes"})
+}
+
+func TestPortalStreamMinutesTopEmotesSanitized(t *testing.T) {
+	start := time.Date(2026, 6, 25, 18, 0, 0, 0, time.UTC)
+	twitchUUID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+	stream := &StreamRecord{
+		StreamID:  "123",
+		Login:     "xqc",
+		StartedAt: start,
+	}
+	rollups := []MinuteRollup{{
+		MinuteTS: start.Add(2 * time.Minute),
+		Emotes: map[string]int{
+			"twitch:" + twitchUUID + ":xqcL": 5,
+			"twitch:1035663:xqcL":            3,
+		},
+	}}
+	h := &Handler{
+		pulseHosted:   PulseHostedConfig{Hosted: true},
+		cdnPublicBase: "https://cdn.streampulse.stream/emotes",
+	}
+	resp := portalMinutesFromRollups(stream, rollups, false)
+	h.enrichPortalMinuteTopEmotes(t.Context(), stream, resp.Minutes, rollups)
+	if len(resp.Minutes) != 1 || len(resp.Minutes[0].TopEmotes) == 0 {
+		t.Fatalf("expected topEmotes, got %+v", resp.Minutes)
+	}
+	for _, emote := range resp.Minutes[0].TopEmotes {
+		if strings.Contains(emote.ImageURL, twitchUUID) {
+			t.Fatalf("twitch uuid leaked into imageUrl: %q", emote.ImageURL)
+		}
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSONOmitsForbiddenFields(t, body, []string{"emotes", "rawChat", "userId", "chatter"})
 }
 
 func TestPortalChannelEmotesSanitizedShape(t *testing.T) {
@@ -156,6 +194,7 @@ func TestPortalChannelEmotesSanitizedShape(t *testing.T) {
 			Provider:           "seventv",
 			ProviderEmoteID:    "abc",
 			Name:               "KEKW",
+			ImageURL:           "https://cdn.7tv.app/emote/abc/4x.webp",
 			UseCount:           120,
 			MinutesSeen:        42,
 			SharePct:           30,
@@ -178,7 +217,7 @@ func TestPortalChannelEmotesSanitizedShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := strings.ToLower(string(body))
-	for _, required := range []string{"coverage", "freshness", "identityresolutionpct", "topemotes", "topmoments"} {
+	for _, required := range []string{"coverage", "freshness", "identityresolutionpct", "topemotes", "topmoments", "imageurl"} {
 		if !strings.Contains(raw, required) {
 			t.Fatalf("portal emotes response missing %q in %s", required, raw)
 		}
@@ -212,7 +251,7 @@ func TestPortalChannelEmotesRouteStoreUnavailable(t *testing.T) {
 	}
 }
 
-func TestPortalStreamMinutesUnauthorizedHosted(t *testing.T) {
+func TestPortalStreamMinutesAllowsGuestHosted(t *testing.T) {
 	h := &Handler{
 		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret-one"}},
 	}
@@ -222,12 +261,12 @@ func TestPortalStreamMinutesUnauthorizedHosted(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/portal/analytics/streams/stream-1/minutes", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("portal minutes must be public-safe, got 401: %s", rec.Body.String())
 	}
 }
 
-func TestHostedPortalChannelStreamsUnauthorizedWithoutAuth(t *testing.T) {
+func TestHostedPortalChannelStreamsAllowsGuestWithoutAuth(t *testing.T) {
 	h := &Handler{
 		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret-one"}},
 	}
@@ -237,18 +276,8 @@ func TestHostedPortalChannelStreamsUnauthorizedWithoutAuth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/portal/analytics/channels/ludwig/streams", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-	var payload map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if payload["error"] != "unauthorized" {
-		t.Fatalf("payload = %#v", payload)
-	}
-	if strings.Contains(strings.ToLower(rec.Body.String()), `"items"`) {
-		t.Fatalf("unauthorized response must not include items, got %s", rec.Body.String())
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("portal channel streams must be public-safe, got 401: %s", rec.Body.String())
 	}
 }
 
@@ -275,6 +304,41 @@ func TestHostedPortalChannelStreamsAllowsBetaKey(t *testing.T) {
 	}
 }
 
+func TestHostedPortalGuestRoutesAllowUnauthenticated(t *testing.T) {
+	h := &Handler{
+		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret-one"}},
+	}
+	r := chi.NewRouter()
+	h.PortalRoutes(r)
+
+	routes := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/v1/portal/analytics/streams/stream-1"},
+		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/summary"},
+		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/sync/status"},
+		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/replay-heatmap"},
+		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/games"},
+		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/recap"},
+		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/minutes"},
+		{http.MethodGet, "/v1/portal/analytics/channels/xqc/emotes?range=30d"},
+		{http.MethodGet, "/v1/portal/analytics/channels/xqc/streams"},
+		{http.MethodGet, "/v1/portal/analytics/channels/xqc/live"},
+	}
+
+	for _, route := range routes {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			req := httptest.NewRequest(route.method, route.path, nil)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code == http.StatusUnauthorized {
+				t.Fatalf("guest portal route must not require auth, got 401: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestNonHostedPortalChannelStreamsAllowsGuest(t *testing.T) {
 	h := &Handler{
 		pulseHosted: PulseHostedConfig{Hosted: false},
@@ -295,6 +359,60 @@ func TestNonHostedPortalChannelStreamsAllowsGuest(t *testing.T) {
 	if payload["error"] != "store_unavailable" {
 		t.Fatalf("payload = %#v, want store_unavailable", payload)
 	}
+}
+
+func TestPortalGuestJSONForbiddenKeys(t *testing.T) {
+	forbidden := []string{
+		"rawChat", "chatText", "message", "messages", "fragments",
+		"chatter", "userLogin", "userId", "operator", "gql", "corpus",
+		"archive", "lease", "recentAdmissions", "rows",
+	}
+
+	t.Run("PortalStreamDetail", func(t *testing.T) {
+		body, err := json.Marshal(PortalStreamDetail{
+			Channel: "xqc",
+			State:   "historical",
+			Sources: []SourceStatus{{Source: "analytics_db", State: "ready"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONOmitsForbiddenFields(t, body, forbidden)
+	})
+
+	t.Run("PortalChannelStreamsResponse", func(t *testing.T) {
+		body, err := json.Marshal(PortalChannelStreamsResponse{
+			Channel: "xqc",
+			Items:   []PortalStreamRecord{{StreamID: "1", Login: "xqc", StartedAt: time.Now().UTC()}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONOmitsForbiddenFields(t, body, forbidden)
+	})
+
+	t.Run("PortalChannelLiveResponse", func(t *testing.T) {
+		body, err := json.Marshal(PortalChannelLiveResponse{
+			Channel: "xqc",
+			State:   "offline",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONOmitsForbiddenFields(t, body, forbidden)
+	})
+
+	t.Run("PortalSyncStatus", func(t *testing.T) {
+		body, err := json.Marshal(PortalSyncStatus{Phase: "completed", Message: "Done"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		syncForbidden := []string{
+			"rawChat", "chatText", "fragments", "chatter", "userLogin", "userId",
+			"operator", "gql", "corpus", "archive", "lease", "recentAdmissions", "rows",
+		}
+		assertJSONOmitsForbiddenFields(t, body, syncForbidden)
+	})
 }
 
 func TestAllowPortalSummaryRateLimitFailOpen(t *testing.T) {

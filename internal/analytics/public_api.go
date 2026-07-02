@@ -37,6 +37,7 @@ func (h *Handler) PublicRoutes(r chi.Router) {
 		r.Get("/stats", h.getPublicStats)
 		r.Get("/status", h.getPublicStatus)
 		r.Get("/hub", h.getPublicHub)
+		r.Get("/hub/moments", h.getPublicHubMoments)
 		r.Get("/emotes/overview", h.getPublicEmotesOverview)
 	})
 }
@@ -70,13 +71,20 @@ func (h *Handler) publicCacheRefreshLoop(ctx context.Context) {
 func (h *Handler) refreshPublicCaches(ctx context.Context) {
 	_, _, _ = h.loadPublicStats(ctx, true)
 	_, _, _ = h.loadPublicStatus(ctx, true)
-	if h.shouldForceRefreshPublicHub(publicHubOptions{}) {
-		_, _, _ = h.loadPublicHub(ctx, true, publicHubOptions{})
-	}
-	if h.shouldForceRefreshPublicHub(publicHubOptions{ActivityWindowMinutes: 7 * 24 * 60}) {
-		_, _, _ = h.loadPublicHub(ctx, true, publicHubOptions{ActivityWindowMinutes: 7 * 24 * 60})
+	for _, opts := range publicHubPrewarmOptions() {
+		if h.shouldForceRefreshPublicHub(opts) {
+			_, _, _ = h.loadPublicHub(ctx, true, opts)
+		}
 	}
 	_, _, _ = h.loadPublicEmotesOverview(ctx, true, parsePublicEmotesRange(""))
+}
+
+func publicHubPrewarmOptions() []publicHubOptions {
+	return []publicHubOptions{
+		{},
+		{ActivityWindowMinutes: 24 * 60},
+		{ActivityWindowMinutes: 7 * 24 * 60},
+	}
 }
 
 func (h *Handler) shouldForceRefreshPublicHub(opts publicHubOptions) bool {
@@ -231,19 +239,20 @@ type PublicAggregateStats struct {
 	VodsAnalyzed          int64
 }
 
+const publicAggregateStatsQuery = `
+		SELECT
+			(SELECT COUNT(*)::bigint FROM analytics_streams),
+			(SELECT COUNT(*)::bigint FROM analytics_minute_rollups WHERE chat_count > 0 AND chat_source_detail = $1),
+			(SELECT COALESCE(SUM(chat_count), 0)::bigint FROM analytics_minute_rollups),
+			(SELECT COUNT(*)::bigint FROM emotes),
+			(SELECT COUNT(*)::bigint FROM analytics_streams WHERE COALESCE(vod_id, '') <> '')`
+
 func (s *Store) PublicAggregateStats(ctx context.Context) (PublicAggregateStats, error) {
 	var out PublicAggregateStats
 	if s == nil || s.db == nil {
 		return out, nil
 	}
-	err := s.db.QueryRow(ctx, `
-		SELECT
-			(SELECT COUNT(*)::bigint FROM analytics_streams),
-			(SELECT COUNT(*)::bigint FROM pulse_bookmarks),
-			(SELECT COALESCE(SUM(chat_count), 0)::bigint FROM analytics_minute_rollups),
-			(SELECT COUNT(*)::bigint FROM emotes),
-			(SELECT COUNT(*)::bigint FROM analytics_streams WHERE COALESCE(vod_id, '') <> '')`,
-	).Scan(
+	err := s.db.QueryRow(ctx, publicAggregateStatsQuery, RollupDetailIVRPeaksOnly).Scan(
 		&out.StreamsTracked,
 		&out.MomentsDetected,
 		&out.ChatMessagesProcessed,

@@ -136,8 +136,8 @@ func (h *Handler) purgeChatMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 type channelChatLogsResponse struct {
-	Streams     []ChannelChatLogStream `json:"streams"`
-	LiveCount   int64                  `json:"liveMessageCount"`
+	Streams   []ChannelChatLogStream `json:"streams"`
+	LiveCount int64                  `json:"liveMessageCount"`
 }
 
 func (h *Handler) channelChatLogs(w http.ResponseWriter, r *http.Request) {

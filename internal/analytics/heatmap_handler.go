@@ -41,6 +41,11 @@ func (h *Handler) replayHeatmap(w http.ResponseWriter, r *http.Request) {
 		window = parsed
 	}
 
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
+		return
+	}
+
 	detail := false
 	if dq := r.URL.Query().Get("detail"); dq != "" {
 		detail = strings.EqualFold(dq, "true") || dq == "1"
@@ -109,12 +114,14 @@ func (h *Handler) replayHeatmap(w http.ResponseWriter, r *http.Request) {
 		resp.StreamID = streamID
 		resp.WindowSeconds = window
 		resp.UpdatedAt = updatedAtMs
+		h.decorateHeatmapDetailResponseEmotes(&resp)
 		respBytes, _ = json.Marshal(resp)
 	} else {
 		resp := heatmap.ComputeHeatmap(rollups, cfg)
 		resp.StreamID = streamID
 		resp.WindowSeconds = window
 		resp.UpdatedAt = updatedAtMs
+		h.decorateHeatmapResponseEmotes(&resp)
 		respBytes, _ = json.Marshal(resp)
 	}
 

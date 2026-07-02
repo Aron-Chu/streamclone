@@ -436,6 +436,7 @@ func (c *Collector) effectiveTrackingPriority(login string, tc *trackedChannel) 
 func (c *Collector) evictOneForIncomingPriorityLocked(now time.Time, incomingPriority int) (string, int, bool) {
 	type candidate struct {
 		login    string
+		tracked  *trackedChannel
 		priority int
 		idle     time.Duration
 	}
@@ -446,7 +447,7 @@ func (c *Collector) evictOneForIncomingPriorityLocked(now time.Time, incomingPri
 			continue
 		}
 		idle := now.Sub(tc.lastViewedAt)
-		candidates = append(candidates, candidate{login: login, priority: victimPriority, idle: idle})
+		candidates = append(candidates, candidate{login: login, tracked: tc, priority: victimPriority, idle: idle})
 	}
 	if len(candidates) == 0 {
 		return "", 0, false
@@ -455,7 +456,13 @@ func (c *Collector) evictOneForIncomingPriorityLocked(now time.Time, incomingPri
 		if candidates[i].priority != candidates[j].priority {
 			return candidates[i].priority < candidates[j].priority
 		}
-		return candidates[i].idle > candidates[j].idle
+		if candidates[i].idle != candidates[j].idle {
+			return candidates[i].idle > candidates[j].idle
+		}
+		if !candidates[i].tracked.addedAt.Equal(candidates[j].tracked.addedAt) {
+			return candidates[i].tracked.addedAt.Before(candidates[j].tracked.addedAt)
+		}
+		return candidates[i].login < candidates[j].login
 	})
 	login := candidates[0].login
 	priority := candidates[0].priority

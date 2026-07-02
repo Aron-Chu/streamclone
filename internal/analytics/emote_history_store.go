@@ -119,6 +119,7 @@ type PortalChannelEmote struct {
 	Provider           string     `json:"provider"`
 	ProviderEmoteID    string     `json:"providerEmoteId"`
 	Name               string     `json:"name"`
+	ImageURL           string     `json:"imageUrl,omitempty"`
 	UseCount           int64      `json:"useCount"`
 	MinutesSeen        int        `json:"minutesSeen"`
 	SharePct           float64    `json:"sharePct"`

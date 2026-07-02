@@ -126,8 +126,10 @@ type Config struct {
 
 	S3Endpoint    string `env:"S3_ENDPOINT"`
 	S3Bucket      string `env:"S3_BUCKET" envDefault:"emotes"`
+	S3Prefix      string `env:"S3_PREFIX"`
 	S3AccessKey   string `env:"S3_ACCESS_KEY"`
 	S3SecretKey   string `env:"S3_SECRET_KEY"`
+	S3PublicRead  bool   `env:"S3_PUBLIC_READ" envDefault:"false"`
 	CDNPublicBase string `env:"CDN_PUBLIC_BASE"`
 
 	CuratorAPIToken   string `env:"CURATOR_API_TOKEN"`
@@ -222,6 +224,7 @@ type Config struct {
 	Top500GoldVODInventoryTopN          int           `env:"TOP500_GOLD_VOD_TOP_N" envDefault:"500"`
 	Top500GoldVODInventoryMaxPerRun     int           `env:"TOP500_GOLD_VOD_MAX_PER_RUN" envDefault:"25"`
 	Top500GoldVODInventoryInterval      time.Duration `env:"TOP500_GOLD_VOD_INTERVAL" envDefault:"15m"`
+	BackfillSilverWorkerCount           int           `env:"BACKFILL_SILVER_WORKER_COUNT" envDefault:"1"`
 	BackfillGoldWorkerCount             int           `env:"BACKFILL_GOLD_WORKER_COUNT" envDefault:"1"`
 	GoldMaxParallelVODs                 int           `env:"GOLD_MAX_PARALLEL_VODS" envDefault:"2"`
 	GoldMaxSegmentsPerVOD               int           `env:"GOLD_MAX_SEGMENTS_PER_VOD" envDefault:"4"`
@@ -257,7 +260,7 @@ type Config struct {
 
 	BackfillEnabled                  bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
 	BackfillWorkerInterval           time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`
-	BackfillStaleRunningAfter        time.Duration `env:"BACKFILL_STALE_RUNNING_AFTER" envDefault:"2h"`
+	BackfillStaleRunningAfter        time.Duration `env:"BACKFILL_STALE_RUNNING_AFTER" envDefault:"15m"`
 	BackfillHeartbeatInterval        time.Duration `env:"BACKFILL_HEARTBEAT_INTERVAL" envDefault:"60s"`
 	BackfillGoldWorkerEnabled        bool          `env:"BACKFILL_GOLD_WORKER_ENABLED"`
 	BackfillQueueMaintenanceEnabled  bool          `env:"BACKFILL_QUEUE_MAINTENANCE_ENABLED" envDefault:"true"`
@@ -347,7 +350,24 @@ type Config struct {
 	Upstream upstream.Endpoints
 }
 
+func applyEnvAlias(canonical, legacy string) {
+	if strings.TrimSpace(os.Getenv(canonical)) != "" {
+		return
+	}
+	if v := strings.TrimSpace(os.Getenv(legacy)); v != "" {
+		_ = os.Setenv(canonical, v)
+	}
+}
+
 func Load() (Config, error) {
+	// Operator docs still reference PULSE_TOP_ROSTER_*; Go reads PULSE_TOP500_*.
+	applyEnvAlias("PULSE_TOP500_ADMISSION_ENABLED", "PULSE_TOP_ROSTER_ADMISSION_ENABLED")
+	applyEnvAlias("PULSE_TOP500_ADMISSION_TOP_N", "PULSE_TOP_ROSTER_ADMISSION_TOP_N")
+	applyEnvAlias("PULSE_TOP500_ADMISSION_INTERVAL", "PULSE_TOP_ROSTER_ADMISSION_INTERVAL")
+	if strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_ENABLED")) == "" {
+		applyEnvAlias("PULSE_TOP500_ADMISSION_ENABLED", "PULSE_TOP_ROSTER_POLL_ENABLED")
+	}
+
 	var c Config
 	if err := env.Parse(&c); err != nil {
 		return Config{}, err
@@ -426,6 +446,12 @@ func Load() (Config, error) {
 	}
 	if c.Top500GoldVODInventoryInterval <= 0 {
 		c.Top500GoldVODInventoryInterval = 15 * time.Minute
+	}
+	if c.BackfillSilverWorkerCount <= 0 {
+		c.BackfillSilverWorkerCount = 1
+	}
+	if c.BackfillSilverWorkerCount > 4 {
+		c.BackfillSilverWorkerCount = 4
 	}
 	if c.BackfillGoldWorkerCount <= 0 {
 		c.BackfillGoldWorkerCount = 1

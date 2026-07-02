@@ -26,6 +26,10 @@ var (
 		Name: "streamclone_top_roster_admission_attempts_total",
 		Help: "Top Roster admission poll outcomes by result and mode.",
 	}, []string{"outcome", "mode"})
+	TopRosterAdmissionSkippedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "streamclone_top_roster_admission_skipped_total",
+		Help: "Top Roster admission skip reasons by mode.",
+	}, []string{"reason", "mode"})
 	TopRosterAdmissionCapacityBlockedTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "streamclone_top_roster_admission_capacity_blocked_total",
 		Help: "Top Roster admission polls stopped because the IRC collector pool was full.",

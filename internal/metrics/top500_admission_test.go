@@ -17,6 +17,8 @@ func TestTopRosterAdmissionMetricsRegisterAndUseAllowedLabels(t *testing.T) {
 	TopRosterAdmissionZeroChatLiveRows.Set(3)
 	TopRosterAdmissionAttemptsTotal.WithLabelValues("admitted", "top_roster").Inc()
 	TopRosterAdmissionAttemptsTotal.WithLabelValues("capacity_full", "top_roster").Inc()
+	TopRosterAdmissionSkippedTotal.WithLabelValues("disabled", "top_roster").Inc()
+	TopRosterAdmissionSkippedTotal.WithLabelValues("env_mismatch", "top_roster").Inc()
 	TopRosterAdmissionCapacityBlockedTotal.Inc()
 
 	if got := testutil.ToFloat64(TopRosterAdmissionEnabled); got != 1 {
@@ -33,6 +35,7 @@ func assertTopRosterAdmissionLabelsAllowed(t *testing.T) {
 	}
 	allowed := map[string]bool{
 		"outcome": true,
+		"reason":  true,
 		"mode":    true,
 	}
 	re := regexp.MustCompile(`\[\]string\{([^}]*)\}`)

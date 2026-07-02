@@ -211,6 +211,33 @@ func TestBulkUpsertMinuteRollupsStampsGQLCanonical(t *testing.T) {
 	}
 }
 
+func TestTopHistoricalChatMinutesUsesMinutePeaks(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	insertTestStream(t, ctx, store, "peak-stream", "chan", 0)
+	minute := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	if err := store.BulkUpsertMinuteRollups(ctx, "peak-stream", []MinuteRollup{{
+		MinuteTS:          minute,
+		ChatCount:         99,
+		TotalEmoteCount:   12,
+		SevenTVEmoteCount: 5,
+		Emotes:            map[string]int{"7tv:wave:Wave": 7},
+	}}); err != nil {
+		t.Fatalf("BulkUpsertMinuteRollups: %v", err)
+	}
+	mustExec(t, ctx, store, `DELETE FROM analytics_minute_rollups WHERE stream_id=$1`, "peak-stream")
+
+	candidates, err := store.TopHistoricalChatMinutesInWindow(ctx, minute.Add(-time.Minute), minute.Add(time.Minute), 5)
+	if err != nil {
+		t.Fatalf("TopHistoricalChatMinutesInWindow: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].StreamID != "peak-stream" || candidates[0].ChatCount != 99 {
+		t.Fatalf("candidates = %+v", candidates)
+	}
+	if candidates[0].Emotes["7tv:wave:Wave"] != 7 {
+		t.Fatalf("emotes = %+v", candidates[0].Emotes)
+	}
+}
+
 func TestAliasReadPathsResolveCanonicalStream(t *testing.T) {
 	ctx, store := setupSessionStore(t)
 	insertTestStream(t, ctx, store, "a", "chan", 0)
@@ -561,6 +588,21 @@ func createSessionTestSchema(t *testing.T, ctx context.Context, store *Store) {
 			total_emote_count INT NOT NULL DEFAULT 0,
 			seventv_emote_count INT NOT NULL DEFAULT 0,
 			emotes_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+			chat_source TEXT NOT NULL DEFAULT '',
+			source_confidence TEXT NOT NULL DEFAULT '',
+			chat_source_detail TEXT NOT NULL DEFAULT '',
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			PRIMARY KEY (stream_id, minute_ts)
+		);
+		CREATE TABLE analytics_minute_peaks (
+			stream_id TEXT NOT NULL REFERENCES analytics_streams(stream_id) ON DELETE CASCADE,
+			minute_ts TIMESTAMPTZ NOT NULL,
+			chat_count INT NOT NULL DEFAULT 0,
+			total_emote_count INT NOT NULL DEFAULT 0,
+			seventv_emote_count INT NOT NULL DEFAULT 0,
+			emotes_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+			chat_source TEXT NOT NULL DEFAULT '',
+			source_confidence TEXT NOT NULL DEFAULT '',
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			PRIMARY KEY (stream_id, minute_ts)
 		);

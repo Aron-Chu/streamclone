@@ -52,14 +52,18 @@ func TestPublicHubResponseOmitsSensitiveKeys(t *testing.T) {
 	resp := sampleHubResponse()
 	// Populate the corpus pipeline so the forbidden-key scan covers it too.
 	resp.CorpusPipeline = HubCorpusPipeline{
-		GeneratedAt:     resp.GeneratedAt,
-		State:           CorpusStatusDegraded,
-		TopN:            500,
-		CollectorActive: 80,
-		CollectorMax:    100,
+		GeneratedAt:               resp.GeneratedAt,
+		State:                     CorpusStatusDegraded,
+		TopN:                      500,
+		LiveAdmissionEnabled:      true,
+		LiveAdmissionTopN:         500,
+		MaxActiveIRCChannels:      100,
+		CollectorActive:           80,
+		CollectorMax:              100,
+		MetadataSampledAgoSeconds: hubTestIntPtr(90),
 		Roster: HubTrackerSummary{
 			Live: 60, CollectorTracking: 40, ExpectedCollectorRows: 60, LiveCollectorDeficitRows: 20,
-			MetadataOnly: 18, MetadataStale: 0, AdmissionDisabled: 0, CapacityBlocked: 2,
+			MetadataOnly: 18, MetadataStale: 0, AdmissionFeatureDisabled: 0, AdmissionDisabled: 0, CapacityBlocked: 2,
 			Warming: 5, Collecting: 35, ViewerOnly: 1, ZeroChatAfterAge: 0,
 		},
 		Silver: HubTierCounts{Queued: 4, Running: 2, Done: 120, Skipped: 3, Failed: 1, Total: 130},
@@ -76,13 +80,42 @@ func TestPublicHubResponseOmitsSensitiveKeys(t *testing.T) {
 	// readiness rows, admission attempts/messages, stream IDs, or job errors.
 	for _, forbidden := range []string{
 		"rollups", `"emotes":{`, "gcs", "gs://", "principal", "betakey", "beta_key", "operatorkey", "gql", "tracker",
-		`"rows"`, "recentadmissions", "admissionoutcome", "admissionmessage", `"streamid"`, "metadatasampled",
+		`"rows"`, "recentadmissions", "admissionoutcome", "admissionmessage", `"streamid"`, "metadatasampledat",
 		"freshnessseconds", `"error"`, "categoryname",
 	} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("public hub payload must not contain %q", forbidden)
 		}
 	}
+}
+
+func TestAdmissionFeatureDisabledRows(t *testing.T) {
+	report := Top100ReadinessReport{Summary: Top100ReadinessSummary{LiveRows: 12}}
+	if got := admissionFeatureDisabledRows(CorpusRuntimeConfig{LiveAdmissionEnabled: true}, report); got != 0 {
+		t.Fatalf("enabled rows = %d, want 0", got)
+	}
+	if got := admissionFeatureDisabledRows(CorpusRuntimeConfig{}, report); got != 12 {
+		t.Fatalf("disabled rows = %d, want 12", got)
+	}
+}
+
+func TestTop500ReportMetadataSampledAgoSeconds(t *testing.T) {
+	if got := top500ReportMetadataSampledAgoSeconds(Top100ReadinessReport{}); got != nil {
+		t.Fatalf("empty report age = %v, want nil", *got)
+	}
+	oldest := 120
+	newest := 30
+	got := top500ReportMetadataSampledAgoSeconds(Top100ReadinessReport{Rows: []Top100ReadinessRow{
+		{MetadataFreshnessSeconds: &newest},
+		{MetadataFreshnessSeconds: &oldest},
+	}})
+	if got == nil || *got != oldest {
+		t.Fatalf("metadata age = %v, want %d", got, oldest)
+	}
+}
+
+func hubTestIntPtr(v int) *int {
+	return &v
 }
 
 func TestSummarizeChannelWindowSynced(t *testing.T) {

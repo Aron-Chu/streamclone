@@ -14,7 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-const defaultBackfillStaleRunningAfter = 2 * time.Hour
+const defaultBackfillStaleRunningAfter = 15 * time.Minute
 
 var (
 	ArchiveExportsConfirmedTotal = promauto.NewCounterVec(prometheus.CounterOpts{

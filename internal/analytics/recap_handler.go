@@ -19,6 +19,10 @@ func (h *Handler) getPulseStreamRecap(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_stream_id"})
 		return
 	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
+		return
+	}
 	payload, err := h.buildPulseStreamRecap(r.Context(), streamID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"streamclone/internal/archive"
@@ -288,12 +289,76 @@ func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup 
 		result = "error"
 		return err
 	}
+	if err := upsertMinutePeaksTx(ctx, tx, streamID, []MinuteRollup{rollup}, RollupChatSourceLive, SourceConfidenceVerified); err != nil {
+		result = "error"
+		return err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		result = "error"
 		return err
 	}
 	s.enqueueRollupTelemetry(ctx, streamID, []MinuteRollup{rollup})
 	return nil
+}
+
+func upsertMinutePeaksTx(ctx context.Context, tx pgx.Tx, streamID string, rollups []MinuteRollup, defaultSource, defaultConfidence string) error {
+	if tx == nil || streamID == "" || len(rollups) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	queued := 0
+	for _, rollup := range rollups {
+		if rollup.MinuteTS.IsZero() || rollup.ChatCount <= 0 {
+			continue
+		}
+		if rollup.Emotes == nil {
+			rollup.Emotes = map[string]int{}
+		}
+		emotes, err := json.Marshal(rollup.Emotes)
+		if err != nil {
+			return err
+		}
+		chatSource := strings.TrimSpace(rollup.ChatSource)
+		if chatSource == "" {
+			chatSource = defaultSource
+		}
+		sourceConfidence := strings.TrimSpace(rollup.SourceConfidence)
+		if sourceConfidence == "" {
+			sourceConfidence = defaultConfidence
+		}
+		batch.Queue(`
+			INSERT INTO analytics_minute_peaks (
+				stream_id, minute_ts, chat_count, total_emote_count, seventv_emote_count,
+				emotes_json, chat_source, source_confidence, updated_at
+			)
+			VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,now())
+			ON CONFLICT (stream_id, minute_ts) DO UPDATE SET
+				chat_count=GREATEST(analytics_minute_peaks.chat_count, EXCLUDED.chat_count),
+				total_emote_count=GREATEST(analytics_minute_peaks.total_emote_count, EXCLUDED.total_emote_count),
+				seventv_emote_count=GREATEST(analytics_minute_peaks.seventv_emote_count, EXCLUDED.seventv_emote_count),
+				emotes_json=CASE
+					WHEN EXCLUDED.chat_count >= analytics_minute_peaks.chat_count THEN EXCLUDED.emotes_json
+					ELSE analytics_minute_peaks.emotes_json
+				END,
+				chat_source=CASE
+					WHEN EXCLUDED.chat_count >= analytics_minute_peaks.chat_count THEN EXCLUDED.chat_source
+					ELSE analytics_minute_peaks.chat_source
+				END,
+				source_confidence=CASE
+					WHEN EXCLUDED.chat_count >= analytics_minute_peaks.chat_count THEN EXCLUDED.source_confidence
+					ELSE analytics_minute_peaks.source_confidence
+				END,
+				updated_at=now()`,
+			streamID, rollup.MinuteTS.UTC(), rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount,
+			string(emotes), chatSource, sourceConfidence,
+		)
+		queued++
+	}
+	if queued == 0 {
+		return nil
+	}
+	br := tx.SendBatch(ctx, batch)
+	return br.Close()
 }
 
 func refreshStreamSummary(ctx context.Context, tx pgx.Tx, streamID string) error {
@@ -810,6 +875,128 @@ func (s *Store) AggregateRollupBucketsSince(ctx context.Context, since time.Time
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// TopHistoricalChatMinutesInWindow returns bounded per-stream hot minutes for a
+// public hub activity bucket. It prefers analytics_minute_peaks so bucket-clicks
+// do not sort raw rollup windows; emotes_json is read server-side only.
+func (s *Store) TopHistoricalChatMinutesInWindow(ctx context.Context, start, end time.Time, limit int) ([]hubHistoricalMinuteCandidate, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	if !end.After(start) {
+		return nil, nil
+	}
+	if limit <= 0 || limit > hubHistoricalCandidateCap {
+		limit = hubHistoricalCandidateCap
+	}
+	out, err := s.topHistoricalChatMinutesFromPeaks(ctx, start, end, limit)
+	if err == nil {
+		return out, nil
+	}
+	if !isUndefinedTableError(err) {
+		return nil, err
+	}
+	return s.topHistoricalChatMinutesFromRollups(ctx, start, end, limit)
+}
+
+func (s *Store) topHistoricalChatMinutesFromPeaks(ctx context.Context, start, end time.Time, limit int) ([]hubHistoricalMinuteCandidate, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT
+			s.stream_id,
+			s.login,
+			COALESCE(s.display_name, ''),
+			COALESCE(s.profile_image_url, ''),
+			COALESCE(s.vod_id, ''),
+			s.started_at,
+			p.minute_ts,
+			p.chat_count,
+			p.total_emote_count,
+			p.seventv_emote_count,
+			COALESCE(p.emotes_json, '{}'::jsonb)
+		FROM analytics_minute_peaks p
+		JOIN analytics_streams s ON s.stream_id = p.stream_id
+		WHERE p.minute_ts >= $1
+		  AND p.minute_ts < $2
+		  AND p.chat_count > 0
+		ORDER BY p.chat_count DESC, p.total_emote_count DESC, p.minute_ts DESC
+		LIMIT $3`, start.UTC(), end.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanHubHistoricalMinuteCandidates(rows, limit)
+}
+
+func (s *Store) topHistoricalChatMinutesFromRollups(ctx context.Context, start, end time.Time, limit int) ([]hubHistoricalMinuteCandidate, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT
+			s.stream_id,
+			s.login,
+			COALESCE(s.display_name, ''),
+			COALESCE(s.profile_image_url, ''),
+			COALESCE(s.vod_id, ''),
+			s.started_at,
+			r.minute_ts,
+			r.chat_count,
+			r.total_emote_count,
+			r.seventv_emote_count,
+			COALESCE(r.emotes_json, '{}'::jsonb)
+		FROM analytics_minute_rollups r
+		JOIN analytics_streams s ON s.stream_id = r.stream_id
+		WHERE r.minute_ts >= $1
+		  AND r.minute_ts < $2
+		  AND r.chat_count > 0
+		  AND `+sqlPublicLiveChatMinutePredicate+`
+		ORDER BY r.chat_count DESC, r.total_emote_count DESC, r.minute_ts DESC
+		LIMIT $3`, start.UTC(), end.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanHubHistoricalMinuteCandidates(rows, limit)
+}
+
+type historicalCandidateRows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}
+
+func scanHubHistoricalMinuteCandidates(rows historicalCandidateRows, limit int) ([]hubHistoricalMinuteCandidate, error) {
+	out := make([]hubHistoricalMinuteCandidate, 0, limit)
+	for rows.Next() {
+		var cand hubHistoricalMinuteCandidate
+		var rawEmotes []byte
+		if err := rows.Scan(
+			&cand.StreamID,
+			&cand.Login,
+			&cand.DisplayName,
+			&cand.ProfileImageURL,
+			&cand.VodID,
+			&cand.StartedAt,
+			&cand.MinuteTS,
+			&cand.ChatCount,
+			&cand.TotalEmoteCount,
+			&cand.SevenTVEmoteCount,
+			&rawEmotes,
+		); err != nil {
+			return nil, err
+		}
+		if len(rawEmotes) > 0 {
+			_ = json.Unmarshal(rawEmotes, &cand.Emotes)
+		}
+		if cand.Emotes == nil {
+			cand.Emotes = map[string]int{}
+		}
+		out = append(out, cand)
+	}
+	return out, rows.Err()
+}
+
+func isUndefinedTableError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
 }
 
 func (s *Store) SetStreamVodID(ctx context.Context, streamID, vodID, source string) error {
@@ -1564,6 +1751,10 @@ func (s *Store) BulkUpsertMinuteRollups(ctx context.Context, streamID string, ro
 			return err
 		}
 	}
+	if err := upsertMinutePeaksTx(ctx, tx, streamID, rollups, RollupChatSourceGQL, SourceConfidenceCanonical); err != nil {
+		result = "error"
+		return err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		result = "error"
@@ -1649,6 +1840,10 @@ func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollu
 			result = "error"
 			return err
 		}
+	}
+	if err := upsertMinutePeaksTx(ctx, tx, streamID, rollups, RollupChatSourceGQL, SourceConfidenceCanonical); err != nil {
+		result = "error"
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

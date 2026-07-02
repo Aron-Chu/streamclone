@@ -62,15 +62,24 @@ type PortalSyncStatus struct {
 	Stale     bool      `json:"stale,omitempty"`
 }
 
+// PortalMinuteTopEmote is a bounded per-minute emote preview (no raw emote maps or ids).
+type PortalMinuteTopEmote struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider,omitempty"`
+	ImageURL string `json:"imageUrl,omitempty"`
+	Count    int    `json:"count"`
+}
+
 // PortalMinutePoint is a sanitized per-minute series point (no emote maps or raw chat).
 type PortalMinutePoint struct {
-	OffsetSeconds     int  `json:"offsetSeconds"`
-	ViewerAvg         int  `json:"viewerAvg,omitempty"`
-	ViewerMax         int  `json:"viewerMax,omitempty"`
-	ViewerLatest      int  `json:"viewerLatest,omitempty"`
-	ChatCount         int  `json:"chatCount,omitempty"`
-	SevenTVEmoteCount int  `json:"seventvEmoteCount,omitempty"`
-	Missing           bool `json:"missing,omitempty"`
+	OffsetSeconds     int                    `json:"offsetSeconds"`
+	ViewerAvg         int                    `json:"viewerAvg,omitempty"`
+	ViewerMax         int                    `json:"viewerMax,omitempty"`
+	ViewerLatest      int                    `json:"viewerLatest,omitempty"`
+	ChatCount         int                    `json:"chatCount,omitempty"`
+	SevenTVEmoteCount int                    `json:"seventvEmoteCount,omitempty"`
+	TopEmotes         []PortalMinuteTopEmote `json:"topEmotes,omitempty"`
+	Missing           bool                   `json:"missing,omitempty"`
 }
 
 // PortalStreamMinutesResponse exposes portal-safe minute rollups for chart rails.
@@ -237,6 +246,10 @@ func (h *Handler) portalStreamDetail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_stream_id"})
 		return
 	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
+		return
+	}
 	stream, err := h.store.StreamByID(r.Context(), streamID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -290,6 +303,10 @@ func (h *Handler) portalStreamSummary(w http.ResponseWriter, r *http.Request) {
 	streamID := strings.TrimSpace(chi.URLParam(r, "streamID"))
 	if streamID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_stream_id"})
+		return
+	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
 		return
 	}
 	if h.pulseHosted.Hosted && h.rateLimiter != nil {
@@ -425,6 +442,11 @@ func (h *Handler) portalStreamMinutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := portalMinutesFromRollups(stream, rollups, includePeaks)
+	timeline := filterTimelineRollups(rollups)
+	h.enrichPortalMinuteTopEmotes(r.Context(), stream, resp.Minutes, timeline)
+	if includePeaks {
+		h.enrichPortalMinuteTopEmotes(r.Context(), stream, resp.ProvisionalPeakMinutes, provisionalPeakCandidateRollups(rollups))
+	}
 	body, err := json.Marshal(resp)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encode_failed"})
@@ -439,7 +461,11 @@ func (h *Handler) portalStreamMinutes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) authorizeHostedPortalStreamAccess(w http.ResponseWriter, r *http.Request) bool {
-	return h.authorizeHostedStreamTimelineAccess(w, r)
+	// Portal analytics routes return sanitized aggregate rollups only (no raw chat).
+	// Public /analytics pages are intentionally no-login on hosted production.
+	_ = w
+	_ = r
+	return true
 }
 
 func (h *Handler) portalChannelEmotes(w http.ResponseWriter, r *http.Request) {
@@ -467,6 +493,7 @@ func (h *Handler) portalChannelEmotes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "channel_emotes_unavailable"})
 		return
 	}
+	resp.TopEmotes = h.decoratePortalChannelEmotes(r.Context(), resp.TopEmotes)
 	body, err := json.Marshal(resp)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encode_failed"})

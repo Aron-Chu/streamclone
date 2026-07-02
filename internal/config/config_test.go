@@ -150,12 +150,13 @@ func TestGoldParallelScanConfigDefaultsAndCaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.GoldMaxParallelVODs != 2 || cfg.GoldMaxSegmentsPerVOD != 4 || cfg.GoldGlobalGQLRPM != 120 || cfg.GoldPerVODGQLRPM != 30 || cfg.GoldSegmentSizeSeconds != 600 || cfg.GoldRetryMax != 3 || cfg.GoldLeaseTTLSeconds != 120 {
-		t.Fatalf("unexpected gold defaults: parallel=%d segments=%d globalRPM=%d perVodRPM=%d segment=%d retry=%d lease=%d",
-			cfg.GoldMaxParallelVODs, cfg.GoldMaxSegmentsPerVOD, cfg.GoldGlobalGQLRPM, cfg.GoldPerVODGQLRPM, cfg.GoldSegmentSizeSeconds, cfg.GoldRetryMax, cfg.GoldLeaseTTLSeconds)
+	if cfg.BackfillSilverWorkerCount != 1 || cfg.BackfillStaleRunningAfter != 15*time.Minute || cfg.GoldMaxParallelVODs != 2 || cfg.GoldMaxSegmentsPerVOD != 4 || cfg.GoldGlobalGQLRPM != 120 || cfg.GoldPerVODGQLRPM != 30 || cfg.GoldSegmentSizeSeconds != 600 || cfg.GoldRetryMax != 3 || cfg.GoldLeaseTTLSeconds != 120 {
+		t.Fatalf("unexpected gold defaults: silverWorkers=%d staleAfter=%s parallel=%d segments=%d globalRPM=%d perVodRPM=%d segment=%d retry=%d lease=%d",
+			cfg.BackfillSilverWorkerCount, cfg.BackfillStaleRunningAfter, cfg.GoldMaxParallelVODs, cfg.GoldMaxSegmentsPerVOD, cfg.GoldGlobalGQLRPM, cfg.GoldPerVODGQLRPM, cfg.GoldSegmentSizeSeconds, cfg.GoldRetryMax, cfg.GoldLeaseTTLSeconds)
 	}
 
 	clearTop500Env(t)
+	t.Setenv("BACKFILL_SILVER_WORKER_COUNT", "99")
 	t.Setenv("GOLD_MAX_PARALLEL_VODS", "99")
 	t.Setenv("GOLD_MAX_SEGMENTS_PER_VOD", "99")
 	t.Setenv("GOLD_GLOBAL_GQL_RPM", "0")
@@ -167,9 +168,9 @@ func TestGoldParallelScanConfigDefaultsAndCaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.GoldMaxParallelVODs != 16 || cfg.GoldMaxSegmentsPerVOD != 64 || cfg.GoldGlobalGQLRPM != 120 || cfg.GoldPerVODGQLRPM != 30 || cfg.GoldSegmentSizeSeconds != 60 || cfg.GoldRetryMax != 10 || cfg.GoldLeaseTTLSeconds != 30 {
-		t.Fatalf("unexpected gold caps: parallel=%d segments=%d globalRPM=%d perVodRPM=%d segment=%d retry=%d lease=%d",
-			cfg.GoldMaxParallelVODs, cfg.GoldMaxSegmentsPerVOD, cfg.GoldGlobalGQLRPM, cfg.GoldPerVODGQLRPM, cfg.GoldSegmentSizeSeconds, cfg.GoldRetryMax, cfg.GoldLeaseTTLSeconds)
+	if cfg.BackfillSilverWorkerCount != 4 || cfg.GoldMaxParallelVODs != 16 || cfg.GoldMaxSegmentsPerVOD != 64 || cfg.GoldGlobalGQLRPM != 120 || cfg.GoldPerVODGQLRPM != 30 || cfg.GoldSegmentSizeSeconds != 60 || cfg.GoldRetryMax != 10 || cfg.GoldLeaseTTLSeconds != 30 {
+		t.Fatalf("unexpected gold caps: silverWorkers=%d parallel=%d segments=%d globalRPM=%d perVodRPM=%d segment=%d retry=%d lease=%d",
+			cfg.BackfillSilverWorkerCount, cfg.GoldMaxParallelVODs, cfg.GoldMaxSegmentsPerVOD, cfg.GoldGlobalGQLRPM, cfg.GoldPerVODGQLRPM, cfg.GoldSegmentSizeSeconds, cfg.GoldRetryMax, cfg.GoldLeaseTTLSeconds)
 	}
 }
 

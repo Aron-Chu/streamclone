@@ -49,14 +49,14 @@ type PortalCoverageTruthResponse struct {
 }
 
 type portalSessionFigmaBundle struct {
-	stream         *StreamRecord
-	rollups        []heatmap.MinuteRollup
-	points         []heatmap.ReplayHeatmapDetailPoint
-	startedAt      time.Time
-	isLive         bool
-	vodID          string
-	currentOffset  int
-	peaks          []PortalPeak
+	stream          *StreamRecord
+	rollups         []heatmap.MinuteRollup
+	points          []heatmap.ReplayHeatmapDetailPoint
+	startedAt       time.Time
+	isLive          bool
+	vodID           string
+	currentOffset   int
+	peaks           []PortalPeak
 	dataCoveragePct float64
 }
 
@@ -86,7 +86,7 @@ func (h *Handler) loadPortalSessionFigmaBundle(ctx context.Context, stream *Stre
 	}
 	vodID := strings.TrimSpace(stream.VodID)
 	extPeaks := buildExtensionPeaks(heatmapRollups, points, isLive, vodID, streamStart)
-	peaks := portalPeaksFromExtension(extPeaks, heatmapRollups, points, vodID)
+	peaks := h.decoratePortalPeaks(ctx, portalPeaksFromExtension(extPeaks, heatmapRollups, points, vodID))
 	metrics := summarizeStreamMetrics(stream, filterTimelineRollups(storeRollupsFromHeatmap(heatmapRollups)))
 	return &portalSessionFigmaBundle{
 		stream:          stream,
