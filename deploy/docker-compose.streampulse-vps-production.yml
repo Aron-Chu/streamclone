@@ -1,0 +1,88 @@
+# StreamPulse VPS production overlay — API + Postgres + Redis + single corpus worker.
+#
+# Bigger VPS (streampulse-vps, 23.173.152.156) becomes production SoT. No Tailscale
+# dependency on BearHost for Postgres/Redis.
+#
+# Merge (on VPS after BearHost pg_restore):
+#   docker compose \
+#     --env-file .env \
+#     --env-file deploy/env/profile-full.env \
+#     --env-file deploy/env/profile-streampulse-vps-production.local.env \
+#     -f deploy/docker-compose.yml \
+#     -f deploy/docker-compose.release.yml \
+#     -f deploy/docker-compose.bearhost-prod.yml \
+#     -f deploy/docker-compose.bearhost-pulse.yml \
+#     -f deploy/docker-compose.streampulse-vps-production.yml \
+#     up -d
+#
+# Canary: keep BACKFILL_GOLD_WORKER_COUNT=1 and GOLD_VOD_SEGMENTS_ENABLED=true on
+# analytics-workers only until soak passes. Do not enable a second worker here.
+name: streamclone-production
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  analytics:
+    environment:
+      BACKFILL_ENABLED: "false"
+      GOLD_BACKFILL_ENABLED: "false"
+      CORPUS_WORKERS_ENABLED: "0"
+      GOLD_VOD_SEGMENTS_ENABLED: "false"
+
+  analytics-workers:
+    profiles: []
+    container_name: streampulse-analytics-workers
+    restart: unless-stopped
+    environment:
+      CORPUS_WORKERS_ENABLED: "1"
+      BACKFILL_ENABLED: ${BACKFILL_ENABLED:-true}
+      GOLD_BACKFILL_ENABLED: ${GOLD_BACKFILL_ENABLED:-true}
+      BACKFILL_GOLD_WORKER_COUNT: ${BACKFILL_GOLD_WORKER_COUNT:-1}
+      BACKFILL_SILVER_WORKER_COUNT: ${BACKFILL_SILVER_WORKER_COUNT:-1}
+      ANALYTICS_VOD_GQL_CONCURRENCY: ${ANALYTICS_VOD_GQL_CONCURRENCY:-2}
+      ANALYTICS_VOD_GQL_CONCURRENCY_MAX: ${ANALYTICS_VOD_GQL_CONCURRENCY_MAX:-4}
+      GOLD_VOD_SEGMENTS_ENABLED: ${GOLD_VOD_SEGMENTS_ENABLED:-true}
+      PULSE_COLLECTOR_ENABLED: "false"
+      PULSE_MAX_ACTIVE_CHANNELS: "0"
+      MAX_CONCURRENT_TRACKED_CHANNELS: "0"
+      TIMESERIES_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      scraper:
+        condition: service_healthy
+
+  scraper:
+    profiles: []
+    container_name: streampulse-scraper
+
+  pulse-caddy:
+    ports:
+      - "127.0.0.1:8090:80"
+
+  video:
+    profiles: ["playback"]
+
+  chat:
+    profiles: ["playback"]
+
+  frontend:
+    profiles: ["ui"]
+
+  mediamtx:
+    profiles: ["playback"]
+
+  caddy:
+    profiles: ["full-ui"]
