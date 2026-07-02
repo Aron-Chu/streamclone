@@ -33,11 +33,13 @@
 
 | Plane | What it is | Default host | User trigger | Public exposure |
 |-------|------------|--------------|--------------|-----------------|
-| **Live Pulse** | Helix viewer sampler + IRC collector → minute rollups (`chat_source=live`) | BearHost API + streampulse-vps collector | Automatic for tracked roster | Global/channel activity graphs (live-only filter) |
-| **Manual VOD import** | Extension/portal `PulseBackfillManager` → GQL chat for one VOD | BearHost `analytics` | User clicks “load missed moments” / backfill API | Per-session imported view; labeled `chat_source=gql` |
-| **Autonomous corpus (Silver/Gold)** | Bronze index → Silver TT charts → Gold GQL chat backfill at scale | **streampulse-vps** (`scraper` + `analytics-workers`) | Operator config (`CORPUS_WORKERS_ENABLED=1`) | Hub **aggregate-only** tier counts (`corpusPipeline.silver\|gold`); no per-stream errors on public API |
+| **Live Pulse** | Helix viewer sampler + IRC collector → minute rollups (`chat_source=live`) | **streampulse-vps** production stack (`streamclone-production-analytics`, local Postgres) | Automatic for tracked roster | Global/channel activity graphs (live-only filter) |
+| **Manual VOD import** | Extension/portal `PulseBackfillManager` → GQL chat for one VOD | **streampulse-vps** `analytics` (hosted API) | User clicks “load missed moments” / backfill API | Per-session imported view; labeled `chat_source=gql` |
+| **Autonomous corpus (Silver/Gold)** | Bronze index → Silver TT charts → Gold GQL chat backfill at scale | **streampulse-vps** (`scraper` + `analytics-workers`, single worker) | Operator config (`CORPUS_WORKERS_ENABLED=1`) | Hub **aggregate-only** tier counts (`corpusPipeline.silver\|gold`); no per-stream errors on public API |
 
-**Corpus re-enable (2026-06-30):** Autonomous Silver/Gold workers run on streampulse-vps only. BearHost API keeps `CORPUS_WORKERS_ENABLED=false`. Manual VOD import stays on BearHost. See [`docs/live-first-pivot.md`](../live-first-pivot.md) § “Corpus re-enable”.
+**Production cutover (2026-07-02):** Hosted API SoT is **streampulse-vps** (`23.173.152.156`) — API, Postgres, Redis, Caddy tunnel, and **one** corpus worker. BearHost (`141.11.243.103`) is rollback-only until soak passes. Legacy split topology (BearHost API + VPS tailnet worker/collector) is retired; stop obsolete `streamclone-collector` / `streampulse-vps-corpus` stacks on VPS.
+
+**Corpus re-enable (2026-06-30):** Autonomous Silver/Gold workers run on streampulse-vps only. Manual VOD import uses the hosted analytics service on streampulse-vps. See [`docs/live-first-pivot.md`](../live-first-pivot.md) § “Corpus re-enable”.
 
 **Doc drift warning:** Older drafts of `live-first-pivot.md` claimed the corpus Go pipeline was deleted. **That is false in the current tree.** Agents must trust **this file + filesystem + hosted MCP queries**, not stale purge notes, before deleting or rebuilding corpus code.
 
