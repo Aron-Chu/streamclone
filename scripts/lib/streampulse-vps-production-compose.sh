@@ -56,6 +56,11 @@ streampulse_vps_production_compose_args() {
     --env-file "${root}/deploy/env/profile-bearhost-prod.env"
     --env-file "${root}/deploy/env/profile-bearhost-pulse.env"
     --env-file "${root}/${env_local}"
+  )
+  if [[ -f "${root}/deploy/env/profile-streampulse-vps-r2-corpus.local.env" ]]; then
+    args+=(--env-file "${root}/deploy/env/profile-streampulse-vps-r2-corpus.local.env")
+  fi
+  args+=(
     -f "${root}/deploy/docker-compose.yml"
     -f "${root}/deploy/docker-compose.prod.yml"
     -f "${root}/deploy/docker-compose.bearhost-build.yml"
@@ -94,23 +99,30 @@ streampulse_vps_production_service_running() {
 }
 
 streampulse_vps_corpus_worker_conflicts() {
-  local root="${1:?root required}"
+  local _root="${1:?root required}"
   local -a conflicts=()
-  local line name status
+  local -A seen=()
+  local name status
+  while IFS='|' read -r name status; do
+    [[ -z "${name}" ]] && continue
+    if [[ -z "${seen[${name}]+x}" ]]; then
+      conflicts+=("${name} (${status})")
+      seen["${name}"]=1
+    fi
+  done < <(docker ps -a --filter 'label=com.docker.compose.project=streamclone-corpus' --format '{{.Names}}|{{.Status}}' 2>/dev/null || true)
   while IFS='|' read -r name status; do
     [[ -z "${name}" ]] && continue
     case "${name}" in
-      streampulse-analytics-workers|streampulse-scraper)
-        conflicts+=("${name} (${status})")
+      streamclone-pulse-irc-collector|streamclone-collector|streamclone-legacy-collector|legacy-collector)
+        if [[ -z "${seen[${name}]+x}" ]]; then
+          conflicts+=("${name} (${status})")
+          seen["${name}"]=1
+        fi
         ;;
     esac
   done < <(docker ps -a --format '{{.Names}}|{{.Status}}' 2>/dev/null || true)
   if [[ ${#conflicts[@]} -gt 0 ]]; then
     printf '%s\n' "${conflicts[@]}"
-    return 0
-  fi
-  if docker compose -f "${root}/deploy/docker-compose.streampulse-vps-corpus.yml" ps -q 2>/dev/null | grep -q .; then
-    docker compose -f "${root}/deploy/docker-compose.streampulse-vps-corpus.yml" ps --format '{{.Name}}|{{.Status}}'
     return 0
   fi
   return 1

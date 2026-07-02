@@ -100,6 +100,52 @@ expect_blocked() {
   return 0
 }
 
+expect_auth_required() {
+  local method="$1"
+  local path="$2"
+  local code
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -X "${method}" "${BASE}${path}")"
+  if [[ "${code}" != "401" && "${code}" != "403" ]]; then
+    echo "FAIL: ${method} ${path} HTTP ${code} (want 401/403 auth required)" >&2
+    return 1
+  fi
+  echo "OK: ${method} ${path} HTTP ${code} (auth required)"
+  return 0
+}
+
+expect_404() {
+  local method="$1"
+  local path="$2"
+  local code
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -X "${method}" "${BASE}${path}")"
+  if [[ "${code}" != "404" ]]; then
+    echo "FAIL: ${method} ${path} HTTP ${code} (want 404)" >&2
+    return 1
+  fi
+  echo "OK: ${method} ${path} HTTP 404"
+  return 0
+}
+
+expect_admin_auth_no_operator_leak() {
+  local path="$1"
+  local tmp code
+  tmp="$(mktemp)"
+  code="$(curl -sS -o "${tmp}" -w '%{http_code}' "${BASE}${path}")"
+  if [[ "${code}" != "401" && "${code}" != "403" ]]; then
+    echo "FAIL: GET ${path} HTTP ${code} (want 401/403 admin auth required)" >&2
+    rm -f "${tmp}"
+    return 1
+  fi
+  if grep -Eq '"(caps|rates|queues|config|trackedChannels|alwaysTracked|jobs|rateLimitKeysSampled|watchRateLimitPerMin|backfillRateLimitPerHour)"' "${tmp}"; then
+    echo "FAIL: GET ${path} leaked admin operator fields while unauthenticated" >&2
+    rm -f "${tmp}"
+    return 1
+  fi
+  rm -f "${tmp}"
+  echo "OK: GET ${path} HTTP ${code} (admin auth required, no operator fields)"
+  return 0
+}
+
 expect_not_blocked() {
   local method="$1"
   local path="$2"
@@ -173,6 +219,7 @@ phase_a_public_boundary() {
   done <<'BLOCKED_ROUTES'
 GET	/v1/analytics/streams/999999/chat-replay?limit=1
 GET	/v1/analytics/streams/999999/chat-replay/
+GET	/v1/analytics/streams/999999/chat-messages
 GET	/v1/analytics/channels/ludwig/chat-logs/messages
 DELETE	/v1/analytics/streams/999999/chat-messages
 POST	/v1/analytics/chat/ingest
@@ -190,6 +237,31 @@ GET	/v1/analytics/streams/999999/sync/status
 POST	/v1/analytics/streams/999999/sync/status
 BLOCKED_ROUTES
   if [[ "${blocked_fail}" -ne 0 ]]; then
+    fail=1
+  fi
+
+  echo "==> Phase A: auth-gated hosted ops routes"
+  if ! expect_auth_required GET '/v1/internal/corpus/gaps?limit=1'; then
+    fail=1
+  fi
+  if ! expect_admin_auth_no_operator_leak /v1/admin/pulse/health; then
+    fail=1
+  fi
+  if ! expect_admin_auth_no_operator_leak /v1/admin/pulse/registry; then
+    fail=1
+  fi
+
+  echo "==> Phase A: unmatched hosted edge routes"
+  if ! expect_404 GET /grafana/; then
+    fail=1
+  fi
+  if ! expect_404 GET /__pulse_smoke_unmatched__; then
+    fail=1
+  fi
+  if ! expect_404 GET /v1/__pulse_smoke_unmatched__; then
+    fail=1
+  fi
+  if ! expect_404 GET /v1/public/__pulse_smoke_unmatched__; then
     fail=1
   fi
 
