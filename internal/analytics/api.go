@@ -44,6 +44,8 @@ type Handler struct {
 	storyboardCache  *vodStoryboardCache
 	refreshStop      chan struct{}
 	refreshOnce      sync.Once
+	hubRefreshMu     sync.Mutex
+	hubLastRefresh   map[string]time.Time
 }
 
 func NewHandler(store *Store, collector *Collector, helix *HelixClient, syncService *SyncService) *Handler {

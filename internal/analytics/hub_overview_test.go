@@ -127,6 +127,44 @@ func TestHubLiveActivityCountsExcludeCorpusRollups(t *testing.T) {
 	}
 }
 
+func TestFilterPublicHubLiveRollupsExcludesCorpusImports(t *testing.T) {
+	start := time.Date(2026, 6, 26, 17, 0, 0, 0, time.UTC)
+	rollups := []MinuteRollup{
+		{MinuteTS: start, ChatCount: 100, ChatSource: RollupChatSourceGQL, SourceConfidence: SourceConfidenceCanonical, TotalEmoteCount: 50},
+		{MinuteTS: start.Add(time.Minute), ChatCount: 12, ChatSource: RollupChatSourceLive, SourceConfidence: SourceConfidenceVerified, TotalEmoteCount: 8},
+		{MinuteTS: start.Add(2 * time.Minute), ChatCount: 5, ChatSource: ChatSourceMixed, SourceConfidence: SourceConfidenceProvisional, TotalEmoteCount: 3},
+	}
+	filtered := filterPublicHubLiveRollups(rollups)
+	if len(filtered) != 1 || filtered[0].ChatSource != RollupChatSourceLive {
+		t.Fatalf("filtered rollups = %+v, want live only", filtered)
+	}
+	rec := &StreamRecord{StreamID: "s1", Login: "xqc", CurrentViewers: 1000}
+	win := summarizeChannelWindow(rec, rollups)
+	if win.chatPerMin != 12 {
+		t.Fatalf("chatPerMin = %v, want 12 from live rollup only", win.chatPerMin)
+	}
+}
+
+func TestShouldForceRefreshPublicHubAtRespectsLongWindowTTL(t *testing.T) {
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	opts7d := publicHubOptions{ActivityWindowMinutes: 7 * 24 * 60}
+	last := now.Add(-2 * time.Minute)
+	if shouldForceRefreshPublicHubAt(last, now, opts7d) {
+		t.Fatal("7d hub should not refresh after 2m")
+	}
+	if !shouldForceRefreshPublicHubAt(last, now.Add(6*time.Minute), opts7d) {
+		t.Fatal("7d hub should refresh after 5m TTL")
+	}
+	opts30m := publicHubOptions{}
+	last30 := now.Add(-20 * time.Second)
+	if shouldForceRefreshPublicHubAt(last30, now, opts30m) {
+		t.Fatal("30m hub should not refresh after 20s")
+	}
+	if !shouldForceRefreshPublicHubAt(last30, now.Add(31*time.Second), opts30m) {
+		t.Fatal("30m hub should refresh after 30s TTL")
+	}
+}
+
 func TestPublicHubCacheTTLForOptions(t *testing.T) {
 	if got := publicHubCacheTTLForOptions(publicHubOptions{}); got != publicHubCacheTTL {
 		t.Fatalf("default window TTL = %s, want %s", got, publicHubCacheTTL)
@@ -176,10 +214,16 @@ func TestWindowTrendPctRising(t *testing.T) {
 	rollups := make([]MinuteRollup, 0, 10)
 	// prior 5 minutes low, recent 5 minutes high -> strong positive trend.
 	for i := 0; i < 5; i++ {
-		rollups = append(rollups, MinuteRollup{MinuteTS: base.Add(time.Duration(i) * time.Minute), ChatCount: 10})
+		rollups = append(rollups, MinuteRollup{
+			MinuteTS: base.Add(time.Duration(i) * time.Minute), ChatCount: 10,
+			ChatSource: RollupChatSourceLive, SourceConfidence: SourceConfidenceVerified,
+		})
 	}
 	for i := 5; i < 10; i++ {
-		rollups = append(rollups, MinuteRollup{MinuteTS: base.Add(time.Duration(i) * time.Minute), ChatCount: 40})
+		rollups = append(rollups, MinuteRollup{
+			MinuteTS: base.Add(time.Duration(i) * time.Minute), ChatCount: 40,
+			ChatSource: RollupChatSourceLive, SourceConfidence: SourceConfidenceVerified,
+		})
 	}
 	if got := windowTrendPct(rollups); got <= 0 {
 		t.Fatalf("expected positive trend, got %v", got)
