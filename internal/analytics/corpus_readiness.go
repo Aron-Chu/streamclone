@@ -247,6 +247,7 @@ func normalizeCorpusTopN(n int) int {
 func (h *Handler) CorpusRoutes(r chi.Router) {
 	r.Get("/v1/corpus/readiness", h.getCorpusReadiness)
 	r.Get("/v1/internal/corpus/readiness", h.getCorpusReadiness)
+	h.registerCorpusGapRoutes(r)
 }
 
 func (h *Handler) getCorpusReadiness(w http.ResponseWriter, r *http.Request) {
