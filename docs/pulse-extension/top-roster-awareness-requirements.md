@@ -226,9 +226,9 @@ Two backfill systems (do not conflate in docs or code):
 | **Extension Pulse backfill** | Redis via `PulseBackfillManager` | Explicit `POST …/backfill` | ✅ available (quota-limited) |
 | **Archive Silver/Gold** | Postgres `backfill_jobs` | `SilverEnqueuer`, `GoldEnqueuer`, `BackfillWorker` | ❌ workers stopped |
 
-### 3.5 Current Silver / Gold backlog (BearHost Pulse mode)
+### 3.5 Silver / Gold backlog (historical BearHost Pulse mode)
 
-When BearHost is in **Pulse API mode**, Silver/Gold jobs in Postgres are **paused**, not “stuck.”
+When BearHost ran **Pulse API-only mode** (pre-VPS cutover), Silver/Gold jobs in Postgres were **paused**, not “stuck.” Production now runs workers on streampulse-vps with local Postgres.
 
 **Observed snapshot (2026-06, Pulse mode, workers off):**
 

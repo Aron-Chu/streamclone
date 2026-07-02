@@ -5,7 +5,7 @@
 - `7197575` fix(analytics): speed up public hub and isolate mixed live rollups
 - `2660a3a` fix(analytics): heartbeat and reclaim stale gold vod segments
 
-**Scope:** Hub perf + mixed live-graph parity on BearHost API; segment heartbeat/reclaim on streampulse-vps corpus worker (`23.173.152.156`).
+**Scope:** Hub perf + mixed live-graph parity on hosted API; segment heartbeat/reclaim on streampulse-vps corpus worker. **Post-cutover (2026-07-02):** hosted API and Postgres SoT are on streampulse-vps (`23.173.152.156`), not BearHost.
 
 ---
 

@@ -1,13 +1,21 @@
 # BearHost + Cloudflare Tunnel — Pulse extension API
 
+**Production (2026-07-02 cutover):** `api.streampulse.stream` terminates at **streampulse-vps** (`23.173.152.156`). **BearHost** (`141.11.243.103`) remains a **rollback** host only until soak completes — no `cloudflared` connector there.
+
 Public URL target:
 
 ```text
 https://api.streampulse.stream
-  → Cloudflare Tunnel (cloudflared on BearHost)
+  → Cloudflare Tunnel (cloudflared on streampulse-vps)
   → http://127.0.0.1:8090
   → Caddy (Pulse API routes)
-  → analytics + emote + metadata
+  → analytics + emote + metadata + corpus workers (single worker)
+```
+
+Rollback (operator only, not public DNS):
+
+```text
+BearHost localhost:8090  (stack up, no tunnel)
 ```
 
 Reserved for later (do not configure yet):
@@ -21,13 +29,11 @@ Reserved for later (do not configure yet):
 
 ## VPS renewal note
 
-BearHost corpus scraping and Pulse live API **compete for the same 8 GB box**. Options:
+**Current production:** full SoT on **streampulse-vps** (API + Postgres + Redis + single corpus worker + tunnel).
 
-1. **Renew current VPS** — run **either** corpus **or** Pulse API as primary (`bearhost-corpus-only.sh` vs `bearhost-pulse-api.sh`).
-2. **Split hosts** — keep corpus on the existing VPS; run Pulse API on a smaller renewed/smaller instance with `profile-bearhost-pulse.env` only.
-3. **Pause corpus** during beta — set `CORPUS_WORKERS_ENABLED=0` and use `bearhost-pulse-api.sh` until friends finish testing.
+BearHost (`141.11.243.103`) is kept for **rollback** until post-cutover soak passes. Do not decommission BearHost until then.
 
-Do not run heavy silver backfill and live Tier-0 tracking at full priority on one 8 GB VPS.
+Historical note — BearHost corpus scraping and Pulse live API **competed for the same 8 GB box**. That split topology is retired; corpus and API now colocate on streampulse-vps.
 
 ---
 
@@ -37,9 +43,9 @@ Add the domain **streampulse.stream** to Cloudflare. Tunnel routes create the `a
 
 ---
 
-## 2. BearHost — Pulse API stack
+## 2. streampulse-vps — production Pulse API stack
 
-On the VPS (`/opt/streamclone/app`):
+On the VPS (`/opt/streamclone/app`, project `streamclone-production`):
 
 ```bash
 # Beta key (never commit — create on VPS only)
@@ -72,15 +78,15 @@ Services running: `postgres`, `redis`, `metadata`, `analytics` (Tier-0 IRC), `em
 
 ## 3. Cloudflare Tunnel
 
-1. Cloudflare dashboard → **Zero Trust** → **Networks** → **Tunnels** → **Create**.
-2. Name: `streampulse-bearhost`.
-3. Install connector on BearHost (run the command Cloudflare shows):
+1. Cloudflare dashboard → **Zero Trust** → **Networks** → **Tunnels** → select **`streampulse-bearhost`** (name retained from BearHost install).
+2. **Rotate connector token** after cutover (token reuse from BearHost process args is a security risk). Issue a new token; install on **streampulse-vps only**; revoke old connectors.
+3. Install connector on **streampulse-vps** (run the command Cloudflare shows, or `scripts/tmp/cf-tunnel-rotate.sh` with `CLOUDFLARE_API_TOKEN` set):
 
    ```bash
    sudo cloudflared service install <TOKEN_FROM_DASHBOARD>
    ```
 
-4. Add **Public Hostname**:
+4. Add **Public Hostname** (already configured if cutover complete):
 
    | Field | Value |
    |-------|--------|
