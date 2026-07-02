@@ -84,15 +84,16 @@ echo "==> streampulse-vps: migrate + build production stack (GOLD_VOD_SEGMENTS_E
 ssh_worker bash -s <<REMOTE
 set -euo pipefail
 cd ${WORKER_APP}
-ENV_LOCAL=$(streampulse_vps_production_env_local)
+# shellcheck source=scripts/lib/streampulse-vps-production-compose.sh
+source scripts/lib/streampulse-vps-production-compose.sh
+ENV_LOCAL="\$(streampulse_vps_production_env_local)"
 if [[ ! -f "\${ENV_LOCAL}" ]]; then
   echo "missing \${ENV_LOCAL} — copy from deploy/env/profile-streampulse-vps-production.env.example" >&2
   exit 1
 fi
-
-compose() {
-  $(streampulse_vps_production_compose_args "${WORKER_APP}")
-}
+if ! streampulse_vps_ensure_emote_storage_env "${WORKER_APP}/.env"; then
+  exit 1
+fi
 
 # Ensure canary env on workers only
 grep -q '^GOLD_VOD_SEGMENTS_ENABLED=' "\${ENV_LOCAL}" && \
@@ -106,17 +107,17 @@ grep -q '^BACKFILL_GOLD_WORKER_COUNT=' "\${ENV_LOCAL}" && \
   echo 'BACKFILL_GOLD_WORKER_COUNT=1' >> "\${ENV_LOCAL}"
 
 echo "==> migrate (000001–000058 chain must be on disk)"
-compose up -d postgres redis
+streampulse_vps_production_compose "${WORKER_APP}" up -d postgres redis
 sleep 5
-compose up migrate
-compose wait migrate 2>/dev/null || sleep 10
+streampulse_vps_production_compose "${WORKER_APP}" up migrate
+streampulse_vps_production_compose "${WORKER_APP}" wait migrate 2>/dev/null || sleep 10
 
 echo "==> build + start API + single corpus worker (local checkout build)"
-compose build analytics analytics-workers scraper emote metadata
-compose up -d postgres redis migrate metadata emote analytics pulse-caddy scraper analytics-workers
+streampulse_vps_production_compose "${WORKER_APP}" build analytics analytics-workers scraper emote metadata
+streampulse_vps_production_compose "${WORKER_APP}" up -d postgres redis migrate metadata emote analytics pulse-caddy scraper analytics-workers
 
 sleep 20
-compose ps
+streampulse_vps_production_compose "${WORKER_APP}" ps
 REMOTE
 
 echo "==> local smoke on VPS (127.0.0.1:8090)"

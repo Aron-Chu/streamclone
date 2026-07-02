@@ -41,28 +41,26 @@ echo "==> Restore into streamclone-production Postgres volume"
 ssh_worker bash -s <<REMOTE
 set -euo pipefail
 cd ${WORKER_APP}
-ENV_LOCAL=$(streampulse_vps_production_env_local)
+# shellcheck source=scripts/lib/streampulse-vps-production-compose.sh
+source scripts/lib/streampulse-vps-production-compose.sh
+ENV_LOCAL="\$(streampulse_vps_production_env_local)"
 if [[ ! -f "\${ENV_LOCAL}" ]]; then
   echo "missing \${ENV_LOCAL} — copy from deploy/env/profile-streampulse-vps-production.env.example" >&2
   exit 1
 fi
 
-compose() {
-  $(streampulse_vps_production_compose_args "${WORKER_APP}")
-}
-
 for svc in analytics analytics-workers; do
-  if cid="\$(compose ps -q "\${svc}" 2>/dev/null)" && [[ -n "\${cid}" ]]; then
+  if cid="\$(streampulse_vps_production_compose "${WORKER_APP}" ps -q "\${svc}" 2>/dev/null)" && [[ -n "\${cid}" ]]; then
     echo "Refusing restore: production \${svc} is running (cid=\${cid}). Stop it first." >&2
     exit 1
   fi
 done
 
 echo "==> target project: streamclone-production"
-compose config --services | head -5
-compose up -d postgres
+streampulse_vps_production_compose "${WORKER_APP}" config --services | head -5
+streampulse_vps_production_compose "${WORKER_APP}" up -d postgres
 sleep 5
-pg_cid="\$(compose ps -q postgres)"
+pg_cid="\$(streampulse_vps_production_compose "${WORKER_APP}" ps -q postgres)"
 if [[ -z "\${pg_cid}" ]]; then
   echo "postgres container not found in streamclone-production project" >&2
   exit 1

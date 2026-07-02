@@ -69,7 +69,7 @@ services:
     container_name: streampulse-scraper
 
   pulse-caddy:
-    ports:
+    ports: !override
       - "127.0.0.1:8090:80"
 
   video:

@@ -17,6 +17,28 @@ streampulse_vps_production_env_local() {
   echo "deploy/env/profile-streampulse-vps-production.local.env"
 }
 
+# Emote reads S3_* from ${root}/.env (compose env_file). Append non-secret MinIO defaults if missing.
+streampulse_vps_ensure_emote_storage_env() {
+  local env_file="${1:?env file required}"
+  [[ -f "${env_file}" ]] || {
+    echo "streampulse-vps: missing ${env_file} (create from .env.example + BearHost secrets)" >&2
+    return 1
+  }
+  local -a defaults=(
+    'S3_ENDPOINT=http://minio:9000'
+    'S3_BUCKET=emotes'
+    'S3_ACCESS_KEY=minioadmin'
+    'S3_SECRET_KEY=minioadmin'
+  )
+  local kv key
+  for kv in "${defaults[@]}"; do
+    key="${kv%%=*}"
+    if ! grep -q "^${key}=" "${env_file}"; then
+      echo "${kv}" >> "${env_file}"
+    fi
+  done
+}
+
 # Build the same docker compose argv used for production deploy/restore/migrate.
 streampulse_vps_production_compose_args() {
   local root="${1:?root required}"
@@ -31,8 +53,11 @@ streampulse_vps_production_compose_args() {
     --project-name streamclone-production
     --env-file "${root}/.env"
     --env-file "${root}/deploy/env/profile-full.env"
+    --env-file "${root}/deploy/env/profile-bearhost-prod.env"
+    --env-file "${root}/deploy/env/profile-bearhost-pulse.env"
     --env-file "${root}/${env_local}"
     -f "${root}/deploy/docker-compose.yml"
+    -f "${root}/deploy/docker-compose.prod.yml"
     -f "${root}/deploy/docker-compose.bearhost-build.yml"
     -f "${root}/deploy/docker-compose.bearhost-prod.yml"
     -f "${root}/deploy/docker-compose.bearhost-pulse.yml"
