@@ -17,7 +17,7 @@ Added recovery migrations **000051–000058** to the repo:
 
 | Version | Purpose |
 |--------:|---------|
-| 051 | `public_emote_provider_hourly_rollups` |
+| 051 | `public_emote_provider_hourly_rollups` (includes `generated_at`) |
 | 052 | `public_emote_materialization_runs` |
 | 053–055 | Emote Atlas snapshot tables (retired) |
 | 056 | `pulse_collector_leases` |
@@ -48,7 +48,7 @@ ORDER BY 1;
 1. Rsync repo including `migrations/000051`–`000058`.
 2. `docker compose … up migrate` — must exit 0 with `version=58`.
 3. Run `bearhost-analytics-predeploy-gate` (or VPS equivalent) before analytics recreate.
-4. For hosted-production-vps SoT: restore BearHost `pg_dump -Fc` first, then migrate, then smoke.
+4. For hosted-production-vps SoT: restore BearHost `pg_dump -Fc` via `scripts/hosted-production-vps-production-restore.sh` (requires `STREAMPULSE_PG_RESTORE_CONFIRM=YES_I_HAVE_PROD_BACKUP`; uses `streamclone-production` compose project), then migrate, then smoke.
 
 ## Redis
 
