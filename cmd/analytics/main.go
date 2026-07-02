@@ -308,7 +308,7 @@ func main() {
 		cfg.GoldRetryMax,
 		cfg.GoldLeaseTTLSeconds,
 		"",
-	)
+	).WithGoldGQLRateLimits(cfg.GoldGlobalGQLRPM, cfg.GoldPerVODGQLRPM)
 	analytics.LogGoldIVREffectiveConfig(logger, ivrCfg, cfg.GoldIVREnabledChannelAllowlist)
 
 	startArchiveWorkers(ctx, cfg, pool, syncService, archiveSyncExporter, archiveWriter, logger)
@@ -377,9 +377,15 @@ func main() {
 				HeartbeatInterval: heartbeat,
 			}
 		}
-		silverWorker := analytics.NewBackfillWorker(pool, syncService, archiveExporter, cfg.BackfillWorkerInterval).
-			WithWorkerOptions(workerOpts("silver", []string{"silver"}))
-		analytics.StartBackfillWorker(ctx, silverWorker, logger)
+		for i := 0; i < cfg.BackfillSilverWorkerCount; i++ {
+			name := "silver"
+			if cfg.BackfillSilverWorkerCount > 1 {
+				name = fmt.Sprintf("silver-%d", i+1)
+			}
+			silverWorker := analytics.NewBackfillWorker(pool, syncService, archiveExporter, cfg.BackfillWorkerInterval).
+				WithWorkerOptions(workerOpts(name, []string{"silver"}))
+			analytics.StartBackfillWorker(ctx, silverWorker, logger)
+		}
 		if cfg.GoldBackfillEnabled && cfg.BackfillGoldWorkerEnabled {
 			for i := 0; i < cfg.BackfillGoldWorkerCount; i++ {
 				name := "gold"
@@ -414,6 +420,7 @@ func main() {
 		}
 		logger.Info("backfill workers started",
 			"interval", cfg.BackfillWorkerInterval.String(),
+			"silver_worker_count", cfg.BackfillSilverWorkerCount,
 			"gold_worker", cfg.GoldBackfillEnabled && cfg.BackfillGoldWorkerEnabled,
 			"gold_worker_count", cfg.BackfillGoldWorkerCount,
 			"stale_after", staleLease.String(),
@@ -567,7 +574,7 @@ func main() {
 	if pulseHosted.IdleTTL == 0 {
 		pulseHosted.IdleTTL = 15 * time.Minute
 	}
-	handler.WithHeatmapCache(heatmapCache).WithTimeseries(tsWriter).WithRedis(rdb).WithPulseBackfill(pulseBackfill).WithPulseHosted(pulseHosted).WithPulseRuntime(pulseRuntime).WithCorpusRuntime(analytics.CorpusRuntimeConfigFromApp(cfg)).WithEmoteHistoryJobs(emoteHistoryJobConfig).WithCDNPublicBase(cfg.CDNPublicBase)
+	handler.WithHeatmapCache(heatmapCache).WithTimeseries(tsWriter).WithRedis(rdb).WithPulseBackfill(pulseBackfill).WithPulseHosted(pulseHosted).WithPulseRuntime(pulseRuntime).WithCorpusRuntime(analytics.CorpusRuntimeConfigFromApp(cfg)).WithEmoteHistoryJobs(emoteHistoryJobConfig).WithCDNPublicBase(cfg.CDNPublicBase).WithAppConfig(cfg)
 	handler.WithRateLimiter(analytics.NewPulseRateLimiter(rdb, pulseHosted.WatchRatePerMin, pulseHosted.BackfillRatePerHour))
 	analytics.StartProtectedGoLivePoller(ctx, analytics.NewProtectedGoLivePoller(store, helix, collector, pulseRuntime, logger), logger)
 	analytics.StartTop500PriorityWatchPoller(ctx, analytics.NewTop500PriorityWatchPoller(store, collector, cfg, logger), logger)
@@ -589,7 +596,11 @@ func main() {
 		"pulse_backfill", pulseRuntime.BackfillEnabled,
 		"read_only", pulseRuntime.ReadOnlyMode,
 	)
-	handler.StartPublicCacheRefresh(ctx)
+	if shouldStartPublicCacheRefreshForThisProcess() {
+		handler.StartPublicCacheRefresh(ctx)
+	} else {
+		logger.Info("public cache refresh disabled: corpus worker process")
+	}
 	adminArchiveHandler := analytics.NewAdminArchiveHandler(pool, cfg)
 	chatReplayStore := chatreplay.NewStore(pool).WithArchiveProtectRetention(cfg.ArchiveProtectRetention)
 	chatReplayHandler := chatreplay.NewHandler(chatReplayStore).WithLogger(logger).WithIngestEnabled(func() bool {
@@ -620,5 +631,19 @@ func corpusWorkersExplicitlyDisabled() bool {
 	if !ok {
 		return false
 	}
+	v = strings.ToLower(strings.TrimSpace(v))
 	return v == "0" || v == "false"
+}
+
+func corpusWorkersEnabledForThisProcess() bool {
+	v, ok := os.LookupEnv("CORPUS_WORKERS_ENABLED")
+	if !ok {
+		return false
+	}
+	v = strings.ToLower(strings.TrimSpace(v))
+	return v == "1" || v == "true"
+}
+
+func shouldStartPublicCacheRefreshForThisProcess() bool {
+	return !corpusWorkersEnabledForThisProcess()
 }

@@ -93,6 +93,30 @@ func TestPublicStatsCacheHit(t *testing.T) {
 	}
 }
 
+func TestPublicAggregateStatsMomentsDetectedUsesPeakRollups(t *testing.T) {
+	query := strings.ToLower(publicAggregateStatsQuery)
+	if strings.Contains(query, "pulse_bookmarks") {
+		t.Fatal("momentsDetected must not count user bookmarks")
+	}
+	for _, want := range []string{"analytics_minute_rollups", "chat_source_detail", "chat_count > 0"} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("momentsDetected query missing %q: %s", want, publicAggregateStatsQuery)
+		}
+	}
+}
+
+func TestPublicHubPrewarmOptionsInclude24h(t *testing.T) {
+	got := map[int]bool{}
+	for _, opts := range publicHubPrewarmOptions() {
+		got[normalizePublicHubOptions(opts).ActivityWindowMinutes] = true
+	}
+	for _, want := range []int{hubActivityWindowMinutes, 24 * 60, 7 * 24 * 60} {
+		if !got[want] {
+			t.Fatalf("prewarm options missing %d minutes: %+v", want, got)
+		}
+	}
+}
+
 func forbiddenPublicJSONFields(body []byte) []string {
 	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {

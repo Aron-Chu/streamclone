@@ -26,13 +26,6 @@ type corpusWorkersResponse struct {
 	Workers []CorpusGoldWorkerLease `json:"workers"`
 }
 
-func (h *Handler) registerCorpusGapRoutes(r chi.Router) {
-	r.Get("/v1/internal/corpus/gaps", h.getCorpusGoldGaps)
-	r.Post("/v1/internal/corpus/gaps/requeue", h.postCorpusGoldGapsRequeue)
-	r.Get("/v1/internal/corpus/workers", h.getCorpusGoldWorkers)
-	r.Post("/v1/internal/corpus/inventory/{vod_id}/sync-gold-status", h.postSyncTop500GoldStatus)
-}
-
 func (h *Handler) getCorpusGoldGaps(w http.ResponseWriter, r *http.Request) {
 	if h.store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store unavailable"})

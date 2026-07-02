@@ -107,14 +107,24 @@ func HostedBrowserURL(cdnBase, provider, localID, providerEmoteID string) string
 // known, prefer the public 7TV CDN so the extension never proxies localhost images.
 func ExtensionBrowserURL(provider, localID, providerEmoteID string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
+	localID = strings.TrimSpace(localID)
 	providerEmoteID = strings.TrimSpace(providerEmoteID)
-	if (provider == "seventv" || provider == "7tv") && providerEmoteID != "" {
+	if provider == "twitch" {
+		if providerEmoteID != "" && !IsLocalEmoteID(providerEmoteID) {
+			return fmt.Sprintf(twitchCDNTemplate, providerEmoteID)
+		}
+		if localID != "" && !IsLocalEmoteID(localID) {
+			return fmt.Sprintf(twitchCDNTemplate, localID)
+		}
+		return ""
+	}
+	if (provider == "seventv" || provider == "7tv") && providerEmoteID != "" && !IsLocalEmoteID(providerEmoteID) {
 		return fmt.Sprintf(sevenTVCDNTemplate, providerEmoteID)
 	}
-	if (provider == "ffz" || provider == "frankerfacez") && providerEmoteID != "" {
+	if (provider == "ffz" || provider == "frankerfacez") && providerEmoteID != "" && !IsLocalEmoteID(providerEmoteID) {
 		return fmt.Sprintf(ffzCDNTemplate, providerEmoteID)
 	}
-	if (provider == "bttv" || provider == "betterttv") && providerEmoteID != "" {
+	if (provider == "bttv" || provider == "betterttv") && providerEmoteID != "" && !IsLocalEmoteID(providerEmoteID) {
 		return fmt.Sprintf(bttvCDNTemplate, providerEmoteID)
 	}
 	return URL(provider, localID, "1x")

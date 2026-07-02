@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"streamclone/internal/analytics/heatmap"
+	"streamclone/internal/config"
 	"streamclone/internal/timeseries"
 )
 
@@ -38,6 +39,7 @@ type Handler struct {
 	corpusRuntime    CorpusRuntimeConfig
 	emoteHistoryJobs EmoteHistoryJobConfig
 	cdnPublicBase    string
+	appConfig        config.Config
 	statsGroup       singleflight.Group
 	statusGroup      singleflight.Group
 	hubGroup         singleflight.Group
@@ -81,6 +83,11 @@ func (h *Handler) WithCorpusRuntime(cfg CorpusRuntimeConfig) *Handler {
 
 func (h *Handler) WithEmoteHistoryJobs(cfg EmoteHistoryJobConfig) *Handler {
 	h.emoteHistoryJobs = cfg
+	return h
+}
+
+func (h *Handler) WithAppConfig(cfg config.Config) *Handler {
+	h.appConfig = cfg
 	return h
 }
 

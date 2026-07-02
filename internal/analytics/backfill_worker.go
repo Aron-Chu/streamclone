@@ -18,7 +18,7 @@ import (
 
 const maxBackfillSyncAttempts = 3
 
-const defaultBackfillStaleRunningAfter = 2 * time.Hour
+const defaultBackfillStaleRunningAfter = 15 * time.Minute
 const defaultBackfillHeartbeatInterval = 60 * time.Second
 const defaultStaleReclaimerInterval = 5 * time.Minute
 

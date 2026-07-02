@@ -169,6 +169,9 @@ func (s *Store) BulkUpsertProvisionalIVRChatRollups(ctx context.Context, streamI
 	if err := refreshStreamSummaryObserved(ctx, tx, streamID, "immediate"); err != nil {
 		return err
 	}
+	if err := upsertMinutePeaksTx(ctx, tx, streamID, rollups, RollupChatSourceIVR, SourceConfidenceProvisional); err != nil {
+		return err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}

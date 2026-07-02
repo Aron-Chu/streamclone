@@ -160,15 +160,15 @@ func HashSender(userID string, salt []byte) string {
 // passed into BuildMessage. It carries the raw sender id (used only to derive
 // the hash) which must not be persisted directly.
 type RawComment struct {
-	StreamID      string
-	MessageID     string
-	DisplayName   string
+	StreamID       string
+	MessageID      string
+	DisplayName    string
 	CommenterLogin string
-	SenderUserID  string
-	Text          string
-	EmoteFrags    []EmoteFrag
-	OffsetSeconds int
-	MinuteTS      time.Time
+	SenderUserID   string
+	Text           string
+	EmoteFrags     []EmoteFrag
+	OffsetSeconds  int
+	MinuteTS       time.Time
 }
 
 // ShouldKeep reports whether a message should be persisted, given its raw

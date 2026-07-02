@@ -52,6 +52,32 @@ func TestExtensionBrowserURLPrefersSevenTVCDN(t *testing.T) {
 	}
 }
 
+func TestExtensionBrowserURLPrefersTwitchProviderID(t *testing.T) {
+	localUUID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
+	twitchID := "1035663"
+	got := ExtensionBrowserURL("twitch", localUUID, twitchID)
+	want := "https://static-cdn.jtvnw.net/emoticons/v2/1035663/default/dark/2.0"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestExtensionBrowserURLOmitsTwitchUUIDFallback(t *testing.T) {
+	localUUID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
+	if got := ExtensionBrowserURL("twitch", localUUID, ""); got != "" {
+		t.Fatalf("expected empty url for twitch uuid without provider id, got %q", got)
+	}
+}
+
+func TestExtensionBrowserURLSevenTVUUIDUsesLocalPath(t *testing.T) {
+	localUUID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
+	got := ExtensionBrowserURL("seventv", localUUID, localUUID)
+	want := "/emotes/" + localUUID + "/1x.webp"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
 func TestAbsolutizeHostedCDN(t *testing.T) {
 	base := "https://api.streampulse.stream/emotes"
 	localPath := "/emotes/75f49395-d5fc-41da-998c-880c6d8fddcb/1x.webp"

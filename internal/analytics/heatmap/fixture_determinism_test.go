@@ -89,6 +89,7 @@ func fixtureRollups() []MinuteRollup {
 		},
 	}
 }
+
 // expectedEmote is a pinned top-emote expectation for a fixture point.
 type expectedEmote struct {
 	id       string

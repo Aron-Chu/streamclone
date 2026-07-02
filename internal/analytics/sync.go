@@ -56,6 +56,10 @@ type SyncService struct {
 	vodGQLDeferSummaryRefresh     bool
 	vodGQLRollupFlushSegments     int
 	vodGQLRollupFlushInterval     time.Duration
+	goldGlobalGQLRPM              int
+	goldPerVODGQLRPM              int
+	gqlGlobalRateMu               sync.Mutex
+	gqlGlobalNextRequest          time.Time
 	trackerScrapeTimeoutMS        int
 	ttSyncTimeoutMS               int
 	ttBackgroundRetryEnabled      bool
@@ -263,6 +267,8 @@ func NewSyncService(
 		vodGQLDeferSummaryRefresh:     vodGQLDeferSummaryRefresh,
 		vodGQLRollupFlushSegments:     vodGQLRollupFlushSegments,
 		vodGQLRollupFlushInterval:     vodGQLRollupFlushInterval,
+		goldGlobalGQLRPM:              120,
+		goldPerVODGQLRPM:              30,
 		trackerScrapeTimeoutMS:        trackerScrapeTimeoutMS,
 		ttSyncTimeoutMS:               ttSyncTimeoutMS,
 		ttBackgroundRetryEnabled:      ttBackgroundRetryEnabled,
@@ -337,6 +343,41 @@ func (s *SyncService) WithGoldVODSegments(enabled bool, maxSegmentsPerVOD, retry
 	s.goldLeaseTTL = time.Duration(leaseTTLSeconds) * time.Second
 	s.goldVODSegmentOwner = strings.TrimSpace(owner)
 	return s
+}
+
+func (s *SyncService) WithGoldGQLRateLimits(globalRPM, perVODRPM int) *SyncService {
+	if s == nil {
+		return s
+	}
+	if globalRPM > 0 {
+		s.goldGlobalGQLRPM = globalRPM
+	}
+	if perVODRPM > 0 {
+		s.goldPerVODGQLRPM = perVODRPM
+	}
+	return s
+}
+
+func (s *SyncService) waitGoldGQLGlobalRate(ctx context.Context) error {
+	if s == nil || s.goldGlobalGQLRPM <= 0 {
+		return nil
+	}
+	for {
+		s.gqlGlobalRateMu.Lock()
+		now := time.Now()
+		until := s.gqlGlobalNextRequest
+		if until.IsZero() || !until.After(now) {
+			s.gqlGlobalNextRequest = now.Add(time.Minute / time.Duration(s.goldGlobalGQLRPM))
+			s.gqlGlobalRateMu.Unlock()
+			return nil
+		}
+		s.gqlGlobalRateMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Until(until)):
+		}
+	}
 }
 
 // TryGoldIVRLiteBeforeGQL runs the IVR Gold Lite fast path; GQL canonical sync still follows.
@@ -2830,8 +2871,11 @@ func (s *SyncService) postGQLVideoComments(ctx context.Context, reqBody GQLReque
 	var count429, count503 int
 	for attempt := 0; attempt <= gqlVideoCommentsMaxRetries; attempt++ {
 		pageStarted := time.Now()
+		if waitErr := s.waitGoldGQLGlobalRate(ctx); waitErr != nil {
+			return GQLResponse{}, waitErr
+		}
 		if coord != nil {
-			if waitErr := coord.Wait(ctx); waitErr != nil {
+			if waitErr := coord.WaitRequest(ctx); waitErr != nil {
 				return GQLResponse{}, waitErr
 			}
 		}

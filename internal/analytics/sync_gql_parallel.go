@@ -48,13 +48,15 @@ const (
 type gqlRateCoordinator struct {
 	mu             sync.Mutex
 	pauseUntil     time.Time
+	nextPerVOD     time.Time
 	minConcurrency int
 	maxConcurrency int
+	perVODRPM      int
 	activeLimit    atomic.Int32
 	successStreak  atomic.Int32
 }
 
-func newGQLRateCoordinator(minConcurrency, maxConcurrency, initial int) *gqlRateCoordinator {
+func newGQLRateCoordinator(minConcurrency, maxConcurrency, initial int, perVODRPM int) *gqlRateCoordinator {
 	if minConcurrency <= 0 {
 		minConcurrency = 1
 	}
@@ -70,6 +72,7 @@ func newGQLRateCoordinator(minConcurrency, maxConcurrency, initial int) *gqlRate
 	coord := &gqlRateCoordinator{
 		minConcurrency: minConcurrency,
 		maxConcurrency: maxConcurrency,
+		perVODRPM:      perVODRPM,
 	}
 	coord.activeLimit.Store(int32(initial))
 	return coord
@@ -122,6 +125,9 @@ func (c *gqlRateCoordinator) RecordSuccess() {
 }
 
 func (c *gqlRateCoordinator) Wait(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
 	for {
 		c.mu.Lock()
 		until := c.pauseUntil
@@ -134,6 +140,33 @@ func (c *gqlRateCoordinator) Wait(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(delay):
+		}
+	}
+}
+
+func (c *gqlRateCoordinator) WaitRequest(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	if err := c.Wait(ctx); err != nil {
+		return err
+	}
+	for {
+		c.mu.Lock()
+		now := time.Now()
+		until := c.nextPerVOD
+		if c.perVODRPM <= 0 || until.IsZero() || !until.After(now) {
+			if c.perVODRPM > 0 {
+				c.nextPerVOD = now.Add(time.Minute / time.Duration(c.perVODRPM))
+			}
+			c.mu.Unlock()
+			return nil
+		}
+		c.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Until(until)):
 		}
 	}
 }
@@ -1428,7 +1461,7 @@ func (s *SyncService) fetchVODCommentsParallel(ctx context.Context, streamID, lo
 		}
 	}
 
-	coord := newGQLRateCoordinator(s.vodGQLConcurrencyMin, s.vodGQLConcurrencyMax, s.vodGQLConcurrency)
+	coord := newGQLRateCoordinator(s.vodGQLConcurrencyMin, s.vodGQLConcurrencyMax, s.vodGQLConcurrency, s.goldPerVODGQLRPM)
 	var gqlPageCount atomic.Int64
 	requestStats := &gqlRequestStats{}
 	initialSegments := len(segments)

@@ -44,17 +44,21 @@ type publicHubOptions struct {
 }
 
 type PublicHubResponse struct {
-	GeneratedAt    time.Time         `json:"generatedAt"`
-	PoolSize       int               `json:"poolSize"`
-	Corpus         HubCorpus         `json:"corpus"`
-	Coverage       HubCoverage       `json:"coverage"`
-	CorpusPipeline HubCorpusPipeline `json:"corpusPipeline"`
-	Activity       HubActivity       `json:"activity"`
-	EmoteIntel     HubEmoteIntel     `json:"emoteIntel"`
-	TopEmotes      []HubEmote        `json:"topEmotes"`
-	TopMovers      []HubMover        `json:"topMovers"`
-	LiveChannels   []HubLiveChannel  `json:"liveChannels"`
-	Moments        []HubMoment       `json:"moments"`
+	GeneratedAt            time.Time            `json:"generatedAt"`
+	PoolSize               int                  `json:"poolSize"`
+	Corpus                 HubCorpus            `json:"corpus"`
+	Coverage               HubCoverage          `json:"coverage"`
+	CorpusPipeline         HubCorpusPipeline    `json:"corpusPipeline"`
+	Activity               HubActivity          `json:"activity"`
+	EmoteIntel             HubEmoteIntel        `json:"emoteIntel"`
+	TopEmotes              []HubEmote           `json:"topEmotes"`
+	TopMovers              []HubMover           `json:"topMovers"`
+	LiveChannels           []HubLiveChannel     `json:"liveChannels"`
+	Moments                []HubMoment          `json:"moments"`
+	LivePulseMoments       []HubLivePulseMoment `json:"livePulseMoments,omitempty"`
+	LivePulseMomentsStatus string               `json:"livePulseMomentsStatus,omitempty"`
+	LivePulseMomentsReason string               `json:"livePulseMomentsReason,omitempty"`
+	FeaturedSession        HubFeaturedSession   `json:"featuredSession,omitempty"`
 }
 
 // HubCorpusPipeline is a hosted-safe, aggregate-only view of the Top-500 roster
@@ -63,14 +67,18 @@ type PublicHubResponse struct {
 // admission messages, logins, stream IDs, job errors, or scraper/GQL internals
 // (guarded by TestPublicHubResponseOmitsSensitiveKeys).
 type HubCorpusPipeline struct {
-	GeneratedAt     time.Time         `json:"generatedAt"`
-	State           string            `json:"state"`
-	TopN            int               `json:"topN"`
-	CollectorActive int               `json:"collectorActive"`
-	CollectorMax    int               `json:"collectorMax"`
-	Roster          HubTrackerSummary `json:"roster"`
-	Silver          HubTierCounts     `json:"silver"`
-	Gold            HubTierCounts     `json:"gold"`
+	GeneratedAt               time.Time         `json:"generatedAt"`
+	State                     string            `json:"state"`
+	TopN                      int               `json:"topN"`
+	LiveAdmissionEnabled      bool              `json:"liveAdmissionEnabled"`
+	LiveAdmissionTopN         int               `json:"liveAdmissionTopN"`
+	MaxActiveIRCChannels      int               `json:"maxActiveIrcChannels"`
+	CollectorActive           int               `json:"collectorActive"`
+	CollectorMax              int               `json:"collectorMax"`
+	MetadataSampledAgoSeconds *int              `json:"metadataSampledAgoSeconds,omitempty"`
+	Roster                    HubTrackerSummary `json:"roster"`
+	Silver                    HubTierCounts     `json:"silver"`
+	Gold                      HubTierCounts     `json:"gold"`
 }
 
 // HubTrackerSummary mirrors the aggregate state counts from the Top-500 roster
@@ -82,6 +90,7 @@ type HubTrackerSummary struct {
 	LiveCollectorDeficitRows int `json:"liveCollectorDeficitRows"`
 	MetadataOnly             int `json:"metadataOnly"`
 	MetadataStale            int `json:"metadataStale"`
+	AdmissionFeatureDisabled int `json:"admissionFeatureDisabled"`
 	AdmissionDisabled        int `json:"admissionDisabled"`
 	CapacityBlocked          int `json:"capacityBlocked"`
 	Warming                  int `json:"warming"`
@@ -652,6 +661,11 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 	// 9. Lightweight moments feed.
 	resp.Moments = h.buildHubMoments(live, windows, now)
 
+	// 10. Network-wide live pulse moments + featured session preview.
+	resp.LivePulseMoments = h.buildHubLivePulseMoments(ctx, resp.LiveChannels)
+	resp.LivePulseMomentsStatus, resp.LivePulseMomentsReason = hubLivePulseMomentsMeta(resp.LiveChannels, resp.LivePulseMoments)
+	resp.FeaturedSession = h.buildHubFeaturedSession(ctx, resp.LiveChannels)
+
 	return resp
 }
 
@@ -864,7 +878,14 @@ func (h *Handler) buildHubCorpusPipeline(ctx context.Context, now time.Time) Hub
 	if topN <= 0 {
 		topN = hubTrackerTopN
 	}
-	pipeline := HubCorpusPipeline{GeneratedAt: now, State: CorpusStatusHealthy, TopN: topN}
+	pipeline := HubCorpusPipeline{
+		GeneratedAt:          now,
+		State:                CorpusStatusHealthy,
+		TopN:                 topN,
+		LiveAdmissionEnabled: cfg.LiveAdmissionEnabled,
+		LiveAdmissionTopN:    cfg.LiveAdmissionTopN,
+		MaxActiveIRCChannels: cfg.MaxActiveIRCChannels,
+	}
 
 	// Errors (e.g. roster tables absent in local dev) degrade to zeroed counts;
 	// collector capacity is still populated from the in-memory snapshot.
@@ -874,6 +895,7 @@ func (h *Handler) buildHubCorpusPipeline(ctx context.Context, now time.Time) Hub
 	}
 	pipeline.CollectorActive = report.CollectorActive
 	pipeline.CollectorMax = report.CollectorMax
+	pipeline.MetadataSampledAgoSeconds = top500ReportMetadataSampledAgoSeconds(report)
 	if report.TopN > 0 {
 		pipeline.TopN = report.TopN
 	}
@@ -887,6 +909,7 @@ func (h *Handler) buildHubCorpusPipeline(ctx context.Context, now time.Time) Hub
 		LiveCollectorDeficitRows: report.Summary.LiveCollectorDeficitRows,
 		MetadataOnly:             report.Summary.MetadataOnlyRows,
 		MetadataStale:            report.Summary.MetadataStaleRows,
+		AdmissionFeatureDisabled: admissionFeatureDisabledRows(cfg, report),
 		AdmissionDisabled:        report.Summary.AdmissionDisabledRows,
 		CapacityBlocked:          report.Summary.CapacityBlockedRows,
 		Warming:                  report.Summary.WarmingRows,
@@ -920,6 +943,28 @@ func (h *Handler) buildHubCorpusPipeline(ctx context.Context, now time.Time) Hub
 		}
 	}
 	return pipeline
+}
+
+func admissionFeatureDisabledRows(cfg CorpusRuntimeConfig, report Top100ReadinessReport) int {
+	if cfg.LiveAdmissionEnabled || report.Summary.LiveRows <= 0 {
+		return 0
+	}
+	return report.Summary.LiveRows
+}
+
+func top500ReportMetadataSampledAgoSeconds(report Top100ReadinessReport) *int {
+	var maxAge *int
+	for _, row := range report.Rows {
+		if row.MetadataFreshnessSeconds == nil {
+			continue
+		}
+		age := *row.MetadataFreshnessSeconds
+		if maxAge == nil || age > *maxAge {
+			ageCopy := age
+			maxAge = &ageCopy
+		}
+	}
+	return maxAge
 }
 
 func applyHubTierCount(counts *HubTierCounts, status string, n int) {

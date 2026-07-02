@@ -246,8 +246,18 @@ func normalizeCorpusTopN(n int) int {
 
 func (h *Handler) CorpusRoutes(r chi.Router) {
 	r.Get("/v1/corpus/readiness", h.getCorpusReadiness)
-	r.Get("/v1/internal/corpus/readiness", h.getCorpusReadiness)
-	h.registerCorpusGapRoutes(r)
+	r.Route("/v1/internal/corpus", func(ir chi.Router) {
+		if h != nil && h.pulseHosted.Hosted {
+			ir.Use(func(next http.Handler) http.Handler {
+				return AdminArchiveAuthMiddleware(h.appConfig, next)
+			})
+		}
+		ir.Get("/readiness", h.getCorpusReadiness)
+		ir.Get("/gaps", h.getCorpusGoldGaps)
+		ir.Post("/gaps/requeue", h.postCorpusGoldGapsRequeue)
+		ir.Get("/workers", h.getCorpusGoldWorkers)
+		ir.Post("/inventory/{vod_id}/sync-gold-status", h.postSyncTop500GoldStatus)
+	})
 }
 
 func (h *Handler) getCorpusReadiness(w http.ResponseWriter, r *http.Request) {

@@ -30,7 +30,7 @@ const (
 	chatConfidenceCap     = 0.3  // Requirement 11.1
 	viewerConfidenceCap   = 0.4  // Requirement 11.2
 	densityConfidenceCap  = 0.5  // Requirement 11.3
-	emoteAbsentConfidence  = 0.0 // Requirement 11.4
+	emoteAbsentConfidence = 0.0  // Requirement 11.4
 )
 
 // windowConfidence computes the per-signal and overall confidence for one

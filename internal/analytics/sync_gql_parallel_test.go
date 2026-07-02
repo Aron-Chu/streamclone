@@ -95,6 +95,34 @@ func TestGQLRateCoordinatorWaitRespectsPause(t *testing.T) {
 	}
 }
 
+func TestGQLRateCoordinatorWaitRequestHonorsPerVODRPM(t *testing.T) {
+	coord := newGQLRateCoordinator(1, 1, 1, 6000)
+	if err := coord.WaitRequest(context.Background()); err != nil {
+		t.Fatalf("first wait: %v", err)
+	}
+	start := time.Now()
+	if err := coord.WaitRequest(context.Background()); err != nil {
+		t.Fatalf("second wait: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 8*time.Millisecond {
+		t.Fatalf("expected per-VOD RPM wait before second request, got %v", elapsed)
+	}
+}
+
+func TestSyncServiceWaitGoldGQLGlobalRate(t *testing.T) {
+	svc := (&SyncService{}).WithGoldGQLRateLimits(6000, 0)
+	if err := svc.waitGoldGQLGlobalRate(context.Background()); err != nil {
+		t.Fatalf("first wait: %v", err)
+	}
+	start := time.Now()
+	if err := svc.waitGoldGQLGlobalRate(context.Background()); err != nil {
+		t.Fatalf("second wait: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 8*time.Millisecond {
+		t.Fatalf("expected global RPM wait before second request, got %v", elapsed)
+	}
+}
+
 func TestVODCommentsFetchStateMergeDedupe(t *testing.T) {
 	var count atomic.Int64
 	state := &vodCommentsFetchState{
@@ -382,7 +410,7 @@ func TestGQLSegmentPointerSnapshotsSurviveAppend(t *testing.T) {
 }
 
 func TestGQLRateCoordinatorAdaptiveConcurrency(t *testing.T) {
-	coord := newGQLRateCoordinator(2, 6, 4)
+	coord := newGQLRateCoordinator(2, 6, 4, 0)
 	if got := coord.ActiveConcurrency(); got != 4 {
 		t.Fatalf("expected initial concurrency 4, got %d", got)
 	}

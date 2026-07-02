@@ -48,6 +48,11 @@ func (p *Top500PriorityWatchPoller) Enabled() bool {
 
 func StartTop500PriorityWatchPoller(ctx context.Context, poller *Top500PriorityWatchPoller, log *slog.Logger) {
 	if poller == nil || !poller.Enabled() {
+		metrics.TopRosterAdmissionEnabled.Set(0)
+		recordTopRosterAdmissionSkip(TopRosterAdmissionModeDefault, TopRosterAdmissionSkipDisabled)
+		if log != nil {
+			log.Info("top500 priority watch poller disabled", "reason", TopRosterAdmissionSkipDisabled)
+		}
 		return
 	}
 	if log == nil {
@@ -90,26 +95,36 @@ func (p *Top500PriorityWatchPoller) runOnce(ctx context.Context) {
 	metrics.TopRosterAdmissionLiveConsidered.Set(float64(len(live)))
 	snap := p.collector.TrackingSnapshot()
 	metrics.TopRosterAdmissionActiveCollectors.Set(float64(snap.Active))
+	skippedByReason := map[string]int{}
+	if snap.Max <= 0 {
+		recordTopRosterAdmissionSkip(TopRosterAdmissionModeDefault, TopRosterAdmissionSkipEnvMismatch)
+		skippedByReason[TopRosterAdmissionSkipEnvMismatch]++
+	}
 	if len(live) == 0 {
 		metrics.TopRosterAdmissionZeroChatLiveRows.Set(0)
+		p.log.Info("top500 priority watch admission cycle", "considered", 0, "admitted", 0, "skipped_by_reason", skippedByReason)
 		return
 	}
 	now := time.Now().UTC()
 	capacityBlocked := false
+	admitted := 0
 	for _, row := range live {
 		outcome, message, streamID := classifyTopRosterCandidate(p, row)
 		if outcome == TopRosterAdmissionEmptyLogin || outcome == TopRosterAdmissionEmptyStreamID || outcome == TopRosterAdmissionNotLive {
 			recordTopRosterAdmissionMetrics(mode, outcome)
+			recordTopRosterAdmissionSkipForOutcome(mode, outcome, message, skippedByReason)
 			recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, message, snap))
 			continue
 		}
 		if outcome == TopRosterAdmissionDuplicateStream {
 			recordTopRosterAdmissionMetrics(mode, outcome)
+			recordTopRosterAdmissionSkipForOutcome(mode, outcome, "duplicate stream id already tracked", skippedByReason)
 			recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, "duplicate stream id already tracked", snap))
 			continue
 		}
 		if outcome == TopRosterAdmissionAlreadyTracking {
 			recordTopRosterAdmissionMetrics(mode, outcome)
+			recordTopRosterAdmissionSkipForOutcome(mode, outcome, "already tracking", skippedByReason)
 			recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, "already tracking", snap))
 			continue
 		}
@@ -121,9 +136,11 @@ func (p *Top500PriorityWatchPoller) runOnce(ctx context.Context) {
 		recordTopRosterAdmissionMetrics(mode, outcome)
 		recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, message, snap))
 		if resp.Tracking {
+			admitted++
 			p.log.Info("top500 priority watch admitted", "login", normalizeLogin(row.Login), "stream_id", streamID, "active", resp.Active, "max", resp.Max)
 			continue
 		}
+		recordTopRosterAdmissionSkipForOutcome(mode, outcome, message, skippedByReason)
 		p.log.Debug("top500 priority watch skipped", "login", normalizeLogin(row.Login), "message", resp.Message, "active", resp.Active, "max", resp.Max)
 		if outcome == TopRosterAdmissionCapacityFull {
 			capacityBlocked = true
@@ -133,6 +150,7 @@ func (p *Top500PriorityWatchPoller) runOnce(ctx context.Context) {
 	if capacityBlocked {
 		metrics.TopRosterAdmissionCapacityBlockedTotal.Inc()
 	}
+	p.log.Info("top500 priority watch admission cycle", "considered", len(live), "admitted", admitted, "skipped_by_reason", skippedByReason)
 }
 
 func classifyTopRosterCandidate(p *Top500PriorityWatchPoller, row Top500Current) (outcome, message, streamID string) {
@@ -178,6 +196,24 @@ func recordTopRosterAdmissionMetrics(mode, outcome string) {
 		return
 	}
 	metrics.TopRosterAdmissionAttemptsTotal.WithLabelValues(outcome, mode).Inc()
+}
+
+func recordTopRosterAdmissionSkipForOutcome(mode, outcome, message string, skippedByReason map[string]int) {
+	reason := topRosterAdmissionSkipReason(outcome, message)
+	if reason == "" {
+		return
+	}
+	recordTopRosterAdmissionSkip(mode, reason)
+	if skippedByReason != nil {
+		skippedByReason[reason]++
+	}
+}
+
+func recordTopRosterAdmissionSkip(mode, reason string) {
+	if reason == "" {
+		return
+	}
+	metrics.TopRosterAdmissionSkippedTotal.WithLabelValues(reason, mode).Inc()
 }
 
 func containsString(values []string, target string) bool {

@@ -231,6 +231,7 @@ func (h *Handler) buildExtensionVodPulse(ctx context.Context, vodID string) (Ext
 		out.CoverageMessage = "Stream linked but replay analytics are still building."
 	}
 
+	h.decorateExtensionVodPulseEmotes(ctx, &out)
 	return out, nil
 }
 

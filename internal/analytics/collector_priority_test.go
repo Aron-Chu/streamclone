@@ -11,17 +11,18 @@ func TestProtectedChannelPreemptsTopRosterChannel(t *testing.T) {
 	store := &fakeStore{}
 	joiner := &fakeJoiner{}
 	c := NewCollector(store, fakeProvider{}, joiner, nil, nilLogger(), 2, time.Hour, 30*24*time.Hour, 200)
+	now := time.Now().UTC()
 	c.tracked["roster"] = &trackedChannel{
 		login:         "roster",
-		addedAt:       time.Now().UTC(),
-		lastViewedAt:  time.Now().UTC(),
+		addedAt:       now.Add(-time.Minute),
+		lastViewedAt:  now.Add(-time.Minute),
 		refCounts:     map[string]int{},
 		watchPriority: TrackPriorityTopRoster,
 	}
 	c.tracked["other"] = &trackedChannel{
 		login:         "other",
-		addedAt:       time.Now().UTC(),
-		lastViewedAt:  time.Now().UTC(),
+		addedAt:       now,
+		lastViewedAt:  now,
 		refCounts:     map[string]int{},
 		watchPriority: TrackPriorityTopRoster,
 	}
