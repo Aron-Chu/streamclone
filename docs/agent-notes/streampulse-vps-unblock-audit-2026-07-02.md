@@ -1,7 +1,29 @@
 # StreamPulse VPS migration unblock audit — 2026-07-02
 
-**Branch:** `fix/vps-migration-hardening` (not pushed)
-**Scope:** BearHost backup → VPS pg_restore → production deploy → localhost smoke. **No DNS/tunnel cutover.**
+**Branch:** `fix/vps-migration-hardening` · **PR:** [#35](https://github.com/Aron-Chu/streamclone/pull/35)
+
+---
+
+## Post-cutover status (2026-07-02, soak in progress)
+
+| Item | State |
+|------|--------|
+| Public API | `https://api.streampulse.stream` → **hosted-production-vps** cloudflared → `127.0.0.1:8090` |
+| BearHost rollback | Local `:8090` **200**, **no** cloudflared |
+| VPS production stack | `streamclone-production-*` healthy; **1** `streampulse-analytics-workers` |
+| Postgres | `schema_migrations` **58**, dirty **false**; stale running **0**; false-done **0** |
+| Legacy stacks stopped | `hosted-production-vps-corpus` empty; `streamclone-collector` (tailnet IRC) **down** |
+| BearHost decommission | **Hold** until 24h soak |
+| PR 2 / second worker | **not started** |
+| Tunnel token | **Rotate** — cutover reused BearHost connector token |
+
+Hosted smoke: `PULSE_SMOKE_BASE_URL=https://api.streampulse.stream PULSE_EXPECT_HOSTED_MODE=true bash deploy/smoke/bearhost-pulse-api.sh` → **PASS**.
+
+---
+
+## Pre-cutover audit (historical)
+
+**Scope:** BearHost backup → VPS pg_restore → production deploy → localhost smoke. Cutover completed 2026-07-02 after operator approval.
 
 ---
 
@@ -25,7 +47,7 @@
 | BearHost backup | **OK** — `runtime/backups/streamclone-bearhost-20260702T004055Z.dump` (~255M) |
 | VPS pg_restore | **OK** — project `streamclone-production`, `schema_migrations` **58**, dirty **false** |
 | Production deploy | **OK** after ops fixes (see below) |
-| Cloudflare cutover | **not done** — awaiting operator approval |
+| Cloudflare cutover | **done** — tunnel on hosted-production-vps; BearHost connector stopped |
 
 ### Deploy fixes (ops session + branch working tree)
 
@@ -36,15 +58,15 @@
 
 ---
 
-## Hosted API (BearHost still serving `api.streampulse.stream`)
+## Hosted API (hosted-production-vps via Cloudflare)
 
 | Check | Result |
 |-------|--------|
-| `GET /v1/extension/health` | **200** ~300–400ms |
-| `GET /v1/public/hub?activityWindow=30m` | **200** ~300ms–1s |
-| `GET /v1/public/hub?activityWindow=7d` | **200** ~350ms |
+| `GET /v1/extension/health` | **200** ~300ms |
+| `GET /v1/public/hub?activityWindow=30m` | **200** ~150–900ms |
+| `GET /v1/public/hub?activityWindow=7d` | **200** ~120–165ms |
 
-Production traffic **still on BearHost** until tunnel cutover.
+Production traffic on **hosted-production-vps** since 2026-07-02 cutover.
 
 ---
 
@@ -63,7 +85,8 @@ Last read-only verify: **2026-07-02** (WSL SSH audit + `deploy/smoke/bearhost-pu
 | `streampulse-analytics-workers` | **1 container, healthy** |
 | `streampulse-scraper` | **healthy** (production stack, not old corpus-only) |
 | Old corpus-only compose | **no containers** |
-| VPS `cloudflared` | **not running** — cutover requires operator tunnel setup |
+| VPS `cloudflared` | **active** (systemd) |
+| Legacy `streamclone-collector` | **stopped** (was unhealthy — tailnet BearHost PG) |
 
 ---
 
@@ -114,7 +137,7 @@ go test ./internal/analytics -count=1  → PASS
 | Phase | Status |
 |-------|--------|
 | VPS restore + production deploy | **Go** — localhost smoke passes |
-| Cloudflare tunnel/DNS → VPS | **Stop — operator approval required** |
+| Cloudflare tunnel/DNS → VPS | **Done** — soak in progress |
 | BearHost decommission | **Hold** — keep as rollback until 24h soak post-cutover |
 | PR 2 coverage/gap linkage | **Hold** |
 | Second corpus worker | **No** |

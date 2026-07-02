@@ -317,7 +317,7 @@ docker compose --env-file .env --env-file .env.local \
 |------|-------------|-------------|
 | Windows local stack | `http://localhost:8090` | Daily dev on PC with `make up` |
 | Laptop dev hub | `http://laptopworker:8090` | Shared tailnet stack; lighter on PC RAM |
-| Production / BearHost | `https://api.streampulse.stream` | Public ingress, scrape/corpus, hosted API tests |
+| Production / hosted API | `https://api.streampulse.stream` | Public ingress (hosted-production-vps + Cloudflare Tunnel); BearHost rollback until soak |
 
 Health check (all modes):
 
@@ -343,7 +343,7 @@ Switch to laptop hub:
 2. Open extension **Options** → set Backend URL to `http://laptopworker:8090` → Save
 3. Reload a Twitch channel tab
 
-Do **not** commit OAuth tokens or machine-specific URLs into the repo. For production API tests, use `https://api.streampulse.stream` in Options only when you intend to hit BearHost (extension still talks to `/v1/extension/*` on that host).
+Do **not** commit OAuth tokens or machine-specific URLs into the repo. For production API tests, use `https://api.streampulse.stream` in Options when you intend to hit the **hosted** API (hosted-production-vps via Cloudflare, not BearHost rollback).
 
 **CORS / origins:** laptop profile sets `PUBLIC_ORIGIN`, `FRONTEND_ORIGIN`, and `HLS_PUBLIC_BASE` to `http://laptopworker:8090` (`deploy/env/profile-laptopworker-dev.env`). Twitch pages load from `https://www.twitch.tv`; the BFF must allow extension origins — same as localhost dev when origins are merged into `.env.local`.
 
