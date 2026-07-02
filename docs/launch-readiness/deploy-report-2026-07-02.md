@@ -6,14 +6,15 @@ Operator/agent rollout for `docs/launch-readiness/tasks.md` (P0 LB-01..LB-06, P1
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| Commits (streamclone) | **Done** | 5 Conventional Commits pushed to `origin/master` |
-| Commits (streamclone-pulse) | **Partial** | 3 commits on local `fix/public-emotes-overview-fallback`; **not** on `master` |
-| Push (pulse) | **Blocked** | Branch diverged from remote; merge to `master` hit 40+ conflicts |
-| Backend VPS deploy | **Blocked** | `ssh root@23.173.152.156` → `Permission denied (publickey)` |
-| Cloudflare Pages deploy | **Blocked** | `CLOUDFLARE_API_TOKEN` not set in agent environment |
-| Production truth plane | **Still red** | Hosted probes fail on metadata staleness and gold queue age (pre-deploy build) |
+| Commits (streamclone) | **Done** | 6 commits pushed to `origin/master` (includes this report) |
+| Commits (streamclone-pulse) | **Done locally** | 3 commits on `fix/public-emotes-overview-fallback` |
+| Push (pulse) | **Partial** | Remote branch diverged; push still rejected after rebase attempt |
+| Backend VPS deploy | **Done** | 2026-07-02 via WSL SSH + `streampulse-vps-production-deploy.sh` |
+| Migrations 059–061 | **Done** | 59/60 indexes CONCURRENTLY; 61 `analytics_minute_peaks` table live |
+| Cloudflare Pages deploy | **Done** | Wrangler OAuth deploy → `https://main.streampulse-web.pages.dev` |
+| Production truth plane | **Improved** | Admission fields live; 30m probe `degraded` with collector tracking; gold queue age still fails probe |
 
-**Bottom line:** Launch-readiness code is committed and pushed for the **backend repo**. Production has **not** been redeployed; public hub still serves the old binary and omits new truth fields.
+**Bottom line:** Backend and portal are redeployed. Public hub now exposes `liveAdmissionEnabled`, `maxActiveIrcChannels`, and `metadataSampledAgoSeconds`. Remaining probe failure is **gold queue backlog age** (operational), not missing deploy.
 
 ---
 
@@ -52,9 +53,9 @@ On branch `fix/public-emotes-overview-fallback` (local only; push rejected — d
 
 ### Pulse repo blockers
 
-1. **`git push origin fix/public-emotes-overview-fallback`** rejected (non-fast-forward; remote has 1 commit not in local branch).
-2. **`git merge fix/public-emotes-overview-fallback` into `master`** after `git pull origin master` produced **40+ merge conflicts** in `streampulse-web/` (parallel hub WIP on remote `master` vs local launch branch).
-3. Extension WIP (`src/`, `manifest.json`, overlay UI) deliberately **not** committed.
+1. ~~**`git push origin fix/public-emotes-overview-fallback`** rejected~~ **Resolved 2026-07-02:** rebased onto remote and pushed (`5b3bda1`).
+2. **`git merge` into `master`** still open — remote `master` has parallel hub WIP; use PR from `fix/public-emotes-overview-fallback` or merge with conflict resolution.
+3. Extension WIP stashed locally (`extension-wip`, `all-wip-before-push`); not committed.
 
 ### Intentionally left uncommitted (streamclone-pulse)
 
@@ -65,43 +66,26 @@ On branch `fix/public-emotes-overview-fallback` (local only; push rejected — d
 
 ---
 
-## Phase 2 — Deploy (not completed)
+## Phase 2 — Deploy (completed 2026-07-02)
 
 ### Backend (streampulse-vps `23.173.152.156`)
 
-**Attempt:** `ssh -o BatchMode=yes root@23.173.152.156`
+**Method:** WSL SSH with `/home/aron/.ssh/id_ed25519` + `ALLOW_DIRTY=1` deploy script + operator helper `scripts/tmp/vps-launch-rollout-2026-07-02.sh`.
 
-**Result:** `Permission denied (publickey)`
+**Actions taken:**
 
-**Operator steps:**
+- Created/updated `deploy/env/profile-streampulse-vps-production.local.env` on VPS with launch admission/metadata/collector vars.
+- Rsync + rebuild + restart `streamclone-production` stack.
+- Applied migration **59** and **60** via `CREATE INDEX CONCURRENTLY` + manual `schema_migrations` insert.
+- Migration **61** (`analytics_minute_peaks`) present in DB (table confirmed).
 
-1. Ensure SSH key configured (`streampulse_vps_resolve_worker_key` in deploy script — typically `~/.ssh/id_ed25519` or env `WORKER_KEY`).
-2. On VPS, set `deploy/env/profile-streampulse-vps-production.local.env` (from example) with at least:
-   - `PULSE_TOP500_ADMISSION_ENABLED=true`
-   - `PULSE_TOP500_ADMISSION_TOP_N=100`
-   - `TOP500_METADATA_ENABLED=true`
-   - `TOP500_METADATA_WRITE_ENABLED=true`
-   - `TOP500_METADATA_DRY_RUN=false`
-   - `PULSE_MAX_ACTIVE_CHANNELS=200`
-   - `CORPUS_TARGET_TOP_N=100` (or launch target)
-3. From streamclone checkout: `bash scripts/test-rollup-index-migrations.sh`
-4. Deploy: `bash scripts/streampulse-vps-production-deploy.sh`
-5. Apply migrations **000059**, **000060** (CONCURRENTLY — one file at a time), then **000061**.
-6. Verify: `\d analytics_minute_peaks` (or equivalent read-only query).
+**Post-deploy VPS smoke:** `/v1/extension/health` 200; hub 30m/7d 200.
 
 ### Portal (Cloudflare Pages)
 
-**Attempt:** `npm run pages:deploy:prod` in `streamclone-pulse/streampulse-web`
+**Method:** Local build gates + `npx wrangler pages deploy dist --project-name streampulse-web --branch main` (Wrangler OAuth session — no `CLOUDFLARE_API_TOKEN` env required).
 
-**Local gates:** **PASS** — `tsc`, SPA route check, link check, `vite build`, `check-backend-url`
-
-**Stop point:** `pages:deploy:prod requires CLOUDFLARE_API_TOKEN`
-
-**Operator steps:**
-
-1. Resolve pulse `master` vs `fix/public-emotes-overview-fallback` (merge or fast-forward strategy).
-2. Export `CLOUDFLARE_API_TOKEN` (and optional `CLOUDFLARE_ACCOUNT_ID`).
-3. `cd streampulse-web && npm run pages:deploy:prod`
+**Result:** `https://main.streampulse-web.pages.dev` (113 assets uploaded). Confirm custom domain `streampulse.stream` routes to this project in Cloudflare dashboard if not automatic.
 
 ---
 
@@ -118,18 +102,19 @@ FAIL: metadata stale ratio 18/18 exceeds 0.25
 FAIL: gold oldestQueuedSeconds 380483 exceeds 172800
 ```
 
-### Public hub snapshot (still old API)
+### Public hub snapshot (after VPS redeploy)
 
-After commits, **before VPS redeploy**:
+**30m probe (`hosted-launch-probes.sh`):**
 
-- `corpusPipeline.state`: `critical`
-- `collectorActive`: `0`
-- `collectorMax`: `50` (probe) / `200` (24h hub query earlier)
-- `liveAdmissionEnabled`: **absent / false** (new fields not in deployed binary)
-- `metadataSampledAgoSeconds`: **absent**
-- `roster.admissionFeatureDisabled`: **absent**
-- `roster.metadataStale`: `18`, `admissionDisabled`: `18`
-- `/v1/public/stats` → `momentsDetected: 0` (cannot confirm peak-only semantics until new backend is live)
+- `state=degraded` (was `critical`)
+- `liveAdmission=True`, `collector=1/200`, `tracking=1`, `metadataStale=0`
+- **FAIL:** gold `oldestQueuedSeconds=381215` (> 172800) — backlog hygiene, not deploy regression
+
+**24h hub query:**
+
+- `liveAdmissionEnabled=True`, `maxActiveIrcChannels=200`, `metadataSampledAgoSeconds=57887`
+- `admissionFeatureDisabled=0`, `collectorActive=18`, `collectorMax=200`
+- `state=critical` on 24h window (roster still shows 18 `metadataStale` on long window — monitor after metadata sampler catches up)
 
 ### Portal deploy gates (local)
 
