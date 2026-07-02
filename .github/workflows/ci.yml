@@ -42,7 +42,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: cp .env.example .env
+      - run: bash scripts/ci-bootstrap-env.sh
       - run: cd frontend && npm ci
       - run: make check-quick
 
@@ -71,7 +71,7 @@ jobs:
           sudo install /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
           sudo apt-get update && sudo apt-get install -y ripgrep
-      - run: cp .env.example .env
+      - run: bash scripts/ci-bootstrap-env.sh
       - run: cd frontend && npm ci
       - run: make check
       - name: govulncheck
@@ -130,7 +130,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: cp .env.example .env
+      - run: bash scripts/ci-bootstrap-env.sh
       - name: Build core service images
         run: |
           ${{ env.COMPOSE_CI }} build metadata video chat emote analytics frontend storygraph
