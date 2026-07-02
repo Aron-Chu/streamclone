@@ -7,73 +7,88 @@
 	@emote {
 		path /v1/channels/*/emotes /v1/channels/*/emotes/* /v1/emotes* /v1/sets* /v1/seed*
 	}
-	reverse_proxy @emote emote:8080
 
 	@emote_assets {
 		path /emotes/*
 	}
-	reverse_proxy @emote_assets minio:9000
 
 	@admin_pulse {
 		path /v1/admin/pulse /v1/admin/pulse/*
 	}
-	reverse_proxy @admin_pulse analytics:8080
 
 	@admin_blocked {
 		path /v1/admin/archive /v1/admin/archive/* /v1/admin/system /v1/admin/system/*
 	}
-	respond @admin_blocked 404
 
 	@pulse_api_blocked {
 		path \
-			/v1/analytics/streams/*/chat-replay \
-			/v1/analytics/streams/*/chat-replay/* \
-			/v1/analytics/streams/*/chat-messages \
-			/v1/analytics/streams/*/chat-messages/* \
-			/v1/analytics/channels/*/chat-logs \
-			/v1/analytics/channels/*/chat-logs/* \
-			/v1/analytics/chat/ingest \
-			/v1/analytics/chat/ingest/* \
-			/v1/analytics/tracking/snapshot \
-			/v1/analytics/top100/readiness \
-			/v1/analytics/top-roster/readiness \
-			/v1/corpus/readiness \
-			/v1/corpus/readiness/* \
-			/v1/internal/corpus/readiness \
-			/v1/internal/corpus/readiness/* \
-			/v1/internal/emote-history/readiness \
-			/metrics \
-			/metrics/* \
-			/v1/analytics/streams/*/sync \
-			/v1/analytics/streams/*/sync/* \
-			/v1/analytics/streams/*/sync/status \
-			/v1/analytics/streams/*/sync/status/* \
-			/v1/analytics/streams/*/prefetch-tracker \
-			/v1/analytics/streams/*/prefetch-tracker/* \
-			/v1/analytics/sync/active
+ /v1/analytics/streams/*/chat-replay \
+ /v1/analytics/streams/*/chat-replay/* \
+ /v1/analytics/streams/*/chat-messages \
+ /v1/analytics/streams/*/chat-messages/* \
+ /v1/analytics/channels/*/chat-logs \
+ /v1/analytics/channels/*/chat-logs/* \
+ /v1/analytics/chat/ingest \
+ /v1/analytics/chat/ingest/* \
+ /v1/analytics/tracking/snapshot \
+ /v1/analytics/top100/readiness \
+ /v1/analytics/top-roster/readiness \
+ /v1/corpus/readiness \
+ /v1/corpus/readiness/* \
+ /v1/internal/corpus/readiness \
+ /v1/internal/corpus/readiness/* \
+ /v1/internal/emote-history/readiness \
+ /metrics \
+ /metrics/* \
+ /v1/analytics/streams/*/sync \
+ /v1/analytics/streams/*/sync/* \
+ /v1/analytics/streams/*/sync/status \
+ /v1/analytics/streams/*/sync/status/* \
+ /v1/analytics/streams/*/prefetch-tracker \
+ /v1/analytics/streams/*/prefetch-tracker/* \
+ /v1/analytics/sync/active
 	}
-	respond @pulse_api_blocked 404
+
+	@internal_corpus_ops {
+		path \
+ /v1/internal/corpus/gaps \
+ /v1/internal/corpus/gaps/* \
+ /v1/internal/corpus/workers \
+ /v1/internal/corpus/workers/* \
+ /v1/internal/corpus/inventory/* \
+ /v1/internal/corpus/inventory/*
+	}
 
 	@analytics {
 		path_regexp analytics ^/v1/(analytics|extension|pulse|public|portal)(/|$)
-	}
-	reverse_proxy @analytics analytics:8080 {
-		transport http {
-			read_timeout 15m
-			write_timeout 15m
-		}
 	}
 
 	@metadata {
 		path /v1/channels/* /v1/metadata /v1/metadata/*
 	}
-	reverse_proxy @metadata metadata:8080
 
 	@health {
 		path /healthz /readyz
 	}
-	reverse_proxy @health analytics:8080
 
 	@root path /
-	respond @root "Streamclone Pulse API" 200
+
+	route {
+		reverse_proxy @emote emote:8080
+		reverse_proxy @emote_assets emote:8080
+		reverse_proxy @admin_pulse analytics:8080
+		respond @admin_blocked 404
+		respond @pulse_api_blocked 404
+		reverse_proxy @internal_corpus_ops analytics:8080
+		reverse_proxy @analytics analytics:8080 {
+			transport http {
+				read_timeout 15m
+				write_timeout 15m
+			}
+		}
+		reverse_proxy @metadata metadata:8080
+		reverse_proxy @health analytics:8080
+		respond @root "Streamclone Pulse API" 200
+		respond 404
+	}
 }
