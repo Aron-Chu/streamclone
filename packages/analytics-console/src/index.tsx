@@ -5,6 +5,21 @@ export type {
   SetupWelcome,
   StartHistoricalSyncOptions,
 } from './configureApi.ts'
+export type {
+  AnalyticsMinuteRollup,
+  AnalyticsStream,
+  AnalyticsStreamDetail,
+  AnalyticsStreamsResponse,
+  AnalyticsTopEmote,
+  GameSegment,
+  PulseStreamRecap,
+  SyncStatus,
+} from './apiTypes.ts'
+export {
+  findNearestRollupByOffset,
+  parseMomentHash,
+  rollupOffsetSeconds,
+} from './utils/momentSelection.ts'
 export {
   configureAnalyticsApi,
   configureEmoteAssetBase,

@@ -58,10 +58,13 @@ export interface AnalyticsStreamDetail {
   sources: SourceStatus[]
   updatedAt: number
   vodId?: string
+  vodAlignSeconds?: number
   syncPhase?: string
   chatCoveragePct?: number
   chatCoverage?: ChatCoverageSummary
   viewerSource?: string
+  timelineMinutes?: number
+  analyticsQuality?: string
 }
 
 export interface AnalyticsStreamsResponse {
