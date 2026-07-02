@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Deploy StreamPulse production stack on streampulse-vps (API + DB + single corpus worker).
 #
+# Builds from the rsynced checkout (bearhost-build overlay). To use GHCR images instead,
+# set STREAMPULSE_USE_RELEASE_IMAGES=1 and IMAGE_TAG to an immutable tag that contains this branch.
+#
 # Does NOT change Cloudflare tunnel/DNS — operator cuts over only after smoke passes.
 #
 # Usage:
@@ -11,13 +14,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/lib/deploy-rsync.sh
 source "${ROOT}/scripts/lib/deploy-rsync.sh"
+# shellcheck source=scripts/lib/streampulse-vps-production-compose.sh
+source "${ROOT}/scripts/lib/streampulse-vps-production-compose.sh"
 
 WORKER="${WORKER:-23.173.152.156}"
-WORKER_KEY="${WORKER_KEY:-${HOME}/.ssh/id_ed25519}"
 WORKER_APP="${WORKER_APP:-/opt/streamclone/app}"
 SKIP_RSYNC="${SKIP_RSYNC:-0}"
 CANARY_GOLD_VOD_SEGMENTS="${CANARY_GOLD_VOD_SEGMENTS:-1}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 
+streampulse_vps_resolve_worker_key
 ssh_worker() { ssh -i "${WORKER_KEY}" -o BatchMode=yes "root@${WORKER}" "$@"; }
 
 if [[ "${SKIP_RSYNC}" != "1" ]]; then
@@ -53,27 +59,39 @@ if [[ "${CANARY_GOLD_VOD_SEGMENTS}" == "1" || "${CANARY_GOLD_VOD_SEGMENTS}" == "
   GQL_CONCURRENCY=2
 fi
 
+echo "==> preflight: worker-only corpus stack conflicts"
+ssh_worker bash -s <<REMOTE
+set -euo pipefail
+cd ${WORKER_APP}
+# shellcheck source=scripts/lib/streampulse-vps-production-compose.sh
+source scripts/lib/streampulse-vps-production-compose.sh
+if streampulse_vps_corpus_worker_conflicts "${WORKER_APP}"; then
+  echo "BLOCKED: old streampulse-vps corpus worker stack detected:" >&2
+  streampulse_vps_corpus_worker_conflicts "${WORKER_APP}" >&2
+  echo "Stop it before production deploy, e.g.:" >&2
+  echo "  cd ${WORKER_APP} && docker compose -f deploy/docker-compose.streampulse-vps-corpus.yml down" >&2
+  exit 1
+fi
+echo "preflight OK — no corpus worker conflicts"
+REMOTE
+
+if [[ "${PREFLIGHT_ONLY}" == "1" ]]; then
+  echo "preflight-only complete"
+  exit 0
+fi
+
 echo "==> streampulse-vps: migrate + build production stack (GOLD_VOD_SEGMENTS_ENABLED=${GOLD_FLAG})"
 ssh_worker bash -s <<REMOTE
 set -euo pipefail
 cd ${WORKER_APP}
-ENV_LOCAL=deploy/env/profile-streampulse-vps-production.local.env
+ENV_LOCAL=$(streampulse_vps_production_env_local)
 if [[ ! -f "\${ENV_LOCAL}" ]]; then
   echo "missing \${ENV_LOCAL} — copy from deploy/env/profile-streampulse-vps-production.env.example" >&2
   exit 1
 fi
 
 compose() {
-  docker compose \
-    --env-file .env \
-    --env-file deploy/env/profile-full.env \
-    --env-file "\${ENV_LOCAL}" \
-    -f deploy/docker-compose.yml \
-    -f deploy/docker-compose.release.yml \
-    -f deploy/docker-compose.bearhost-prod.yml \
-    -f deploy/docker-compose.bearhost-pulse.yml \
-    -f deploy/docker-compose.streampulse-vps-production.yml \
-    "\$@"
+  $(streampulse_vps_production_compose_args "${WORKER_APP}")
 }
 
 # Ensure canary env on workers only
@@ -93,7 +111,7 @@ sleep 5
 compose up migrate
 compose wait migrate 2>/dev/null || sleep 10
 
-echo "==> build + start API + single corpus worker"
+echo "==> build + start API + single corpus worker (local checkout build)"
 compose build analytics analytics-workers scraper emote metadata
 compose up -d postgres redis migrate metadata emote analytics pulse-caddy scraper analytics-workers
 

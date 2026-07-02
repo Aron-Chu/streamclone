@@ -4,12 +4,12 @@
 # dependency on BearHost for Postgres/Redis.
 #
 # Merge (on VPS after BearHost pg_restore):
-#   docker compose \
+#   docker compose --project-name streamclone-production \
 #     --env-file .env \
 #     --env-file deploy/env/profile-full.env \
 #     --env-file deploy/env/profile-streampulse-vps-production.local.env \
 #     -f deploy/docker-compose.yml \
-#     -f deploy/docker-compose.release.yml \
+#     -f deploy/docker-compose.bearhost-build.yml \
 #     -f deploy/docker-compose.bearhost-prod.yml \
 #     -f deploy/docker-compose.bearhost-pulse.yml \
 #     -f deploy/docker-compose.streampulse-vps-production.yml \
