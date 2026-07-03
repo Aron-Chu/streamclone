@@ -17,13 +17,13 @@ function Get-EnvRandomHex {
 }
 
 function Get-EnvProfileFragment {
-    param([ValidateSet('core', 'scraper', 'clipper', 'full', 'pulse')][string]$Profile)
+    param([ValidateSet('core', 'scraper', 'clipper', 'full')][string]$Profile)
     $root = Get-EnvRepoRoot
     return Join-Path $root "deploy\env\profile-$Profile.env"
 }
 
 function Get-EnvComposeProfiles {
-    param([ValidateSet('core', 'scraper', 'clipper', 'full', 'pulse')][string]$Profile)
+    param([ValidateSet('core', 'scraper', 'clipper', 'full')][string]$Profile)
     switch ($Profile) {
         'core' { return @() }
         'scraper' { return @('scraper') }
@@ -32,7 +32,6 @@ function Get-EnvComposeProfiles {
             return @()
         }
         'full' { return @('scraper') }
-        'pulse' { return @('pulse') }
     }
 }
 
@@ -41,12 +40,6 @@ function Get-EnvFeatureComposeProfiles {
     $profiles = @()
     if (-not (Test-Path $EnvFile)) { return $profiles }
     $vals = Read-EnvKeyValueFile -Path $EnvFile
-    if ($vals['PULSE_WIRE_ENABLED'] -eq 'true') {
-        $profiles += 'pulse-wire'
-    }
-    if ($vals['PULSE_WIRE_SEMANTIC'] -eq 'true') {
-        $profiles += 'pulse-wire-semantic'
-    }
     $scraperKey = [string]$vals['SCRAPER_API_KEY']
     if (-not [string]::IsNullOrWhiteSpace($scraperKey)) {
         $profiles += 'scraper'
@@ -56,7 +49,7 @@ function Get-EnvFeatureComposeProfiles {
 
 function Get-StreamcloneComposeProfiles {
     param(
-        [ValidateSet('core', 'scraper', 'clipper', 'full', 'pulse')][string]$Profile = 'core',
+        [ValidateSet('core', 'scraper', 'clipper', 'full')][string]$Profile = 'core',
         [string]$EnvFile = (Join-Path (Get-EnvRepoRoot) '.env')
     )
     return @((Get-EnvComposeProfiles -Profile $Profile) + (Get-EnvFeatureComposeProfiles -EnvFile $EnvFile) | Select-Object -Unique)
@@ -234,9 +227,11 @@ function Invoke-EnvSynthesize {
     )
     $root = Get-EnvRepoRoot
     $sources = @(
-        (Join-Path $root '.env.dev'),
+        (Join-Path $root '.env.example'),
         (Get-EnvProfileFragment -Profile $Profile)
     )
+    $devProfile = Join-Path $root 'deploy\env\profile-dev.env'
+    if (Test-Path $devProfile) { $sources += $devProfile }
     $releaseBundle = Join-Path $root 'deploy\env\release-bundle.env'
     if (Test-Path $releaseBundle) { $sources += $releaseBundle }
     $oauthBundle = Join-Path $root 'deploy\env\oauth-bundle.env'

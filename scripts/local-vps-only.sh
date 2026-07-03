@@ -13,7 +13,7 @@ local_env="${ROOT}/.env.local"
 env_file="${ROOT}/.env"
 
 if [[ ! -f "${env_file}" ]]; then
-  cp .env.dev "${env_file}"
+  bash scripts/env-synthesize.sh core "${env_file}"
 fi
 
 if [[ -f "${overlay}" ]]; then
