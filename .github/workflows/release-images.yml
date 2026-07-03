@@ -89,7 +89,7 @@ jobs:
             build_args: SERVICE=analytics
           - image: frontend
             dockerfile: frontend/Dockerfile
-            context: frontend
+            context: .
             build_args: ""
           - image: migrate
             dockerfile: deploy/Dockerfile.migrate
