@@ -22,7 +22,7 @@ jobs:
             git clone --depth 1 "https://github.com/${SCRAPER_REPO}.git" "$dest"
           fi
           echo "path=$dest" >> "$GITHUB_OUTPUT"
-      - run: cp .env.dev .env
+      - run: bash scripts/ci-bootstrap-env.sh
       - name: Start stack with scraper profile
         run: |
           docker compose --env-file .env \

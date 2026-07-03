@@ -23,10 +23,13 @@ env_profile_fragment() {
   case "$profile" in
     core) printf '%s\n' "$ENV_REPO_ROOT/deploy/env/profile-core.env" ;;
     scraper) printf '%s\n' "$ENV_REPO_ROOT/deploy/env/profile-scraper.env" ;;
-    clipper) printf '%s\n' "$ENV_REPO_ROOT/deploy/env/profile-clipper.env" ;;
+    clipper)
+      echo "env_profile_fragment: clipper profile deprecated (ReplayForge outside compose); using core env" >&2
+      printf '%s\n' "$ENV_REPO_ROOT/deploy/env/profile-core.env"
+      ;;
     full) printf '%s\n' "$ENV_REPO_ROOT/deploy/env/profile-full.env" ;;
     *)
-      echo "env_profile_fragment: unknown profile '$profile' (use core|scraper|clipper|full)" >&2
+      echo "env_profile_fragment: unknown profile '$profile' (use core|scraper|full; clipper maps to core)" >&2
       return 1
       ;;
   esac
@@ -52,13 +55,9 @@ env_compose_profiles() {
 
 env_feature_compose_profiles() {
   local file="${1:-$ENV_REPO_ROOT/.env}"
-  local pulse pulse_sem scraper_key disable_scraper
-  pulse="$(env_read_value "$file" PULSE_WIRE_ENABLED 2>/dev/null || true)"
-  pulse_sem="$(env_read_value "$file" PULSE_WIRE_SEMANTIC 2>/dev/null || true)"
+  local scraper_key disable_scraper
   scraper_key="$(env_read_value "$file" SCRAPER_API_KEY 2>/dev/null || true)"
   disable_scraper="$(env_read_value "$file" STREAMCLONE_DISABLE_LOCAL_SCRAPER 2>/dev/null || true)"
-  [ "$pulse" = "true" ] && printf '%s ' pulse-wire
-  [ "$pulse_sem" = "true" ] && printf '%s ' pulse-wire-semantic
   if [ -n "$scraper_key" ] && [ "$disable_scraper" != "1" ] && [ "$disable_scraper" != "true" ]; then
     printf '%s ' scraper
   fi
@@ -274,7 +273,11 @@ env_synthesize() {
   local fragment
   fragment="$(env_profile_fragment "$profile")"
 
-  local -a sources=("$ENV_REPO_ROOT/.env.dev" "$fragment")
+  local -a sources=("$ENV_REPO_ROOT/.env.example" "$fragment")
+  local dev_profile="$ENV_REPO_ROOT/deploy/env/profile-dev.env"
+  if [ -f "$dev_profile" ]; then
+    sources+=("$dev_profile")
+  fi
   if [ -f "$ENV_REPO_ROOT/deploy/env/release-bundle.env" ]; then
     sources+=("$ENV_REPO_ROOT/deploy/env/release-bundle.env")
   fi

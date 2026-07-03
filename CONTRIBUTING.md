@@ -44,7 +44,7 @@ Author commits as **Aron-Chu** `<aroncloudchu@gmail.com>`. Do not add agent co-a
 
 ## Secrets
 
-Never commit `.env`, tokens, OAuth bundles, `clipper-data/`, rendered compose config, or token-bearing logs. Templates only: `.env.example`, `.env.dev`.
+Never commit `.env`, tokens, OAuth bundles, `clipper-data/`, rendered compose config, or token-bearing logs. Templates only: `.env.example`, `deploy/env/profile-dev.env`.
 
 ## More
 

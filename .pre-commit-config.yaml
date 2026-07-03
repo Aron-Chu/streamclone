@@ -19,7 +19,7 @@ repos:
     hooks:
       - id: forbid-env-commit
         name: forbid secret env files
-        entry: bash -c 'for f in "$@"; do case "$f" in .env.example|.env.dev) ;; .env*) echo "Refusing to commit $f (use .env.example or .env.dev templates only)"; exit 1;; esac; done'
+        entry: bash -c 'for f in "$@"; do case "$f" in .env.example|deploy/env/profile-dev.env) ;; .env*) echo "Refusing to commit $f (use .env.example or deploy/env/profile-dev.env templates only)"; exit 1;; esac; done'
         language: system
         files: ^\.env
         pass_filenames: true

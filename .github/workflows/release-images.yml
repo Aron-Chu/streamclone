@@ -55,7 +55,7 @@ jobs:
           sudo install /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
           sudo apt-get update && sudo apt-get install -y ripgrep
-      - run: cp .env.dev .env
+      - run: bash scripts/ci-bootstrap-env.sh
       - run: cd frontend && npm ci
       - run: make check
 
@@ -90,6 +90,10 @@ jobs:
           - image: frontend
             dockerfile: frontend/Dockerfile
             context: frontend
+            build_args: ""
+          - image: migrate
+            dockerfile: deploy/Dockerfile.migrate
+            context: .
             build_args: ""
     steps:
       - uses: actions/checkout@v4
@@ -232,13 +236,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - run: cp .env.dev .env
+      - run: bash scripts/ci-bootstrap-env.sh
 
       - name: Validate release compose
         env:
           IMAGE_TAG: ${{ steps.tag.outputs.value }}
         run: |
-          docker compose --env-file .env.dev \
+          docker compose --env-file .env \
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
             -f deploy/docker-compose.release.yml config
@@ -249,17 +253,48 @@ jobs:
         run: |
           set -euo pipefail
           echo "GHCR pull sanity: pulling tagged release images before stack start"
-          docker compose --env-file .env.dev \
+          docker compose --env-file .env \
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
             -f deploy/docker-compose.release.yml \
-            pull metadata video chat analytics emote frontend
+            pull metadata video chat analytics emote frontend migrate scraper
+
+      - name: Migrate test database (pinned migrate image)
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.value }}
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            -f deploy/docker-compose.release.yml \
+            up -d postgres
+          for i in $(seq 1 30); do
+            if docker compose --env-file .env \
+              -f deploy/docker-compose.yml \
+              -f deploy/docker-compose.local-tunnel.yml \
+              -f deploy/docker-compose.release.yml \
+              exec -T postgres pg_isready -U app -d streamclone >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          docker compose --env-file .env \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            -f deploy/docker-compose.release.yml \
+            run --rm migrate
+          docker compose --env-file .env \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.local-tunnel.yml \
+            -f deploy/docker-compose.release.yml \
+            exec -T postgres psql -U app -d streamclone -c 'SELECT version, dirty FROM schema_migrations;'
 
       - name: Start core stack from release images
         env:
           IMAGE_TAG: ${{ steps.tag.outputs.value }}
         run: |
-          docker compose --env-file .env.dev \
+          docker compose --env-file .env \
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
             -f deploy/docker-compose.release.yml \
@@ -304,11 +339,11 @@ jobs:
         env:
           IMAGE_TAG: ${{ steps.tag.outputs.value }}
         run: |
-          docker compose --env-file .env.dev \
+          docker compose --env-file .env \
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
             -f deploy/docker-compose.release.yml ps
-          docker compose --env-file .env.dev \
+          docker compose --env-file .env \
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
             -f deploy/docker-compose.release.yml logs
@@ -318,7 +353,7 @@ jobs:
         env:
           IMAGE_TAG: ${{ steps.tag.outputs.value }}
         run: |
-          docker compose --env-file .env.dev \
+          docker compose --env-file .env \
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
             -f deploy/docker-compose.release.yml down -v

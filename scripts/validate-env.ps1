@@ -65,8 +65,8 @@ function Test-NotPlaceholder {
     }
 }
 
-Test-Required -Key 'DATABASE_URL' -Fix 'Run make setup to synthesize .env from .env.dev'
-Test-Required -Key 'REDIS_URL' -Fix 'Run make setup to synthesize .env from .env.dev'
+Test-Required -Key 'DATABASE_URL' -Fix 'Run make setup to synthesize .env from .env.example'
+Test-Required -Key 'REDIS_URL' -Fix 'Run make setup to synthesize .env from .env.example'
 Test-NotPlaceholder -Key 'CURATOR_API_TOKEN' -Placeholder 'change-me' -Fix 'Run make setup or scripts/validate-env.ps1 -Fix'
 Test-Required -Key 'PUBLIC_ORIGIN' -Fix 'Set PUBLIC_ORIGIN=http://localhost:8090 for local dev'
 Test-Required -Key 'FRONTEND_ORIGIN' -Fix 'Set FRONTEND_ORIGIN=http://localhost:8090'
@@ -87,7 +87,7 @@ if ($isReleaseInstall) {
         Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true on loopback release install' -Hint 'Run scripts/reload-env-if-stale.ps1 or restart Streamclone to enable Sign in (optional)'
     }
 } elseif ($envValues['TWITCH_DEV_TOKEN_IMPORT_ENABLED'] -ne 'true') {
-    Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true' -Hint 'Run make setup (.env.dev sets this for in-app local token import)'
+    Add-ValidateWarning -Message 'TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true' -Hint 'Run make setup (profile-dev.env sets this for in-app local token import)'
 }
 
 if ($nonLoopbackOrigin) {
