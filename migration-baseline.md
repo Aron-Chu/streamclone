@@ -34,7 +34,7 @@ Deploy today: rsync + `bearhost-build` overlay; optional `STREAMPULSE_USE_RELEAS
 
 ## `.env.dev`
 
-Exists locally, **not tracked**. CI uses `scripts/ci-bootstrap-env.sh` → `.env.example`. Makefile/release still reference `.env.dev`.
+Exists locally on some machines, **not tracked**. CI and `chore/ops-migration-only` use `scripts/ci-bootstrap-env.sh` → `.env.example` and `scripts/env-synthesize.sh` (tracked `deploy/env/profile-dev.env`). Makefile `env` target and release paths no longer require `.env.dev` on the migration branch.
 
 ---
 
