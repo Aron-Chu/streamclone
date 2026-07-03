@@ -877,6 +877,91 @@ func (s *Store) AggregateRollupBucketsSince(ctx context.Context, since time.Time
 	return out, rows.Err()
 }
 
+// HubProviderBucketCounts holds per-minute non-7TV provider totals for hub activity charts.
+type HubProviderBucketCounts struct {
+	Twitch int
+	BTTV   int
+	FFZ    int
+}
+
+// AggregateRollupProviderBucketsSince sums twitch/bttv/ffz uses from emotes_json for
+// live IRC rollups across the corpus, keyed by bucket start (Unix milliseconds).
+func (s *Store) AggregateRollupProviderBucketsSince(ctx context.Context, since time.Time, bucketMinutes, limit int) (map[int64]HubProviderBucketCounts, error) {
+	out := map[int64]HubProviderBucketCounts{}
+	if s == nil || s.db == nil {
+		return out, nil
+	}
+	if bucketMinutes <= 0 {
+		bucketMinutes = 1
+	}
+	if limit <= 0 || limit > 240 {
+		limit = 240
+	}
+	rows, err := s.db.Query(ctx, `
+		WITH bucketed AS (
+			SELECT
+				to_timestamp(floor(extract(epoch from minute_ts) / ($2::double precision * 60)) * ($2::double precision * 60)) AS bucket_ts,
+				emotes_json,
+				chat_count,
+				chat_source,
+				source_confidence,
+				viewer_samples
+			FROM analytics_minute_rollups
+			WHERE minute_ts >= $1
+		),
+		expanded AS (
+			SELECT
+				b.bucket_ts,
+				split_part(e.key, ':', 1) AS provider,
+				e.value::int AS cnt
+			FROM bucketed b,
+			LATERAL jsonb_each_text(COALESCE(b.emotes_json, '{}'::jsonb)) AS e(key, value)
+			WHERE `+sqlPublicLiveChatMinutePredicate+`
+				AND split_part(e.key, ':', 1) IN ('twitch', 'bttv', 'ffz')
+		),
+		aggregated AS (
+			SELECT bucket_ts, provider, SUM(cnt)::int AS total
+			FROM expanded
+			GROUP BY bucket_ts, provider
+		),
+		recent_buckets AS (
+			SELECT DISTINCT bucket_ts
+			FROM aggregated
+			ORDER BY bucket_ts DESC
+			LIMIT $3
+		)
+		SELECT
+			(extract(epoch FROM a.bucket_ts) * 1000)::bigint AS bucket_ms,
+			a.provider,
+			a.total
+		FROM aggregated a
+		INNER JOIN recent_buckets rb ON rb.bucket_ts = a.bucket_ts
+		ORDER BY a.bucket_ts ASC`, since.UTC(), bucketMinutes, limit)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var bucketMS int64
+		var provider string
+		var total int
+		if err := rows.Scan(&bucketMS, &provider, &total); err != nil {
+			return out, err
+		}
+		entry := out[bucketMS]
+		switch strings.ToLower(strings.TrimSpace(provider)) {
+		case "twitch":
+			entry.Twitch += total
+		case "bttv":
+			entry.BTTV += total
+		case "ffz":
+			entry.FFZ += total
+		}
+		out[bucketMS] = entry
+	}
+	return out, rows.Err()
+}
+
 // TopHistoricalChatMinutesInWindow returns bounded per-stream hot minutes for a
 // public hub activity bucket. It prefers analytics_minute_peaks so bucket-clicks
 // do not sort raw rollup windows; emotes_json is read server-side only.
