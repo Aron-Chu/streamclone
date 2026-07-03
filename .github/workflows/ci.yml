@@ -78,12 +78,6 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
-      - name: Validate Emote Pulse Helm chart
-        if: hashFiles('charts/pulse/Chart.yaml') != ''
-        run: |
-          helm lint charts/pulse
-          helm template streamclone-pulse charts/pulse \
-            -f deploy/env/helm-local.example.yaml >/tmp/streamclone-pulse.yaml
 
   codegraph:
     name: Code graph rebuild
@@ -103,10 +97,28 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Cache codegraph venv
+        if: steps.changes.outputs.code == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .codegraph/.venv
+          key: codegraph-venv-${{ runner.os }}-py3.12-${{ hashFiles('tools/codegraph/requirements.txt') }}
+      - name: Cache codegraph database
+        if: steps.changes.outputs.code == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            .codegraph/streamclone.kuzu
+            .codegraph/index.sqlite
+            .codegraph/tree-sitter-cache
+          key: codegraph-db-${{ runner.os }}-${{ hashFiles('internal/**', 'cmd/**', 'frontend/src/**', 'tools/codegraph/**') }}
+          restore-keys: |
+            codegraph-db-${{ runner.os }}-
       - if: steps.changes.outputs.code == 'true'
+        # Incremental is content-hash based: exact cache hit → noop, stale
+        # restore-key → full rebuild. Smoke validates the DB either way.
         run: |
-          make codegraph-install
-          make codegraph
+          make codegraph-incremental
           make codegraph-smoke
       - if: steps.changes.outputs.code == 'true'
         uses: actions/upload-artifact@v4
@@ -133,7 +145,7 @@ jobs:
       - run: bash scripts/ci-bootstrap-env.sh
       - name: Build core service images
         run: |
-          ${{ env.COMPOSE_CI }} build metadata video chat emote analytics frontend storygraph
+          ${{ env.COMPOSE_CI }} build metadata video chat emote analytics frontend
       - name: Start core stack
         run: ${{ env.COMPOSE_CI }} up -d --no-build
       - name: Install frontend deps and Playwright browsers

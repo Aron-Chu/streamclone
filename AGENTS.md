@@ -18,6 +18,26 @@ Pulse/StreamPulse product docs and portal guardrails: sibling [`streamclone-puls
 
 ---
 
+## Product scope (2026-07)
+
+Recent scope changes agents should treat as current truth (do not reintroduce removed tiers without an explicit product decision):
+
+| Change | What removed / changed | What remains optional |
+|--------|------------------------|------------------------|
+| **Ops UI strip** | Local Grafana/Influx/Prometheus compose profile; Stack status / Network panels for those tiers; Channel **Stats** tab and **Pulse** sidebar | Core + **scraper** in stack status; in-app Analytics charts |
+| **Pulse Wire removal** | `/pulse-wire` UI, `storygraph` / `x-ingest` / `media-matcher` compose services, `/v1/pulse-wire/*` Caddy routes, `cmd/storygraph`, `internal/storygraph`, `PULSE_WIRE_ENABLED` frontend flag | `internal/social/` Reddit/LSF helpers (metadata); archive `pulsewire/*` cold export paths |
+| **UX polish** | — | `content-enter` / `content-stagger` load motion; `useMinSkeletonTime`; horizontal shelf wheel-scroll + softer chrome; channel workspace fade-in |
+
+**Stack status (UI):** core services + scraper only — not Grafana, not Pulse Wire.
+
+**Compose profiles (local):** `core` (default), `scraper`, `full` (= core + scraper). No `pulse`, `pulse-wire`, or `pulse-wire-semantic`.
+
+**Verify after doc/code drift:** `make compose-config-check`, `cd frontend && npx tsc -b && npm test`, `curl http://127.0.0.1:8090/v1/extension/health`.
+
+Historical Pulse Wire notes: [`.kiro/steering/pulse-wire.md`](.kiro/steering/pulse-wire.md) (deprecated pointer only). Full handoff: [`docs/agent-notes/product-scope-2026-07.md`](docs/agent-notes/product-scope-2026-07.md).
+
+---
+
 ## Golden rules
 
 1. **Preserve unrelated dirty work** — narrow diffs only; no drive-by refactors.
@@ -29,8 +49,20 @@ Pulse/StreamPulse product docs and portal guardrails: sibling [`streamclone-puls
 7. **Never commit secrets** — `.env`, tokens, `oauth-bundle.env`, machine-specific `.cursor/mcp.json`.
 8. **Never edit applied migrations** — add new migration files only.
 9. **Run narrow tests first**, then `make check-quick` or `make check` before a PR.
-10. **Update steering/docs** after scraper, analytics, Pulse Wire, install, OAuth, or large frontend changes; run `make codegraph` when symbols move.
-11. **Hosting split** — legacy-rollback-host = scrape/corpus/public API; **laptopworker** = tailnet core dev only (`docs/laptopworker-dev.md`, `.kiro/steering/laptopworker-hosting.md`); Windows PC = Cursor + local stack. Do not run scraper/workers/storygraph on laptop.
+10. **Update steering/docs** after scraper, analytics, install, OAuth, or large frontend changes; run `make codegraph` when symbols move.
+11. **Hosting split** — **Hosted production ops** live in private **streampulse-ops** (deploy by pinned `IMAGE_TAG` from GHCR). **streamclone** = app source, migrations, local dev, CI, release images. Public API: `https://api.streampulse.stream`. **laptopworker** = tailnet core dev only (`docs/laptopworker-dev.md`). Do not run scraper/workers on laptop. See [`docs/production-artifact-contract.md`](docs/production-artifact-contract.md), [`docs/ops-migration-manifest.md`](docs/ops-migration-manifest.md).
+
+## Agent context workflow (required)
+
+Apply this sequence before editing code:
+
+1. Read exactly one domain steering/product doc from the task router.
+2. Use codegraph MCP first (`get_ast_chunk`, `get_blast_radius`, `get_call_chain`) to scope symbols and impact.
+3. Use stack/data MCP (`stack_health`, `stack_ports`, `compose_logs`, `postgres_query` SELECT only) when runtime truth matters.
+4. Use `make context-snapshots` for route/schema/runtime summaries.
+5. Use targeted file reads/grep only after MCP + snapshots are exhausted.
+
+Do not start with whole-repo grep unless MCP is unavailable. If MCP is stale/unavailable, run `make mcp-setup` or `make codegraph` first.
 
 ---
 
@@ -60,14 +92,13 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 |------|------------|---------------------|
 | Any code change | `.kiro/steering/tech.md` | `get_ast_chunk`, `get_blast_radius` |
 | Context / runtime truth | [`docs/agent-context.md`](docs/agent-context.md) | `make context-snapshots`, MCP `stack_health` |
-| Product / UI guardrails | `.kiro/steering/product.md` | As needed |
+| **Watch UI / directory UX** | `.kiro/steering/product.md`, `frontend/src/components/directory/` | Manual `:8090` — stagger, shelf scroll, skeleton timing |
 | Roadmap / backlog | `README.md`, `.kiro/steering/product.md` | As needed |
 | **Playback / HLS** | `.kiro/steering/playback.md`, `docs/low-latency-relay/requirements.md` | `get_ast_chunk("Channel")`, `playback_probe` |
 | **Analytics / VOD / rollups** | `.kiro/steering/analytics.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("SyncProgressPanel")` |
 | **Pulse extension / pulse-core / BFF** | [docs/workspace.md](docs/workspace.md), `docs/pulse-extension/` (redirect), sibling [streamclone-pulse `docs/pulse-extension/`](https://github.com/Aron-Chu/streamclone-pulse/tree/master/docs/pulse-extension), `internal/analytics/extension_api.go`, `packages/pulse-core/` | `get_ast_chunk("ExtensionRoutes")`, `curl :8090/v1/extension/health` |
 | **Pulse live coverage / VOD backfill / Protect** | sibling [`live-coverage-requirements.md`](../streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md), [`docs/roadmapping.md`](docs/roadmapping.md), [`docs/tools.md`](docs/tools.md), [`docs/CODEX.md`](docs/CODEX.md) § Pulse review | Skill `pulse-live-coverage-review`, `get_blast_radius("SyncPulseMissedChat")`, `curl :8090/v1/extension/pulse/channels/{login}` |
 | **Scraper / Cloudflare / proxy** | `.kiro/steering/analytics.md`, `docs/scraper-cloudflare-and-proxy.md`, `docs/scraping-archive/requirements.md` | `scraper_probe`, `make scraper-preflight` |
-| **Pulse Wire / storygraph** | `.kiro/steering/pulse-wire.md`, `docs/options.md`, `docs/tiers-scraper-and-social-spread.md` | `get_ast_chunk("PulseWirePage")`, `get_blast_radius("ingestAll")` |
 | **Emotes / 7TV / FFZ** | `.kiro/steering/emote-pipeline.md` | `emote_jobs`, `redis_channel_emotes` |
 | **Local Twitch auth** | `.kiro/steering/local-auth.md` | `twitch_auth_status`, `make twitch-debug` |
 | **Install / desktop / bootstrap** | `docs/install-desktop.md`, `docs/repo-maintenance.md` | Launcher scripts under `scripts/` |
@@ -77,6 +108,8 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 | Clipper (legacy stub) | `.kiro/steering/clipper.md`, `clipper/README.md` | Deprecated in compose |
 | System health / optional services | `.kiro/steering/windows-dev.md` | `stack_health`, `get_ast_chunk("SystemHealthPanel")` |
 | Scraping archive / Azure blob backfill | `docs/scraping-archive/requirements.md` | `get_ast_chunk("SyncService")` |
+| **Hosted production (operator)** | [`docs/production-artifact-contract.md`](docs/production-artifact-contract.md), private **streampulse-ops** | `curl https://api.streampulse.stream/v1/extension/health` |
+| **BearHost rollback (operator)** | private **streampulse-ops** `archive/bearhost/` | stub: [`docs/bearhost-production.md`](docs/bearhost-production.md) |
 | **Azure archive → R2 migration / storage SoT** | [`docs/storage/README.md`](docs/storage/README.md), [`docs/storage/azure-to-r2-migration.md`](docs/storage/azure-to-r2-migration.md) | Read-only inventory: `scripts/storage/azure-prefix-inventory.sh` |
 | Security / secrets | `SECURITY.md`, `docs/security.md` | `make security-scan` |
 
@@ -84,15 +117,16 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 
 ## Skills router
 
-Load the matching skill from `.cursor/skills/streamclone/` when the task fits (read skill **before** broad file reads). Codex uses the mirror under `.agents/skills/streamclone/` (`make codex-sync-skills` after edits).
+Load the matching skill from `.cursor/skills/streamclone/` when the task fits (read skill **before** broad file reads). Codex uses mirrors under `.agents/skills/` (`make codex-sync-skills` after edits): `streamclone/`, `pulse/`, `workflow/` (brainstorming, TDD, debugging, plans, verification).
 
 | Task | Skill |
 |------|-------|
 | Agent docs / Makefile / MCP setup | `agent-readiness/SKILL.md` |
+| Claude Code setup (mirror Cursor MCP/skills/agents) | [`docs/CLAUDE.md`](docs/CLAUDE.md) — `make claude-setup` |
 | Playback / HLS / latency | `playback-hls/SKILL.md` |
 | Analytics sync / rollups / scraper charts | `analytics-sync/SKILL.md` |
 | Scraper / Cloudflare / proxy / TT timings | `scraper-debug/SKILL.md` |
-| Pulse Wire news / storygraph / LSF/Reddit | `pulse-wire-news/SKILL.md` |
+| Pulse Wire news / storygraph / LSF/Reddit | *(removed — see git history before 2026-07)* |
 | Stack health / ports / localhost | `stack-debug/SKILL.md` |
 | Emotes / 7TV / FFZ | `emote-pipeline/SKILL.md` |
 | Clip Studio / ReplayForge | `clipper-local/SKILL.md` |
@@ -100,7 +134,7 @@ Load the matching skill from `.cursor/skills/streamclone/` when the task fits (r
 | Choosing tests by domain | `test-by-domain/SKILL.md` |
 | Context ladder (codegraph → snapshots → Repomix) | `context-retrieval/SKILL.md` |
 | Pulse extension (Chrome MV3) | Cross-read [streamclone-pulse `AGENTS.md`](https://github.com/Aron-Chu/streamclone-pulse/blob/master/AGENTS.md) and [docs/workspace.md](docs/workspace.md) |
-| Pulse live coverage / backfill / Protect / BearHost | `.cursor/skills/pulse/pulse-live-coverage-review/SKILL.md` (+ `coverage-triage`, `backfill-safety-review`, `capacity-governor-review`) — Codex: `.agents/skills/pulse/` |
+| Pulse live coverage / VOD backfill / Protect / hosted VPS | `.cursor/skills/pulse/pulse-live-coverage-review/SKILL.md` (+ `coverage-triage`, `backfill-safety-review`, `capacity-governor-review`) — Codex: `.agents/skills/pulse/` |
 | StreamPulse portal / website-portal tasks | `streamclone-pulse/.cursor/skills/streamclone-task-runner/` — Codex: `.agents/skills/pulse/streamclone-task-runner/` (`make codex-sync-skills`) |
 
 ---
@@ -150,7 +184,7 @@ Load the matching skill from `.cursor/skills/streamclone/` when the task fits (r
 | Playback | `deploy/mediamtx.yml`, `internal/video/`, `frontend/src/playback.ts` | HLS 401 if CDN secret mismatch |
 | Auth | `internal/chat/auth*`, Twitch OAuth env | Session cookies, token import |
 | Scraper | `deploy/docker-compose.yml` profile `scraper`, sibling `streamclone-scraper` | Browser pool locks; ephemeral mode on Windows |
-| Pulse Wire ingest | `cmd/storygraph`, `internal/storygraph/`, `internal/social/` | Long-running ingest; optional profiles |
+| Social helpers | `internal/social/` | Reddit/LSF helpers for metadata; not a user-facing wire product |
 | Pulse extension BFF | `internal/analytics/extension_api.go`, bookmarks, recap | Caddy routes `/v1/extension/*`, `/v1/pulse/*` |
 | pulse-core | `packages/pulse-core/` | Shared types/scoring; imported by frontend and extension |
 | Release | `VERSION`, `.github/workflows/release-images.yml` | Tag push triggers GHCR + Setup.exe |
@@ -181,11 +215,13 @@ Full detail: [docs/MCP.md](docs/MCP.md). Starter config: [`.cursor/mcp.recommend
 | Server | Use for |
 |--------|---------|
 | `streamclone-codegraph` | Symbol lookup, call chains, blast radius |
+| `streamclone-pulse-codegraph` | Extension/portal TS (`streamclone-pulse` checkout) |
 | `streamclone-stack` | Health, ports, playback, auth, scraper, **compose_logs** (read-only logs) |
-| `streamclone-data` | Read-only Postgres/Redis, emote jobs |
-| **Playwright** (Essential) | UI smoke — `make smoke-ui`, `frontend/tests/playwright/` |
+| `streamclone-data` | Read-only Postgres/Redis, emote jobs (local compose) |
+| `streamclone-hosted-data` | Hosted prod PG/Redis (SSH tunnel; optional) |
+| **Playwright** | UI smoke — `make smoke-ui`, `frontend/tests/playwright/` |
 
-Setup: `make mcp-setup` then copy recommended example. Preflight: `bash scripts/mcp-preflight.sh` (or `scripts/mcp-preflight.ps1` on Windows → WSL).
+Setup: `make mcp-setup` then copy **`.cursor/mcp.windows.json.example`** → `~/.cursor/mcp.json` on Windows (or `mcp.recommended.json.example` on Linux/WSL). Preflight: `bash scripts/mcp-preflight.sh` (or `scripts/mcp-preflight.ps1` on Windows → WSL). Codex: `make codex-setup`.
 
 ---
 
@@ -197,12 +233,9 @@ Detail: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), [docs/SERVICE_MAP.md](docs/S
 |---------|------|-------------|
 | *(default core)* | metadata, video, chat, analytics, emote, frontend, local-proxy, postgres, redis, minio, mediamtx | Daily dev |
 | `scraper` | TwitchTracker scraper (`:8000`) | Analytics minute charts |
-| `pulse` | InfluxDB, Prometheus, Grafana | Live stats time series |
-| `pulse-wire` | storygraph ingest UI/API, media-matcher, x-ingest | Pulse Wire edition |
-| `pulse-wire-semantic` | `migrate-semantic` optional PG extensions | Semantic search experiments |
-| `clipper` | *(no compose service — Clip Studio = ReplayForge on host :8095)* | Not a compose profile; `profile-clipper.env` is legacy |
+| `clipper` | *(deprecated — maps to core)* | ReplayForge runs on host `:8095`; not a compose profile |
 
-Env overlays: `deploy/env/profile-{core,scraper,pulse,full}.env` (+ legacy `profile-clipper.env`). Feature profiles are merged from `.env` via `scripts/lib/env.sh`.
+Env overlays: `deploy/env/profile-{core,scraper,full}.env`. Feature profiles are merged from `.env` via `scripts/lib/env.sh`.
 
 ---
 
@@ -232,8 +265,8 @@ Database: `.codegraph/streamclone.kuzu` (gitignored).
 ## Layout
 
 - User docs: `README.md`, `docs/`
-- Go services: `cmd/*`, `internal/*` (Pulse Wire: `cmd/storygraph`, `internal/storygraph/`, `internal/social/`)
-- Frontend: `frontend/src/` (Pulse Wire UI: `frontend/src/components/pulsewire/`)
+- Go services: `cmd/*`, `internal/*` (social helpers: `internal/social/`)
+- Frontend: `frontend/src/` (directory UX: `components/directory/`, `hooks/useMinSkeletonTime.ts`)
 - Clipper (legacy stub): `clipper/` — active Clip Studio in sibling **ReplayForge** (`../replayforge`); see [docs/workspace.md](docs/workspace.md)
 - Pulse extension spec: sibling **streamclone-pulse** (`../streamclone-pulse`); BFF and `packages/pulse-core/` in this repo
 - Compose: `deploy/docker-compose*.yml`

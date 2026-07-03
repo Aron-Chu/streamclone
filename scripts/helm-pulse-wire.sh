@@ -133,9 +133,9 @@ EOF
 fi
 
 if [ ! -f "$ENV_FILE" ]; then
-  if [ -f .env.dev ]; then
-    cp .env.dev "$ENV_FILE"
-    echo "Created ${ENV_FILE} from .env.dev"
+  if [ -f .env.example ]; then
+    bash scripts/env-synthesize.sh core "$ENV_FILE"
+    echo "Created ${ENV_FILE} via env-synthesize (core profile)"
   else
     touch "$ENV_FILE"
   fi

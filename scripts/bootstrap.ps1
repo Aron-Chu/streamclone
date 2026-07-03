@@ -8,7 +8,7 @@ Test-EnvPreflightDocker
 $envFile = Join-Path (Get-Location) '.env'
 if (-not (Test-Path $envFile)) {
     Invoke-EnvSynthesize -Profile core -OutFile $envFile
-    Write-Host 'Created .env from .env.dev + profile-core (secrets generated).'
+    Write-Host 'Created .env from .env.example + profile-dev + profile-core (secrets generated).'
 } else {
     Invoke-EnvGenerateSecrets -EnvFile $envFile
 }

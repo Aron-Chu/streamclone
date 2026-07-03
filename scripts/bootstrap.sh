@@ -10,7 +10,7 @@ env_preflight_docker
 
 if [ ! -f .env ]; then
   env_synthesize core .env
-  echo "Created .env from .env.dev + profile-core (secrets generated)."
+  echo "Created .env from .env.example + profile-dev + profile-core (secrets generated)."
 else
   env_generate_secrets .env
 fi
