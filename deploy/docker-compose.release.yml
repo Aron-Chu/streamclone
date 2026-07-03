@@ -10,6 +10,10 @@
 # Otherwise builds from the streamclone-scraper sibling repo (--profile scraper).
 
 services:
+  migrate:
+    image: ghcr.io/aron-chu/streamclone/migrate:${IMAGE_TAG:-latest}
+    volumes: !reset []
+
   metadata:
     image: ghcr.io/aron-chu/streamclone/metadata:${IMAGE_TAG:-latest}
     build: !reset null
@@ -39,7 +43,9 @@ services:
   scraper:
     image: ghcr.io/aron-chu/streamclone/scraper:${IMAGE_TAG:-latest}
     build: !reset null
+    profiles: []
 
   analytics-workers:
     image: ghcr.io/aron-chu/streamclone/analytics:${IMAGE_TAG:-latest}
     build: !reset null
+    profiles: []

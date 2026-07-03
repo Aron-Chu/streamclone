@@ -18,7 +18,6 @@ MIN_SYMBOLS = 5000
 
 MERGE_SYMBOL = "mergeMinuteRollups"
 MERGE_FILE = "internal/analytics/api.go"
-MERGE_LINE = 676
 
 LEGACY_TOOLS = {
     "get_call_chain",
@@ -112,9 +111,10 @@ def main() -> int:
     if not matches:
         fail(f"search target {MERGE_SYMBOL!r} not found")
     top = matches[0]
-    if top["file_path"] != MERGE_FILE or int(top["start_line"]) != MERGE_LINE:
-        fail(f"search expected {MERGE_FILE}:{MERGE_LINE}, got {top['file_path']}:{top['start_line']}")
-    ok(f"search_symbols({MERGE_SYMBOL!r}) -> {top['file_path']}:{top['start_line']}")
+    merge_line = int(top["start_line"])
+    if top["file_path"] != MERGE_FILE:
+        fail(f"search expected file {MERGE_FILE}, got {top['file_path']}:{merge_line}")
+    ok(f"search_symbols({MERGE_SYMBOL!r}) -> {top['file_path']}:{merge_line}")
 
     chunk = codegraph_mcp.get_ast_chunk(MERGE_SYMBOL)
     if chunk.get("error") or not chunk.get("matches"):
@@ -124,12 +124,12 @@ def main() -> int:
         fail("get_ast_chunk symbol mode unexpected result")
     ok(f"get_ast_chunk({MERGE_SYMBOL!r}) returns source")
 
-    line_chunk = codegraph_mcp.get_ast_chunk(file_path=MERGE_FILE, start_line=MERGE_LINE, end_line=MERGE_LINE + 10)
+    line_chunk = codegraph_mcp.get_ast_chunk(file_path=MERGE_FILE, start_line=merge_line, end_line=merge_line + 10)
     if line_chunk.get("error") or not line_chunk.get("matches"):
         fail(f"get_ast_chunk file/line mode failed: {line_chunk.get('error')}")
     if MERGE_SYMBOL not in line_chunk["matches"][0].get("code", ""):
         fail("get_ast_chunk file/line mode missing symbol text")
-    ok(f"get_ast_chunk(file_path={MERGE_FILE!r}, start_line={MERGE_LINE}) returns region")
+    ok(f"get_ast_chunk(file_path={MERGE_FILE!r}, start_line={merge_line}) returns region")
 
     for table in DOMAIN_NODE_TABLES:
         if not table_exists(conn, table):
