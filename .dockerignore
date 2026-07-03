@@ -24,6 +24,8 @@ frontend/*
 !frontend/tests/**
 deploy
 migrations
+!migrations
+!migrations/**
 *.md
 .env
 bin
