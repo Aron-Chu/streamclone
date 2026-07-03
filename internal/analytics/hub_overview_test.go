@@ -160,6 +160,32 @@ func TestHubLiveActivityCountsExcludeCorpusRollups(t *testing.T) {
 	}
 }
 
+func TestHubRollupProviderCounts(t *testing.T) {
+	ru := MinuteRollup{
+		ChatCount:         10,
+		ChatSource:        RollupChatSourceLive,
+		SourceConfidence:  SourceConfidenceVerified,
+		SevenTVEmoteCount: 5,
+		Emotes: map[string]int{
+			"twitch:1:LUL":    4,
+			"bttv:2:OMEGALUL": 3,
+			"ffz:3:PepeLaugh": 2,
+			"seventv:4:KEKW":  99,
+		},
+	}
+	tw, bt, fz := hubRollupProviderCounts(ru)
+	if tw != 4 || bt != 3 || fz != 2 {
+		t.Fatalf("provider counts = (%d,%d,%d), want (4,3,2)", tw, bt, fz)
+	}
+	gql := MinuteRollup{
+		ChatCount: 100, ChatSource: RollupChatSourceGQL, SourceConfidence: SourceConfidenceCanonical,
+		Emotes: map[string]int{"twitch:1:LUL": 50},
+	}
+	if tw, bt, fz := hubRollupProviderCounts(gql); tw != 0 || bt != 0 || fz != 0 {
+		t.Fatalf("gql rollup leaked provider counts: (%d,%d,%d)", tw, bt, fz)
+	}
+}
+
 func TestFilterPublicHubLiveRollupsExcludesCorpusImports(t *testing.T) {
 	start := time.Date(2026, 6, 26, 17, 0, 0, 0, time.UTC)
 	rollups := []MinuteRollup{

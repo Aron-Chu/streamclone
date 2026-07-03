@@ -135,6 +135,9 @@ type HubActivityPoint struct {
 	Chat    int   `json:"chat"`
 	Emotes  int   `json:"emotes"`
 	SevenTV int   `json:"seventv"`
+	Twitch  int   `json:"twitch,omitempty"`
+	BTTV    int   `json:"bttv,omitempty"`
+	FFZ     int   `json:"ffz,omitempty"`
 	Viewers int   `json:"viewers"`
 }
 
@@ -170,14 +173,15 @@ type HubEmote struct {
 }
 
 type HubMover struct {
-	Login         string  `json:"login"`
-	DisplayName   string  `json:"displayName,omitempty"`
-	Category      string  `json:"category,omitempty"`
-	Viewers       int     `json:"viewers"`
-	EmotesPerMin  float64 `json:"emotesPerMin"`
-	SevenTVPerMin float64 `json:"seventvPerMin"`
-	ChatPerMin    float64 `json:"chatPerMin"`
-	TrendPct      float64 `json:"trendPct"`
+	Login           string  `json:"login"`
+	DisplayName     string  `json:"displayName,omitempty"`
+	Category        string  `json:"category,omitempty"`
+	ProfileImageURL string  `json:"profileImageUrl,omitempty"`
+	Viewers         int     `json:"viewers"`
+	EmotesPerMin    float64 `json:"emotesPerMin"`
+	SevenTVPerMin   float64 `json:"seventvPerMin"`
+	ChatPerMin      float64 `json:"chatPerMin"`
+	TrendPct        float64 `json:"trendPct"`
 }
 
 type HubLiveChannel struct {
@@ -539,6 +543,12 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 			pt.Chat += chat
 			pt.Emotes += emotes
 			pt.SevenTV += sevenTV
+			if chat > 0 || emotes > 0 {
+				tw, bt, fz := hubRollupProviderCounts(ru)
+				pt.Twitch += tw
+				pt.BTTV += bt
+				pt.FFZ += fz
+			}
 			if hubLiveViewerRollup(ru) {
 				pt.Viewers += pickViewer(ru)
 			}
@@ -550,16 +560,23 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 	// home view stays a low-latency "right now" readout.
 	if activityWindow > hubActivityWindowMinutes && h.store != nil {
 		if buckets, err := h.store.AggregateRollupBucketsSince(ctx, activitySince, activityBucketMinutes, hubActivityMaxPoints); err == nil && len(buckets) > 0 {
+			providerByBucket, _ := h.store.AggregateRollupProviderBucketsSince(ctx, activitySince, activityBucketMinutes, hubActivityMaxPoints)
 			activity = map[int64]*HubActivityPoint{}
 			for _, ru := range buckets {
 				bucket := ru.MinuteTS.UTC().Truncate(time.Minute).UnixMilli()
-				activity[bucket] = &HubActivityPoint{
+				pt := &HubActivityPoint{
 					T:       bucket,
 					Chat:    ru.ChatCount,
 					Emotes:  hubRollupEmoteCount(ru),
 					SevenTV: ru.SevenTVEmoteCount,
 					Viewers: pickViewer(ru),
 				}
+				if pc, ok := providerByBucket[bucket]; ok {
+					pt.Twitch = pc.Twitch
+					pt.BTTV = pc.BTTV
+					pt.FFZ = pc.FFZ
+				}
+				activity[bucket] = pt
 			}
 			resp.Activity.ChannelCount = int(resp.Corpus.StreamsTracked)
 		}
@@ -643,20 +660,26 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 		if win.emotesPerMin <= 0 && win.chatPerMin <= 0 {
 			continue
 		}
+		profileURL := ""
+		if win.record != nil {
+			profileURL = win.record.ProfileImageURL
+		}
 		resp.TopMovers = append(resp.TopMovers, HubMover{
-			Login:         win.record.Login,
-			DisplayName:   displayNameOrLogin(win.record),
-			Category:      win.record.Category,
-			Viewers:       win.viewers,
-			EmotesPerMin:  win.emotesPerMin,
-			SevenTVPerMin: win.seventvPerMin,
-			ChatPerMin:    win.chatPerMin,
-			TrendPct:      win.trendPct,
+			Login:           win.record.Login,
+			DisplayName:     displayNameOrLogin(win.record),
+			Category:        win.record.Category,
+			ProfileImageURL: profileURL,
+			Viewers:         win.viewers,
+			EmotesPerMin:    win.emotesPerMin,
+			SevenTVPerMin:   win.seventvPerMin,
+			ChatPerMin:      win.chatPerMin,
+			TrendPct:        win.trendPct,
 		})
 		if len(resp.TopMovers) >= hubMoversCap {
 			break
 		}
 	}
+	h.enrichHubMoverProfileImages(ctx, resp.TopMovers, resp.LiveChannels)
 
 	// 9. Lightweight moments feed.
 	resp.Moments = h.buildHubMoments(live, windows, now)
@@ -774,7 +797,6 @@ func (h *Handler) enrichHubProfileImages(ctx context.Context, channels []HubLive
 	if len(channels) == 0 {
 		return
 	}
-	resolved := make(map[string]string, len(channels))
 	missing := make([]string, 0, len(channels))
 	for i := range channels {
 		if channels[i].ProfileImageURL != "" {
@@ -784,9 +806,76 @@ func (h *Handler) enrichHubProfileImages(ctx context.Context, channels []HubLive
 		if login == "" {
 			continue
 		}
-		if _, seen := resolved[login]; seen {
+		missing = append(missing, login)
+	}
+	resolved := h.resolveHubProfileURLs(ctx, missing)
+	if len(resolved) == 0 {
+		return
+	}
+	for i := range channels {
+		if channels[i].ProfileImageURL != "" {
 			continue
 		}
+		if url, ok := resolved[normalizeLogin(channels[i].Login)]; ok {
+			channels[i].ProfileImageURL = url
+		}
+	}
+}
+
+func (h *Handler) enrichHubMoverProfileImages(ctx context.Context, movers []HubMover, channels []HubLiveChannel) {
+	if len(movers) == 0 {
+		return
+	}
+	byLogin := make(map[string]string, len(channels))
+	for _, ch := range channels {
+		if ch.ProfileImageURL != "" {
+			byLogin[normalizeLogin(ch.Login)] = ch.ProfileImageURL
+		}
+	}
+	missing := make([]string, 0, len(movers))
+	for i := range movers {
+		if movers[i].ProfileImageURL != "" {
+			continue
+		}
+		login := normalizeLogin(movers[i].Login)
+		if url, ok := byLogin[login]; ok {
+			movers[i].ProfileImageURL = url
+			continue
+		}
+		if login != "" {
+			missing = append(missing, login)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	resolved := h.resolveHubProfileURLs(ctx, missing)
+	for i := range movers {
+		if movers[i].ProfileImageURL != "" {
+			continue
+		}
+		if url, ok := resolved[normalizeLogin(movers[i].Login)]; ok {
+			movers[i].ProfileImageURL = url
+		}
+	}
+}
+
+func (h *Handler) resolveHubProfileURLs(ctx context.Context, logins []string) map[string]string {
+	resolved := make(map[string]string, len(logins))
+	if len(logins) == 0 {
+		return resolved
+	}
+	missing := make([]string, 0, len(logins))
+	seen := make(map[string]struct{}, len(logins))
+	for _, raw := range logins {
+		login := normalizeLogin(raw)
+		if login == "" {
+			continue
+		}
+		if _, ok := seen[login]; ok {
+			continue
+		}
+		seen[login] = struct{}{}
 		if h.rdb != nil {
 			if url, err := h.rdb.Get(ctx, hubProfileCachePrefix+login).Result(); err == nil && url != "" {
 				resolved[login] = url
@@ -795,7 +884,6 @@ func (h *Handler) enrichHubProfileImages(ctx context.Context, channels []HubLive
 		}
 		missing = append(missing, login)
 	}
-
 	if len(missing) > 0 && h.helix != nil && h.helix.Enabled() {
 		if profiles, err := h.helix.UsersByLogin(ctx, missing); err == nil {
 			for login, prof := range profiles {
@@ -810,18 +898,7 @@ func (h *Handler) enrichHubProfileImages(ctx context.Context, channels []HubLive
 			}
 		}
 	}
-
-	if len(resolved) == 0 {
-		return
-	}
-	for i := range channels {
-		if channels[i].ProfileImageURL != "" {
-			continue
-		}
-		if url, ok := resolved[normalizeLogin(channels[i].Login)]; ok {
-			channels[i].ProfileImageURL = url
-		}
-	}
+	return resolved
 }
 
 func hubProviderShares(emoteTotals map[string]int, total int) []HubProviderShare {
@@ -1059,6 +1136,27 @@ func hubLiveActivityCounts(ru MinuteRollup) (chat, emotes, sevenTV int) {
 		return 0, 0, 0
 	}
 	return ru.ChatCount, hubRollupEmoteCount(ru), ru.SevenTVEmoteCount
+}
+
+func hubRollupProviderCounts(ru MinuteRollup) (twitch, bttv, ffz int) {
+	if !isLiveChatRollup(ru) || len(ru.Emotes) == 0 {
+		return 0, 0, 0
+	}
+	for key, count := range ru.Emotes {
+		if count <= 0 {
+			continue
+		}
+		_, _, provider := splitEmoteKey(key)
+		switch strings.ToLower(strings.TrimSpace(provider)) {
+		case "twitch":
+			twitch += count
+		case "bttv":
+			bttv += count
+		case "ffz":
+			ffz += count
+		}
+	}
+	return twitch, bttv, ffz
 }
 
 func hubLiveViewerRollup(ru MinuteRollup) bool {
