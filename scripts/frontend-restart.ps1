@@ -30,8 +30,8 @@ if (Get-Command wsl -ErrorAction SilentlyContinue) {
 Write-Host 'frontend-restart: make/wsl unavailable - running docker compose steps directly...' -ForegroundColor Yellow
 
 if (-not (Test-Path $EnvFile)) {
-    if (Test-Path '.env.dev') { Copy-Item '.env.dev' $EnvFile }
-    else { throw "Missing $EnvFile - run scripts/setup.ps1 first." }
+    & bash scripts/env-synthesize.sh core $EnvFile
+    if ($LASTEXITCODE -ne 0) { throw "Failed to synthesize $EnvFile" }
 }
 
 $compose = @(
