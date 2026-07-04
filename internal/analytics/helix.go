@@ -202,6 +202,92 @@ func (c *HelixClient) StreamsByLogin(ctx context.Context, logins []string) (map[
 	return out, nil
 }
 
+// TopLiveStreams lists up to limit live streams sorted by viewer count via paginated GET /streams.
+func (c *HelixClient) TopLiveStreams(ctx context.Context, limit int) ([]LiveStream, error) {
+	if !c.Enabled() {
+		return nil, ErrHelixDisabled
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	out := make([]LiveStream, 0, limit)
+	cursor := ""
+	seen := map[string]struct{}{}
+	for len(out) < limit {
+		pageSize := 100
+		if remaining := limit - len(out); remaining < pageSize {
+			pageSize = remaining
+		}
+		q := url.Values{}
+		q.Set("first", fmt.Sprintf("%d", pageSize))
+		if cursor != "" {
+			q.Set("after", cursor)
+		}
+		var resp struct {
+			Data []struct {
+				ID           string   `json:"id"`
+				UserID       string   `json:"user_id"`
+				UserLogin    string   `json:"user_login"`
+				UserName     string   `json:"user_name"`
+				GameName     string   `json:"game_name"`
+				Title        string   `json:"title"`
+				Tags         []string `json:"tags"`
+				ViewerCount  int      `json:"viewer_count"`
+				StartedAt    string   `json:"started_at"`
+				Language     string   `json:"language"`
+				ThumbnailURL string   `json:"thumbnail_url"`
+			} `json:"data"`
+			Pagination struct {
+				Cursor string `json:"cursor"`
+			} `json:"pagination"`
+		}
+		if err := c.get(ctx, "/streams", q, &resp); err != nil {
+			if len(out) > 0 {
+				return out, nil
+			}
+			return nil, err
+		}
+		for _, item := range resp.Data {
+			login := normalizeLogin(item.UserLogin)
+			key := login
+			if key == "" {
+				key = item.ID
+			}
+			if key == "" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			startedAt, _ := time.Parse(time.RFC3339, item.StartedAt)
+			out = append(out, LiveStream{
+				ID:            item.ID,
+				BroadcasterID: item.UserID,
+				Login:         login,
+				DisplayName:   item.UserName,
+				GameName:      item.GameName,
+				Title:         item.Title,
+				Tags:          item.Tags,
+				ViewerCount:   item.ViewerCount,
+				StartedAt:     startedAt,
+				Language:      item.Language,
+				ThumbnailURL:  normalizeThumbnail(item.ThumbnailURL),
+			})
+			if len(out) >= limit {
+				break
+			}
+		}
+		nextCursor := resp.Pagination.Cursor
+		if nextCursor == "" || nextCursor == cursor || len(resp.Data) == 0 {
+			break
+		}
+		cursor = nextCursor
+	}
+	return out, nil
+}
+
 func (c *HelixClient) UsersByLogin(ctx context.Context, logins []string) (map[string]UserProfile, error) {
 	out := make(map[string]UserProfile)
 	for _, chunk := range chunkStrings(logins, 100) {
