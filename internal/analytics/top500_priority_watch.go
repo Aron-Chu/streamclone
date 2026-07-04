@@ -10,22 +10,24 @@ import (
 	"streamclone/internal/metrics"
 )
 
-// Top500PriorityWatchPoller admits live Top-N metadata channels into the IRC collector
-// at TrackPriorityTopRoster when explicitly enabled. It reads top500_current only —
-// no archive or corpus enqueue.
+// Top500PriorityWatchPoller admits live Top-N channels into the IRC collector at
+// TrackPriorityTopRoster when explicitly enabled. Candidates come from a
+// LiveAdmissionSource (Helix top-live by default, roster metadata as legacy).
 type Top500PriorityWatchPoller struct {
-	store     top500PriorityWatchStore
+	source    LiveAdmissionSource
 	collector *Collector
 	cfg       config.Config
 	log       *slog.Logger
 	interval  time.Duration
 }
 
-type top500PriorityWatchStore interface {
-	ListTop500LiveForPriorityWatch(ctx context.Context, topN, limit int) ([]Top500Current, error)
+type admissionCycleState struct {
+	trackedLogins map[string]struct{}
+	active        int
+	max           int
 }
 
-func NewTop500PriorityWatchPoller(store top500PriorityWatchStore, collector *Collector, cfg config.Config, log *slog.Logger) *Top500PriorityWatchPoller {
+func NewTop500PriorityWatchPoller(source LiveAdmissionSource, collector *Collector, cfg config.Config, log *slog.Logger) *Top500PriorityWatchPoller {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -34,7 +36,7 @@ func NewTop500PriorityWatchPoller(store top500PriorityWatchStore, collector *Col
 		interval = 60 * time.Second
 	}
 	return &Top500PriorityWatchPoller{
-		store:     store,
+		source:    source,
 		collector: collector,
 		cfg:       cfg,
 		log:       log,
@@ -61,6 +63,7 @@ func StartTop500PriorityWatchPoller(ctx context.Context, poller *Top500PriorityW
 	log.Info("top500 priority watch poller started",
 		"interval", poller.interval.String(),
 		"top_n", poller.cfg.PulseTop500AdmissionTopN,
+		"source", normalizePulseTop500AdmissionSource(poller.cfg.PulseTop500AdmissionSource),
 	)
 	go func() {
 		ticker := time.NewTicker(poller.interval)
@@ -78,7 +81,7 @@ func StartTop500PriorityWatchPoller(ctx context.Context, poller *Top500PriorityW
 }
 
 func (p *Top500PriorityWatchPoller) runOnce(ctx context.Context) {
-	if p == nil || p.store == nil || p.collector == nil {
+	if p == nil || p.source == nil || p.collector == nil {
 		return
 	}
 	mode := TopRosterAdmissionModeDefault
@@ -87,16 +90,17 @@ func (p *Top500PriorityWatchPoller) runOnce(ctx context.Context) {
 	if topN <= 0 {
 		topN = DefaultTop500MetadataTopN
 	}
-	live, err := p.store.ListTop500LiveForPriorityWatch(ctx, topN, topN)
+	live, err := p.source.ListLiveCandidates(ctx, topN)
 	if err != nil {
 		p.log.Warn("top500 priority watch list failed", "err", err)
 		return
 	}
 	metrics.TopRosterAdmissionLiveConsidered.Set(float64(len(live)))
 	snap := p.collector.TrackingSnapshot()
-	metrics.TopRosterAdmissionActiveCollectors.Set(float64(snap.Active))
+	state := newAdmissionCycleState(snap)
+	metrics.TopRosterAdmissionActiveCollectors.Set(float64(state.active))
 	skippedByReason := map[string]int{}
-	if snap.Max <= 0 {
+	if state.max <= 0 {
 		recordTopRosterAdmissionSkip(TopRosterAdmissionModeDefault, TopRosterAdmissionSkipEnvMismatch)
 		skippedByReason[TopRosterAdmissionSkipEnvMismatch]++
 	}
@@ -109,32 +113,34 @@ func (p *Top500PriorityWatchPoller) runOnce(ctx context.Context) {
 	capacityBlocked := false
 	admitted := 0
 	for _, row := range live {
-		outcome, message, streamID := classifyTopRosterCandidate(p, row)
+		outcome, message, streamID := classifyTopRosterCandidate(p.collector, state.trackedLogins, row)
 		if outcome == TopRosterAdmissionEmptyLogin || outcome == TopRosterAdmissionEmptyStreamID || outcome == TopRosterAdmissionNotLive {
 			recordTopRosterAdmissionMetrics(mode, outcome)
 			recordTopRosterAdmissionSkipForOutcome(mode, outcome, message, skippedByReason)
-			recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, message, snap))
+			recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, message, state))
 			continue
 		}
 		if outcome == TopRosterAdmissionDuplicateStream {
 			recordTopRosterAdmissionMetrics(mode, outcome)
 			recordTopRosterAdmissionSkipForOutcome(mode, outcome, "duplicate stream id already tracked", skippedByReason)
-			recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, "duplicate stream id already tracked", snap))
+			recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, "duplicate stream id already tracked", state))
 			continue
 		}
 		if outcome == TopRosterAdmissionAlreadyTracking {
 			recordTopRosterAdmissionMetrics(mode, outcome)
 			recordTopRosterAdmissionSkipForOutcome(mode, outcome, "already tracking", skippedByReason)
-			recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, "already tracking", snap))
+			recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, "already tracking", state))
 			continue
 		}
 		resp := p.collector.WatchWithPriority(ctx, normalizeLogin(row.Login), "", TrackPriorityTopRoster)
 		p.collector.NoteGoLiveDetected(streamID, normalizeLogin(row.Login), "top_roster", TrackPriorityTopRoster, false)
 		outcome = classifyTopRosterWatchResponse(resp)
 		message = resp.Message
-		snap = p.collector.TrackingSnapshot()
+		if resp.Tracking {
+			state.noteAdmission(normalizeLogin(row.Login), resp.Active, resp.Max)
+		}
 		recordTopRosterAdmissionMetrics(mode, outcome)
-		recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, message, snap))
+		recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, message, state))
 		if resp.Tracking {
 			admitted++
 			p.log.Info("top500 priority watch admitted", "login", normalizeLogin(row.Login), "stream_id", streamID, "active", resp.Active, "max", resp.Max)
@@ -153,7 +159,34 @@ func (p *Top500PriorityWatchPoller) runOnce(ctx context.Context) {
 	p.log.Info("top500 priority watch admission cycle", "considered", len(live), "admitted", admitted, "skipped_by_reason", skippedByReason)
 }
 
-func classifyTopRosterCandidate(p *Top500PriorityWatchPoller, row Top500Current) (outcome, message, streamID string) {
+func newAdmissionCycleState(snap TrackingSnapshot) admissionCycleState {
+	tracked := make(map[string]struct{}, len(snap.TrackedChannels))
+	for _, login := range snap.TrackedChannels {
+		if login = normalizeLogin(login); login != "" {
+			tracked[login] = struct{}{}
+		}
+	}
+	return admissionCycleState{
+		trackedLogins: tracked,
+		active:        snap.Active,
+		max:           snap.Max,
+	}
+}
+
+func (s *admissionCycleState) noteAdmission(login string, active, max int) {
+	login = normalizeLogin(login)
+	if login == "" {
+		return
+	}
+	if s.trackedLogins == nil {
+		s.trackedLogins = map[string]struct{}{}
+	}
+	s.trackedLogins[login] = struct{}{}
+	s.active = active
+	s.max = max
+}
+
+func classifyTopRosterCandidate(c *Collector, tracked map[string]struct{}, row Top500Current) (outcome, message, streamID string) {
 	login := normalizeLogin(row.Login)
 	streamID = ""
 	if row.StreamID != nil {
@@ -166,17 +199,20 @@ func classifyTopRosterCandidate(p *Top500PriorityWatchPoller, row Top500Current)
 		return TopRosterAdmissionNotLive, "not live", streamID
 	case streamID == "":
 		return TopRosterAdmissionEmptyStreamID, "stream id required", streamID
-	case p.collector.TrackedStreamID(login) == streamID:
+	case c != nil && c.TrackedStreamID(login) == streamID:
 		return TopRosterAdmissionDuplicateStream, "duplicate stream id", streamID
-	case p.collector.IsTracking(login):
-		return TopRosterAdmissionAlreadyTracking, "already tracking", streamID
-	default:
-		return "", "", streamID
 	}
+	if tracked != nil {
+		if _, ok := tracked[login]; ok {
+			return TopRosterAdmissionAlreadyTracking, "already tracking", streamID
+		}
+	}
+	return "", "", streamID
 }
 
-func buildTopRosterAdmissionAttempt(row Top500Current, streamID string, attemptedAt time.Time, outcome, message string, snap TrackingSnapshot) TopRosterAdmissionAttempt {
+func buildTopRosterAdmissionAttempt(row Top500Current, streamID string, attemptedAt time.Time, outcome, message string, state admissionCycleState) TopRosterAdmissionAttempt {
 	login := normalizeLogin(row.Login)
+	_, tracking := state.trackedLogins[login]
 	return TopRosterAdmissionAttempt{
 		Login:             login,
 		Rank:              row.Rank,
@@ -185,9 +221,9 @@ func buildTopRosterAdmissionAttempt(row Top500Current, streamID string, attempte
 		AttemptedAt:       attemptedAt,
 		Outcome:           outcome,
 		Message:           message,
-		CollectorTracking: snap.Active > 0 && containsString(snap.TrackedChannels, login),
-		ActiveCollectors:  snap.Active,
-		MaxCollectors:     snap.Max,
+		CollectorTracking: tracking,
+		ActiveCollectors:  state.active,
+		MaxCollectors:     state.max,
 	}
 }
 
@@ -214,13 +250,4 @@ func recordTopRosterAdmissionSkip(mode, reason string) {
 		return
 	}
 	metrics.TopRosterAdmissionSkippedTotal.WithLabelValues(reason, mode).Inc()
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if strings.EqualFold(value, target) {
-			return true
-		}
-	}
-	return false
 }

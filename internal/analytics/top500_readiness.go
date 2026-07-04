@@ -91,7 +91,11 @@ func (h *Handler) buildTop100ReadinessReport(ctx context.Context, topN int, admi
 	if h.store == nil {
 		return report, nil
 	}
-	live, err := h.store.ListTop500LiveForPriorityWatch(ctx, report.TopN, report.TopN)
+	source := NewReadinessLiveAdmissionSource(h.store)
+	if source == nil {
+		return report, nil
+	}
+	live, err := source.ListLiveCandidates(ctx, report.TopN)
 	if err != nil {
 		return report, err
 	}

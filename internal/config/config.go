@@ -108,21 +108,36 @@ type Config struct {
 	TimeseriesQueueSize       int    `env:"TIMESERIES_QUEUE_SIZE" envDefault:"1024"`
 	TimeseriesBackfillOnStart bool   `env:"TIMESERIES_BACKFILL_ON_START" envDefault:"false"`
 
-	TwitchOAuthClientID     string `env:"TWITCH_OAUTH_CLIENT_ID"`
-	TwitchOAuthClientSecret string `env:"TWITCH_OAUTH_CLIENT_SECRET"`
-	TwitchOAuthRedirectURL  string `env:"TWITCH_OAUTH_REDIRECT_URL" envDefault:"http://localhost:8083/v1/auth/twitch/callback"`
-	TwitchAuthScopes        string `env:"TWITCH_AUTH_SCOPES" envDefault:"chat:read chat:edit user:read:follows clips:edit"`
-	TwitchOAuthURL          string `env:"TWITCH_OAUTH_URL" envDefault:"https://id.twitch.tv/oauth2/authorize"`
-	TwitchTokenURL          string `env:"TWITCH_TOKEN_URL" envDefault:"https://id.twitch.tv/oauth2/token"`
-	TwitchValidateURL       string `env:"TWITCH_VALIDATE_URL" envDefault:"https://id.twitch.tv/oauth2/validate"`
-	TwitchAPIURL            string `env:"TWITCH_API_URL" envDefault:"https://api.twitch.tv/helix"`
-	TwitchDevTokenImport    bool   `env:"TWITCH_DEV_TOKEN_IMPORT_ENABLED" envDefault:"false"`
-	ClipperAuthSyncPath     string `env:"CLIPPER_AUTH_SYNC_PATH"`
-	StreamcloneProfile      string `env:"STREAMCLONE_PROFILE" envDefault:"core"`
-	ClipperServiceURL       string `env:"CLIPPER_SERVICE_URL" envDefault:"http://host.docker.internal:8095"`
-	FrontendOrigin          string `env:"FRONTEND_ORIGIN" envDefault:"http://localhost:8090"`
-	AuthCookieSecret        string `env:"AUTH_COOKIE_SECRET" envDefault:"dev-insecure-cookie-secret"`
-	AuthCookieSameSite      string `env:"AUTH_COOKIE_SAMESITE" envDefault:"lax"`
+	TwitchOAuthClientID      string `env:"TWITCH_OAUTH_CLIENT_ID"`
+	TwitchOAuthClientSecret  string `env:"TWITCH_OAUTH_CLIENT_SECRET"`
+	TwitchOAuthRedirectURL   string `env:"TWITCH_OAUTH_REDIRECT_URL" envDefault:"http://localhost:8083/v1/auth/twitch/callback"`
+	TwitchAuthScopes         string `env:"TWITCH_AUTH_SCOPES" envDefault:"chat:read chat:edit user:read:follows clips:edit"`
+	TwitchOAuthURL           string `env:"TWITCH_OAUTH_URL" envDefault:"https://id.twitch.tv/oauth2/authorize"`
+	TwitchTokenURL           string `env:"TWITCH_TOKEN_URL" envDefault:"https://id.twitch.tv/oauth2/token"`
+	TwitchValidateURL        string `env:"TWITCH_VALIDATE_URL" envDefault:"https://id.twitch.tv/oauth2/validate"`
+	TwitchAPIURL             string `env:"TWITCH_API_URL" envDefault:"https://api.twitch.tv/helix"`
+	TwitchDevTokenImport     bool   `env:"TWITCH_DEV_TOKEN_IMPORT_ENABLED" envDefault:"false"`
+	ClipperAuthSyncPath      string `env:"CLIPPER_AUTH_SYNC_PATH"`
+	StreamcloneProfile       string `env:"STREAMCLONE_PROFILE" envDefault:"core"`
+	ClipperServiceURL        string `env:"CLIPPER_SERVICE_URL" envDefault:"http://host.docker.internal:8095"`
+	ClipperWebhookToken      string `env:"CLIPPER_WEBHOOK_TOKEN"`
+	ReplayForgeCallbackToken string `env:"REPLAYFORGE_CALLBACK_TOKEN"`
+	FrontendOrigin           string `env:"FRONTEND_ORIGIN" envDefault:"http://localhost:8090"`
+	AuthCookieSecret         string `env:"AUTH_COOKIE_SECRET" envDefault:"dev-insecure-cookie-secret"`
+	AuthCookieSameSite       string `env:"AUTH_COOKIE_SAMESITE" envDefault:"lax"`
+
+	PulseClipMaxCandidates              int     `env:"PULSE_CLIP_MAX_CANDIDATES" envDefault:"0"`
+	PulseClipMinScore                   int     `env:"PULSE_CLIP_MIN_SCORE" envDefault:"0"`
+	PulseClipMinConfidence              float64 `env:"PULSE_CLIP_MIN_CONFIDENCE" envDefault:"0"`
+	PulseClipMinChatCount               int     `env:"PULSE_CLIP_MIN_CHAT_COUNT" envDefault:"0"`
+	PulseClipMaxChatCount               int     `env:"PULSE_CLIP_MAX_CHAT_COUNT" envDefault:"0"`
+	PulseClipMinEmoteCount              int     `env:"PULSE_CLIP_MIN_EMOTE_COUNT" envDefault:"0"`
+	PulseClipMinProviderEmoteCount      int     `env:"PULSE_CLIP_MIN_PROVIDER_EMOTE_COUNT" envDefault:"0"`
+	PulseClipProviderEmoteProvider      string  `env:"PULSE_CLIP_PROVIDER_EMOTE_PROVIDER" envDefault:"seventv"`
+	PulseClipMinNonMissingRollupMinutes int     `env:"PULSE_CLIP_MIN_NON_MISSING_ROLLUP_MINUTES" envDefault:"0"`
+	PulseClipDuplicateRadiusSeconds     int     `env:"PULSE_CLIP_DUPLICATE_RADIUS_SECONDS" envDefault:"0"`
+	PulseClipMaxCandidatesPerHour       int     `env:"PULSE_CLIP_MAX_CANDIDATES_PER_HOUR" envDefault:"0"`
+	PulseClipRequireSourceAvailable     bool    `env:"PULSE_CLIP_REQUIRE_SOURCE_AVAILABLE" envDefault:"false"`
 
 	S3Endpoint    string `env:"S3_ENDPOINT"`
 	S3Bucket      string `env:"S3_BUCKET" envDefault:"emotes"`
@@ -238,6 +253,7 @@ type Config struct {
 	PulseTop500AdmissionEnabled  bool          `env:"PULSE_TOP500_ADMISSION_ENABLED" envDefault:"false"`
 	PulseTop500AdmissionTopN     int           `env:"PULSE_TOP500_ADMISSION_TOP_N" envDefault:"100"`
 	PulseTop500AdmissionInterval time.Duration `env:"PULSE_TOP500_ADMISSION_INTERVAL" envDefault:"60s"`
+	PulseTop500AdmissionSource   string        `env:"PULSE_TOP500_ADMISSION_SOURCE" envDefault:"helix_top_live"`
 	LiveAdmissionTopN            int           `env:"LIVE_ADMISSION_TOP_N" envDefault:"0"`
 	MaxActiveIRCChannels         int           `env:"MAX_ACTIVE_IRC_CHANNELS" envDefault:"0"`
 
@@ -274,6 +290,7 @@ type Config struct {
 	SilverEnqueueInterval            time.Duration `env:"SILVER_ENQUEUE_INTERVAL" envDefault:"15m"`
 
 	GoldBackfillEnabled    bool          `env:"GOLD_BACKFILL_ENABLED" envDefault:"false"`
+	GoldAutoEnqueueEnabled bool          `env:"GOLD_AUTO_ENQUEUE_ENABLED" envDefault:"false"`
 	GoldMinPeakViewers     int           `env:"GOLD_MIN_PEAK_VIEWERS" envDefault:"0"`
 	GoldMinDurationMinutes int           `env:"GOLD_MIN_DURATION_MINUTES" envDefault:"0"`
 	GoldEnqueuerInterval   time.Duration `env:"GOLD_ENQUEUER_INTERVAL" envDefault:"5m"`
@@ -408,7 +425,7 @@ func Load() (Config, error) {
 			c.SilverEnqueueTopN = c.CorpusTargetTopN
 		}
 	}
-	if c.LiveAdmissionTopN > 0 {
+	if c.LiveAdmissionTopN > 0 && strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_TOP_N")) == "" {
 		c.PulseTop500AdmissionTopN = clampCorpusTopN(c.LiveAdmissionTopN)
 	}
 	if c.MaxActiveIRCChannels > 0 && strings.TrimSpace(os.Getenv("PULSE_MAX_ACTIVE_CHANNELS")) == "" {
@@ -425,6 +442,12 @@ func Load() (Config, error) {
 	}
 	if c.PulseTop500AdmissionInterval <= 0 {
 		c.PulseTop500AdmissionInterval = 60 * time.Second
+	}
+	switch strings.ToLower(strings.TrimSpace(c.PulseTop500AdmissionSource)) {
+	case "roster":
+		c.PulseTop500AdmissionSource = "roster"
+	default:
+		c.PulseTop500AdmissionSource = "helix_top_live"
 	}
 	if c.Top500SilverGateMaxCandidates <= 0 || c.Top500SilverGateMaxCandidates > 100 {
 		c.Top500SilverGateMaxCandidates = 5

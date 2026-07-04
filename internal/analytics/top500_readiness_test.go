@@ -53,14 +53,14 @@ func TestTop500PriorityWatchPollerRecordsCapacityBlockedOutcome(t *testing.T) {
 	streamA := "111"
 	streamB := "222"
 	streamC := "333"
-	store := &fakeTop500PriorityStore{live: []Top500Current{
+	source := &fakeLiveAdmissionSource{live: []Top500Current{
 		{Login: "a", Rank: 1, IsLive: true, StreamID: &streamA, SampledAt: time.Now().UTC()},
 		{Login: "b", Rank: 2, IsLive: true, StreamID: &streamB, SampledAt: time.Now().UTC()},
 		{Login: "c", Rank: 3, IsLive: true, StreamID: &streamC, SampledAt: time.Now().UTC()},
 	}}
 	joiner := &fakeJoiner{}
 	collector := NewCollector(&fakeStore{}, fakeProvider{}, joiner, nil, nilLogger(), 1, time.Hour, time.Hour, 200)
-	p := NewTop500PriorityWatchPoller(store, collector, config.Config{
+	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
 		PulseTop500AdmissionEnabled: true,
 		PulseTop500AdmissionTopN:    100,
 	}, nil)
@@ -83,13 +83,13 @@ func TestTop500PriorityWatchPollerRecordsCapacityBlockedOutcome(t *testing.T) {
 func TestTop500PriorityWatchPollerRecordsAlreadyTracking(t *testing.T) {
 	globalTopRosterAdmissionRegistry = topRosterAdmissionRegistry{byLogin: make(map[string]TopRosterAdmissionAttempt)}
 	streamA := "111"
-	store := &fakeTop500PriorityStore{live: []Top500Current{
+	source := &fakeLiveAdmissionSource{live: []Top500Current{
 		{Login: "live", Rank: 4, IsLive: true, StreamID: &streamA, SampledAt: time.Now().UTC()},
 	}}
 	joiner := &fakeJoiner{}
 	collector := NewCollector(&fakeStore{}, fakeProvider{}, joiner, nil, nilLogger(), 2, time.Hour, time.Hour, 200)
 	collector.Watch(context.Background(), "live")
-	p := NewTop500PriorityWatchPoller(store, collector, config.Config{
+	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
 		PulseTop500AdmissionEnabled: true,
 		PulseTop500AdmissionTopN:    100,
 	}, nil)

@@ -41,6 +41,20 @@ func TestLoadPrefersCanonicalPulseTop500Env(t *testing.T) {
 	}
 }
 
+func TestLoadPrefersExplicitPulseTop500AdmissionTopNOverLiveAlias(t *testing.T) {
+	t.Setenv("PULSE_TOP500_ADMISSION_TOP_N", "500")
+	t.Setenv("LIVE_ADMISSION_TOP_N", "1000")
+	t.Setenv("CORPUS_TARGET_TOP_N", "1000")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PulseTop500AdmissionTopN != 500 {
+		t.Fatalf("PulseTop500AdmissionTopN = %d, want explicit 500", cfg.PulseTop500AdmissionTopN)
+	}
+}
+
 func init() {
 	_ = os.Unsetenv("PULSE_TOP500_ADMISSION_ENABLED")
 }

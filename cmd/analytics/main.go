@@ -185,7 +185,6 @@ func main() {
 			"orphan_aliases", len(report.OrphanAliasesMerged),
 		)
 	}
-
 	var collector *analytics.Collector
 	irc := ircconn.NewManager(cfg.Upstream.TwitchIRCURL, cfg.MaxChannelsPerSocket, func(line string) {
 		if collector != nil {
@@ -577,11 +576,13 @@ func main() {
 	handler.WithHeatmapCache(heatmapCache).WithTimeseries(tsWriter).WithRedis(rdb).WithPulseBackfill(pulseBackfill).WithPulseHosted(pulseHosted).WithPulseRuntime(pulseRuntime).WithCorpusRuntime(analytics.CorpusRuntimeConfigFromApp(cfg)).WithEmoteHistoryJobs(emoteHistoryJobConfig).WithCDNPublicBase(cfg.CDNPublicBase).WithAppConfig(cfg)
 	handler.WithRateLimiter(analytics.NewPulseRateLimiter(rdb, pulseHosted.WatchRatePerMin, pulseHosted.BackfillRatePerHour))
 	analytics.StartProtectedGoLivePoller(ctx, analytics.NewProtectedGoLivePoller(store, helix, collector, pulseRuntime, logger), logger)
-	analytics.StartTop500PriorityWatchPoller(ctx, analytics.NewTop500PriorityWatchPoller(store, collector, cfg, logger), logger)
+	admissionSource := analytics.NewLiveAdmissionSource(cfg, store, helix, logger)
+	analytics.StartTop500PriorityWatchPoller(ctx, analytics.NewTop500PriorityWatchPoller(admissionSource, collector, cfg, logger), logger)
 	if cfg.PulseTop500AdmissionEnabled {
 		logger.Info("top500 priority watch poller enabled",
 			"top_n", cfg.PulseTop500AdmissionTopN,
 			"interval", cfg.PulseTop500AdmissionInterval.String(),
+			"source", cfg.PulseTop500AdmissionSource,
 		)
 	}
 	logger.Info("pulse runtime config",
