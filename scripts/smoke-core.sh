@@ -26,8 +26,10 @@ wait_all_services() {
     "http://localhost:8083/healthz|chat"
     "http://localhost:8084/healthz|emote"
     "http://localhost:8086/healthz|analytics"
-    "http://localhost:8087/healthz|storygraph"
   )
+  if [ "${SMOKE_STORYGRAPH:-0}" = "1" ]; then
+    urls+=("http://localhost:8087/healthz|storygraph")
+  fi
   echo "Checking core services..."
   for i in $(seq 1 60); do
     local all_ok=true
