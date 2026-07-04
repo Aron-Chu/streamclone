@@ -23,19 +23,52 @@ STAGE="$ROOT/dist/streamclone-$VERSION"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
-copy_tree() {
+release_rsync_tree() {
   local src="$1"
   local dst="$2"
+  shift 2
   mkdir -p "$dst"
-  cp -a "$src"/. "$dst"/
+  # shellcheck disable=SC2086
+  rsync -a "${src}/" "${dst}/" "$@"
 }
+
+RELEASE_DEPLOY_EXCLUDES=(
+  --exclude='docker-compose.bearhost*'
+  --exclude='docker-compose.streampulse-vps*'
+  --exclude='docker-compose.observability*'
+  --exclude='grafana/'
+  --exclude='prometheus/'
+  --exclude='env/profile-bearhost*'
+  --exclude='env/profile-streampulse-vps*'
+  --exclude='env/profile-pulse.env'
+  --exclude='env/profile-clipper.env'
+  --exclude='Caddyfile.bearhost'
+  --exclude='nginx.bearhost.conf'
+  --exclude='smoke/bearhost*'
+)
+
+RELEASE_SCRIPT_EXCLUDES=(
+  --exclude='bearhost*'
+  --exclude='streampulse-vps*'
+  --exclude='helm-*'
+  --exclude='sync-pulse-chart.sh'
+  --exclude='test-streampulse-vps*'
+  --exclude='vps-health-check.sh'
+  --exclude='lib/bearhost*'
+  --exclude='lib/streampulse-vps*'
+  --exclude='lib/deploy-rsync.sh'
+  --exclude='pulse-hosted-boundary*'
+  --exclude='dev/'
+)
 
 echo "Packaging streamclone $VERSION -> dist/"
 
-copy_tree "$ROOT/deploy" "$STAGE/deploy"
-copy_tree "$ROOT/scripts" "$STAGE/scripts"
-copy_tree "$ROOT/migrations" "$STAGE/migrations"
-copy_tree "$ROOT/launchers" "$STAGE/launchers"
+release_rsync_tree "$ROOT/deploy" "$STAGE/deploy" "${RELEASE_DEPLOY_EXCLUDES[@]}"
+release_rsync_tree "$ROOT/scripts" "$STAGE/scripts" "${RELEASE_SCRIPT_EXCLUDES[@]}"
+mkdir -p "$STAGE/migrations"
+cp -a "$ROOT/migrations/." "$STAGE/migrations/"
+mkdir -p "$STAGE/launchers"
+cp -a "$ROOT/launchers/." "$STAGE/launchers/" 2>/dev/null || true
 cp "$ROOT/VERSION" "$STAGE/VERSION"
 cp "$ROOT/.env.example" "$STAGE/.env.example"
 cp "$ROOT/deploy/env/profile-dev.env" "$STAGE/deploy/env/profile-dev.env"
@@ -183,3 +216,11 @@ EOF
 echo "Created:"
 ls -la "$ROOT/dist/streamclone-${VERSION}"* 2>/dev/null || ls -la "$ROOT/dist/"
 echo "Release manifest: $MANIFEST"
+
+echo "==> bundle allowlist audit (paths/filenames only)"
+if find "$STAGE" \( -iname '*bearhost*' -o -iname '*streampulse-vps*' -o -path '*/grafana/*' -o -path '*/prometheus/*' -o -path '*/charts/pulse/*' \) 2>/dev/null | grep -q .; then
+  echo "FAIL: release bundle includes legacy prod ops paths:" >&2
+  find "$STAGE" \( -iname '*bearhost*' -o -iname '*streampulse-vps*' -o -path '*/grafana/*' -o -path '*/prometheus/*' -o -path '*/charts/pulse/*' \) >&2 || true
+  exit 1
+fi
+echo "bundle allowlist audit: PASS"

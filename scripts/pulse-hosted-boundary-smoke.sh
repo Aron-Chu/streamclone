@@ -42,39 +42,11 @@ FIXTURE_SOURCE=fallback
 load_db_fixtures() {
   if [[ "${PULSE_SMOKE_SKIP_SSH:-}" == "1" ]]; then
     echo "SKIP: DB fixture lookup (PULSE_SMOKE_SKIP_SSH=1)"
-    FIXTURE_SOURCE=fallback
-    return 0
+  else
+    echo "SKIP: DB fixture lookup (hosted SSH fixtures moved to streampulse-ops)"
   fi
-  if [[ ! -f "${ROOT}/scripts/lib/bearhost-ssh.sh" ]]; then
-    echo "WARN: bearhost-ssh unavailable; chart/VOD canaries will SKIP" >&2
-    FIXTURE_SOURCE=fallback
-    return 0
-  fi
-  # shellcheck source=scripts/lib/bearhost-ssh.sh
-  source "${ROOT}/scripts/lib/bearhost-ssh.sh"
-  bearhost_ssh_config
-  if [[ ! -f "${BEARHOST_SSH_KEY:-}" ]]; then
-    echo "WARN: BearHost SSH key missing; chart/VOD canaries will SKIP" >&2
-    FIXTURE_SOURCE=fallback
-    return 0
-  fi
-  local fixture_out
-  fixture_out="$(bearhost_ssh "cd '${BEARHOST_REMOTE_APP}' && bash scripts/lib/bearhost-smoke-fixtures-remote.sh" 2>/dev/null || true)"
-  if [[ -z "${fixture_out}" ]]; then
-    echo "WARN: DB fixture lookup failed; chart/VOD canaries will SKIP" >&2
-    FIXTURE_SOURCE=fallback
-    return 0
-  fi
-  FIXTURE_SOURCE=db
-  while IFS= read -r line; do
-    case "${line}" in
-      PULSE_SMOKE_STREAM_ID=*) STREAM_ID="${line#PULSE_SMOKE_STREAM_ID=}" ;;
-      PULSE_SMOKE_STREAM_ROLLUPS=*) STREAM_ROLLUPS="${line#PULSE_SMOKE_STREAM_ROLLUPS=}" ;;
-      PULSE_SMOKE_VOD_ID=*) VOD_ID="${line#PULSE_SMOKE_VOD_ID=}" ;;
-      PULSE_SMOKE_VOD_ROLLUPS=*) VOD_ROLLUPS="${line#PULSE_SMOKE_VOD_ROLLUPS=}" ;;
-    esac
-  done <<< "${fixture_out}"
-  echo "==> DB-backed fixtures: stream_id=${STREAM_ID} rollups=${STREAM_ROLLUPS} vod_id=${VOD_ID} vod_rollups=${VOD_ROLLUPS}"
+  FIXTURE_SOURCE=fallback
+  return 0
 }
 
 curl_code() {
