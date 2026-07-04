@@ -141,9 +141,9 @@ Stub text:
 
 ## 5. Delete after validation
 
-**Status:** Prepared in draft PR `chore/public-ops-cleanup-prep` — **not merged** until soak stable.
+**Status:** **Done** — PR [#42](https://github.com/Aron-Chu/streamclone/pull/42) merged (`d375c8a`); `scripts/lib/bearhost-*` removed. Follow-up PR fixes remaining script references (e.g. `archive-restore-drill.sh`, `ops-000-archive-preflight.sh`).
 
-Duplicates in `streamclone` listed in sections 2–3 removed in that PR after:
+Duplicates in `streamclone` listed in sections 2–3 removed after:
 - Ops copy committed and `import-manifest.md` marked active
 - Live cutover evidence in `streampulse-ops/docs/deployments/2026-07-03-v0.3.0-rc7.md`
 - Inventory: [public-ops-cleanup-inventory.md](public-ops-cleanup-inventory.md)
