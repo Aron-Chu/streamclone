@@ -141,13 +141,14 @@ jobs:
     name: Build and push scraper
     needs: release-gate
     runs-on: ubuntu-latest
-    continue-on-error: true
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_scraper == 'true'
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_scraper == 'true') ||
+      startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Checkout scraper repo
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.inputs.scraper_repository }}
+          repository: ${{ github.event.inputs.scraper_repository || 'Aron-Chu/streamclone-scraper' }}
           path: scraper
 
       - uses: docker/setup-buildx-action@v3
@@ -190,8 +191,12 @@ jobs:
 
   release-smoke:
     name: Release image smoke
-    needs: publish
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
+    needs: [publish, publish-scraper]
+    if: |
+      always() &&
+      needs.publish.result == 'success' &&
+      (needs.publish-scraper.result == 'success' || needs.publish-scraper.result == 'skipped') &&
+      (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -250,14 +255,21 @@ jobs:
       - name: Pull core GHCR images
         env:
           IMAGE_TAG: ${{ steps.tag.outputs.value }}
+          SCRAPER_PUBLISHED: ${{ needs.publish-scraper.result }}
         run: |
           set -euo pipefail
           echo "GHCR pull sanity: pulling tagged release images before stack start"
+          services=(metadata video chat analytics emote frontend migrate)
+          if [ "$SCRAPER_PUBLISHED" = "success" ]; then
+            services+=(scraper)
+          else
+            echo "Skipping scraper pull (publish-scraper was not successful)"
+          fi
           docker compose --env-file .env \
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.local-tunnel.yml \
             -f deploy/docker-compose.release.yml \
-            pull metadata video chat analytics emote frontend migrate scraper
+            pull "${services[@]}"
 
       - name: Migrate test database (pinned migrate image)
         env:
