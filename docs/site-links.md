@@ -31,4 +31,4 @@ See [docs/install-desktop.md](install-desktop.md) and [docs/ENVIRONMENT.md](ENVI
 ## Production operations
 
 Operator runbooks, deploy scripts, and host topology live in the private **streampulse-ops** repository.
-Public artifact contract: [docs/production-artifact-contract.md](production-artifact-contract.md).
+See [docs/hosted-production-ops.md](hosted-production-ops.md) and [docs/production-artifact-contract.md](production-artifact-contract.md).

@@ -1,0 +1,137 @@
+# Batch B2 proposal — hosted + infra alerts (NOT APPLIED). Route via Alertmanager when approved.
+groups:
+  - name: streamclone_top500_hosted
+    rules:
+      - alert: PrometheusTargetDown
+        expr: up{job=~"analytics|analytics-workers"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          lane: hosted
+        annotations:
+          summary: Prometheus scrape target down
+
+      - alert: HostedBFF5xxRateHigh
+        expr: |
+          sum(rate(analytics_http_requests_total{route=~"/v1/extension/.*",status=~"5.."}[5m]))
+          / clamp_min(sum(rate(analytics_http_requests_total{route=~"/v1/extension/.*"}[5m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          lane: hosted
+        annotations:
+          summary: Extension BFF 5xx rate above 5%
+
+      - alert: HostedCoverageLatencyHigh
+        expr: |
+          histogram_quantile(0.95, sum(rate(analytics_http_request_duration_seconds_bucket{route=~".*/coverage"}[5m])) by (le)) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          lane: hosted
+        annotations:
+          summary: Coverage endpoint p95 latency above 200ms
+
+      - alert: PostgresBackupStale
+        expr: (time() - streamclone_postgres_backup_last_success_timestamp) > 93600
+        for: 30m
+        labels:
+          severity: warning
+          lane: infra
+        annotations:
+          summary: Postgres backup older than 26 hours
+
+      - alert: ArchiveExportFailedSpike
+        expr: increase(streamclone_archive_exports_failed_total[15m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+          lane: corpus
+        annotations:
+          summary: Archive export failures elevated
+
+      - alert: Top500MetadataSamplerEnabledButNoSamples
+        expr: |
+          streamclone_top500_metadata_sampler_enabled == 1
+          and on() (sum(rate(streamclone_top500_metadata_channels_sampled_total{result="success"}[15m])) == 0)
+        for: 15m
+        labels:
+          severity: warning
+          lane: hosted
+        annotations:
+          summary: Top 500 metadata sampler enabled but no channels sampled
+
+      - alert: Top500MetadataWriteAttemptedWhileGuarded
+        expr: |
+          (streamclone_top500_metadata_dry_run == 1 or streamclone_top500_metadata_write_enabled == 0)
+          and on() (sum(rate(streamclone_top500_metadata_snapshot_writes_total[5m])) > 0)
+        for: 5m
+        labels:
+          severity: critical
+          lane: hosted
+        annotations:
+          summary: Top 500 metadata writes observed while dry-run or write-disabled guard is active
+
+      - alert: Top500MetadataProviderRateLimitSpike
+        expr: increase(streamclone_top500_metadata_provider_rate_limits_total[15m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+          lane: hosted
+        annotations:
+          summary: Top 500 metadata provider rate-limit responses elevated
+
+      - alert: Top500MetadataProviderAuthMissing
+        expr: increase(streamclone_top500_metadata_provider_errors_total{reason="helix_auth_missing"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          lane: hosted
+        annotations:
+          summary: Top 500 metadata provider auth missing
+
+      - alert: Top500MetadataSnapshotStale
+        expr: streamclone_top500_metadata_freshness_seconds > 900
+        for: 15m
+        labels:
+          severity: info
+          lane: hosted
+        annotations:
+          summary: Top 500 metadata snapshot stale
+
+      - alert: Top500MetadataWriteLatencyHigh
+        expr: streamclone_top500_metadata_write_latency_seconds{operation="write_samples",result="success"} > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          lane: hosted
+        annotations:
+          summary: Top 500 metadata write latency above 200ms
+
+      - alert: Top500MetadataRollbackStateActive
+        expr: streamclone_top500_metadata_rollback_state > 0
+        for: 10m
+        labels:
+          severity: warning
+          lane: hosted
+        annotations:
+          summary: Top 500 metadata sampler rollback or degraded state active
+
+      - alert: Top500MetadataLockUnavailableRepeated
+        expr: increase(streamclone_top500_metadata_lock_unavailable_total[15m]) > 3
+        for: 10m
+        labels:
+          severity: warning
+          lane: hosted
+        annotations:
+          summary: Top 500 metadata sampler lock unavailable repeatedly
+
+      - alert: PrometheusDiskPressure
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.15
+        for: 10m
+        labels:
+          severity: warning
+          lane: infra
+        annotations:
+          summary: VPS root filesystem below 15% free

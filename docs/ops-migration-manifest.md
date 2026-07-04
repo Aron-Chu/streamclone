@@ -141,10 +141,12 @@ Stub text:
 
 ## 5. Delete after validation
 
-Duplicates in `streamclone` listed in sections 2–3, only after:
+**Status:** Prepared in draft PR `chore/public-ops-cleanup-prep` — **not merged** until soak stable.
+
+Duplicates in `streamclone` listed in sections 2–3 removed in that PR after:
 - Ops copy committed and `import-manifest.md` marked active
-- PR9 validation passes
-- PR10 cutover evidence recorded
+- Live cutover evidence in `streampulse-ops/docs/deployments/2026-07-03-v0.3.0-rc7.md`
+- Inventory: [public-ops-cleanup-inventory.md](public-ops-cleanup-inventory.md)
 
 ---
 
