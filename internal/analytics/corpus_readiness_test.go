@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"streamclone/internal/config"
 )
 
 func TestCorpusReadinessRouteReportsCriticalWithoutStore(t *testing.T) {
@@ -198,4 +200,22 @@ func testContainsString(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestCorpusRuntimeConfigFromAppPreservesLiveAdmissionTopN5000(t *testing.T) {
+	cfg := config.Config{
+		Top500MetadataTopN:       1000,
+		PulseTop500AdmissionTopN: 5000,
+		PulseMaxActiveChannels:   5000,
+	}
+	runtime := CorpusRuntimeConfigFromApp(cfg)
+	if runtime.TargetTopN != 1000 {
+		t.Fatalf("TargetTopN = %d, want metadata cap 1000", runtime.TargetTopN)
+	}
+	if runtime.LiveAdmissionTopN != 5000 {
+		t.Fatalf("LiveAdmissionTopN = %d, want 5000", runtime.LiveAdmissionTopN)
+	}
+	if runtime.MaxActiveIRCChannels != 5000 {
+		t.Fatalf("MaxActiveIRCChannels = %d, want 5000", runtime.MaxActiveIRCChannels)
+	}
 }
