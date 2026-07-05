@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
@@ -28,15 +29,16 @@ const (
 	hubProfileCachePrefix = "sp:hub:profimg:"
 	hubProfileCacheTTL    = 12 * time.Hour
 
-	hubActivityWindowMinutes = 30 // default minutes of aggregated activity returned
-	hubActivityMaxPoints     = 240
-	hubPoolCap               = 40 // channels we join rollups for (bounded cost)
-	hubLiveCap               = 24 // live channel rows returned
-	hubMoversCap             = 8
-	hubEmotesCap             = 12
-	hubMomentsCap            = 12
-	hubMomentLookback        = 45 * time.Minute
-	hubTrackerTopN           = MaxTop500MetadataTopN // top-N roster rows examined for the tracker summary
+	hubActivityWindowMinutes      = 30 // default minutes of aggregated activity returned
+	hubActivityMaxPoints          = 240
+	hubPoolCap                    = 96 // channels we join rollups for (bounded cost; aligns with IRC pool expand)
+	hubLiveCap                    = 96 // live channel rows returned (portal table expand)
+	hubMoversCap                  = 12 // portal Top movers rail; pairs with hubEmotesCap / economy panel height
+	hubEmotesCap                  = 12
+	hubActivityBucketTopEmotesCap = 10 // per-bucket inspector + chart tooltip (tooltip slices to 3)
+	hubMomentsCap                 = 12
+	hubMomentLookback             = 45 * time.Minute
+	hubTrackerTopN                = MaxTop500MetadataTopN // top-N roster rows examined for the tracker summary
 )
 
 type publicHubOptions struct {
@@ -75,6 +77,7 @@ type HubCorpusPipeline struct {
 	MaxActiveIRCChannels      int               `json:"maxActiveIrcChannels"`
 	CollectorActive           int               `json:"collectorActive"`
 	CollectorMax              int               `json:"collectorMax"`
+	RuntimeConfigFingerprint  string            `json:"runtimeConfigFingerprint,omitempty"`
 	MetadataSampledAgoSeconds *int              `json:"metadataSampledAgoSeconds,omitempty"`
 	Roster                    HubTrackerSummary `json:"roster"`
 	Silver                    HubTierCounts     `json:"silver"`
@@ -130,21 +133,35 @@ type HubCoverage struct {
 	State          string `json:"state"`
 }
 
+type HubBucketEmote struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider,omitempty"`
+	Count    int    `json:"count"`
+}
+
 type HubActivityPoint struct {
-	T       int64 `json:"t"`
-	Chat    int   `json:"chat"`
-	Emotes  int   `json:"emotes"`
-	SevenTV int   `json:"seventv"`
-	Twitch  int   `json:"twitch,omitempty"`
-	BTTV    int   `json:"bttv,omitempty"`
-	FFZ     int   `json:"ffz,omitempty"`
-	Viewers int   `json:"viewers"`
+	T               int64 `json:"t"`
+	Chat            int   `json:"chat"`
+	Emotes          int   `json:"emotes"`
+	SevenTV         int   `json:"seventv"`
+	Twitch          int   `json:"twitch,omitempty"`
+	BTTV            int   `json:"bttv,omitempty"`
+	FFZ             int   `json:"ffz,omitempty"`
+	Viewers         int   `json:"viewers"`
+	HasChatRollup   bool  `json:"hasChatRollup,omitempty"`
+	HasViewerRollup bool  `json:"hasViewerRollup,omitempty"`
+	// BucketComplete is false when the bucket period has not yet ended (open/in-progress).
+	BucketComplete bool `json:"bucketComplete,omitempty"`
+	// TopEmotes are sanitized name+provider+count only — never raw emote map keys.
+	TopEmotes []HubBucketEmote `json:"topEmotes,omitempty"`
 }
 
 type HubActivity struct {
-	Points        []HubActivityPoint `json:"points"`
-	WindowMinutes int                `json:"windowMinutes"`
-	ChannelCount  int                `json:"channelCount"`
+	Points            []HubActivityPoint `json:"points"`
+	WindowMinutes     int                `json:"windowMinutes"`
+	ChannelCount      int                `json:"channelCount"`
+	PeakViewersAt     int64              `json:"peakViewersAt,omitempty"`
+	LivePoolViewerSum int                `json:"livePoolViewerSum,omitempty"`
 }
 
 type HubEmoteIntel struct {
@@ -185,16 +202,19 @@ type HubMover struct {
 }
 
 type HubLiveChannel struct {
-	Login           string  `json:"login"`
-	DisplayName     string  `json:"displayName,omitempty"`
-	Category        string  `json:"category,omitempty"`
-	ProfileImageURL string  `json:"profileImageUrl,omitempty"`
-	Viewers         int     `json:"viewers"`
-	ChatPerMin      float64 `json:"chatPerMin"`
-	EmotesPerMin    float64 `json:"emotesPerMin"`
-	SevenTVPerMin   float64 `json:"seventvPerMin"`
-	CoverageState   string  `json:"coverageState"`
-	TrendPct        float64 `json:"trendPct"`
+	Login             string   `json:"login"`
+	DisplayName       string   `json:"displayName,omitempty"`
+	Category          string   `json:"category,omitempty"`
+	ProfileImageURL   string   `json:"profileImageUrl,omitempty"`
+	Viewers           int      `json:"viewers"`
+	ChatPerMin        float64  `json:"chatPerMin"`
+	EmotesPerMin      float64  `json:"emotesPerMin"`
+	SevenTVPerMin     float64  `json:"seventvPerMin"`
+	CoverageState     string   `json:"coverageState"`
+	TrendPct          float64  `json:"trendPct"`
+	StreamingTogether bool     `json:"streamingTogether,omitempty"`
+	HostLogin         string   `json:"hostLogin,omitempty"`
+	TogetherWith      []string `json:"togetherWith,omitempty"`
 }
 
 type HubMoment struct {
@@ -224,11 +244,12 @@ func (h *Handler) getPublicHub(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) loadPublicHub(ctx context.Context, forceRefresh bool, opts publicHubOptions) (PublicHubResponse, bool, error) {
 	opts = normalizePublicHubOptions(opts)
-	cacheKey := publicHubCacheKey(opts)
+	runtimeFP := h.publicHubRuntimeFingerprint()
+	cacheKey := publicHubCacheKey(opts, runtimeFP)
 	if !forceRefresh && h.rdb != nil {
 		if cached, err := h.rdb.Get(ctx, cacheKey).Bytes(); err == nil && len(cached) > 0 {
 			var payload PublicHubResponse
-			if json.Unmarshal(cached, &payload) == nil {
+			if json.Unmarshal(cached, &payload) == nil && publicHubRuntimeFingerprintMatches(payload.CorpusPipeline, runtimeFP) {
 				return payload, true, nil
 			}
 		}
@@ -237,7 +258,7 @@ func (h *Handler) loadPublicHub(ctx context.Context, forceRefresh bool, opts pub
 		if !forceRefresh && h.rdb != nil {
 			if cached, err := h.rdb.Get(ctx, cacheKey).Bytes(); err == nil && len(cached) > 0 {
 				var payload PublicHubResponse
-				if json.Unmarshal(cached, &payload) == nil {
+				if json.Unmarshal(cached, &payload) == nil && publicHubRuntimeFingerprintMatches(payload.CorpusPipeline, runtimeFP) {
 					return payload, nil
 				}
 			}
@@ -297,8 +318,51 @@ func normalizePublicHubOptions(opts publicHubOptions) publicHubOptions {
 	return opts
 }
 
-func publicHubCacheKey(opts publicHubOptions) string {
-	return publicHubCacheKeyPrefix + ":activity:" + strconv.Itoa(normalizePublicHubOptions(opts).ActivityWindowMinutes)
+func publicHubCacheKey(opts publicHubOptions, runtimeFingerprint string) string {
+	base := publicHubCacheKeyPrefix + ":activity:" + strconv.Itoa(normalizePublicHubOptions(opts).ActivityWindowMinutes)
+	fp := strings.TrimSpace(runtimeFingerprint)
+	if fp == "" {
+		return base
+	}
+	return base + ":cfg:" + fp
+}
+
+func corpusRuntimeHubCacheFingerprint(cfg CorpusRuntimeConfig, collectorMax int) string {
+	admission := 0
+	if cfg.LiveAdmissionEnabled {
+		admission = 1
+	}
+	return fmt.Sprintf("n%d:a%d:t%d:irc%d:col%d", cfg.TargetTopN, admission, cfg.LiveAdmissionTopN, cfg.MaxActiveIRCChannels, collectorMax)
+}
+
+func (h *Handler) publicHubRuntimeFingerprint() string {
+	cfg := h.corpusRuntimeConfig()
+	collectorMax := 0
+	if h.collector != nil {
+		collectorMax = h.collector.TrackingSnapshot().Max
+	}
+	return corpusRuntimeHubCacheFingerprint(cfg, collectorMax)
+}
+
+func publicHubRuntimeFingerprintMatches(pipeline HubCorpusPipeline, expected string) bool {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return true
+	}
+	if strings.TrimSpace(pipeline.RuntimeConfigFingerprint) == expected {
+		return true
+	}
+	// Legacy cache entries without fingerprint: rebuild when static fields drift.
+	if pipeline.RuntimeConfigFingerprint != "" {
+		return false
+	}
+	rebuilt := corpusRuntimeHubCacheFingerprint(CorpusRuntimeConfig{
+		TargetTopN:           pipeline.TopN,
+		LiveAdmissionEnabled: pipeline.LiveAdmissionEnabled,
+		LiveAdmissionTopN:    pipeline.LiveAdmissionTopN,
+		MaxActiveIRCChannels: pipeline.MaxActiveIRCChannels,
+	}, pipeline.CollectorMax)
+	return rebuilt == expected
 }
 
 func publicHubCacheTTLForOptions(opts publicHubOptions) time.Duration {
@@ -484,10 +548,9 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 		live = live[:hubPoolCap]
 	}
 
-	// 4. Aggregate the requested activity window across the capped pool. Other
-	// hub metrics stay on the short recent window so the public hub remains
-	// cheap and "live" while the chart can browse longer history.
-	activity := map[int64]*HubActivityPoint{}
+	// 4. Aggregate pool-scoped rollups for live-channel windows and emote KPIs.
+	// The public activity chart series is built from corpus-wide rollups below.
+	poolActivity := map[int64]*HubActivityPoint{}
 	emoteTotals := map[string]int{}
 	minutePeak := 0
 	var totalEmotes, totalSeventv int
@@ -534,53 +597,56 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 		}
 		for _, ru := range activityRollups {
 			bucket := ru.MinuteTS.UTC().Truncate(time.Minute).UnixMilli()
-			pt := activity[bucket]
+			pt := poolActivity[bucket]
 			if pt == nil {
 				pt = &HubActivityPoint{T: bucket}
-				activity[bucket] = pt
+				poolActivity[bucket] = pt
 			}
 			chat, emotes, sevenTV := hubLiveActivityCounts(ru)
 			pt.Chat += chat
 			pt.Emotes += emotes
 			pt.SevenTV += sevenTV
 			if chat > 0 || emotes > 0 {
+				pt.HasChatRollup = true
 				tw, bt, fz := hubRollupProviderCounts(ru)
 				pt.Twitch += tw
 				pt.BTTV += bt
 				pt.FFZ += fz
 			}
 			if hubLiveViewerRollup(ru) {
+				if pickViewer(ru) > 0 {
+					pt.HasViewerRollup = true
+				}
 				pt.Viewers += pickViewer(ru)
 			}
 		}
 	}
 
-	// Longer hub windows should represent the shared corpus, not just channels
-	// that happen to be live now. The short live window remains pool-scoped so the
-	// home view stays a low-latency "right now" readout.
-	if activityWindow > hubActivityWindowMinutes && h.store != nil {
+	recentPoolActivity := cloneHubActivityPoints(poolActivity)
+	activity := map[int64]*HubActivityPoint{}
+	if h.store != nil {
 		if buckets, err := h.store.AggregateRollupBucketsSince(ctx, activitySince, activityBucketMinutes, hubActivityMaxPoints); err == nil && len(buckets) > 0 {
 			providerByBucket, _ := h.store.AggregateRollupProviderBucketsSince(ctx, activitySince, activityBucketMinutes, hubActivityMaxPoints)
-			activity = map[int64]*HubActivityPoint{}
-			for _, ru := range buckets {
-				bucket := ru.MinuteTS.UTC().Truncate(time.Minute).UnixMilli()
-				pt := &HubActivityPoint{
-					T:       bucket,
-					Chat:    ru.ChatCount,
-					Emotes:  hubRollupEmoteCount(ru),
-					SevenTV: ru.SevenTVEmoteCount,
-					Viewers: pickViewer(ru),
-				}
-				if pc, ok := providerByBucket[bucket]; ok {
-					pt.Twitch = pc.Twitch
-					pt.BTTV = pc.BTTV
-					pt.FFZ = pc.FFZ
-				}
-				activity[bucket] = pt
-			}
-			resp.Activity.ChannelCount = int(resp.Corpus.StreamsTracked)
+			activity = hubActivityPointsFromRollupBuckets(buckets, providerByBucket)
 		}
 	}
+	if len(activity) == 0 {
+		activity = cloneHubActivityPoints(poolActivity)
+	}
+	if longActivityWindow {
+		overlayRecentPoolHubActivity(activity, recentPoolActivity, now.Add(-time.Duration(hubActivityWindowMinutes)*time.Minute), activityWindow)
+	}
+	var top500Buckets []Top500ViewerBucket
+	currentHelixSum := 0
+	if h.store != nil {
+		if buckets, err := h.store.AggregateTop500ViewerBucketsSince(ctx, activitySince, activityBucketMinutes, hubActivityMaxPoints); err == nil && len(buckets) > 0 {
+			top500Buckets = buckets
+		}
+		if sum, err := h.store.SumTop500CurrentLiveViewers(ctx, resp.CorpusPipeline.TopN); err == nil {
+			currentHelixSum = sum
+		}
+	}
+	finalizeHubActivityViewers(activity, top500Buckets, currentHelixSum, now, activityWindow)
 
 	// 5. Activity series (sorted, trimmed to the window).
 	points := make([]HubActivityPoint, 0, len(activity))
@@ -590,6 +656,14 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 	sort.Slice(points, func(i, j int) bool { return points[i].T < points[j].T })
 	if len(points) > hubActivityMaxPoints {
 		points = points[len(points)-hubActivityMaxPoints:]
+	}
+	markHubActivityBucketComplete(points, now, activityBucketMinutes)
+	if h.store != nil && len(points) > 0 {
+		if byBucket, err := h.store.AggregateRollupTopEmotesBucketsSince(
+			ctx, activitySince, activityBucketMinutes, hubActivityMaxPoints, hubActivityBucketTopEmotesCap,
+		); err == nil {
+			attachHubActivityBucketTopEmotes(ctx, h, points, byBucket)
+		}
 	}
 	resp.Activity.Points = points
 
@@ -641,6 +715,10 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 
 	// 8. Live channel rows + movers.
 	resp.LiveChannels = h.buildHubLiveChannels(ctx, windows)
+	resp.Activity.LivePoolViewerSum = hubLivePoolViewerSum(resp.LiveChannels)
+	if _, peakAt := hubActivityPeakViewers(resp.Activity.Points); peakAt > 0 {
+		resp.Activity.PeakViewersAt = peakAt
+	}
 	// Backfill avatars that the stored stream record never captured so the
 	// portal's top-streamers rail and movers always render profile pictures.
 	h.enrichHubProfileImages(ctx, resp.LiveChannels)
@@ -712,6 +790,12 @@ func (h *Handler) buildHubLiveChannels(ctx context.Context, windows []channelWin
 	if h.store != nil {
 		roster, _ = h.store.ListTop500LiveForPriorityWatch(ctx, hubTrackerTopN, hubLiveCap)
 	}
+	rosterByLogin := make(map[string]Top500Current, len(roster))
+	for _, row := range roster {
+		if login := normalizeLogin(row.Login); login != "" {
+			rosterByLogin[login] = row
+		}
+	}
 
 	out := make([]HubLiveChannel, 0, hubLiveCap)
 	seen := make(map[string]bool, hubLiveCap)
@@ -721,11 +805,15 @@ func (h *Handler) buildHubLiveChannels(ctx context.Context, windows []channelWin
 			continue
 		}
 		seen[login] = true
+		together, hostLogin, togetherWith := resolveStreamTogetherHubFields(login, row.Title, row.Tags, rosterByLogin)
 		ch := HubLiveChannel{
-			Login:         login,
-			DisplayName:   strings.TrimSpace(row.DisplayName),
-			Category:      strings.TrimSpace(row.CategoryName),
-			CoverageState: "stats_only",
+			Login:             login,
+			DisplayName:       strings.TrimSpace(row.DisplayName),
+			Category:          categoryForTogetherStream(login, row.CategoryName, row.Title, row.Tags, rosterByLogin),
+			CoverageState:     "stats_only",
+			StreamingTogether: together,
+			HostLogin:         hostLogin,
+			TogetherWith:      togetherWith,
 		}
 		if row.ViewerCount != nil {
 			ch.Viewers = *row.ViewerCount
@@ -972,6 +1060,7 @@ func (h *Handler) buildHubCorpusPipeline(ctx context.Context, now time.Time) Hub
 	}
 	pipeline.CollectorActive = report.CollectorActive
 	pipeline.CollectorMax = report.CollectorMax
+	pipeline.RuntimeConfigFingerprint = corpusRuntimeHubCacheFingerprint(cfg, report.CollectorMax)
 	pipeline.MetadataSampledAgoSeconds = top500ReportMetadataSampledAgoSeconds(report)
 	if report.TopN > 0 {
 		pipeline.TopN = report.TopN
@@ -1274,6 +1363,255 @@ func (h *Handler) buildHubMoments(live []*StreamRecord, windows []channelWindow,
 	return moments
 }
 
+func cloneHubActivityPoints(src map[int64]*HubActivityPoint) map[int64]*HubActivityPoint {
+	if len(src) == 0 {
+		return map[int64]*HubActivityPoint{}
+	}
+	out := make(map[int64]*HubActivityPoint, len(src))
+	for key, pt := range src {
+		if pt == nil {
+			continue
+		}
+		copied := *pt
+		out[key] = &copied
+	}
+	return out
+}
+
+func hubActivityPointsFromRollupBuckets(buckets []MinuteRollup, providerByBucket map[int64]HubProviderBucketCounts) map[int64]*HubActivityPoint {
+	activity := make(map[int64]*HubActivityPoint, len(buckets))
+	for _, ru := range buckets {
+		bucket := ru.MinuteTS.UTC().Truncate(time.Minute).UnixMilli()
+		pt := &HubActivityPoint{
+			T:               bucket,
+			Chat:            ru.ChatCount,
+			Emotes:          hubRollupEmoteCount(ru),
+			SevenTV:         ru.SevenTVEmoteCount,
+			Viewers:         pickViewer(ru),
+			HasChatRollup:   ru.ChatCount > 0 || hubRollupEmoteCount(ru) > 0,
+			HasViewerRollup: pickViewer(ru) > 0,
+		}
+		if pc, ok := providerByBucket[bucket]; ok {
+			pt.Twitch = pc.Twitch
+			pt.BTTV = pc.BTTV
+			pt.FFZ = pc.FFZ
+		}
+		activity[bucket] = pt
+	}
+	return activity
+}
+
+// finalizeHubActivityViewers is the last viewer mutation on hub activity — Top-500
+// snapshot totals must win over corpus rollups and live-pool overlay peaks.
+func finalizeHubActivityViewers(activity map[int64]*HubActivityPoint, top500Buckets []Top500ViewerBucket, currentHelixSum int, now time.Time, windowMinutes int) {
+	mergeTop500ViewerBucketsIntoActivity(activity, top500Buckets)
+	forwardFillTop500ViewerTrail(activity, top500Buckets)
+	mergeCurrentHelixLiveViewersIntoOpenBucket(activity, currentHelixSum, now, windowMinutes)
+}
+
+func forwardFillTop500ViewerTrail(activity map[int64]*HubActivityPoint, top500Buckets []Top500ViewerBucket) {
+	if len(activity) == 0 || len(top500Buckets) == 0 {
+		return
+	}
+	top500ByT := make(map[int64]int, len(top500Buckets))
+	for _, bucket := range top500Buckets {
+		if bucket.Viewers > 0 {
+			top500ByT[bucket.T] = bucket.Viewers
+		}
+	}
+	keys := make([]int64, 0, len(activity))
+	for key := range activity {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	running := 0
+	for _, key := range keys {
+		if viewers, ok := top500ByT[key]; ok && viewers > running {
+			running = viewers
+		}
+		pt := activity[key]
+		if pt == nil || running <= 0 {
+			continue
+		}
+		if pt.Viewers > 0 && pt.Viewers < running/3 {
+			pt.Viewers = running
+			pt.HasViewerRollup = true
+		}
+	}
+}
+
+// mergeCurrentHelixLiveViewersIntoOpenBucket floors the in-progress coarse bucket with
+// the current Helix live roster sum when corpus rollups are sparse.
+func mergeCurrentHelixLiveViewersIntoOpenBucket(activity map[int64]*HubActivityPoint, currentHelixSum int, now time.Time, windowMinutes int) {
+	if currentHelixSum <= 0 || len(activity) == 0 {
+		return
+	}
+	bucketMin := hubActivityBucketMinutes(windowMinutes)
+	bucketMs := int64(bucketMin) * 60_000
+	if bucketMs <= 0 {
+		bucketMs = 60_000
+	}
+	openKey := (now.UTC().UnixMilli() / bucketMs) * bucketMs
+	pt := activity[openKey]
+	if pt == nil {
+		pt = &HubActivityPoint{T: openKey}
+		activity[openKey] = pt
+	}
+	if currentHelixSum > pt.Viewers {
+		pt.Viewers = currentHelixSum
+		pt.HasViewerRollup = true
+	}
+}
+
+func hubActivityPeakViewers(points []HubActivityPoint) (peak int, at int64) {
+	for _, pt := range points {
+		if pt.Viewers > peak {
+			peak = pt.Viewers
+			at = pt.T
+		}
+	}
+	return peak, at
+}
+
+func hubLivePoolViewerSum(channels []HubLiveChannel) int {
+	sum := 0
+	for _, ch := range channels {
+		sum += ch.Viewers
+	}
+	return sum
+}
+
+func markHubActivityBucketComplete(points []HubActivityPoint, now time.Time, bucketMinutes int) {
+	if len(points) == 0 || bucketMinutes <= 0 {
+		return
+	}
+	bucketDur := time.Duration(bucketMinutes) * time.Minute
+	for i := range points {
+		bucketEnd := time.UnixMilli(points[i].T).UTC().Add(bucketDur)
+		points[i].BucketComplete = !bucketEnd.After(now)
+	}
+}
+
+func mergeTop500ViewerBucketsIntoActivity(activity map[int64]*HubActivityPoint, top500Buckets []Top500ViewerBucket) {
+	if activity == nil || len(top500Buckets) == 0 {
+		return
+	}
+	for _, bucket := range top500Buckets {
+		if bucket.Viewers <= 0 {
+			continue
+		}
+		pt := activity[bucket.T]
+		if pt == nil {
+			pt = &HubActivityPoint{T: bucket.T}
+			activity[bucket.T] = pt
+		}
+		if bucket.Viewers > pt.Viewers {
+			pt.Viewers = bucket.Viewers
+		}
+		pt.HasViewerRollup = true
+	}
+}
+
+// overlayRecentPoolHubActivity replaces coarse corpus buckets in the recent live
+// window with live-pool minute rollups summed per coarse bucket (peak concurrent
+// global viewers inside each bucket).
+func overlayRecentPoolHubActivity(
+	coarse map[int64]*HubActivityPoint,
+	recentPool map[int64]*HubActivityPoint,
+	recentCutoff time.Time,
+	windowMinutes int,
+) {
+	if len(coarse) == 0 || len(recentPool) == 0 {
+		return
+	}
+	bucketMin := hubActivityBucketMinutes(windowMinutes)
+	bucketMs := int64(bucketMin) * 60_000
+	if bucketMs <= 0 {
+		bucketMs = 60_000
+	}
+	cutoffMs := recentCutoff.UTC().UnixMilli()
+
+	coarseRecent := make(map[int64]*HubActivityPoint)
+	for minuteT, minutePt := range recentPool {
+		if minutePt == nil || minuteT < cutoffMs {
+			continue
+		}
+		coarseKey := (minuteT / bucketMs) * bucketMs
+		acc := coarseRecent[coarseKey]
+		if acc == nil {
+			acc = &HubActivityPoint{T: coarseKey}
+			coarseRecent[coarseKey] = acc
+		}
+		if minutePt.Viewers > acc.Viewers {
+			acc.Viewers = minutePt.Viewers
+		}
+		acc.Chat += minutePt.Chat
+		acc.Emotes += minutePt.Emotes
+		acc.SevenTV += minutePt.SevenTV
+		acc.Twitch += minutePt.Twitch
+		acc.BTTV += minutePt.BTTV
+		acc.FFZ += minutePt.FFZ
+		if minutePt.HasChatRollup || minutePt.Chat > 0 || minutePt.Emotes > 0 {
+			acc.HasChatRollup = true
+		}
+		if minutePt.HasViewerRollup || minutePt.Viewers > 0 {
+			acc.HasViewerRollup = true
+		}
+	}
+
+	for key, pt := range coarse {
+		if key < cutoffMs {
+			continue
+		}
+		alignedKey := (key / bucketMs) * bucketMs
+		overlay, ok := coarseRecent[alignedKey]
+		if !ok {
+			overlay, ok = coarseRecent[key]
+		}
+		if !ok {
+			continue
+		}
+		if overlay.Viewers > pt.Viewers {
+			pt.Viewers = overlay.Viewers
+		}
+		if overlay.Viewers > 0 {
+			pt.HasViewerRollup = pt.HasViewerRollup || overlay.HasViewerRollup
+		}
+		if overlay.HasChatRollup || overlay.Chat > 0 || overlay.Emotes > 0 {
+			pt.Chat = overlay.Chat
+			pt.Emotes = overlay.Emotes
+			pt.SevenTV = overlay.SevenTV
+			pt.Twitch = overlay.Twitch
+			pt.BTTV = overlay.BTTV
+			pt.FFZ = overlay.FFZ
+			pt.HasChatRollup = true
+		}
+	}
+}
+
+// peakConcurrentGlobalViewers returns the highest per-minute sum of viewer counts
+// across streams in a bucket (mirrors AggregateRollupBucketsSince SQL semantics).
+func peakConcurrentGlobalViewers(rows []MinuteRollup) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	byMinute := map[int64]int{}
+	for _, ru := range rows {
+		if !hubLiveViewerRollup(ru) {
+			continue
+		}
+		key := ru.MinuteTS.UTC().Truncate(time.Minute).UnixMilli()
+		byMinute[key] += pickViewer(ru)
+	}
+	peak := 0
+	for _, total := range byMinute {
+		if total > peak {
+			peak = total
+		}
+	}
+	return peak
+}
+
 func pickViewer(ru MinuteRollup) int {
 	if ru.ViewerLatest > 0 {
 		return ru.ViewerLatest
@@ -1282,6 +1620,45 @@ func pickViewer(ru MinuteRollup) int {
 		return ru.ViewerMax
 	}
 	return ru.ViewerAvg
+}
+
+func hubBucketEmotesFromTop(top []TopEmote) []HubBucketEmote {
+	if len(top) == 0 {
+		return nil
+	}
+	out := make([]HubBucketEmote, 0, len(top))
+	for _, emote := range top {
+		name := strings.TrimSpace(emote.Name)
+		if name == "" || emote.Count <= 0 {
+			continue
+		}
+		out = append(out, HubBucketEmote{
+			Name:     name,
+			Provider: emote.Provider,
+			Count:    emote.Count,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func attachHubActivityBucketTopEmotes(ctx context.Context, h *Handler, points []HubActivityPoint, byBucket map[int64]map[string]int) {
+	if len(points) == 0 || len(byBucket) == 0 {
+		return
+	}
+	for i := range points {
+		totals := byBucket[points[i].T]
+		if len(totals) == 0 {
+			continue
+		}
+		top := TopEmotesFromRollups([]MinuteRollup{{Emotes: totals}}, hubActivityBucketTopEmotesCap)
+		if h != nil {
+			top = h.rewriteHostedTopEmotes(ctx, top)
+		}
+		points[i].TopEmotes = hubBucketEmotesFromTop(top)
+	}
 }
 
 func displayNameOrLogin(rec *StreamRecord) string {

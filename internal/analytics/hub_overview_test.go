@@ -310,3 +310,34 @@ func TestGetPublicHubRouteIsOpen(t *testing.T) {
 		t.Fatalf("hub arrays must serialize as [] not null: %+v", payload)
 	}
 }
+
+func TestForwardFillTop500ViewerTrail(t *testing.T) {
+	bucketT := int64(1_719_000_000_000)
+	nextT := bucketT + 6*60_000
+	activity := map[int64]*HubActivityPoint{
+		bucketT: {T: bucketT, Viewers: 450_000, HasViewerRollup: true},
+		nextT:   {T: nextT, Viewers: 43_000, HasChatRollup: true, HasViewerRollup: true},
+	}
+	forwardFillTop500ViewerTrail(activity, []Top500ViewerBucket{
+		{T: bucketT, Viewers: 450_000},
+		{T: nextT, Viewers: 43_000},
+	})
+	if activity[nextT].Viewers != 450_000 {
+		t.Fatalf("forward fill viewers = %d, want 450000", activity[nextT].Viewers)
+	}
+}
+
+func TestMergeCurrentHelixLiveViewersIntoOpenBucket(t *testing.T) {
+	now := time.Date(2026, 7, 5, 1, 10, 0, 0, time.UTC)
+	windowMinutes := 24 * 60
+	bucketMin := hubActivityBucketMinutes(windowMinutes)
+	bucketMs := int64(bucketMin) * 60_000
+	openKey := (now.UnixMilli() / bucketMs) * bucketMs
+	activity := map[int64]*HubActivityPoint{
+		openKey: {T: openKey, Viewers: 43_000, Chat: 1000, HasChatRollup: true},
+	}
+	mergeCurrentHelixLiveViewersIntoOpenBucket(activity, 360_000, now, windowMinutes)
+	if activity[openKey].Viewers != 360_000 {
+		t.Fatalf("open bucket viewers = %d, want 360000", activity[openKey].Viewers)
+	}
+}
