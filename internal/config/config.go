@@ -12,6 +12,8 @@ import (
 
 const defaultScraperAPIURL = "http://scraper:8000/v2/scrape"
 const maxCorpusTopN = 1000
+const MaxLiveAdmissionTopN = 5000
+const DefaultLiveAdmissionTopN = 100
 
 type Config struct {
 	HTTPAddr    string `env:"HTTP_ADDR" envDefault:":8080"`
@@ -436,7 +438,7 @@ func Load() (Config, error) {
 		}
 	}
 	if c.LiveAdmissionTopN > 0 && strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_TOP_N")) == "" {
-		c.PulseTop500AdmissionTopN = clampCorpusTopN(c.LiveAdmissionTopN)
+		c.PulseTop500AdmissionTopN = c.LiveAdmissionTopN
 	}
 	if c.MaxActiveIRCChannels > 0 && strings.TrimSpace(os.Getenv("PULSE_MAX_ACTIVE_CHANNELS")) == "" {
 		c.PulseMaxActiveChannels = c.MaxActiveIRCChannels
@@ -447,9 +449,11 @@ func Load() (Config, error) {
 	if c.Top500MetadataBatchSize <= 0 || c.Top500MetadataBatchSize > 100 {
 		c.Top500MetadataBatchSize = 100
 	}
-	if c.PulseTop500AdmissionTopN <= 0 || c.PulseTop500AdmissionTopN > maxCorpusTopN {
-		c.PulseTop500AdmissionTopN = 100
+	maxIRC := 0
+	if c.PulseMaxActiveChannels > 0 {
+		maxIRC = c.PulseMaxActiveChannels
 	}
+	c.PulseTop500AdmissionTopN = ClampLiveAdmissionTopN(c.PulseTop500AdmissionTopN, maxIRC)
 	if c.PulseTop500AdmissionInterval <= 0 {
 		c.PulseTop500AdmissionInterval = 60 * time.Second
 	}
@@ -579,6 +583,22 @@ func clampCorpusTopN(n int) int {
 	}
 	if n > maxCorpusTopN {
 		return maxCorpusTopN
+	}
+	return n
+}
+
+// ClampLiveAdmissionTopN bounds IRC live-admission roster size separately from
+// corpus metadata top-N. When maxIRC is set, admission cannot exceed the IRC slot ceiling.
+func ClampLiveAdmissionTopN(n, maxIRC int) int {
+	if n <= 0 {
+		return DefaultLiveAdmissionTopN
+	}
+	ceiling := MaxLiveAdmissionTopN
+	if maxIRC > 0 && maxIRC < ceiling {
+		ceiling = maxIRC
+	}
+	if n > ceiling {
+		return ceiling
 	}
 	return n
 }
