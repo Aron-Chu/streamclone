@@ -43,7 +43,7 @@ describe('moment score model', () => {
 
     assert.equal(model.score, 64.4)
     assert.equal(model.label, '~64/100')
-    assert.equal(model.reasonLabel, '7TV emote spike')
+    assert.equal(model.reasonLabel, 'Emote spike')
     assert.equal(model.estimated, true)
     assert.equal(model.topEmotes[0].name, 'LO')
   })
