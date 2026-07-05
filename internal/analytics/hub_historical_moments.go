@@ -26,6 +26,7 @@ type hubHistoricalMinuteCandidate struct {
 	DisplayName       string
 	ProfileImageURL   string
 	VodID             string
+	Category          string
 	StartedAt         time.Time
 	MinuteTS          time.Time
 	ChatCount         int
@@ -254,7 +255,16 @@ func hubHistoricalMomentFromCandidate(cand hubHistoricalMinuteCandidate) HubLive
 		ChatPerMin:      cand.ChatCount,
 		Confidence:      100,
 		VodState:        portalVodState(vodID, offset, vodID != ""),
+		Category:        strings.TrimSpace(cand.Category),
+		StreamStartedAt: streamStartedAtMs(cand.StartedAt),
 	}
+}
+
+func streamStartedAtMs(startedAt time.Time) int64 {
+	if startedAt.IsZero() {
+		return 0
+	}
+	return startedAt.UTC().UnixMilli()
 }
 
 func historicalMomentScore(chatCount, emoteCount int) int {
@@ -273,7 +283,7 @@ func historicalMomentScore(chatCount, emoteCount int) int {
 
 func historicalMomentLabel(cand hubHistoricalMinuteCandidate) (label, kind string) {
 	if cand.SevenTVEmoteCount > 0 && cand.SevenTVEmoteCount >= cand.ChatCount/2 {
-		return "7TV emote spike", "seventv"
+		return "Emote spike", "emotes"
 	}
 	if cand.TotalEmoteCount > cand.ChatCount && cand.TotalEmoteCount > 0 {
 		return "Emote spike", "emotes"

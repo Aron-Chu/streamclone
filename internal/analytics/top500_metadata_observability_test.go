@@ -211,7 +211,7 @@ func TestTop500MetadataRollbackStateClearsOnNextTick(t *testing.T) {
 }
 
 func TestTop500MetadataAlertProposalReferencesKnownMetrics(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "deploy", "prometheus", "alerts", "top500-hosted.proposal.yml"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "deploy", "alerts", "top500-hosted.proposal.yml"))
 	if err != nil {
 		t.Fatalf("read alert proposal: %v", err)
 	}

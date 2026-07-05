@@ -17,6 +17,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"streamclone/internal/analytics/heatmap"
+	pulserecap "streamclone/internal/analytics/recap"
 	"streamclone/internal/emoteimage"
 )
 
@@ -26,7 +27,7 @@ const (
 	extPulseMaxRollups         = 60
 	extPulseMaxFullRollups     = 480
 	extPulseMinCompleted       = 5
-	extPulseMaxPeaks           = 10
+	extPulseMaxPeaks           = 20
 	extPulsePeakScoreCutoffPct = 0.25
 )
 
@@ -155,6 +156,7 @@ type ExtensionPulseResponse struct {
 	PeakEmotePerMin            int                     `json:"peakEmotePerMin,omitempty"`
 	CurrentOffsetSeconds       int                     `json:"currentOffsetSeconds"`
 	CoverageStartOffsetSeconds int                     `json:"coverageStartOffsetSeconds"`
+	ViewerStartOffsetSeconds   int                     `json:"viewerStartOffsetSeconds,omitempty"`
 	Coverage                   ExtensionCoverage       `json:"coverage"`
 	TopEmotes                  []ExtensionEmote        `json:"topEmotes,omitempty"`
 	Rollups                    []ExtensionRollup       `json:"rollups"`
@@ -166,6 +168,7 @@ type ExtensionPulseResponse struct {
 	HelixEnabled               bool                    `json:"helixEnabled,omitempty"`
 	Games                      []ExtensionGameSegment  `json:"games,omitempty"`
 	StoredArtifacts            *StoredArtifactsSummary `json:"storedArtifacts,omitempty"`
+	Top500Eligible             bool                    `json:"top500Eligible"`
 }
 
 func (h *Handler) WithRedis(rdb *redis.Client) *Handler {
@@ -287,7 +290,9 @@ func (h *Handler) extensionPulseChannel(w http.ResponseWriter, r *http.Request) 
 	payload, err := h.buildExtensionPulse(ctx, login, window == "full")
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusOK, emptyExtensionPulse(login, h.isLoginTracked(login)))
+			payload := emptyExtensionPulse(login, false, h.extensionTop500Eligible(ctx, login))
+			sanitizeExtensionPulseForNonTop500(&payload)
+			writeJSON(w, http.StatusOK, payload)
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -457,10 +462,25 @@ func (h *Handler) isLoginTracked(login string) bool {
 	return h.collector.IsTracking(login)
 }
 
-func emptyExtensionPulse(login string, tracking bool) ExtensionPulseResponse {
+func (h *Handler) extensionTop500Eligible(ctx context.Context, login string) bool {
+	if h.store == nil {
+		return !h.pulseHosted.Hosted
+	}
+	ok, err := h.store.IsTop500RosterMember(ctx, login)
+	if err != nil {
+		return !h.pulseHosted.Hosted
+	}
+	if !ok && !h.pulseHosted.Hosted {
+		return true
+	}
+	return ok
+}
+
+func emptyExtensionPulse(login string, tracking bool, top500Eligible bool) ExtensionPulseResponse {
 	return ExtensionPulseResponse{
 		Login:                      login,
 		Tracking:                   tracking,
+		Top500Eligible:             top500Eligible,
 		VodID:                      nil,
 		CoverageStartOffsetSeconds: 0,
 		Coverage: ExtensionCoverage{
@@ -479,19 +499,41 @@ func emptyExtensionPulse(login string, tracking bool) ExtensionPulseResponse {
 	}
 }
 
+type extensionLiveReconcileStore interface {
+	LatestStreamByLogin(context.Context, string) (*StreamRecord, error)
+	CloseStream(context.Context, string, time.Time) error
+	UpsertLiveStream(context.Context, LiveStream, UserProfile, time.Time) error
+}
+
 // reconcileExtensionLiveStream refreshes analytics when Twitch is live but the DB
 // still has the previous ended session (common right after a new broadcast starts).
+// Helix reconcile runs for all channels (tracked or not) so stale open rows are closed
+// before the extension BFF serves rollups as current live Pulse.
 func (h *Handler) reconcileExtensionLiveStream(
 	ctx context.Context,
 	login string,
 	stream *StreamRecord,
 	tracking bool,
 ) (*StreamRecord, bool, error) {
+	_ = tracking // collector admission is orthogonal; Helix truth applies to every login.
+	var store extensionLiveReconcileStore
+	if h.store != nil {
+		store = h.store
+	}
+	return h.reconcileExtensionLiveStreamWithStore(ctx, login, stream, store)
+}
+
+func (h *Handler) reconcileExtensionLiveStreamWithStore(
+	ctx context.Context,
+	login string,
+	stream *StreamRecord,
+	store extensionLiveReconcileStore,
+) (*StreamRecord, bool, error) {
 	if stream == nil {
 		return stream, false, nil
 	}
 	isLive := stream.EndedAt == nil
-	if !tracking || h.helix == nil || !h.helix.Enabled() || !h.pulseRuntimeConfig().HelixLiveEnabled {
+	if h.helix == nil || !h.helix.Enabled() || !h.pulseRuntimeConfig().HelixLiveEnabled {
 		return stream, isLive, nil
 	}
 	liveMap, err := h.helix.StreamsByLogin(ctx, []string{login})
@@ -500,12 +542,14 @@ func (h *Handler) reconcileExtensionLiveStream(
 	}
 	liveStream, onTwitch := liveMap[login]
 	if !onTwitch {
-		if isLive && h.store != nil && stream.StreamID != "" {
+		if isLive && store != nil && stream.StreamID != "" {
 			endedAt := time.Now().UTC()
-			if err := h.store.CloseStream(ctx, stream.StreamID, endedAt); err != nil {
+			closedID := stream.StreamID
+			if err := store.CloseStream(ctx, stream.StreamID, endedAt); err != nil {
 				return stream, true, nil
 			}
-			if refreshed, err := h.store.LatestStreamByLogin(ctx, login); err == nil {
+			h.invalidatePulseCaches(ctx, login, closedID)
+			if refreshed, err := store.LatestStreamByLogin(ctx, login); err == nil && refreshed != nil {
 				return refreshed, refreshed.EndedAt == nil, nil
 			}
 			closed := *stream
@@ -517,13 +561,20 @@ func (h *Handler) reconcileExtensionLiveStream(
 	if isLive && liveStream.ID == stream.StreamID {
 		return stream, true, nil
 	}
+	priorStreamID := stream.StreamID
 	profiles, _ := h.helix.UsersByLogin(ctx, []string{login})
 	now := time.Now().UTC()
-	if err := h.store.UpsertLiveStream(ctx, liveStream, profiles[login], now); err != nil {
+	if err := store.UpsertLiveStream(ctx, liveStream, profiles[login], now); err != nil {
 		return stream, true, nil
 	}
-	refreshed, err := h.store.LatestStreamByLogin(ctx, login)
-	if err != nil {
+	if priorStreamID != "" {
+		h.invalidatePulseCaches(ctx, login, priorStreamID)
+	}
+	if liveStream.ID != "" && liveStream.ID != priorStreamID {
+		h.invalidatePulseCaches(ctx, login, liveStream.ID)
+	}
+	refreshed, err := store.LatestStreamByLogin(ctx, login)
+	if err != nil || refreshed == nil {
 		return stream, true, nil
 	}
 	return refreshed, refreshed.EndedAt == nil, nil
@@ -612,6 +663,7 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 	// Peaks ("Most Reacted So Far"): score across the full tracked stream history.
 	peaks := buildExtensionPeaks(heatmapRollups, alignedPoints, isLive, state, streamStart)
 	coverageStart := coverageStartOffsetSeconds(heatmapRollups, streamStart)
+	viewerStart := viewerStartOffsetSeconds(heatmapRollups, streamStart)
 
 	vodIDStr := ""
 	if vodPtr != nil {
@@ -626,6 +678,7 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 		backfillFailed = h.pulseBackfill.BackfillFailedForStream(stream.StreamID)
 	}
 	coverage := computePulseCoverage(heatmapRollups, streamStart, currentOffset, isLive, vodIDStr, backfillRunning, backfillFailed)
+	coverage = enrichCoverageChatSources(coverage, rollups)
 	coverage = enrichExtensionCoverage(coverage, coverageStart, vodIDStr, isLive)
 	stored := h.storedArtifactsForStream(ctx, stream.StreamID)
 	coverage = enrichCoverageWithStoredArtifacts(coverage, stored, vodIDStr, isLive)
@@ -652,7 +705,7 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 
 	var games []ExtensionGameSegment
 	if stream.StreamID != "" {
-		if segments, err := h.store.GetGameSegments(ctx, stream.StreamID); err == nil {
+		if segments, err := h.resolveStreamGameSegments(ctx, stream.StreamID); err == nil {
 			games = convertGameSegmentsForExtension(segments)
 		}
 	}
@@ -661,13 +714,17 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 	if durationSeconds <= 0 && stream.EndedAt != nil && !streamStart.IsZero() {
 		durationSeconds = int(stream.EndedAt.Sub(streamStart).Seconds())
 	}
+	if durationSeconds <= 0 && isLive && !streamStart.IsZero() {
+		durationSeconds = int(time.Since(streamStart).Seconds())
+	}
 	category := strings.TrimSpace(stream.Category)
 	if category == "" && !isLive && vodIDStr != "" && h.helix != nil && h.helix.Enabled() {
 		if helixCategory, err := h.helix.VideoGameName(ctx, vodIDStr); err == nil {
 			category = strings.TrimSpace(helixCategory)
 		}
 	}
-	games = resolveExtensionGames(games, !isLive, durationSeconds, category)
+	games = resolveExtensionGames(games, durationSeconds, category)
+	games = extendLiveGameSegments(games, durationSeconds, isLive)
 
 	var endedAtPtr *time.Time
 	if stream.EndedAt != nil {
@@ -675,10 +732,13 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 		endedAtPtr = &t
 	}
 
+	top500Eligible := h.extensionTop500Eligible(ctx, login)
+
 	payload := ExtensionPulseResponse{
 		Login:                      login,
 		IsLive:                     isLive,
 		Tracking:                   tracking,
+		Top500Eligible:             top500Eligible,
 		StreamID:                   stream.StreamID,
 		VodID:                      vodPtr,
 		StartedAt:                  startedAtPtr,
@@ -690,6 +750,7 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 		PeakEmotePerMin:            peakEmotePerMinFromHeatmapRollups(heatmapRollups),
 		CurrentOffsetSeconds:       currentOffset,
 		CoverageStartOffsetSeconds: coverageStart,
+		ViewerStartOffsetSeconds:   viewerStart,
 		Coverage:                   coverage,
 		TopEmotes:                  streamTopEmotes,
 		Rollups:                    extRollups,
@@ -703,7 +764,60 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 		StoredArtifacts:            &stored,
 	}
 	h.rewriteExtensionPulseEmoteURLs(ctx, &payload)
+	sanitizeExtensionPulseForCollectorTruth(&payload)
+	sanitizeExtensionPulseForNonTop500(&payload)
 	return payload, nil
+}
+
+// sanitizeExtensionPulseForNonTop500 strips Pulse product surfaces for channels outside
+// the hosted top-500 roster so the extension can show a single unsupported state.
+func sanitizeExtensionPulseForNonTop500(payload *ExtensionPulseResponse) {
+	if payload == nil || payload.Top500Eligible {
+		return
+	}
+	payload.Tracking = false
+	payload.Rollups = []ExtensionRollup{}
+	payload.FullRollups = []ExtensionRollup{}
+	payload.Peaks = []ExtensionPeak{}
+	payload.Lanes = ExtensionLanes{
+		Composite: []int{},
+		Chat:      []int{},
+		SevenTV:   []int{},
+	}
+	payload.Recap = nil
+	payload.Coverage = ExtensionCoverage{
+		State:   CoverageStatePartialTracking,
+		Message: "StreamPulse live chat is limited to the top-500 roster on hosted.",
+		CopyKey: "top500_required",
+	}
+}
+
+// sanitizeExtensionPulseForCollectorTruth strips live chat artifacts when the IRC
+// collector is not active, even if historical rollups exist on a stale or prior stream.
+func sanitizeExtensionPulseForCollectorTruth(payload *ExtensionPulseResponse) {
+	if payload == nil || payload.Tracking {
+		return
+	}
+	if !payload.IsLive {
+		return
+	}
+	payload.Rollups = []ExtensionRollup{}
+	payload.FullRollups = []ExtensionRollup{}
+	payload.Peaks = []ExtensionPeak{}
+	payload.Lanes = ExtensionLanes{
+		Composite: []int{},
+		Chat:      []int{},
+		SevenTV:   []int{},
+	}
+	payload.TopEmotes = nil
+	payload.PeakEmotePerMin = 0
+	payload.CoverageStartOffsetSeconds = 0
+	payload.Coverage = ExtensionCoverage{
+		State:       CoverageStatePartialTracking,
+		Message:     "Live chat is not being collected for this channel",
+		CanBackfill: false,
+		CopyKey:     "not_tracking",
+	}
 }
 
 func peakEmotePerMinFromHeatmapRollups(rollups []heatmap.MinuteRollup) int {
@@ -723,15 +837,14 @@ func peakEmotePerMinFromHeatmapRollups(rollups []heatmap.MinuteRollup) int {
 	return peak
 }
 
-// resolveExtensionGames synthesizes a single full-stream segment when TT segments
+// resolveExtensionGames synthesizes a single full-stream segment when segments
 // are missing but category is known (Helix /videos game_name or stream row).
 func resolveExtensionGames(
 	segments []ExtensionGameSegment,
-	offline bool,
 	durationSeconds int,
 	category string,
 ) []ExtensionGameSegment {
-	if len(segments) > 0 || !offline || durationSeconds <= 0 {
+	if len(segments) > 0 || durationSeconds <= 0 {
 		return segments
 	}
 	gameName := strings.TrimSpace(category)
@@ -743,6 +856,26 @@ func resolveExtensionGames(
 		OffsetSeconds:   0,
 		DurationSeconds: durationSeconds,
 	}}
+}
+
+// extendLiveGameSegments keeps the open last segment aligned with live stream duration.
+func extendLiveGameSegments(segments []ExtensionGameSegment, durationSeconds int, isLive bool) []ExtensionGameSegment {
+	if !isLive || durationSeconds <= 0 || len(segments) == 0 {
+		return segments
+	}
+	out := make([]ExtensionGameSegment, len(segments))
+	copy(out, segments)
+	last := len(out) - 1
+	seg := out[last]
+	remaining := durationSeconds - seg.OffsetSeconds
+	if remaining <= 0 {
+		return out
+	}
+	if seg.DurationSeconds < remaining {
+		seg.DurationSeconds = remaining
+		out[last] = seg
+	}
+	return out
 }
 
 func convertGameSegmentsForExtension(segments []GameSegment) []ExtensionGameSegment {
@@ -801,6 +934,34 @@ func coverageStartOffsetSeconds(rollups []heatmap.MinuteRollup, streamStart time
 			continue
 		}
 		if r.ChatCount == 0 && r.TotalEmoteCount == 0 && r.SevenTVEmoteCount == 0 && r.ViewerSamples == 0 {
+			continue
+		}
+		offset := int(r.MinuteTS.Sub(base).Seconds())
+		if offset < 0 {
+			offset = 0
+		}
+		if earliest < 0 || offset < earliest {
+			earliest = offset
+		}
+	}
+	if earliest < 0 {
+		return 0
+	}
+	return earliest
+}
+
+// viewerStartOffsetSeconds is the earliest rollup minute with Helix viewer samples.
+func viewerStartOffsetSeconds(rollups []heatmap.MinuteRollup, streamStart time.Time) int {
+	if streamStart.IsZero() || len(rollups) == 0 {
+		return 0
+	}
+	earliest := -1
+	base := streamStart.UTC().Truncate(time.Minute)
+	for _, r := range rollups {
+		if r.Missing {
+			continue
+		}
+		if r.ViewerSamples <= 0 && r.ViewerLatest <= 0 && r.ViewerAvg <= 0 && r.ViewerMax <= 0 {
 			continue
 		}
 		offset := int(r.MinuteTS.Sub(base).Seconds())
@@ -1012,10 +1173,11 @@ func clampScore(v int) int {
 var extensionReasonLabels = map[string]string{
 	heatmap.ReasonChatSpike:        "Chat spike",
 	"emote_spike":                  "Emote spike",
-	heatmap.ReasonSevenTVSpike:     "7TV emote spike",
-	heatmap.ReasonTwitchEmoteSpike: "Twitch emote spike",
-	heatmap.ReasonFFZSpike:         "FFZ emote spike",
+	heatmap.ReasonSevenTVSpike:     "Emote spike",
+	heatmap.ReasonTwitchEmoteSpike: "Emote spike",
+	heatmap.ReasonFFZSpike:         "Emote spike",
 	heatmap.ReasonViewerSpike:      "Viewer spike",
+	heatmap.ReasonGameChange:       "Game change",
 	heatmap.ReasonManual:           "Moment",
 }
 
@@ -1129,6 +1291,50 @@ func (h *Handler) rewriteExtensionPulseEmoteURLs(ctx context.Context, payload *E
 	for i := range payload.Peaks {
 		payload.Peaks[i].TopEmotes = decorateExtensionEmotes(payload.Peaks[i].TopEmotes, lookup, metadata, base)
 	}
+	if recap, ok := payload.Recap.(pulserecap.StreamRecap); ok {
+		payload.Recap = decorateStreamRecapEmotes(recap, lookup, metadata, base)
+	}
+}
+
+func decorateStreamRecapEmotes(
+	recap pulserecap.StreamRecap,
+	lookup map[string]string,
+	metadata map[string]EmoteMetadata,
+	base string,
+) pulserecap.StreamRecap {
+	recap.TopEmotes = decorateRecapEmoteSlice(recap.TopEmotes, lookup, metadata, base)
+	for i := range recap.TopMoments {
+		recap.TopMoments[i].TopEmotes = decorateRecapEmoteSlice(recap.TopMoments[i].TopEmotes, lookup, metadata, base)
+	}
+	for i := range recap.ClipCandidates {
+		recap.ClipCandidates[i].TopEmotes = decorateRecapEmoteSlice(recap.ClipCandidates[i].TopEmotes, lookup, metadata, base)
+	}
+	return recap
+}
+
+func decorateRecapEmoteSlice(
+	emotes []pulserecap.Emote,
+	lookup map[string]string,
+	metadata map[string]EmoteMetadata,
+	base string,
+) []pulserecap.Emote {
+	if len(emotes) == 0 {
+		return emotes
+	}
+	out := make([]pulserecap.Emote, len(emotes))
+	copy(out, emotes)
+	for i := range out {
+		id := strings.TrimSpace(out[i].ID)
+		if emoteimage.IsLocalEmoteID(id) {
+			if resolved, ok := lookup[id]; ok && strings.TrimSpace(resolved) != "" {
+				out[i].ID = resolved
+			}
+		}
+		if strings.TrimSpace(out[i].ImageURL) != "" {
+			out[i].ImageURL = emoteimage.AbsolutizeHostedCDN(base, out[i].ImageURL)
+		}
+	}
+	return out
 }
 
 func collectExtensionProviderLocalIDs(payload *ExtensionPulseResponse) []string {
@@ -1160,7 +1366,30 @@ func collectExtensionProviderLocalIDs(payload *ExtensionPulseResponse) []string 
 	for i := range payload.Peaks {
 		add(payload.Peaks[i].TopEmotes)
 	}
+	if recap, ok := payload.Recap.(pulserecap.StreamRecap); ok {
+		addRecapEmoteIDs(recap.TopEmotes, seen, &out)
+		for _, moment := range recap.TopMoments {
+			addRecapEmoteIDs(moment.TopEmotes, seen, &out)
+		}
+		for _, moment := range recap.ClipCandidates {
+			addRecapEmoteIDs(moment.TopEmotes, seen, &out)
+		}
+	}
 	return out
+}
+
+func addRecapEmoteIDs(emotes []pulserecap.Emote, seen map[string]struct{}, out *[]string) {
+	for _, emote := range emotes {
+		id := strings.TrimSpace(emote.ID)
+		if !emoteimage.IsLocalEmoteID(id) {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		*out = append(*out, id)
+	}
 }
 
 func rewriteExtensionEmoteURLs(emotes []ExtensionEmote, lookup map[string]string) []ExtensionEmote {
@@ -1270,6 +1499,9 @@ func buildExtensionPeaks(
 		reason := pt.Reason
 		if reason == "" {
 			reason = heatmap.ReasonManual
+		}
+		if reason == heatmap.ReasonViewerSpike {
+			continue
 		}
 		chatCount := 0
 		emoteCount := 0

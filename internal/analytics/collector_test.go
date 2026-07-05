@@ -89,6 +89,31 @@ func (f *fakeStore) UpsertMinuteRollup(context.Context, string, MinuteRollup) er
 	return nil
 }
 
+func (f *fakeStore) BulkUpsertLiveMinuteRollups(context.Context, string, []MinuteRollup) error {
+	return nil
+}
+
+type capturingRollupStore struct {
+	fakeStore
+	mu           sync.Mutex
+	liveStreamID string
+	liveRollups  []MinuteRollup
+}
+
+func (f *capturingRollupStore) BulkUpsertLiveMinuteRollups(_ context.Context, streamID string, rollups []MinuteRollup) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.liveStreamID = streamID
+	f.liveRollups = append(f.liveRollups, rollups...)
+	return nil
+}
+
+func (f *capturingRollupStore) flushedRollups() []MinuteRollup {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]MinuteRollup(nil), f.liveRollups...)
+}
+
 func (f *fakeStore) PurgeOlderThan(_ context.Context, cutoff time.Time) error {
 	f.purged = cutoff
 	return nil
@@ -138,6 +163,100 @@ func (f *fakeStore) vodOutcome() (sets []vodSet, unlinked []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]vodSet(nil), f.vodSets...), append([]string(nil), f.unlinked...)
+}
+
+func TestWatchWithPriorityBindsStreamIDImmediately(t *testing.T) {
+	store := &fakeStore{}
+	joiner := &fakeJoiner{}
+	provider := fakeProvider{
+		streams: map[string]LiveStream{
+			"chan": {ID: "stream-live-1", Login: "chan", ViewerCount: 42},
+		},
+	}
+	c := NewCollector(store, provider, joiner, nil, nilLogger(), 5, time.Hour, 30*24*time.Hour, 200)
+
+	resp := c.WatchWithPriority(context.Background(), "chan", "", TrackPriorityManualWatch)
+	if !resp.Tracking {
+		t.Fatalf("expected tracking: %+v", resp)
+	}
+
+	c.mu.Lock()
+	streamID := c.tracked["chan"].currentStreamID
+	c.mu.Unlock()
+	if streamID != "stream-live-1" {
+		t.Fatalf("currentStreamID = %q, want stream-live-1", streamID)
+	}
+}
+
+func TestBindStreamIDNowOnAlreadyTrackingWithoutStreamID(t *testing.T) {
+	store := &fakeStore{}
+	joiner := &fakeJoiner{}
+	provider := fakeProvider{
+		streams: map[string]LiveStream{
+			"chan": {ID: "stream-live-2", Login: "chan", ViewerCount: 10},
+		},
+	}
+	c := NewCollector(store, provider, joiner, nil, nilLogger(), 5, time.Hour, 30*24*time.Hour, 200)
+	c.tracked["chan"] = &trackedChannel{login: "chan"}
+
+	resp := c.WatchWithPriority(context.Background(), "chan", "", TrackPriorityManualWatch)
+	if !resp.Tracking {
+		t.Fatalf("expected already-tracking response: %+v", resp)
+	}
+
+	c.mu.Lock()
+	streamID := c.tracked["chan"].currentStreamID
+	c.mu.Unlock()
+	if streamID != "stream-live-2" {
+		t.Fatalf("currentStreamID = %q, want stream-live-2", streamID)
+	}
+}
+
+func TestFlushOpenMinuteToStoreWritesViewerSample(t *testing.T) {
+	store := &capturingRollupStore{}
+	c := NewCollector(store, fakeProvider{}, &fakeJoiner{}, nil, nilLogger(), 5, time.Hour, 30*24*time.Hour, 200)
+	now := time.Now().UTC()
+	c.tracked["chan"] = &trackedChannel{login: "chan", currentStreamID: "stream-open"}
+	c.addViewerSample("stream-open", now, 8800)
+	c.flushOpenMinuteToStore(context.Background(), "stream-open")
+	rollups := store.flushedRollups()
+	if len(rollups) != 1 {
+		t.Fatalf("flushed rollups = %d, want 1", len(rollups))
+	}
+	if rollups[0].ViewerSamples != 1 || rollups[0].ViewerLatest != 8800 {
+		t.Fatalf("rollup = %+v, want viewer sample", rollups[0])
+	}
+	c.flushOpenMinuteToStore(context.Background(), "stream-open")
+	if len(store.flushedRollups()) != 1 {
+		t.Fatal("expected open-minute flush rate limit within 10s")
+	}
+}
+
+func TestTouchAdmissionObservationBindsStreamIDWhenEmpty(t *testing.T) {
+	store := &fakeStore{}
+	joiner := &fakeJoiner{}
+	provider := fakeProvider{
+		streams: map[string]LiveStream{
+			"roster": {ID: "stream-admit-bind", Login: "roster", ViewerCount: 12},
+		},
+	}
+	c := NewCollector(store, provider, joiner, nil, nilLogger(), 5, time.Hour, 30*24*time.Hour, 200)
+	c.tracked["roster"] = &trackedChannel{login: "roster"}
+
+	if !c.TouchAdmissionObservation("roster") {
+		t.Fatal("expected touch on tracked roster channel")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		streamID := c.tracked["roster"].currentStreamID
+		c.mu.Unlock()
+		if streamID == "stream-admit-bind" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for bindStreamIDNow from TouchAdmissionObservation")
 }
 
 func TestWatchPoolCap(t *testing.T) {

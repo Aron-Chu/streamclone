@@ -17,13 +17,23 @@ var (
 	ErrPulseBackfillNoData        = errors.New("no_chat_data_in_range")
 )
 
+// PulseMissedChatOptions bounds manual VOD import to a stream offset window.
+type PulseMissedChatOptions struct {
+	FromOffsetSeconds int
+	ToOffsetSeconds   int
+}
+
 // SyncPulseMissedChat fetches VOD chat via GQL and patches minute rollups without
 // TwitchTracker scraping or raw chat retention. Viewer samples are not required.
-func (s *SyncService) SyncPulseMissedChat(ctx context.Context, streamID, login, hintVodID string) error {
+func (s *SyncService) SyncPulseMissedChat(ctx context.Context, streamID, login, hintVodID string, opts ...PulseMissedChatOptions) error {
 	streamID = strings.TrimSpace(streamID)
 	login = normalizeLogin(login)
 	if streamID == "" || login == "" {
 		return fmt.Errorf("missing stream or channel")
+	}
+	var missedOpts PulseMissedChatOptions
+	if len(opts) > 0 {
+		missedOpts = opts[0]
 	}
 
 	canonicalID, err := s.store.ResolveCanonicalStreamID(ctx, streamID)
@@ -131,6 +141,7 @@ func (s *SyncService) SyncPulseMissedChat(ctx context.Context, streamID, login, 
 		})
 		return err
 	}
+	filterCommentsMapByOffsetRange(commentsMap, missedOpts.FromOffsetSeconds, missedOpts.ToOffsetSeconds)
 
 	finalize := summarizeMissedChatFinalize(rollupStart, commentsMap, chatCache)
 	diagnostics := s.missedChatDiagnostics(ctx, login, streamID, vodID, finalize, "")
@@ -202,7 +213,7 @@ func (s *SyncService) SyncPulseMissedChat(ctx context.Context, streamID, login, 
 			st.Chat.Diagnostics = diagnostics
 		}
 	})
-	if err := s.writeChatRollupsOnly(ctx, streamID, login, rollupStart, commentsMap, chatCache); err != nil {
+	if err := s.writeManualImportChatRollups(ctx, streamID, login, rollupStart, commentsMap, chatCache); err != nil {
 		s.setSyncPhase(ctx, streamID, SyncPhaseFailed, "Failed writing rollups", func(st *SyncStatus) {
 			st.Error = err.Error()
 		})
@@ -292,4 +303,21 @@ func (s *SyncService) missedChatDiagnostics(ctx context.Context, login, streamID
 		s.log.Warn("failed to count stream rollup diagnostics", "stream_id", streamID, "err", err)
 	}
 	return diagnostics
+}
+
+func filterCommentsMapByOffsetRange(commentsMap map[int][]string, fromOffsetSec, toOffsetSec int) {
+	if commentsMap == nil || (fromOffsetSec <= 0 && toOffsetSec <= 0) {
+		return
+	}
+	for minute := range commentsMap {
+		minuteStart := minute * 60
+		minuteEnd := minuteStart + 59
+		if toOffsetSec > 0 && minuteStart > toOffsetSec {
+			delete(commentsMap, minute)
+			continue
+		}
+		if fromOffsetSec > 0 && minuteEnd < fromOffsetSec {
+			delete(commentsMap, minute)
+		}
+	}
 }

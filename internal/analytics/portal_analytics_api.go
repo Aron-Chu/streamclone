@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,10 +43,13 @@ type PortalStreamRecord struct {
 	DisplayName    string     `json:"displayName,omitempty"`
 	Title          string     `json:"title,omitempty"`
 	Category       string     `json:"category,omitempty"`
+	GamesSummary   string     `json:"gamesSummary,omitempty"`
 	StartedAt      time.Time  `json:"startedAt"`
 	EndedAt        *time.Time `json:"endedAt,omitempty"`
 	CurrentViewers int        `json:"currentViewers,omitempty"`
 	PeakViewers    int        `json:"peakViewers,omitempty"`
+	ViewerSamples  int        `json:"viewerSamples,omitempty"`
+	ChatMessages   int64      `json:"chatMessages,omitempty"`
 	VodID          string     `json:"vodId,omitempty"`
 }
 
@@ -77,6 +81,7 @@ type PortalMinutePoint struct {
 	ViewerMax         int                    `json:"viewerMax,omitempty"`
 	ViewerLatest      int                    `json:"viewerLatest,omitempty"`
 	ChatCount         int                    `json:"chatCount,omitempty"`
+	TotalEmoteCount   int                    `json:"totalEmoteCount,omitempty"`
 	SevenTVEmoteCount int                    `json:"seventvEmoteCount,omitempty"`
 	TopEmotes         []PortalMinuteTopEmote `json:"topEmotes,omitempty"`
 	Missing           bool                   `json:"missing,omitempty"`
@@ -107,6 +112,8 @@ func portalStreamRecordFrom(rec *StreamRecord) *PortalStreamRecord {
 		EndedAt:        rec.EndedAt,
 		CurrentViewers: rec.CurrentViewers,
 		PeakViewers:    rec.PeakViewers,
+		ViewerSamples:  rec.ViewerSamples,
+		ChatMessages:   rec.ChatMessages,
 		VodID:          rec.VodID,
 	}
 }
@@ -159,6 +166,8 @@ func (h *Handler) PortalRoutes(r chi.Router) {
 		r.Get("/streams/{streamID}/replay-heatmap", h.portalReplayHeatmap)
 		r.Get("/streams/{streamID}/games", h.portalStreamGames)
 		r.Get("/streams/{streamID}/recap", h.portalStreamRecap)
+		r.Get("/streams/{streamID}/peaks", h.portalStreamPeaks)
+		r.Get("/streams/{streamID}/coverage-truth", h.portalStreamCoverageTruth)
 		r.Get("/streams/{streamID}/minutes", h.portalStreamMinutes)
 		r.Get("/channels/{login}/emotes", h.portalChannelEmotes)
 		r.Get("/channels/{login}/streams", h.portalChannelStreams)
@@ -187,7 +196,15 @@ func portalMinutesCacheKey(streamID string, includeProvisionalPeaks bool) string
 
 func portalMinutesFromRollups(stream *StreamRecord, rollups []MinuteRollup, includeProvisionalPeaks bool) PortalStreamMinutesResponse {
 	timeline := filterTimelineRollups(rollups)
-	points := portalMinutePointsFromRollups(stream, timeline)
+	consolidated := consolidateRollupsByMinute(timeline)
+	sorted := make([]MinuteRollup, 0, len(consolidated))
+	for _, rollup := range consolidated {
+		sorted = append(sorted, rollup)
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].MinuteTS.Before(sorted[j].MinuteTS)
+	})
+	points := portalMinutePointsFromRollups(stream, sorted)
 	resp := PortalStreamMinutesResponse{
 		StreamID:  stream.StreamID,
 		Channel:   stream.Login,
@@ -221,6 +238,7 @@ func portalMinutePointsFromRollups(stream *StreamRecord, rollups []MinuteRollup)
 			ViewerMax:         rollup.ViewerMax,
 			ViewerLatest:      viewer,
 			ChatCount:         rollup.ChatCount,
+			TotalEmoteCount:   hubRollupEmoteCount(rollup),
 			SevenTVEmoteCount: rollup.SevenTVEmoteCount,
 			Missing:           rollup.Missing,
 		})
@@ -556,7 +574,16 @@ func (h *Handler) portalChannelStreams(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]PortalStreamRecord, 0, len(streams))
 	for i := range streams {
-		items = append(items, *portalStreamRecordFrom(&streams[i]))
+		rec := portalStreamRecordFrom(&streams[i])
+		if h.store != nil {
+			if segments, err := h.resolveStreamGameSegments(r.Context(), streams[i].StreamID); err == nil {
+				rec.GamesSummary = gamesSummaryFromSegments(segments, streams[i].Category)
+				if rec.Category == "" {
+					rec.Category = dominantCategoryFromSegments(segments, streams[i].Category)
+				}
+			}
+		}
+		items = append(items, *rec)
 	}
 	writeJSON(w, http.StatusOK, PortalChannelStreamsResponse{
 		Channel:   login,

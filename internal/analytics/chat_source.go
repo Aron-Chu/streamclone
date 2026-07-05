@@ -32,6 +32,8 @@ const (
 
 	// RollupDetailIVRPeaksOnly marks sparse top-N peak minutes — not full timeline rollups.
 	RollupDetailIVRPeaksOnly = "ivr_peaks_only"
+	// RollupDetailManualImport marks user-initiated VOD GQL backfill (Pulse manual loader).
+	RollupDetailManualImport = "manual_import"
 )
 
 // sqlPublicLiveChatMinutePredicate matches isLiveChatRollup for public hub SQL aggregations.

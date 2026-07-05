@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 type vodGameCategoryLookup interface {
@@ -51,12 +52,22 @@ func resolveGameCategoryFallback(ctx context.Context, category, streamCategory, 
 }
 
 func fallbackGameSegmentsForStream(stream *StreamRecord) []GameSegment {
-	if stream == nil || stream.EndedAt == nil {
+	if stream == nil {
 		return nil
 	}
 	gameName := normalizeSyncGameCategory(stream.Category)
+	if gameName == "" {
+		return nil
+	}
 	durationSeconds := streamDurationSeconds(stream, nil)
-	if gameName == "" || durationSeconds <= 0 {
+	if stream.EndedAt == nil {
+		if !stream.StartedAt.IsZero() {
+			durationSeconds = int(time.Since(stream.StartedAt.UTC()).Seconds())
+		}
+		if durationSeconds <= 0 {
+			durationSeconds = 60
+		}
+	} else if durationSeconds <= 0 {
 		return nil
 	}
 	return []GameSegment{{

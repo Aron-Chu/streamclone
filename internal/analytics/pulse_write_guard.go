@@ -32,3 +32,24 @@ func (h *Handler) requireHostedUserStatePrincipal(w http.ResponseWriter, r *http
 	})
 	return PulsePrincipal{}, false
 }
+
+func pulsePrincipalCanUsePrivateClips(principal PulsePrincipal) bool {
+	switch principal.Kind {
+	case "beta", "device", "user":
+		return principal.ID != ""
+	default:
+		return false
+	}
+}
+
+func (h *Handler) requireHostedPrivateClipsPrincipal(w http.ResponseWriter, r *http.Request) (PulsePrincipal, bool) {
+	principal, ok := pulsePrincipalFromContext(r.Context())
+	if ok && pulsePrincipalCanUsePrivateClips(principal) {
+		return principal, true
+	}
+	writeJSON(w, http.StatusUnauthorized, map[string]string{
+		"error": "unauthorized",
+		"hint":  "Set X-Streamclone-Beta-Key or Authorization to use private Pulse clips.",
+	})
+	return PulsePrincipal{}, false
+}

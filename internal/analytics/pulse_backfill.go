@@ -243,7 +243,6 @@ func (m *PulseBackfillManager) Enqueue(ctx context.Context, req PulseBackfillReq
 		toOffset = fromOffset
 	}
 	requestedRange := PulseBackfillRange{FromOffsetSeconds: fromOffset, ToOffsetSeconds: toOffset}
-	jobKey := pulseBackfillJobKey(streamID, mode, requestedRange)
 
 	if existing := m.activeJobForRange(streamID, mode, requestedRange); existing != nil {
 		return existing, nil
@@ -253,15 +252,6 @@ func (m *PulseBackfillManager) Enqueue(ctx context.Context, req PulseBackfillReq
 	if m.maxConcurrent > 0 && m.activeJobCountLocked() >= m.maxConcurrent {
 		m.mu.Unlock()
 		return nil, ErrPulseBackfillAtCapacity
-	}
-	if last, ok := m.lastEnqueue[jobKey]; ok && time.Since(last) < pulseBackfillCooldown {
-		for _, job := range m.jobs {
-			if job.StreamID == streamID && job.Mode == mode && !isPulseBackfillTerminal(job.Status) &&
-				pulseBackfillRangesOverlap(job.Range, requestedRange) {
-				m.mu.Unlock()
-				return job, nil
-			}
-		}
 	}
 	m.mu.Unlock()
 
@@ -326,6 +316,20 @@ func (m *PulseBackfillManager) Enqueue(ctx context.Context, req PulseBackfillReq
 		m.storeJob(job)
 		return job, nil
 	}
+
+	jobKey := pulseBackfillJobKey(streamID, mode, vodID, requestedRange)
+	m.mu.Lock()
+	if last, ok := m.lastEnqueue[jobKey]; ok && time.Since(last) < pulseBackfillCooldown {
+		for _, job := range m.jobs {
+			if job.StreamID == streamID && job.Mode == mode && !isPulseBackfillTerminal(job.Status) &&
+				pulseBackfillRangesOverlap(job.Range, requestedRange) {
+				copy := *job
+				m.mu.Unlock()
+				return &copy, nil
+			}
+		}
+	}
+	m.mu.Unlock()
 
 	job := &PulseBackfillJob{
 		JobID:     newPulseBackfillJobID(),
@@ -414,7 +418,10 @@ func (m *PulseBackfillManager) runJob(ctx context.Context, jobID, vodID string) 
 	go m.pollSyncProgress(jobID, streamID, done)
 	defer close(done)
 
-	syncErr := m.sync.SyncPulseMissedChat(ctx, streamID, login, vodID)
+	syncErr := m.sync.SyncPulseMissedChat(ctx, streamID, login, vodID, PulseMissedChatOptions{
+		FromOffsetSeconds: requestedFrom,
+		ToOffsetSeconds:   requestedTo,
+	})
 	if syncErr == nil {
 		syncErr = m.verifyBackfillCoverage(ctx, streamID, stream.StartedAt, beforeStart, requestedFrom, requestedTo)
 	}
@@ -590,8 +597,8 @@ func normalizePulseBackfillMode(raw string) string {
 	}
 }
 
-func pulseBackfillJobKey(streamID, mode string, r PulseBackfillRange) string {
-	return strings.TrimSpace(streamID) + "|" + normalizePulseBackfillMode(mode) + "|" +
+func pulseBackfillJobKey(streamID, mode, vodID string, r PulseBackfillRange) string {
+	return strings.TrimSpace(streamID) + "|" + normalizePulseBackfillMode(mode) + "|" + strings.TrimSpace(vodID) + "|" +
 		fmt.Sprintf("%d:%d", r.FromOffsetSeconds, r.ToOffsetSeconds)
 }
 
@@ -611,7 +618,7 @@ func (m *PulseBackfillManager) activeJobForRange(streamID, mode string, r PulseB
 	}
 	streamID = strings.TrimSpace(streamID)
 	mode = normalizePulseBackfillMode(mode)
-	key := pulseBackfillJobKey(streamID, mode, r)
+	key := pulseBackfillJobKey(streamID, mode, "", r)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if jobID, ok := m.activeByKey[key]; ok {

@@ -168,7 +168,7 @@ func (e *PulseAutoBackfillEnqueuer) RunOnce(ctx context.Context) (PulseAutoBackf
 			FromOffsetSeconds: r.FromOffsetSeconds,
 			ToOffsetSeconds:   r.ToOffsetSeconds,
 		}
-		key := pulseBackfillJobKey(streamID, PulseBackfillModeMissingRange, backfillRange)
+		key := pulseBackfillJobKey(streamID, PulseBackfillModeMissingRange, "", backfillRange)
 		if e.inCooldown(key, now, opts.Cooldown) {
 			report.SkippedCooldown++
 			continue

@@ -1143,7 +1143,7 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 				st.Chat.IndexPhase = "writing"
 			}
 		})
-		err = s.writeChatRollupsOnly(ctx, streamID, login, rollupStart, commentsMap, chatCache)
+		err = s.writeChatRollupsOnly(ctx, streamID, login, rollupStart, commentsMap, chatCache, "")
 		if err != nil {
 			return "", fmt.Errorf("failed to save chat rollups to DB: %w", err)
 		}
@@ -1178,6 +1178,16 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		}
 		if err = s.store.SaveGameSegments(ctx, streamID, segments); err != nil {
 			return "", fmt.Errorf("failed to save game segments to DB: %w", err)
+		}
+		if len(segments) > 0 {
+			syncCategory := dominantCategoryFromSegments(segments, category)
+			if syncCategory != "" {
+				_, _ = s.store.db.Exec(ctx, `
+					UPDATE analytics_streams
+					SET category = $2, updated_at = now()
+					WHERE stream_id = $1
+					  AND ended_at IS NOT NULL`, streamID, syncCategory)
+			}
 		}
 	}
 
@@ -2806,7 +2816,7 @@ func (s *SyncService) patchChatRollupsForSegment(
 	return s.patchChatRollupsForSegments(ctx, streamID, login, rollupStartFn, commentsMap, []gqlSegmentProgress{seg}, chatAlignSec, cache)
 }
 
-func (s *SyncService) writeChatRollupsOnly(ctx context.Context, streamID, login string, rollupStart time.Time, commentsMap map[int][]string, cache *chatRollupCache) error {
+func (s *SyncService) writeChatRollupsOnly(ctx context.Context, streamID, login string, rollupStart time.Time, commentsMap map[int][]string, cache *chatRollupCache, sourceDetail string) error {
 	rollups := make([]MinuteRollup, 0, len(commentsMap))
 	for minuteOffset, comments := range commentsMap {
 		if len(comments) == 0 || cache.has(minuteOffset) {
@@ -2819,6 +2829,7 @@ func (s *SyncService) writeChatRollupsOnly(ctx context.Context, streamID, login 
 			TotalEmoteCount:   totalEmoteCount,
 			SevenTVEmoteCount: seventvEmoteCount,
 			Emotes:            emotes,
+			ChatSourceDetail:  strings.TrimSpace(sourceDetail),
 		})
 	}
 	sort.Slice(rollups, func(i, j int) bool {
@@ -2828,6 +2839,10 @@ func (s *SyncService) writeChatRollupsOnly(ctx context.Context, streamID, login 
 		st.RollupsWritten = len(rollups)
 	})
 	return s.store.BulkPatchChatRollups(ctx, streamID, rollups)
+}
+
+func (s *SyncService) writeManualImportChatRollups(ctx context.Context, streamID, login string, rollupStart time.Time, commentsMap map[int][]string, cache *chatRollupCache) error {
+	return s.writeChatRollupsOnly(ctx, streamID, login, rollupStart, commentsMap, cache, RollupDetailManualImport)
 }
 
 func parseRetryAfter(h http.Header) time.Duration {

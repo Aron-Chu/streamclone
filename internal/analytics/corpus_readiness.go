@@ -466,6 +466,22 @@ func corpusTopRosterFromReadiness(report Top100ReadinessReport) CorpusReadinessT
 	return out
 }
 
+// corpusMetadataStaleCriticalFraction reserves critical for broad sampler
+// failure. A handful of stale roster rows (offline channels awaiting sampler
+// catch-up, transient Helix hiccups) degrades instead of flipping the whole
+// public hub to critical.
+const corpusMetadataStaleCriticalFraction = 0.2
+
+func metadataStaleSeverity(staleRows, liveRows int) string {
+	if staleRows <= 0 {
+		return CorpusStatusHealthy
+	}
+	if liveRows > 0 && float64(staleRows) >= corpusMetadataStaleCriticalFraction*float64(liveRows) {
+		return CorpusStatusCritical
+	}
+	return CorpusStatusDegraded
+}
+
 func corpusPipelineStateFromReadiness(cfg CorpusRuntimeConfig, report Top100ReadinessReport) string {
 	if !cfg.MetadataEnabled || !cfg.MetadataWriteEnabled || cfg.MetadataDryRun {
 		return CorpusStatusCritical
@@ -473,7 +489,8 @@ func corpusPipelineStateFromReadiness(cfg CorpusRuntimeConfig, report Top100Read
 	if report.Summary.LiveRows == 0 {
 		return CorpusStatusDegraded
 	}
-	if report.Summary.MetadataStaleRows > 0 {
+	metadataStale := metadataStaleSeverity(report.Summary.MetadataStaleRows, report.Summary.LiveRows)
+	if metadataStale == CorpusStatusCritical {
 		return CorpusStatusCritical
 	}
 	if report.Summary.AdmissionDisabledRows > 0 || (!cfg.LiveAdmissionEnabled && report.Summary.LiveRows > 0) {
@@ -482,7 +499,8 @@ func corpusPipelineStateFromReadiness(cfg CorpusRuntimeConfig, report Top100Read
 	if report.CollectorMax <= 0 || report.Summary.CollectorTrackingRows == 0 {
 		return CorpusStatusCritical
 	}
-	if report.Summary.LiveCollectorDeficitRows > 0 || report.Summary.CapacityBlockedRows > 0 || report.Summary.ZeroChatAfterAgeRows > 0 {
+	if metadataStale == CorpusStatusDegraded ||
+		report.Summary.LiveCollectorDeficitRows > 0 || report.Summary.CapacityBlockedRows > 0 || report.Summary.ZeroChatAfterAgeRows > 0 {
 		return CorpusStatusDegraded
 	}
 	return CorpusStatusHealthy
@@ -500,9 +518,13 @@ func metadataReadinessComponent(cfg CorpusRuntimeConfig, report Top100ReadinessR
 	if report.Summary.LiveRows == 0 {
 		return component(CorpusStatusDegraded, "No live Top-N metadata rows are currently visible", "no_live_rows")
 	}
-	if report.Summary.MetadataStaleRows > 0 {
+	switch metadataStaleSeverity(report.Summary.MetadataStaleRows, report.Summary.LiveRows) {
+	case CorpusStatusCritical:
 		addIssue(readiness, CorpusStatusCritical, "metadata_stale", "Top-N metadata rows are stale")
 		return component(CorpusStatusCritical, "Top-N metadata rows are stale", "metadata_stale")
+	case CorpusStatusDegraded:
+		addIssue(readiness, CorpusStatusDegraded, "metadata_stale_partial", "Some Top-N metadata rows are stale")
+		return component(CorpusStatusDegraded, "Some Top-N metadata rows are stale", "metadata_stale_partial")
 	}
 	return component(CorpusStatusHealthy, "Top-N metadata is fresh")
 }

@@ -136,6 +136,7 @@ type HubCoverage struct {
 type HubBucketEmote struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider,omitempty"`
+	ImageURL string `json:"imageUrl,omitempty"`
 	Count    int    `json:"count"`
 }
 
@@ -152,7 +153,7 @@ type HubActivityPoint struct {
 	HasViewerRollup bool  `json:"hasViewerRollup,omitempty"`
 	// BucketComplete is false when the bucket period has not yet ended (open/in-progress).
 	BucketComplete bool `json:"bucketComplete,omitempty"`
-	// TopEmotes are sanitized name+provider+count only — never raw emote map keys.
+	// TopEmotes are sanitized name+provider+count+public imageUrl — never raw emote map keys.
 	TopEmotes []HubBucketEmote `json:"topEmotes,omitempty"`
 }
 
@@ -1635,6 +1636,7 @@ func hubBucketEmotesFromTop(top []TopEmote) []HubBucketEmote {
 		out = append(out, HubBucketEmote{
 			Name:     name,
 			Provider: emote.Provider,
+			ImageURL: emote.ImageURL,
 			Count:    emote.Count,
 		})
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // SessionCleanupReport summarizes one-shot prefetch stub / alias cleanup.
@@ -473,4 +474,120 @@ func (s *Store) cleanupPrefetchStubs(ctx context.Context, logins []string, dryRu
 		merged++
 	}
 	return merged, nil
+}
+
+// StaleOpenStreamsReport summarizes idle sessions closed that were still marked live.
+type StaleOpenStreamsReport struct {
+	Closed    int      `json:"closed"`
+	StreamIDs []string `json:"streamIds,omitempty"`
+}
+
+// CloseStaleOpenStreams sets ended_at on sessions with no recent collector activity.
+func (s *Store) CloseStaleOpenStreams(ctx context.Context, maxAge time.Duration) (StaleOpenStreamsReport, error) {
+	report := StaleOpenStreamsReport{}
+	if s == nil || s.db == nil {
+		return report, fmt.Errorf("analytics store unavailable")
+	}
+	if maxAge <= 0 {
+		maxAge = 48 * time.Hour
+	}
+	cutoff := time.Now().UTC().Add(-maxAge)
+	rows, err := s.db.Query(ctx, `
+		SELECT stream_id, COALESCE(last_seen_at, started_at) AS end_candidate
+		FROM analytics_streams
+		WHERE ended_at IS NULL
+		  AND started_at < $1
+		  AND COALESCE(last_seen_at, started_at) < $1
+		ORDER BY started_at ASC
+		LIMIT 200`, cutoff)
+	if err != nil {
+		return report, err
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		streamID string
+		endedAt  time.Time
+	}
+	var pending []candidate
+	for rows.Next() {
+		var streamID string
+		var endedAt time.Time
+		if err := rows.Scan(&streamID, &endedAt); err != nil {
+			return report, err
+		}
+		if streamID == "" || endedAt.IsZero() {
+			continue
+		}
+		pending = append(pending, candidate{streamID: streamID, endedAt: endedAt.UTC()})
+	}
+	if err := rows.Err(); err != nil {
+		return report, err
+	}
+	for _, item := range pending {
+		if err := s.CloseStream(ctx, item.streamID, item.endedAt); err != nil {
+			return report, fmt.Errorf("close stale stream %s: %w", item.streamID, err)
+		}
+		report.Closed++
+		report.StreamIDs = append(report.StreamIDs, item.streamID)
+	}
+	return report, nil
+}
+
+// StaleSummaryRefreshReport counts stream rows whose denormalized counts were rebuilt from rollups.
+type StaleSummaryRefreshReport struct {
+	Refreshed int `json:"refreshed"`
+}
+
+// RefreshSummariesForRollupStreams rebuilds analytics_streams summary fields when rollups exist but counts are zero.
+func (s *Store) RefreshSummariesForRollupStreams(ctx context.Context, limit int) (StaleSummaryRefreshReport, error) {
+	report := StaleSummaryRefreshReport{}
+	if s == nil || s.db == nil {
+		return report, fmt.Errorf("analytics store unavailable")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT s.stream_id
+		FROM analytics_streams s
+		WHERE COALESCE(s.viewer_samples, 0) = 0
+		  AND COALESCE(s.chat_messages, 0) = 0
+		  AND EXISTS (
+		    SELECT 1
+		    FROM analytics_minute_rollups r
+		    WHERE r.stream_id = s.stream_id
+		      AND (
+		        COALESCE(r.chat_count, 0) > 0
+		        OR COALESCE(r.viewer_samples, 0) > 0
+		        OR COALESCE(r.viewer_avg, 0) > 0
+		      )
+		  )
+		ORDER BY s.started_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return report, err
+	}
+	defer rows.Close()
+
+	var streamIDs []string
+	for rows.Next() {
+		var streamID string
+		if err := rows.Scan(&streamID); err != nil {
+			return report, err
+		}
+		if streamID != "" {
+			streamIDs = append(streamIDs, streamID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return report, err
+	}
+	for _, streamID := range streamIDs {
+		if err := s.RefreshStreamSummaryWithMode(ctx, streamID, "startup_repair"); err != nil {
+			return report, fmt.Errorf("refresh summary %s: %w", streamID, err)
+		}
+		report.Refreshed++
+	}
+	return report, nil
 }
