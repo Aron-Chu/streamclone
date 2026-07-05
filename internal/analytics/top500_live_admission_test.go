@@ -145,6 +145,48 @@ func TestTop500PriorityWatchSkipsDuplicateStream(t *testing.T) {
 	}
 }
 
+func TestTop500PriorityWatchDuplicateStreamRefreshesIdleClock(t *testing.T) {
+	globalTopRosterAdmissionRegistry = topRosterAdmissionRegistry{byLogin: make(map[string]TopRosterAdmissionAttempt)}
+	streamID := "dup-stream"
+	source := &fakeLiveAdmissionSource{live: []Top500Current{
+		{Login: "live", Rank: 1, IsLive: true, StreamID: &streamID, SampledAt: time.Now().UTC()},
+	}}
+	joiner := &fakeJoiner{}
+	collector := NewCollector(&fakeStore{}, fakeProvider{}, joiner, nil, nilLogger(), 2, time.Second, time.Hour, 200)
+	collector.WithIdleTTL(time.Millisecond)
+	collector.mu.Lock()
+	collector.tracked["live"] = &trackedChannel{
+		login:           "live",
+		currentStreamID: streamID,
+		addedAt:         time.Now().UTC(),
+		lastViewedAt:    time.Now().UTC().Add(-time.Hour),
+		refCounts:       map[string]int{},
+		watchPriority:   TrackPriorityTopRoster,
+	}
+	collector.mu.Unlock()
+
+	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
+		PulseTop500AdmissionEnabled: true,
+		PulseTop500AdmissionTopN:    100,
+	}, nil)
+	p.runOnce(context.Background())
+
+	collector.evictIdleChannels(time.Now().UTC())
+	if !collector.IsTracking("live") {
+		t.Fatal("duplicate_stream admission should refresh idle and retain tracked channel")
+	}
+	if len(joiner.parted) != 0 {
+		t.Fatalf("expected no PART after duplicate_stream refresh, parted=%v", joiner.parted)
+	}
+	attempt, ok := getTopRosterAdmissionAttempt("live")
+	if !ok {
+		t.Fatal("expected admission attempt")
+	}
+	if attempt.Outcome != TopRosterAdmissionDuplicateStream {
+		t.Fatalf("outcome = %q, want %q", attempt.Outcome, TopRosterAdmissionDuplicateStream)
+	}
+}
+
 func TestTop500PriorityWatchProtectedPreemptsTopLive(t *testing.T) {
 	streamA := "111"
 	source := &fakeLiveAdmissionSource{live: []Top500Current{
