@@ -16,6 +16,7 @@ import (
 	"streamclone/internal/chat/parse"
 	"streamclone/internal/chat/pubsub"
 	"streamclone/internal/config"
+	"streamclone/internal/emote/render"
 	"streamclone/internal/httpx"
 	"streamclone/internal/log"
 	"streamclone/internal/metrics"
@@ -39,6 +40,17 @@ func main() {
 	ps := pubsub.New(rdb)
 
 	enricher := enrich.New(rdb, cfg.DeltaDebounceMS, logger)
+	if cfg.EmoteRenderOnChatObserved {
+		observePub := render.NewObservePublisher(rdb, logger)
+		enricher.SetEmoteObserver(func(channel string, frag batch.Fragment) {
+			observePub.TryPublish(render.ObservePayload{
+				EmoteID:      frag.ID,
+				Provider:     frag.Provider,
+				ChannelLogin: channel,
+				Scale:        "1x",
+			})
+		})
+	}
 
 	batcher := batch.New(cfg.BatchWindowMS, func(channel string, data []byte) {
 		ps.Publish(context.Background(), channel, data)

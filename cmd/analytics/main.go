@@ -15,9 +15,11 @@ import (
 	"streamclone/internal/analytics/chatreplay"
 	"streamclone/internal/analytics/heatmap"
 	"streamclone/internal/archive"
+	"streamclone/internal/chat/batch"
 	"streamclone/internal/chat/enrich"
 	"streamclone/internal/chat/ircconn"
 	"streamclone/internal/config"
+	"streamclone/internal/emote/render"
 	"streamclone/internal/emote/seeder"
 	"streamclone/internal/httpx"
 	"streamclone/internal/log"
@@ -165,6 +167,17 @@ func main() {
 		cfg.Upstream.UserAgent,
 	)
 	enricher := enrich.New(rdb, cfg.DeltaDebounceMS, logger)
+	if cfg.EmoteRenderOnChatObserved {
+		observePub := render.NewObservePublisher(rdb, logger)
+		enricher.SetEmoteObserver(func(channel string, frag batch.Fragment) {
+			observePub.TryPublish(render.ObservePayload{
+				EmoteID:      frag.ID,
+				Provider:     frag.Provider,
+				ChannelLogin: channel,
+				Scale:        "1x",
+			})
+		})
+	}
 	if err := store.EnsureAlwaysTrackedTable(ctx); err != nil {
 		logger.Error("always tracked table ensure failed", "err", err)
 	}

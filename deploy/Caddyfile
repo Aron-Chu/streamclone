@@ -23,12 +23,23 @@
 	@emote_assets {
 		path /emotes/*
 	}
-	reverse_proxy @emote_assets minio:9000
+	reverse_proxy @emote_assets emote:8080
 
 	@analytics {
-		path_regexp analytics ^/v1/(analytics|extension|pulse)(/|$)
+		path_regexp analytics ^/v1/(analytics|extension|pulse|public|portal)(/|$)
 	}
 	reverse_proxy @analytics analytics:8080 {
+		transport http {
+			read_timeout 15m
+			write_timeout 15m
+		}
+	}
+
+	@internal_replayforge_jobs {
+		method POST
+		path /v1/internal/replayforge/jobs/*
+	}
+	reverse_proxy @internal_replayforge_jobs analytics:8080 {
 		transport http {
 			read_timeout 15m
 			write_timeout 15m
@@ -44,11 +55,6 @@
 			write_timeout 15m
 		}
 	}
-
-	@storygraph {
-		path /v1/pulse-wire /v1/pulse-wire/* /v1/channels/*/spread /v1/channels/*/spread/*
-	}
-	reverse_proxy @storygraph storygraph:8080
 
 	@hls {
 		path /live/*

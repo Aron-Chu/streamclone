@@ -348,21 +348,31 @@ type Config struct {
 	ArchiveMetricsRefreshInterval time.Duration `env:"ARCHIVE_METRICS_REFRESH_INTERVAL" envDefault:"30s"`
 	PulsewireArchiveEnabled       bool          `env:"PULSEWIRE_ARCHIVE_ENABLED" envDefault:"false"`
 
-	EmoteImportConcurrency             int           `env:"EMOTE_IMPORT_CONCURRENCY" envDefault:"8"`
-	EmoteWorkerConcurrency             int           `env:"EMOTE_WORKER_CONCURRENCY" envDefault:"8"`
-	EmoteDictionaryDebounceMS          int           `env:"EMOTE_DICTIONARY_DEBOUNCE_MS" envDefault:"3000"`
-	EmoteRosterPreloadEnabled          bool          `env:"EMOTE_ROSTER_PRELOAD_ENABLED" envDefault:"false"`
-	EmoteRosterPreloadInterval         time.Duration `env:"EMOTE_ROSTER_PRELOAD_INTERVAL" envDefault:"6h"`
-	EmoteRosterPreloadTopN             int           `env:"EMOTE_ROSTER_PRELOAD_TOP_N" envDefault:"200"`
-	EmoteHistorySnapshotEnabled        bool          `env:"EMOTE_HISTORY_SNAPSHOT_ENABLED" envDefault:"false"`
-	EmoteHistorySnapshotInterval       time.Duration `env:"EMOTE_HISTORY_SNAPSHOT_INTERVAL" envDefault:"6h"`
-	EmoteHistorySnapshotBatchSize      int           `env:"EMOTE_HISTORY_SNAPSHOT_BATCH_SIZE" envDefault:"25"`
-	EmoteHistoryNormalizeEnabled       bool          `env:"EMOTE_HISTORY_NORMALIZE_ENABLED" envDefault:"false"`
-	EmoteHistoryNormalizeInterval      time.Duration `env:"EMOTE_HISTORY_NORMALIZE_INTERVAL" envDefault:"15m"`
-	EmoteHistoryNormalizeSince         time.Duration `env:"EMOTE_HISTORY_NORMALIZE_SINCE" envDefault:"720h"`
-	EmoteHistoryNormalizeBatchSize     int           `env:"EMOTE_HISTORY_NORMALIZE_BATCH_SIZE" envDefault:"25"`
-	PublicEmoteProviderRefreshEnabled  bool          `env:"PUBLIC_EMOTE_PROVIDER_REFRESH_ENABLED" envDefault:"false"`
-	PublicEmoteProviderRefreshInterval time.Duration `env:"PUBLIC_EMOTE_PROVIDER_REFRESH_INTERVAL" envDefault:"15m"`
+	EmoteImportConcurrency                 int           `env:"EMOTE_IMPORT_CONCURRENCY" envDefault:"8"`
+	EmoteWorkerConcurrency                 int           `env:"EMOTE_WORKER_CONCURRENCY" envDefault:"8"`
+	EmoteRenderTwitchEager                 bool          `env:"EMOTE_RENDER_TWITCH_EAGER" envDefault:"false"`
+	EmoteRenderThirdpartyEager             bool          `env:"EMOTE_RENDER_THIRDPARTY_EAGER" envDefault:"false"`
+	EmoteRenderOnChatObserved              bool          `env:"EMOTE_RENDER_ON_CHAT_OBSERVED" envDefault:"true"`
+	EmoteRenderOnUIRequest                 bool          `env:"EMOTE_RENDER_ON_UI_REQUEST" envDefault:"true"`
+	EmoteRenderDefaultScales               string        `env:"EMOTE_RENDER_DEFAULT_SCALES" envDefault:"1x"`
+	EmoteRenderAllowedScales               string        `env:"EMOTE_RENDER_ALLOWED_SCALES" envDefault:"1x,2x,3x,4x"`
+	EmoteRenderQueueMaxDepth               int           `env:"EMOTE_RENDER_QUEUE_MAX_DEPTH" envDefault:"5000"`
+	EmoteRenderChatObservedRateLimitPerMin int           `env:"EMOTE_RENDER_CHAT_OBSERVED_RATE_LIMIT_PER_MIN" envDefault:"120"`
+	EmoteRenderUIRequestRateLimitPerMin    int           `env:"EMOTE_RENDER_UI_REQUEST_RATE_LIMIT_PER_MIN" envDefault:"300"`
+	EmoteRenderBackfillEnabled             bool          `env:"EMOTE_RENDER_BACKFILL_ENABLED" envDefault:"false"`
+	EmoteDictionaryDebounceMS              int           `env:"EMOTE_DICTIONARY_DEBOUNCE_MS" envDefault:"3000"`
+	EmoteRosterPreloadEnabled              bool          `env:"EMOTE_ROSTER_PRELOAD_ENABLED" envDefault:"false"`
+	EmoteRosterPreloadInterval             time.Duration `env:"EMOTE_ROSTER_PRELOAD_INTERVAL" envDefault:"6h"`
+	EmoteRosterPreloadTopN                 int           `env:"EMOTE_ROSTER_PRELOAD_TOP_N" envDefault:"200"`
+	EmoteHistorySnapshotEnabled            bool          `env:"EMOTE_HISTORY_SNAPSHOT_ENABLED" envDefault:"false"`
+	EmoteHistorySnapshotInterval           time.Duration `env:"EMOTE_HISTORY_SNAPSHOT_INTERVAL" envDefault:"6h"`
+	EmoteHistorySnapshotBatchSize          int           `env:"EMOTE_HISTORY_SNAPSHOT_BATCH_SIZE" envDefault:"25"`
+	EmoteHistoryNormalizeEnabled           bool          `env:"EMOTE_HISTORY_NORMALIZE_ENABLED" envDefault:"false"`
+	EmoteHistoryNormalizeInterval          time.Duration `env:"EMOTE_HISTORY_NORMALIZE_INTERVAL" envDefault:"15m"`
+	EmoteHistoryNormalizeSince             time.Duration `env:"EMOTE_HISTORY_NORMALIZE_SINCE" envDefault:"720h"`
+	EmoteHistoryNormalizeBatchSize         int           `env:"EMOTE_HISTORY_NORMALIZE_BATCH_SIZE" envDefault:"25"`
+	PublicEmoteProviderRefreshEnabled      bool          `env:"PUBLIC_EMOTE_PROVIDER_REFRESH_ENABLED" envDefault:"false"`
+	PublicEmoteProviderRefreshInterval     time.Duration `env:"PUBLIC_EMOTE_PROVIDER_REFRESH_INTERVAL" envDefault:"15m"`
 
 	Upstream upstream.Endpoints
 }

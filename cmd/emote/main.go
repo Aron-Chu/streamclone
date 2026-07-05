@@ -15,6 +15,7 @@ import (
 	"streamclone/internal/emote/eventapi"
 	"streamclone/internal/emote/objstore"
 	"streamclone/internal/emote/preload"
+	"streamclone/internal/emote/render"
 	"streamclone/internal/emote/seeder"
 	"streamclone/internal/emote/store"
 	"streamclone/internal/emote/worker"
@@ -53,21 +54,30 @@ func main() {
 	endpoint := strings.TrimPrefix(cfg.S3Endpoint, "https://")
 	endpoint = strings.TrimPrefix(endpoint, "http://")
 
-	obj, err := objstore.New(endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, useSSL)
+	obj, err := objstore.New(endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3Prefix, useSSL)
 	if err != nil {
 		logger.Error("objstore init failed", "err", err)
 		os.Exit(1)
 	}
 
-	if err := obj.EnsureBucket(ctx); err != nil {
+	if err := obj.EnsureBucket(ctx, cfg.S3PublicRead); err != nil {
 		logger.Warn("ensure bucket failed", "err", err)
 	}
 
 	st := store.New(pool)
+	if n, err := st.RepairProviderMetadataReady(ctx); err != nil {
+		logger.Warn("startup provider metadata repair failed", "err", err)
+	} else if n > 0 {
+		logger.Info("startup provider metadata repair", "count", n)
+	}
 	d := dict.New(rdb, cfg.CDNPublicBase)
+	renderCfg := render.ConfigFromApp(cfg)
+	rq := render.NewQueue(st, obj, renderCfg, logger)
+	render.StartObserveConsumer(ctx, rdb, rq, logger)
+	render.SyncQueueDepthMetric(ctx, st)
 	twitch := helix.New(cfg.TwitchAPIURL, cfg.TwitchTokenURL, cfg.TwitchOAuthClientID, cfg.TwitchOAuthClientSecret, "streamclone/emote")
-	seed := seeder.NewWithImportConcurrency(st, obj, d, logger, cfg.Upstream.SevenTVAPIURL, cfg.Upstream.SevenTVCDNURL, cfg.Upstream.FFZAPIURL, cfg.Upstream.BTTVAPIURL, twitch, cfg.EmoteImportConcurrency)
-	w := worker.NewWithDictionaryDebounce(st, obj, d, logger, time.Duration(cfg.EmoteDictionaryDebounceMS)*time.Millisecond)
+	seed := seeder.NewWithRenderQueue(st, obj, d, rq, logger, cfg.Upstream.SevenTVAPIURL, cfg.Upstream.SevenTVCDNURL, cfg.Upstream.FFZAPIURL, cfg.Upstream.BTTVAPIURL, twitch, cfg.EmoteImportConcurrency)
+	w := worker.NewWithConfig(st, obj, d, renderCfg, logger, time.Duration(cfg.EmoteDictionaryDebounceMS)*time.Millisecond)
 	workerConcurrency := cfg.EmoteWorkerConcurrency
 	if workerConcurrency < 1 {
 		workerConcurrency = 1
@@ -95,7 +105,7 @@ func main() {
 		)
 	}
 
-	h := api.New(st, obj, d, seed, logger, cfg.CuratorAPIToken)
+	h := api.NewWithRenderQueue(st, obj, d, seed, rq, logger, cfg.CuratorAPIToken)
 	h.SetEventSubscriber(eventSub)
 
 	srv := httpx.New("emote", cfg.HTTPAddr, logger, metrics.HTTPMiddleware("emote"), httpx.CORS)
