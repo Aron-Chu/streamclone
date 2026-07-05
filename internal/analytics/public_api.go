@@ -92,7 +92,7 @@ func (h *Handler) shouldForceRefreshPublicHub(opts publicHubOptions) bool {
 		return false
 	}
 	opts = normalizePublicHubOptions(opts)
-	key := publicHubCacheKey(opts)
+	key := publicHubCacheKey(opts, h.publicHubRuntimeFingerprint())
 	ttl := publicHubCacheTTLForOptions(opts)
 	now := time.Now()
 	h.hubRefreshMu.Lock()

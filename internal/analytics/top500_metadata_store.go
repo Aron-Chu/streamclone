@@ -21,6 +21,7 @@ const (
 	Top500SnapshotSourceCache        = "cache"
 	Top500SnapshotSourceMetadata     = "top500_metadata"
 	Top500SnapshotSourceConfigured   = "configured"
+	Top500SnapshotSourceIRCCollector = "irc_collector"
 
 	Top500CoverageSourceMetadata  = "top500_metadata"
 	Top500CoverageSourceTier0     = "tier0"
@@ -43,6 +44,12 @@ type Top500Channel struct {
 	LastSeenAt     *time.Time
 	LastSampledAt  *time.Time
 	LastLiveAt     *time.Time
+}
+
+// Top500ViewerBucket is a coarse time bucket of summed Top-500 live viewer counts.
+type Top500ViewerBucket struct {
+	T       int64
+	Viewers int
 }
 
 type Top500LiveSnapshot struct {
@@ -395,6 +402,15 @@ func upsertTop500CurrentTx(ctx context.Context, tx pgx.Tx, current Top500Current
 	if err := validateTop500Current(current); err != nil {
 		return err
 	}
+	login := normalizeLogin(current.Login)
+	channelID := strings.TrimSpace(current.ChannelID)
+	// top500_current.login is unique. When Helix/channel seed updates channel_id for
+	// the same login, ON CONFLICT (channel_id) inserts a new row and violates login_key.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM top500_current
+		WHERE login = $1 AND channel_id <> $2`, login, channelID); err != nil {
+		return err
+	}
 	tags, err := marshalTop500Tags(current.Tags)
 	if err != nil {
 		return err
@@ -435,6 +451,21 @@ func upsertTop500CurrentTx(ctx context.Context, tx pgx.Tx, current Top500Current
 
 func (s *Store) GetTop500CurrentByLogin(ctx context.Context, login string) (*Top500Current, error) {
 	return scanTop500Current(s.db.QueryRow(ctx, top500CurrentSelectSQL+` WHERE login=$1`, normalizeLogin(login)))
+}
+
+// IsTop500RosterMember reports whether login is an enabled row in top500_channels.
+func (s *Store) IsTop500RosterMember(ctx context.Context, login string) (bool, error) {
+	login = normalizeLogin(login)
+	if login == "" {
+		return false, nil
+	}
+	var exists bool
+	err := s.db.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM top500_channels
+			WHERE login = $1 AND enabled = true
+		)`, login).Scan(&exists)
+	return exists, err
 }
 
 func (s *Store) GetTop500CurrentByChannelID(ctx context.Context, channelID string) (*Top500Current, error) {
@@ -485,6 +516,103 @@ func scanTop500Current(row pgx.Row) (*Top500Current, error) {
 		}
 	}
 	return &current, nil
+}
+
+// AggregateTop500ViewerBucketsSince returns bounded coarse buckets of summed live
+// viewer counts from Top-500 metadata snapshots. Each channel contributes at most
+// one sample per bucket (latest sample_tick_at wins).
+func (s *Store) AggregateTop500ViewerBucketsSince(ctx context.Context, since time.Time, bucketMinutes, limit int) ([]Top500ViewerBucket, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	if bucketMinutes <= 0 {
+		bucketMinutes = 1
+	}
+	if limit <= 0 || limit > 240 {
+		limit = 240
+	}
+	rows, err := s.db.Query(ctx, `
+		WITH bucketed AS (
+			SELECT
+				channel_id,
+				to_timestamp(floor(extract(epoch from sample_tick_at) / ($2::double precision * 60)) * ($2::double precision * 60)) AS bucket_ts,
+				viewer_count,
+				sample_tick_at
+			FROM top500_live_snapshots
+			WHERE sample_tick_at >= $1
+				AND is_live = true
+				AND COALESCE(viewer_count, 0) > 0
+		),
+		latest_per_channel AS (
+			SELECT DISTINCT ON (channel_id, bucket_ts)
+				bucket_ts,
+				viewer_count
+			FROM bucketed
+			ORDER BY channel_id, bucket_ts, sample_tick_at DESC
+		)
+		SELECT *
+		FROM (
+			SELECT bucket_ts, SUM(viewer_count)::bigint AS total_viewers
+			FROM latest_per_channel
+			GROUP BY bucket_ts
+			ORDER BY bucket_ts DESC
+			LIMIT $3
+		) recent
+		ORDER BY bucket_ts ASC`, since.UTC(), bucketMinutes, limit)
+	if err != nil {
+		if isUndefinedTableError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]Top500ViewerBucket, 0, limit)
+	for rows.Next() {
+		var bucketTS time.Time
+		var total int64
+		if err := rows.Scan(&bucketTS, &total); err != nil {
+			return nil, err
+		}
+		out = append(out, Top500ViewerBucket{
+			T:       bucketTS.UTC().UnixMilli(),
+			Viewers: int(total),
+		})
+	}
+	return out, rows.Err()
+}
+
+// SumTop500CurrentLiveViewers returns the summed Helix viewer_count for live rows in
+// top500_current (bounded roster). Used to floor sparse corpus viewer buckets on the hub chart.
+func (s *Store) SumTop500CurrentLiveViewers(ctx context.Context, topN int) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	if topN <= 0 {
+		topN = DefaultTop500MetadataTopN
+	}
+	var total sql.NullInt64
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(SUM(cur.viewer_count), 0)::bigint
+		FROM top500_current cur
+		INNER JOIN top500_channels ch ON ch.channel_id = cur.channel_id
+		WHERE ch.enabled = true
+			AND ch.source IN ('operator_seed', 'configured')
+			AND ch.rank <= $1
+			AND cur.is_live = true
+			AND cur.stream_id IS NOT NULL
+			AND btrim(cur.stream_id) <> ''
+			AND COALESCE(cur.viewer_count, 0) > 0`, topN).Scan(&total)
+	if err != nil {
+		if isUndefinedTableError(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	if !total.Valid {
+		return 0, nil
+	}
+	return int(total.Int64), nil
 }
 
 // ListTop500LiveForPriorityWatch returns live Top-N roster rows ordered by viewer count.
@@ -596,7 +724,7 @@ func allowedTop500ChannelSource(source string) bool {
 func allowedTop500SnapshotSource(source string) bool {
 	switch source {
 	case Top500SnapshotSourceHelixStreams, Top500SnapshotSourceHelixUsers, Top500SnapshotSourceCache,
-		Top500SnapshotSourceMetadata, Top500SnapshotSourceConfigured:
+		Top500SnapshotSourceMetadata, Top500SnapshotSourceConfigured, Top500SnapshotSourceIRCCollector:
 		return true
 	default:
 		return false
