@@ -18,9 +18,12 @@ import (
 	"streamclone/internal/emote/dict"
 	"streamclone/internal/emote/flags"
 	"streamclone/internal/emote/objstore"
+	"streamclone/internal/emote/render"
 	"streamclone/internal/emote/seeder"
 	"streamclone/internal/emote/store"
 	emotesync "streamclone/internal/emote/sync"
+	"streamclone/internal/emoteimage"
+	"streamclone/internal/metrics"
 )
 
 const maxUploadBytes = 5 << 20
@@ -30,6 +33,7 @@ type Handler struct {
 	obj             *objstore.Client
 	d               *dict.Dict
 	seed            *seeder.Seeder
+	render          *render.Queue
 	log             *slog.Logger
 	token           string
 	eventSub        eventSubscriber
@@ -50,10 +54,15 @@ func (h *Handler) SetEventSubscriber(sub eventSubscriber) {
 }
 
 func New(st *store.Store, obj *objstore.Client, d *dict.Dict, seed *seeder.Seeder, log *slog.Logger, token string) *Handler {
-	return &Handler{st: st, obj: obj, d: d, seed: seed, log: log, token: token, seeding: make(map[string]struct{}), loadedProviders: make(map[string]map[seeder.Provider]struct{})}
+	return NewWithRenderQueue(st, obj, d, seed, nil, log, token)
+}
+
+func NewWithRenderQueue(st *store.Store, obj *objstore.Client, d *dict.Dict, seed *seeder.Seeder, rq *render.Queue, log *slog.Logger, token string) *Handler {
+	return &Handler{st: st, obj: obj, d: d, seed: seed, render: rq, log: log, token: token, seeding: make(map[string]struct{}), loadedProviders: make(map[string]map[seeder.Provider]struct{})}
 }
 
 func (h *Handler) Routes(r chi.Router) {
+	r.Get("/emotes/{id}/{scale}.webp", h.serveEmoteAsset)
 	r.Get("/v1/channels/{login}/emotes", h.listChannelEmotes)
 	r.Post("/v1/channels/{login}/emotes/ensure", h.ensureChannelEmotes)
 
@@ -66,6 +75,59 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Put("/v1/channels/{twitch_id}/active-set", h.setActiveSet)
 		r.Post("/v1/seed/twitch/{twitch_id}", h.seedChannel)
 	})
+}
+
+func (h *Handler) serveEmoteAsset(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	scale := strings.TrimSpace(chi.URLParam(r, "scale"))
+	if id == "" || scale == "" {
+		http.NotFound(w, r)
+		return
+	}
+	data, contentType, err := h.obj.Get(r.Context(), id, scale)
+	if err == nil {
+		emote, emoteErr := h.st.GetEmote(r.Context(), id)
+		provider := "custom"
+		if emoteErr == nil && emote.Provider != "" {
+			provider = emote.Provider
+		}
+		metrics.EmoteImageServed.WithLabelValues(provider, scale, "local").Inc()
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+		_, _ = w.Write(data)
+		return
+	}
+
+	emote, emoteErr := h.st.GetEmote(r.Context(), id)
+	if emoteErr != nil {
+		metrics.EmoteImageServed.WithLabelValues("unknown", scale, "missing").Inc()
+		http.NotFound(w, r)
+		return
+	}
+	cdnURL := emoteimage.ExtensionBrowserURL(emote.Provider, emote.ID, emote.ProviderEmoteID)
+	if cdnURL == "" && emote.SourceURL != "" {
+		cdnURL = emote.SourceURL
+	}
+	if cdnURL != "" {
+		metrics.EmoteImageServed.WithLabelValues(emote.Provider, scale, "cdn").Inc()
+		if h.render != nil && h.render.ShouldRenderOnUIRequest() {
+			h.render.EnqueueAsync(r.Context(), render.Request{
+				EmoteID:         emote.ID,
+				Provider:        emote.Provider,
+				ProviderEmoteID: emote.ProviderEmoteID,
+				SourceURL:       emote.SourceURL,
+				SourceHash:      emote.SourceHash,
+				Reason:          render.ReasonUIRequest,
+				Scale:           scale,
+			})
+		}
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		http.Redirect(w, r, cdnURL, http.StatusFound)
+		return
+	}
+
+	metrics.EmoteImageServed.WithLabelValues(emote.Provider, scale, "missing").Inc()
+	http.NotFound(w, r)
 }
 
 func (h *Handler) bearerAuth(next http.Handler) http.Handler {
@@ -139,7 +201,19 @@ func (h *Handler) uploadEmote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.st.InsertJob(r.Context(), emoteID, hash); err != nil {
+	if h.render != nil {
+		if _, err := h.render.Enqueue(r.Context(), render.Request{
+			EmoteID:    emoteID,
+			Provider:   "custom",
+			Reason:     render.ReasonCustomUpload,
+			SourceHash: hash,
+			Scale:      "1x",
+		}); err != nil {
+			h.log.Error("insert job", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+	} else if _, err := h.st.InsertJob(r.Context(), emoteID, render.JobSourceKey(hash, []string{"1x", "2x", "3x", "4x"})); err != nil {
 		h.log.Error("insert job", "err", err)
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
@@ -362,6 +436,20 @@ func (h *Handler) ensureEmotes(ctx context.Context, login, twitchID string, prov
 	resp.Benchmark.SeedMs = time.Since(seedStarted).Milliseconds()
 	resp.Benchmark.EnsureMs = time.Since(started).Milliseconds()
 	return resp, http.StatusAccepted, nil
+}
+
+func (h *Handler) repairProviderMetadata(ctx context.Context) {
+	if h.st == nil {
+		return
+	}
+	n, err := h.st.RepairProviderMetadataReady(ctx)
+	if err != nil && h.log != nil {
+		h.log.Warn("repair provider metadata ready", "err", err)
+		return
+	}
+	if n > 0 && h.log != nil {
+		h.log.Info("repaired provider metadata ready", "count", n)
+	}
 }
 
 func providerListIncludes(providers []seeder.Provider, want seeder.Provider) bool {
@@ -745,6 +833,7 @@ func (h *Handler) startSeed(login, twitchID string, setProviders, seedProviders 
 				h.registerSevenTVSubscription(ctx, login, twitchID)
 			}
 		}
+		h.repairProviderMetadata(ctx)
 		if h.log != nil {
 			h.log.Info("seed channel emotes finished", "login", login, "twitch_id", twitchID, "providers", setProviders, "seed_providers", seedProviders, "results", results, "elapsed_ms", time.Since(started).Milliseconds())
 		}

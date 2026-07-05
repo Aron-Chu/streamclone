@@ -161,14 +161,81 @@ func (s *Store) GetProviderEmote(ctx context.Context, provider, providerEmoteID 
 }
 
 func (s *Store) InsertJob(ctx context.Context, emoteID, sourceKey string) (int64, error) {
+	return s.InsertOrRequeueJob(ctx, emoteID, sourceKey)
+}
+
+// InsertOrRequeueJob creates a pending job or resets a terminal job (completed/failed) back to queued.
+func (s *Store) InsertOrRequeueJob(ctx context.Context, emoteID, sourceKey string) (int64, error) {
 	var id int64
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO processing_jobs (emote_id, source_key, state) VALUES ($1::uuid, $2, 0)
-		ON CONFLICT (emote_id, source_key) DO UPDATE SET updated_at=now()
+		ON CONFLICT (emote_id, source_key) DO UPDATE SET
+			state = CASE WHEN processing_jobs.state IN (3, 4) THEN 0 ELSE processing_jobs.state END,
+			attempts = CASE WHEN processing_jobs.state IN (3, 4) THEN 0 ELSE processing_jobs.attempts END,
+			last_error = CASE WHEN processing_jobs.state IN (3, 4) THEN NULL ELSE processing_jobs.last_error END,
+			updated_at = now()
 		RETURNING id`,
 		emoteID, sourceKey,
 	).Scan(&id)
 	return id, err
+}
+
+func (s *Store) JobExists(ctx context.Context, emoteID, sourceKey string) (bool, error) {
+	var id int64
+	err := s.db.QueryRow(ctx, `
+		SELECT id FROM processing_jobs
+		WHERE emote_id=$1::uuid AND source_key=$2 AND state IN (0, 1, 2)
+		LIMIT 1`, emoteID, sourceKey,
+	).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) CountPendingJobs(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM processing_jobs WHERE state IN (0, 1, 2)`).Scan(&count)
+	return count, err
+}
+
+func (s *Store) UpdateEmoteSourceHash(ctx context.Context, id, sourceHash string) error {
+	_, err := s.db.Exec(ctx, `UPDATE emotes SET source_hash=$1, updated_at=now() WHERE id=$2::uuid`, sourceHash, id)
+	return err
+}
+
+func (s *Store) UpdateEmoteSourceURL(ctx context.Context, id, sourceURL string) error {
+	_, err := s.db.Exec(ctx, `UPDATE emotes SET source_url=$1, updated_at=now() WHERE id=$2::uuid`, sourceURL, id)
+	return err
+}
+
+// RepairProviderMetadataReady marks non-custom provider emotes metadata-ready when provider ids
+// are present. Custom uploads stay pending until a local asset render completes.
+func (s *Store) RepairProviderMetadataReady(ctx context.Context) (int64, error) {
+	tag, err := s.db.Exec(ctx, `
+		UPDATE emotes SET status=1, updated_at=now()
+		WHERE status=0
+			AND COALESCE(provider, '') <> ''
+			AND COALESCE(provider, 'custom') NOT IN ('custom')
+			AND COALESCE(provider_emote_id, '') <> ''`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// SetEmoteMetadataReady marks a single provider emote metadata-ready without requiring local assets.
+func (s *Store) SetEmoteMetadataReady(ctx context.Context, id string) error {
+	_, err := s.db.Exec(ctx, `
+		UPDATE emotes SET status=1, updated_at=now()
+		WHERE id=$1::uuid
+			AND COALESCE(provider, 'custom') NOT IN ('custom')
+			AND COALESCE(provider_emote_id, '') <> ''`, id)
+	return err
 }
 
 func (s *Store) UpsertEmoteSetByOwnerName(ctx context.Context, name, ownerID string) (string, error) {

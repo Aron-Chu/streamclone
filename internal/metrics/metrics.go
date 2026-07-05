@@ -87,6 +87,29 @@ var (
 	EmoteDictionaryQueueDrops = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "emote_dictionary_queue_drops_total", Help: "Total dropped emote dictionary rebuild requests.",
 	})
+	EmoteRenderEnqueued = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "emote_render_enqueued_total", Help: "Emote render jobs enqueued by reason, provider, and channel priority.",
+	}, []string{"reason", "provider", "channel_priority"})
+	EmoteRenderCompleted = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "emote_render_completed_total", Help: "Completed emote render jobs by provider and scale.",
+	}, []string{"provider", "scale"})
+	EmoteRenderFailed = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "emote_render_failed_total", Help: "Failed emote render jobs by provider, scale, and reason.",
+	}, []string{"provider", "scale", "reason"})
+	EmoteImageServed = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "emote_image_served_total", Help: "Emote image responses by provider, scale, and source.",
+	}, []string{"provider", "scale", "source"})
+	EmoteObservedInChat = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "emote_observed_in_chat_total", Help: "Third-party emotes observed in chat tokenization by provider.",
+	}, []string{"provider"})
+	EmoteRenderQueueDepth = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "emote_render_queue_depth", Help: "Pending emote render jobs (queued, running, or retry).",
+	})
+	EmoteRenderDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "emote_render_duration_seconds",
+		Help:    "Time spent rendering emote assets by provider and scale.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"provider", "scale"})
 	HTTPRequests = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "http_requests_total", Help: "HTTP requests by service, method, route, and status.",
 	}, []string{"service", "method", "route", "status"})

@@ -25,6 +25,7 @@ type Enricher struct {
 	log      *slog.Logger
 	mu       sync.Mutex
 	dicts    map[string]*tokenize.ChannelDict
+	observe  func(channel string, frag batch.Fragment)
 }
 
 func New(rdb *redis.Client, debounceMS int, logger *slog.Logger) *Enricher {
@@ -34,6 +35,10 @@ func New(rdb *redis.Client, debounceMS int, logger *slog.Logger) *Enricher {
 		log:      logger,
 		dicts:    make(map[string]*tokenize.ChannelDict),
 	}
+}
+
+func (e *Enricher) SetEmoteObserver(fn func(channel string, frag batch.Fragment)) {
+	e.observe = fn
 }
 
 func (e *Enricher) Invalidate(channel string) {
@@ -54,8 +59,25 @@ func (e *Enricher) Tokenize(channel, text string, native []parse.EmoteRange) []b
 	} else {
 		fragments = e.tokenizeWithNative(channel, text, native)
 	}
+	e.notifyObserved(channel, fragments)
 	metrics.TokenizeSeconds.Observe(time.Since(started).Seconds())
 	return fragments
+}
+
+func (e *Enricher) notifyObserved(channel string, fragments []batch.Fragment) {
+	if e.observe == nil {
+		return
+	}
+	for _, frag := range fragments {
+		if frag.T != "emote" || frag.ID == "" {
+			continue
+		}
+		provider := strings.ToLower(strings.TrimSpace(frag.Provider))
+		switch provider {
+		case "seventv", "7tv", "ffz", "frankerfacez", "bttv", "betterttv":
+			e.observe(channel, frag)
+		}
+	}
 }
 
 func (e *Enricher) tokenizeWithNative(channel, text string, native []parse.EmoteRange) []batch.Fragment {
