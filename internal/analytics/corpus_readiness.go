@@ -189,13 +189,19 @@ func CorpusRuntimeConfigFromApp(cfg config.Config) CorpusRuntimeConfig {
 	if targetTopN == 0 {
 		targetTopN = DefaultTop500MetadataTopN
 	}
-	admissionTopN := normalizeCorpusTopN(cfg.PulseTop500AdmissionTopN)
-	if admissionTopN == 0 {
-		admissionTopN = targetTopN
-	}
 	maxActiveIRC := cfg.PulseMaxActiveChannels
 	if maxActiveIRC <= 0 {
 		maxActiveIRC = cfg.MaxConcurrentTrackedChannels
+	}
+	admissionTopN := 0
+	admissionMaxIRC := 0
+	if cfg.PulseMaxActiveChannels > 0 {
+		admissionMaxIRC = cfg.PulseMaxActiveChannels
+	}
+	if cfg.PulseTop500AdmissionTopN > 0 {
+		admissionTopN = config.ClampLiveAdmissionTopN(cfg.PulseTop500AdmissionTopN, admissionMaxIRC)
+	} else {
+		admissionTopN = targetTopN
 	}
 	return CorpusRuntimeConfig{
 		TargetTopN:             targetTopN,
@@ -225,9 +231,11 @@ func (c CorpusRuntimeConfig) withDefaults() CorpusRuntimeConfig {
 	if c.LiveAdmissionTopN <= 0 {
 		c.LiveAdmissionTopN = c.TargetTopN
 	}
-	if c.LiveAdmissionTopN > MaxTop500MetadataTopN {
-		c.LiveAdmissionTopN = MaxTop500MetadataTopN
+	admissionMaxIRC := 0
+	if c.MaxActiveIRCChannels > 0 {
+		admissionMaxIRC = c.MaxActiveIRCChannels
 	}
+	c.LiveAdmissionTopN = config.ClampLiveAdmissionTopN(c.LiveAdmissionTopN, admissionMaxIRC)
 	if c.GoldWorkerCount <= 0 {
 		c.GoldWorkerCount = 1
 	}
