@@ -16,6 +16,7 @@
     "src"
   ],
   "peerDependencies": {
+    "@streamclone/pulse-charts": "*",
     "@streamclone/pulse-core": "*",
     "@tanstack/react-query": "^5.90.0",
     "react": "^18.3.0",
@@ -24,6 +25,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@streamclone/pulse-charts": "file:../pulse-charts",
     "@types/react": "18.3.18",
     "@types/react-dom": "18.3.5",
     "react": "18.3.1",

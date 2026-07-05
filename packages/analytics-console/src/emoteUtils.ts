@@ -31,7 +31,7 @@ export function emoteProviderTone(provider?: string): string {
 
 export function emoteCountForProvider(rollup: AnalyticsMinuteRollup, provider: EmoteProviderKind): number {
   if (provider === 'seventv' && (rollup.seventvEmoteCount ?? 0) > 0) {
-    return rollup.seventvEmoteCount
+    return rollup.seventvEmoteCount ?? 0
   }
   if (!rollup.emotes) return 0
   let total = 0

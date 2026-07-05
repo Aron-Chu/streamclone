@@ -83,6 +83,12 @@ export function computeStreamBaselines(rollups: MomentScoringRollup[]): StreamBa
   }
 }
 
+function catalogLookupKey(item: CatalogTopEmote): string {
+  const name = item.name.trim().toLowerCase()
+  if (!name) return ''
+  return `${(item.provider ?? 'unknown').toLowerCase()}:${name}`
+}
+
 export function topEmotesFromRollup(
   rollup: MomentScoringRollup,
   limit = 5,
@@ -90,13 +96,19 @@ export function topEmotesFromRollup(
 ): RollupEmoteHit[] {
   if (!rollup.emotes) return []
   const byKey = new Map(catalog?.map(item => [item.key, item]) ?? [])
+  const byLookup = new Map(
+    (catalog ?? [])
+      .map((item) => [catalogLookupKey(item), item] as const)
+      .filter((entry): entry is readonly [string, CatalogTopEmote] => entry[0] !== ''),
+  )
   const byName = new Map(catalog?.map(item => [item.name.toLowerCase(), item]) ?? [])
   return Object.entries(rollup.emotes)
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
     .map(([key, count]) => {
       const parsed = parseEmoteKey(key)
-      const match = byKey.get(key) ?? byName.get(parsed.name.toLowerCase())
+      const lookupKey = `${(parsed.provider !== 'unknown' ? parsed.provider : 'unknown').toLowerCase()}:${parsed.name.toLowerCase()}`
+      const match = byKey.get(key) ?? byLookup.get(lookupKey) ?? byName.get(parsed.name.toLowerCase())
       return {
         key,
         name: match?.name ?? parsed.name,
@@ -104,7 +116,9 @@ export function topEmotesFromRollup(
         count,
         image_url: match
           ? getEmoteImageUrl(match)
-          : (parsed.id ? getEmoteImageUrl({ provider: parsed.provider, id: parsed.id }) : undefined),
+          : (parsed.id && parsed.id !== parsed.name
+              ? getEmoteImageUrl({ provider: parsed.provider, id: parsed.id })
+              : undefined),
       }
     })
 }
@@ -120,9 +134,14 @@ export function detectPickReason(
   if (chatMult >= 2 && chatMult >= emoteMult) return 'chat_spike'
   if (emoteMult >= 2) {
     const top = topEmotesFromRollup(rollup, 1, catalog)[0]
-    if (top?.provider === 'seventv') return 'seventv_spike'
-    if (top?.provider === 'twitch') return 'twitch_emote_spike'
-    if (top?.provider === 'ffz') return 'ffz_spike'
+    if (!top) {
+      if (chatMult >= 1.5) return 'chat_spike'
+      if (viewerMult >= 1.5) return 'viewer_spike'
+      return 'manual'
+    }
+    if (top.provider === 'seventv') return 'seventv_spike'
+    if (top.provider === 'twitch') return 'twitch_emote_spike'
+    if (top.provider === 'ffz') return 'ffz_spike'
     return 'emote_spike'
   }
   if (viewerMult >= 1.5) return 'viewer_spike'

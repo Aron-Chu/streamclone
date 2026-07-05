@@ -14,6 +14,7 @@ export type {
   AnalyticsStreamDetail,
   AnalyticsStreamsResponse,
   AnalyticsTopEmote,
+  ChannelEmote,
   GameSegment,
   PulseBookmark,
   PulseStreamRecap,
@@ -35,6 +36,12 @@ export async function getAnalyticsStream(
   opts?: { sparse?: boolean; channel?: string },
 ): Promise<AnalyticsStreamDetail | null> {
   return api().getAnalyticsStream(streamId, opts) as Promise<AnalyticsStreamDetail | null>
+}
+
+export async function getStreamSummary(streamId: string, channel?: string) {
+  const fn = api().getStreamSummary
+  if (!fn) return null
+  return fn(streamId, channel)
 }
 
 export async function getAnalyticsStreams(login: string, limit = 20): Promise<AnalyticsStreamsResponse> {
