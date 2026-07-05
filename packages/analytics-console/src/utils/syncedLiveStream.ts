@@ -1,8 +1,50 @@
 import type { AnalyticsStream } from '../api.ts'
 
-/** Stream list row has minute-level rollups synced into analytics DB. */
+export type StreamSyncBadge = 'synced' | 'partial' | 'stats_only' | 'syncing'
+
+/** Stream list row has both viewer and chat minute rollups synced into analytics DB. */
 export function streamHasSyncedMinutes(stream: AnalyticsStream): boolean {
-  return (stream.viewerSamples ?? 0) > 0 || (stream.chatMessages ?? 0) > 0
+  return (stream.viewerSamples ?? 0) > 0 && (stream.chatMessages ?? 0) > 0
+}
+
+export function streamSyncBadgeState(stream: AnalyticsStream, syncing = false): StreamSyncBadge {
+  if (syncing) return 'syncing'
+  const hasViewers = (stream.viewerSamples ?? 0) > 0
+  const hasChat = (stream.chatMessages ?? 0) > 0
+  if (hasViewers && hasChat) return 'synced'
+  if (hasViewers || hasChat) return 'partial'
+  return 'stats_only'
+}
+
+export function streamSyncBadgeLabel(badge: StreamSyncBadge): string {
+  switch (badge) {
+    case 'syncing':
+      return 'Syncing'
+    case 'synced':
+      return 'Synced'
+    case 'partial':
+      return 'Partial'
+    default:
+      return 'Stats only'
+  }
+}
+
+export function streamSyncBadgeTitle(badge: StreamSyncBadge, stream: AnalyticsStream): string {
+  switch (badge) {
+    case 'syncing':
+      return 'Sync in progress — partial chart data may already be visible.'
+    case 'synced':
+      return 'Minute-level viewer, chat, and emote rollups are synced for charts.'
+    case 'partial': {
+      const hasViewers = (stream.viewerSamples ?? 0) > 0
+      const hasChat = (stream.chatMessages ?? 0) > 0
+      if (hasViewers && !hasChat) return 'Viewer minutes synced; chat rollups missing or partial.'
+      if (!hasViewers && hasChat) return 'Chat rollups synced; viewer minutes missing or partial.'
+      return 'Partial minute coverage — chart may be incomplete.'
+    }
+    default:
+      return 'Session stats only (duration, title). Open the stream detail page to see minute charts.'
+  }
 }
 
 /** Sidebar row is navigable when it has minute data or TwitchTracker session stats. */

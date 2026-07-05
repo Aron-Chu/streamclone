@@ -39,9 +39,24 @@ export interface TwitchDayClipsResponse {
   items: TwitchDayClip[]
 }
 
+export interface StreamSummaryMetrics {
+  sync_health_state?: string
+  data_coverage_pct?: number
+  minutesWithData?: number
+  viewerSampleCount?: number
+}
+
+export interface StreamSummaryResponse {
+  channel?: string
+  metrics?: StreamSummaryMetrics
+  analyticsQuality?: string
+  updatedAt?: number
+}
+
 export interface AnalyticsApi {
   ensureChannelEmotes(login: string, twitchId: string, providers?: string[]): Promise<unknown>
   getAnalyticsStream(streamId: string, opts?: AnalyticsStreamOptions): Promise<unknown | null>
+  getStreamSummary?(streamId: string, channel?: string): Promise<StreamSummaryResponse | null>
   getAnalyticsStreams(login: string, limit?: number): Promise<unknown>
   getPulseBookmarks(params?: PulseBookmarkQuery): Promise<unknown>
   getPulseStreamRecap(streamId: string): Promise<unknown | null>
