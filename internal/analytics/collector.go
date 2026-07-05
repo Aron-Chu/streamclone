@@ -390,6 +390,28 @@ func (c *Collector) touchPrincipalLocked(tc *trackedChannel, principalID string,
 	}
 }
 
+// TouchAdmissionObservation refreshes idle retention for a channel that recurring
+// top-roster admission still considers live and already tracked. It does not grant
+// poolAlwaysTrack, principal refs, or global protected status.
+func (c *Collector) TouchAdmissionObservation(login string) bool {
+	if c == nil {
+		return false
+	}
+	login = normalizeLogin(login)
+	if login == "" {
+		return false
+	}
+	now := time.Now().UTC()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tc, ok := c.tracked[login]
+	if !ok || tc == nil {
+		return false
+	}
+	tc.lastViewedAt = now
+	return true
+}
+
 func (c *Collector) channelRefCount(tc *trackedChannel) int {
 	if tc == nil || len(tc.refCounts) == 0 {
 		return 0

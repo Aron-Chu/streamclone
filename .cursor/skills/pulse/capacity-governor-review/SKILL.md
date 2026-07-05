@@ -13,6 +13,7 @@ description: Review tracking pool caps, always-track eviction, rate limits, and 
 ## Checklist
 
 - [ ] Always-track entries respect pool cap and idle eviction policy
+- [ ] Top-roster admission refreshes idle on steady-state skip outcomes (`duplicate_stream`, `already_tracking`) via `TouchAdmissionObservation` — see [`docs/agent-notes/top-roster-idle-churn-p1-2026-07.md`](../../../docs/agent-notes/top-roster-idle-churn-p1-2026-07.md) before raising IRC cap
 - [ ] Beta-key principals cannot unboundedly expand watchlists (`PULSE_MAX_CHANNELS_PER_PRINCIPAL`)
 - [ ] Go-live detector SLA documented (Helix poll vs EventSub)
 - [ ] Backfill concurrency capped per host (`PULSE_MAX_BACKFILLS`)
