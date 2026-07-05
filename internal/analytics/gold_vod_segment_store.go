@@ -39,12 +39,19 @@ func (s *Store) UpsertGoldVODSegmentPlans(ctx context.Context, plans []GoldVODSe
 	if maxAttempts <= 0 {
 		maxAttempts = 3
 	}
-	insertedOrTouched := 0
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	batch := &pgx.Batch{}
+	queued := 0
 	for _, plan := range plans {
 		if strings.TrimSpace(plan.SegmentKey) == "" || strings.TrimSpace(plan.VODID) == "" || plan.EndOffsetSeconds <= plan.StartOffsetSeconds {
 			continue
 		}
-		tag, err := s.db.Exec(ctx, `
+		batch.Queue(`
 			INSERT INTO gold_vod_segments (
 				segment_key, vod_id, stream_id, login, backfill_job_id, strategy_version,
 				start_offset_seconds, end_offset_seconds, max_attempts
@@ -67,14 +74,19 @@ func (s *Store) UpsertGoldVODSegmentPlans(ctx context.Context, plans []GoldVODSe
 			plan.EndOffsetSeconds,
 			maxAttempts,
 		)
-		if err != nil {
-			return insertedOrTouched, err
-		}
-		if tag.RowsAffected() > 0 {
-			insertedOrTouched++
-		}
+		queued++
 	}
-	return insertedOrTouched, nil
+	if queued == 0 {
+		return 0, nil
+	}
+	br := tx.SendBatch(ctx, batch)
+	if err := br.Close(); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return queued, nil
 }
 
 func (s *Store) ClaimGoldVODSegment(ctx context.Context, owner string, leaseTTL time.Duration, maxSegmentsPerVOD int) (*GoldVODSegmentClaim, error) {

@@ -76,6 +76,6 @@ func (h *Handler) buildPulseStreamRecap(ctx context.Context, streamID string) (p
 		Rollups:         rollups,
 		Points:          detail.Points,
 	})
-	h.enrichRecapTopEmotes(ctx, &recap, storeRollupsFromHeatmap(rollups))
+	h.enrichRecapTopEmotes(ctx, &recap, storeRollupsFromHeatmap(rollups), stream.StreamID, stream.BroadcasterID)
 	return recap, nil
 }

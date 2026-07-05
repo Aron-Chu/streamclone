@@ -66,8 +66,20 @@ func TestFallbackGameSegmentsForEndedStreamSkipsUnknownCategory(t *testing.T) {
 	if got := fallbackGameSegmentsForStream(&StreamRecord{StreamID: "s1", Category: "Live", StartedAt: startedAt, EndedAt: &endedAt}); len(got) != 0 {
 		t.Fatalf("segments = %#v, want empty for placeholder category", got)
 	}
-	if got := fallbackGameSegmentsForStream(&StreamRecord{StreamID: "s1", Category: "Just Chatting", StartedAt: startedAt}); len(got) != 0 {
-		t.Fatalf("segments = %#v, want empty for live stream", got)
+}
+
+func TestFallbackGameSegmentsForLiveStreamCategory(t *testing.T) {
+	startedAt := time.Now().UTC().Add(-2 * time.Hour)
+	got := fallbackGameSegmentsForStream(&StreamRecord{
+		StreamID:  "s1",
+		Category:  "VALORANT",
+		StartedAt: startedAt,
+	})
+	if len(got) != 1 {
+		t.Fatalf("segments = %#v, want one live category segment", got)
+	}
+	if got[0].GameName != "VALORANT" || got[0].OffsetSeconds != 0 || got[0].DurationSeconds < 60 {
+		t.Fatalf("segment = %+v, want VALORANT from offset 0 with live duration", got[0])
 	}
 }
 
@@ -75,6 +87,27 @@ func TestResolveGameCategoryFallbackUsesHelix(t *testing.T) {
 	got := resolveGameCategoryFallback(context.Background(), "Live", "", "12345", stubHelixGameName{game: "VALORANT"})
 	if got != "VALORANT" {
 		t.Fatalf("category = %q, want VALORANT", got)
+	}
+}
+
+func TestGetStreamGamesCategoryFallback(t *testing.T) {
+	startedAt := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	endedAt := startedAt.Add(3 * time.Hour)
+	stream := &StreamRecord{
+		StreamID:  "317548790616",
+		Category:  "Holdfast: Nations At War",
+		StartedAt: startedAt,
+		EndedAt:   &endedAt,
+	}
+	segments := fallbackGameSegmentsForStream(stream)
+	if len(segments) != 1 {
+		t.Fatalf("segments = %#v, want one category fallback segment", segments)
+	}
+	if segments[0].GameName != "Holdfast: Nations At War" || segments[0].OffsetSeconds != 0 {
+		t.Fatalf("segment = %+v, want Holdfast from offset 0", segments[0])
+	}
+	if segments[0].DurationSeconds != 3*60*60 {
+		t.Fatalf("duration = %d, want full stream span", segments[0].DurationSeconds)
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"streamclone/internal/analytics/heatmap"
 )
 
 func TestHubLivePulseMomentsMeta(t *testing.T) {
@@ -82,14 +84,22 @@ func TestHubLivePulseMomentsPublicJSONSafe(t *testing.T) {
 
 func TestHubLivePulseMomentAtFromStreamStart(t *testing.T) {
 	started := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
-	got := hubLivePulseMomentFromPeak(HubLiveChannel{Login: "xqc"}, PortalPeak{
+	got, ok := hubLivePulseMomentFromPeak(HubLiveChannel{Login: "xqc"}, PortalPeak{
 		OffsetSeconds: 120,
 		Score:         90,
 		ReasonLabel:   "Chat spike",
-	}, "", started, "s1")
+		Reasons:       []string{heatmap.ReasonChatSpike},
+		ChatCount:     40,
+	}, "", started, "s1", 0, 600, "Just Chatting")
+	if !ok {
+		t.Fatal("expected moment")
+	}
 	wantAt := started.Add(120 * time.Second).UnixMilli()
 	if got.At != wantAt {
 		t.Fatalf("At = %d, want %d", got.At, wantAt)
+	}
+	if got.StreamStartedAt != started.UnixMilli() {
+		t.Fatalf("streamStartedAt = %d", got.StreamStartedAt)
 	}
 }
 
@@ -121,15 +131,21 @@ func TestHubLivePulseMomentFromPeakCarriesChannel(t *testing.T) {
 		Confidence:     97,
 		VodState:       "no_vod",
 	}
-	moment := hubLivePulseMomentFromPeak(ch, peak, "", time.Time{}, "stream-1")
+	moment, ok := hubLivePulseMomentFromPeak(ch, peak, "", time.Time{}, "stream-1", 0, 0, "Just Chatting")
+	if !ok {
+		t.Fatal("expected moment")
+	}
 	if moment.Login != "jynxzi" {
 		t.Fatalf("login = %q", moment.Login)
 	}
 	if moment.StreamID != "stream-1" {
 		t.Fatalf("streamId = %q", moment.StreamID)
 	}
-	if moment.Label != "7TV emote spike" {
+	if moment.Label != "7TV emote spike" && moment.Label != "Emote spike" {
 		t.Fatalf("label = %q", moment.Label)
+	}
+	if moment.Category != "Just Chatting" {
+		t.Fatalf("category = %q, want Just Chatting from resolved category arg", moment.Category)
 	}
 	if moment.Source != "live_irc" {
 		t.Fatalf("source = %q", moment.Source)

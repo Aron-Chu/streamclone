@@ -82,6 +82,39 @@ func TestCorpusPipelineStateFromReadinessFlagsCriticalTrackerFailures(t *testing
 	}
 }
 
+func TestCorpusPipelineStateMetadataStaleProportional(t *testing.T) {
+	cfg := CorpusRuntimeConfig{
+		MetadataEnabled:      true,
+		MetadataWriteEnabled: true,
+		LiveAdmissionEnabled: true,
+	}
+	report := Top100ReadinessReport{
+		CollectorMax: 300,
+		Summary: Top100ReadinessSummary{
+			LiveRows:              115,
+			CollectorTrackingRows: 99,
+			ExpectedCollectorRows: 115,
+			MetadataStaleRows:     15,
+		},
+	}
+	// 15/115 stale (~13%) is below the 20% critical fraction → degraded, not critical.
+	if got := corpusPipelineStateFromReadiness(cfg, report); got != CorpusStatusDegraded {
+		t.Fatalf("state with 13%% stale metadata = %q, want degraded", got)
+	}
+
+	report.Summary.MetadataStaleRows = 30
+	if got := corpusPipelineStateFromReadiness(cfg, report); got != CorpusStatusCritical {
+		t.Fatalf("state with 26%% stale metadata = %q, want critical", got)
+	}
+
+	// Sub-threshold stale rows must not mask a harder critical condition.
+	report.Summary.MetadataStaleRows = 5
+	report.Summary.CollectorTrackingRows = 0
+	if got := corpusPipelineStateFromReadiness(cfg, report); got != CorpusStatusCritical {
+		t.Fatalf("state with zero collector tracking = %q, want critical", got)
+	}
+}
+
 func TestCorpusPipelineStateFromReadinessFlagsCollectorDeficit(t *testing.T) {
 	cfg := CorpusRuntimeConfig{
 		MetadataEnabled:      true,

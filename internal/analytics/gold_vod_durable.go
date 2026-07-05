@@ -53,7 +53,10 @@ type goldVODFetchLedger struct {
 	strategy      string
 	mu            sync.Mutex
 	activeClaimID map[string]int64
+	lastHeartbeat map[string]time.Time
 }
+
+const goldSegmentHeartbeatMinInterval = 20 * time.Second
 
 func (s *SyncService) goldVODFetchLedger(ctx context.Context, streamID, login, vodID string) *goldVODFetchLedger {
 	if s == nil || !s.goldVODSegmentsEnabled || s.store == nil {
@@ -76,6 +79,7 @@ func (s *SyncService) goldVODFetchLedger(ctx context.Context, streamID, login, v
 		maxPerVOD:     s.goldMaxSegmentsPerVOD,
 		strategy:      GoldVODSegmentStrategyV1,
 		activeClaimID: make(map[string]int64),
+		lastHeartbeat: make(map[string]time.Time),
 	}
 }
 
@@ -174,10 +178,16 @@ func (l *goldVODFetchLedger) heartbeatSegment(seg gqlSegmentProgress) {
 	key := l.segmentKey(seg)
 	l.mu.Lock()
 	claimID := l.activeClaimID[key]
-	l.mu.Unlock()
 	if claimID <= 0 {
+		l.mu.Unlock()
 		return
 	}
+	if last, ok := l.lastHeartbeat[key]; ok && time.Since(last) < goldSegmentHeartbeatMinInterval {
+		l.mu.Unlock()
+		return
+	}
+	l.lastHeartbeat[key] = time.Now()
+	l.mu.Unlock()
 	if _, err := l.svc.store.HeartbeatGoldVODSegment(l.ctx, claimID, l.owner, l.leaseTTL); err != nil {
 		l.svc.log.Warn("gold vod segment heartbeat failed",
 			"stream_id", l.streamID,

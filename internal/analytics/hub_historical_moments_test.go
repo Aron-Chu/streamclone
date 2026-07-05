@@ -185,7 +185,7 @@ func TestHistoricalMomentScoreAndLabel(t *testing.T) {
 		SevenTVEmoteCount: 60,
 		ChatCount:         100,
 	})
-	if label != "7TV emote spike" || kind != "seventv" {
+	if label != "Emote spike" || kind != "emotes" {
 		t.Fatalf("label = (%q, %q)", label, kind)
 	}
 }

@@ -69,6 +69,7 @@ func (h *Handler) PulseRoutes(r chi.Router) {
 			r.Use(h.pulseHostedAuthMiddleware)
 		}
 		h.registerPulseWatchlistRoutes(r)
+		h.registerPulseClipRoutes(r)
 		r.Get("/bookmarks", h.listPulseBookmarks)
 		r.Post("/bookmarks", h.createPulseBookmark)
 		r.Patch("/bookmarks/{id}", h.updatePulseBookmark)

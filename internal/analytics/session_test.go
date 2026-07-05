@@ -185,6 +185,94 @@ func TestBulkPatchViewerRollupsWritesThroughAlias(t *testing.T) {
 	}
 }
 
+func TestBulkPatchViewerRollupsPreservesChatOnConflict(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	insertTestStream(t, ctx, store, "viewer-chat", "chan", 0)
+	minute := time.Date(2026, 7, 4, 1, 52, 0, 0, time.UTC)
+	if err := store.BulkUpsertMinuteRollups(ctx, "viewer-chat", []MinuteRollup{{
+		MinuteTS:          minute,
+		ChatCount:         445,
+		TotalEmoteCount:   352,
+		SevenTVEmoteCount: 352,
+		Emotes:            map[string]int{"seventv:1:LO": 352},
+	}}); err != nil {
+		t.Fatalf("BulkUpsertMinuteRollups: %v", err)
+	}
+	if err := store.BulkPatchViewerRollups(ctx, "viewer-chat", []MinuteRollup{{
+		MinuteTS:      minute,
+		ViewerAvg:     18825,
+		ViewerMax:     18825,
+		ViewerLatest:  18825,
+		ViewerSamples: 1,
+	}}); err != nil {
+		t.Fatalf("BulkPatchViewerRollups: %v", err)
+	}
+	var chatCount, emoteCount int
+	if err := store.db.QueryRow(ctx, `
+		SELECT chat_count, total_emote_count
+		FROM analytics_minute_rollups
+		WHERE stream_id='viewer-chat' AND minute_ts=$1`, minute).Scan(&chatCount, &emoteCount); err != nil {
+		t.Fatalf("load rollup: %v", err)
+	}
+	if chatCount != 445 || emoteCount != 352 {
+		t.Fatalf("rollup after viewer patch = chat:%d emote:%d, want 445/352", chatCount, emoteCount)
+	}
+}
+
+func TestBulkPatchViewerRollupsInsertsViewerOnlyRow(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	insertTestStream(t, ctx, store, "viewer-only", "chan", 0)
+	minute := time.Date(2026, 7, 4, 1, 52, 0, 0, time.UTC)
+	if err := store.BulkPatchViewerRollups(ctx, "viewer-only", []MinuteRollup{{
+		MinuteTS:      minute,
+		ViewerAvg:     18825,
+		ViewerMax:     18825,
+		ViewerLatest:  18825,
+		ViewerSamples: 1,
+	}}); err != nil {
+		t.Fatalf("BulkPatchViewerRollups: %v", err)
+	}
+	var chatCount int
+	if err := store.db.QueryRow(ctx, `
+		SELECT chat_count
+		FROM analytics_minute_rollups
+		WHERE stream_id='viewer-only' AND minute_ts=$1`, minute).Scan(&chatCount); err != nil {
+		t.Fatalf("load rollup: %v", err)
+	}
+	if chatCount != 0 {
+		t.Fatalf("viewer-only insert chat_count = %d, want 0 until chat upsert", chatCount)
+	}
+}
+
+func TestBulkUpsertLiveMinuteRollupsInsertsViewerOnlyHeartbeat(t *testing.T) {
+	ctx, store := setupSessionStore(t)
+	insertTestStream(t, ctx, store, "live-heartbeat", "chan", 0)
+	minute := time.Date(2026, 7, 4, 2, 10, 0, 0, time.UTC)
+	if err := store.BulkUpsertLiveMinuteRollups(ctx, "live-heartbeat", []MinuteRollup{{
+		MinuteTS:      minute,
+		ViewerAvg:     4200,
+		ViewerMax:     4200,
+		ViewerLatest:  4200,
+		ViewerSamples: 1,
+		ChatCount:     0,
+	}}); err != nil {
+		t.Fatalf("BulkUpsertLiveMinuteRollups: %v", err)
+	}
+	var chatCount, viewerSamples int
+	if err := store.db.QueryRow(ctx, `
+		SELECT chat_count, viewer_samples
+		FROM analytics_minute_rollups
+		WHERE stream_id='live-heartbeat' AND minute_ts=$1`, minute).Scan(&chatCount, &viewerSamples); err != nil {
+		t.Fatalf("load rollup: %v", err)
+	}
+	if chatCount != 0 {
+		t.Fatalf("viewer-only heartbeat chat_count = %d, want 0", chatCount)
+	}
+	if viewerSamples != 1 {
+		t.Fatalf("viewer-only heartbeat viewer_samples = %d, want 1", viewerSamples)
+	}
+}
+
 func TestBulkUpsertMinuteRollupsStampsGQLCanonical(t *testing.T) {
 	ctx, store := setupSessionStore(t)
 	insertTestStream(t, ctx, store, "bulk-gql", "chan", 0)

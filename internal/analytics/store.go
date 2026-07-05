@@ -163,6 +163,11 @@ func (s *Store) UpsertLiveStream(ctx context.Context, stream LiveStream, profile
 	if profile.DisplayName != "" {
 		displayName = profile.DisplayName
 	}
+	var previousCategory string
+	_ = s.db.QueryRow(ctx, `
+		SELECT COALESCE(category, '')
+		FROM analytics_streams
+		WHERE stream_id = $1`, stream.ID).Scan(&previousCategory)
 	_, err = s.db.Exec(ctx, `
 		INSERT INTO analytics_streams (
 			stream_id, canonical_stream_id, broadcaster_id, login, display_name, profile_image_url, description,
@@ -199,6 +204,7 @@ func (s *Store) UpsertLiveStream(ctx context.Context, stream LiveStream, profile
 			category:  stream.GameName,
 			startedAt: stream.StartedAt,
 		})
+		_ = s.recordLiveCategorySample(ctx, stream, profile, seenAt, previousCategory)
 	}
 	return err
 }
@@ -222,13 +228,18 @@ func (s *Store) CloseStream(ctx context.Context, streamID string, endedAt time.T
 }
 
 func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup MinuteRollup) error {
-	if streamID == "" || rollup.MinuteTS.IsZero() {
+	return s.BulkUpsertLiveMinuteRollups(ctx, streamID, []MinuteRollup{rollup})
+}
+
+// BulkUpsertLiveMinuteRollups writes IRC/live minute buckets in one transaction per stream.
+func (s *Store) BulkUpsertLiveMinuteRollups(ctx context.Context, streamID string, rollups []MinuteRollup) error {
+	if streamID == "" || len(rollups) == 0 {
 		return nil
 	}
 	started := time.Now()
 	result := "success"
 	defer func() {
-		metrics.AnalyticsRollupWriteDuration.WithLabelValues("upsert", result).Observe(time.Since(started).Seconds())
+		metrics.AnalyticsRollupWriteDuration.WithLabelValues("bulk_upsert_live", result).Observe(time.Since(started).Seconds())
 	}()
 	resolvedStreamID, err := s.ResolveStreamIDForWrite(ctx, streamID)
 	if err != nil {
@@ -236,52 +247,66 @@ func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup 
 		return err
 	}
 	streamID = resolvedStreamID
-	if rollup.Emotes == nil {
-		rollup.Emotes = map[string]int{}
-	}
-	emotes, err := json.Marshal(rollup.Emotes)
-	if err != nil {
-		result = "error"
-		return err
-	}
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		result = "error"
 		return err
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `
-		INSERT INTO analytics_minute_rollups (
-			stream_id, minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
-			chat_count, total_emote_count, seventv_emote_count, emotes_json,
-			chat_source, source_confidence
+
+	batch := &pgx.Batch{}
+	queued := 0
+	for _, rollup := range rollups {
+		if rollup.MinuteTS.IsZero() {
+			continue
+		}
+		if rollup.Emotes == nil {
+			rollup.Emotes = map[string]int{}
+		}
+		emotes, err := json.Marshal(rollup.Emotes)
+		if err != nil {
+			result = "error"
+			return err
+		}
+		batch.Queue(`
+			INSERT INTO analytics_minute_rollups (
+				stream_id, minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
+				chat_count, total_emote_count, seventv_emote_count, emotes_json,
+				chat_source, source_confidence
+			)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
+			ON CONFLICT (stream_id, minute_ts) DO UPDATE SET
+				viewer_avg=CASE WHEN EXCLUDED.viewer_avg > 0 THEN EXCLUDED.viewer_avg ELSE analytics_minute_rollups.viewer_avg END,
+				viewer_max=GREATEST(analytics_minute_rollups.viewer_max, EXCLUDED.viewer_max),
+				viewer_latest=CASE WHEN EXCLUDED.viewer_latest > 0 THEN EXCLUDED.viewer_latest ELSE analytics_minute_rollups.viewer_latest END,
+				viewer_samples=GREATEST(analytics_minute_rollups.viewer_samples, EXCLUDED.viewer_samples),
+				chat_count=GREATEST(analytics_minute_rollups.chat_count, EXCLUDED.chat_count),
+				total_emote_count=GREATEST(analytics_minute_rollups.total_emote_count, EXCLUDED.total_emote_count),
+				seventv_emote_count=GREATEST(analytics_minute_rollups.seventv_emote_count, EXCLUDED.seventv_emote_count),
+				emotes_json=EXCLUDED.emotes_json,
+				chat_source=CASE
+					WHEN COALESCE(analytics_minute_rollups.source_confidence,'') = 'canonical' THEN analytics_minute_rollups.chat_source
+					WHEN EXCLUDED.chat_count > 0 THEN EXCLUDED.chat_source
+					ELSE analytics_minute_rollups.chat_source
+				END,
+				source_confidence=CASE
+					WHEN COALESCE(analytics_minute_rollups.source_confidence,'') = 'canonical' THEN analytics_minute_rollups.source_confidence
+					WHEN EXCLUDED.chat_count > 0 THEN EXCLUDED.source_confidence
+					ELSE analytics_minute_rollups.source_confidence
+				END,
+				updated_at=now()`,
+			streamID, rollup.MinuteTS, rollup.ViewerAvg, rollup.ViewerMax, rollup.ViewerLatest, rollup.ViewerSamples,
+			rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount, string(emotes),
+			RollupChatSourceLive, SourceConfidenceVerified,
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
-		ON CONFLICT (stream_id, minute_ts) DO UPDATE SET
-			viewer_avg=CASE WHEN EXCLUDED.viewer_avg > 0 THEN EXCLUDED.viewer_avg ELSE analytics_minute_rollups.viewer_avg END,
-			viewer_max=GREATEST(analytics_minute_rollups.viewer_max, EXCLUDED.viewer_max),
-			viewer_latest=CASE WHEN EXCLUDED.viewer_latest > 0 THEN EXCLUDED.viewer_latest ELSE analytics_minute_rollups.viewer_latest END,
-			viewer_samples=GREATEST(analytics_minute_rollups.viewer_samples, EXCLUDED.viewer_samples),
-			chat_count=GREATEST(analytics_minute_rollups.chat_count, EXCLUDED.chat_count),
-			total_emote_count=GREATEST(analytics_minute_rollups.total_emote_count, EXCLUDED.total_emote_count),
-			seventv_emote_count=GREATEST(analytics_minute_rollups.seventv_emote_count, EXCLUDED.seventv_emote_count),
-			emotes_json=EXCLUDED.emotes_json,
-			chat_source=CASE
-				WHEN COALESCE(analytics_minute_rollups.source_confidence,'') = 'canonical' THEN analytics_minute_rollups.chat_source
-				WHEN EXCLUDED.chat_count > 0 THEN EXCLUDED.chat_source
-				ELSE analytics_minute_rollups.chat_source
-			END,
-			source_confidence=CASE
-				WHEN COALESCE(analytics_minute_rollups.source_confidence,'') = 'canonical' THEN analytics_minute_rollups.source_confidence
-				WHEN EXCLUDED.chat_count > 0 THEN EXCLUDED.source_confidence
-				ELSE analytics_minute_rollups.source_confidence
-			END,
-			updated_at=now()`,
-		streamID, rollup.MinuteTS, rollup.ViewerAvg, rollup.ViewerMax, rollup.ViewerLatest, rollup.ViewerSamples,
-		rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount, string(emotes),
-		RollupChatSourceLive, SourceConfidenceVerified,
-	)
-	if err != nil {
+		queued++
+	}
+	if queued == 0 {
+		return nil
+	}
+	br := tx.SendBatch(ctx, batch)
+	if err := br.Close(); err != nil {
 		result = "error"
 		return err
 	}
@@ -289,7 +314,7 @@ func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup 
 		result = "error"
 		return err
 	}
-	if err := upsertMinutePeaksTx(ctx, tx, streamID, []MinuteRollup{rollup}, RollupChatSourceLive, SourceConfidenceVerified); err != nil {
+	if err := upsertMinutePeaksTx(ctx, tx, streamID, rollups, RollupChatSourceLive, SourceConfidenceVerified); err != nil {
 		result = "error"
 		return err
 	}
@@ -297,7 +322,9 @@ func (s *Store) UpsertMinuteRollup(ctx context.Context, streamID string, rollup 
 		result = "error"
 		return err
 	}
-	s.enqueueRollupTelemetry(ctx, streamID, []MinuteRollup{rollup})
+	metrics.AnalyticsRollupRowsWrittenTotal.WithLabelValues("bulk_upsert_live").Add(float64(queued))
+	metrics.AnalyticsRollupWriteBatchSize.WithLabelValues("bulk_upsert_live").Observe(float64(queued))
+	s.enqueueRollupTelemetry(ctx, streamID, rollups)
 	return nil
 }
 
@@ -832,6 +859,7 @@ func (s *Store) AggregateRollupBucketsSince(ctx context.Context, since time.Time
 		WITH bucketed AS (
 			SELECT
 				to_timestamp(floor(extract(epoch from minute_ts) / ($2::double precision * 60)) * ($2::double precision * 60)) AS bucket_ts,
+				minute_ts,
 				viewer_avg,
 				viewer_max,
 				viewer_latest,
@@ -843,21 +871,47 @@ func (s *Store) AggregateRollupBucketsSince(ctx context.Context, since time.Time
 				source_confidence
 			FROM analytics_minute_rollups
 			WHERE minute_ts >= $1
+		),
+		minute_global AS (
+			SELECT
+				bucket_ts,
+				minute_ts,
+				SUM(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN
+					COALESCE(NULLIF(viewer_latest, 0), viewer_max, viewer_avg, 0)
+				ELSE 0 END)::bigint AS global_viewers
+			FROM bucketed
+			GROUP BY bucket_ts, minute_ts
+		),
+		bucket_viewers AS (
+			SELECT
+				bucket_ts,
+				COALESCE(MAX(global_viewers), 0)::int AS peak_global_viewers
+			FROM minute_global
+			GROUP BY bucket_ts
 		)
 		SELECT *
 		FROM (
 			SELECT
-				bucket_ts,
-				COALESCE(AVG(NULLIF(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_avg ELSE NULL END, 0)), 0)::int AS viewer_avg,
-				COALESCE(MAX(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_max ELSE NULL END), 0)::int AS viewer_max,
-				COALESCE(MAX(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_latest ELSE NULL END), 0)::int AS viewer_latest,
-				COALESCE(SUM(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_samples ELSE 0 END), 0)::int AS viewer_samples,
-				COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN chat_count ELSE 0 END), 0)::int AS chat_count,
-				COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN total_emote_count ELSE 0 END), 0)::int AS total_emote_count,
-				COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN seventv_emote_count ELSE 0 END), 0)::int AS seventv_emote_count
-			FROM bucketed
-			GROUP BY bucket_ts
-			ORDER BY bucket_ts DESC
+				b.bucket_ts,
+				COALESCE(bv.peak_global_viewers, 0) AS viewer_avg,
+				COALESCE(bv.peak_global_viewers, 0) AS viewer_max,
+				COALESCE(bv.peak_global_viewers, 0) AS viewer_latest,
+				b.viewer_samples,
+				b.chat_count,
+				b.total_emote_count,
+				b.seventv_emote_count
+			FROM (
+				SELECT
+					bucket_ts,
+					COALESCE(SUM(CASE WHEN `+sqlPublicLiveViewerRollupPredicate+` THEN viewer_samples ELSE 0 END), 0)::int AS viewer_samples,
+					COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN chat_count ELSE 0 END), 0)::int AS chat_count,
+					COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN total_emote_count ELSE 0 END), 0)::int AS total_emote_count,
+					COALESCE(SUM(CASE WHEN `+sqlPublicLiveChatMinutePredicate+` THEN seventv_emote_count ELSE 0 END), 0)::int AS seventv_emote_count
+				FROM bucketed
+				GROUP BY bucket_ts
+			) b
+			LEFT JOIN bucket_viewers bv ON bv.bucket_ts = b.bucket_ts
+			ORDER BY b.bucket_ts DESC
 			LIMIT $3
 		) recent
 		ORDER BY bucket_ts ASC`, since.UTC(), bucketMinutes, limit)
@@ -993,6 +1047,7 @@ func (s *Store) topHistoricalChatMinutesFromPeaks(ctx context.Context, start, en
 			COALESCE(s.display_name, ''),
 			COALESCE(s.profile_image_url, ''),
 			COALESCE(s.vod_id, ''),
+			COALESCE(s.category, ''),
 			s.started_at,
 			p.minute_ts,
 			p.chat_count,
@@ -1021,6 +1076,7 @@ func (s *Store) topHistoricalChatMinutesFromRollups(ctx context.Context, start, 
 			COALESCE(s.display_name, ''),
 			COALESCE(s.profile_image_url, ''),
 			COALESCE(s.vod_id, ''),
+			COALESCE(s.category, ''),
 			s.started_at,
 			r.minute_ts,
 			r.chat_count,
@@ -1059,6 +1115,7 @@ func scanHubHistoricalMinuteCandidates(rows historicalCandidateRows, limit int) 
 			&cand.DisplayName,
 			&cand.ProfileImageURL,
 			&cand.VodID,
+			&cand.Category,
 			&cand.StartedAt,
 			&cand.MinuteTS,
 			&cand.ChatCount,
@@ -1895,7 +1952,7 @@ func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollu
 				chat_count, total_emote_count, seventv_emote_count, emotes_json,
 				chat_source, source_confidence, chat_source_detail
 			)
-			VALUES ($1,$2,0,0,0,0,$3,$4,$5,$6::jsonb,$7,$8,'')
+			VALUES ($1,$2,0,0,0,0,$3,$4,$5,$6::jsonb,$7,$8,$9)
 			ON CONFLICT (stream_id, minute_ts) DO UPDATE SET
 				chat_count=GREATEST(analytics_minute_rollups.chat_count, EXCLUDED.chat_count),
 				total_emote_count=GREATEST(analytics_minute_rollups.total_emote_count, EXCLUDED.total_emote_count),
@@ -1903,10 +1960,13 @@ func (s *Store) BulkPatchChatRollups(ctx context.Context, streamID string, rollu
 				emotes_json=EXCLUDED.emotes_json,
 				chat_source=EXCLUDED.chat_source,
 				source_confidence=EXCLUDED.source_confidence,
-				chat_source_detail='',
+				chat_source_detail=CASE
+					WHEN EXCLUDED.chat_source_detail <> '' THEN EXCLUDED.chat_source_detail
+					ELSE analytics_minute_rollups.chat_source_detail
+				END,
 				updated_at=now()`,
 			streamID, rollup.MinuteTS, rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount,
-			string(emotes), RollupChatSourceGQL, SourceConfidenceCanonical,
+			string(emotes), RollupChatSourceGQL, SourceConfidenceCanonical, strings.TrimSpace(rollup.ChatSourceDetail),
 		)
 		queued++
 	}
@@ -1975,6 +2035,8 @@ func (s *Store) BulkPatchViewerRollups(ctx context.Context, streamID string, rol
 			continue
 		}
 		batch.Queue(`
+			-- New rows start with zero chat/emote counts; chat sync must upsert the same
+			-- minute_ts bucket to attach IRC rollups. ON CONFLICT only updates viewer_*.
 			INSERT INTO analytics_minute_rollups (
 				stream_id, minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
 				chat_count, total_emote_count, seventv_emote_count, emotes_json

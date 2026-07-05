@@ -43,7 +43,7 @@ func TestRecapEmoteEnrichHostedURLRewrite(t *testing.T) {
 	recap := &pulserecap.StreamRecap{
 		TopEmotes: []pulserecap.Emote{{Code: "KEKW", Count: 10, Provider: "seventv"}},
 	}
-	h.enrichRecapTopEmotes(context.Background(), recap, rollups)
+	h.enrichRecapTopEmotes(context.Background(), recap, rollups, "stream-1", "")
 	got := recap.TopEmotes[0].ImageURL
 	if !strings.HasPrefix(got, "https://api.streampulse.stream/emotes/") {
 		t.Fatalf("hosted imageUrl = %q", got)
@@ -108,6 +108,75 @@ func TestRecapEmoteEnrichCountAuthority(t *testing.T) {
 	}})
 	if out[0].Count != 42 {
 		t.Fatalf("count = %d, want recap authority 42", out[0].Count)
+	}
+}
+
+func TestRecapEmoteEnrichSevenTVOutsideGlobalTopN(t *testing.T) {
+	rollups := []MinuteRollup{{
+		Emotes: map[string]int{
+			"twitch:1:Kappa":         500,
+			"twitch:2:LUL":           400,
+			"twitch:3:OMEGALUL":      350,
+			"twitch:4:PogChamp":      300,
+			"twitch:5:monkaS":        280,
+			"twitch:6:KEKW":          260,
+			"twitch:7:PepeHands":     240,
+			"twitch:8:TriHard":       220,
+			"twitch:9:4Head":         200,
+			"twitch:10:BabyRage":     180,
+			"seventv:clap-id:Clap":   112,
+			"seventv:ez-id:EZ":       24,
+			"seventv:gayge-id:Gayge": 6,
+		},
+	}}
+	h := &Handler{
+		pulseHosted:   PulseHostedConfig{Hosted: true},
+		cdnPublicBase: "https://api.streampulse.stream/emotes",
+	}
+	recap := &pulserecap.StreamRecap{
+		TopEmotes: []pulserecap.Emote{
+			{Code: "Clap", Count: 112, Provider: "seventv"},
+			{Code: "EZ", Count: 24, Provider: "seventv"},
+			{Code: "Gayge", Count: 6, Provider: "seventv"},
+		},
+	}
+	h.enrichRecapTopEmotes(context.Background(), recap, rollups, "stream-1", "")
+	if recap.TopEmotes[1].ID != "ez-id" {
+		t.Fatalf("EZ id = %q, want ez-id", recap.TopEmotes[1].ID)
+	}
+	if recap.TopEmotes[2].ID != "gayge-id" {
+		t.Fatalf("Gayge id = %q, want gayge-id", recap.TopEmotes[2].ID)
+	}
+	if recap.EmoteEnrichmentStatus != "complete" {
+		t.Fatalf("status = %q, want complete", recap.EmoteEnrichmentStatus)
+	}
+}
+
+func TestRecapEmoteEnrichMomentTopEmotes(t *testing.T) {
+	h := &Handler{
+		pulseHosted:   PulseHostedConfig{Hosted: true},
+		cdnPublicBase: "https://api.streampulse.stream/emotes",
+	}
+	rollups := []MinuteRollup{{
+		Emotes: map[string]int{
+			"seventv:kekw-id:KEKW": 10,
+		},
+	}}
+	recap := &pulserecap.StreamRecap{
+		TopEmotes: []pulserecap.Emote{{Code: "KEKW", Count: 10, Provider: "seventv"}},
+		TopMoments: []pulserecap.Moment{{
+			OffsetSeconds: 120,
+			Score:         80,
+			Reasons:       []string{"emote_spike"},
+			TopEmotes:     []pulserecap.Emote{{Code: "KEKW", Count: 8, Provider: "seventv"}},
+		}},
+	}
+	h.enrichRecapTopEmotes(context.Background(), recap, rollups, "stream-1", "")
+	if recap.TopMoments[0].TopEmotes[0].ID != "kekw-id" {
+		t.Fatalf("moment emote id = %q, want kekw-id", recap.TopMoments[0].TopEmotes[0].ID)
+	}
+	if strings.TrimSpace(recap.TopMoments[0].TopEmotes[0].ImageURL) == "" {
+		t.Fatalf("moment imageUrl empty")
 	}
 }
 

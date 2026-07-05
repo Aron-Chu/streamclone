@@ -126,7 +126,10 @@ func TestDecoratePortalPeaksTwitchProviderID(t *testing.T) {
 	if out[0].TopEmotes[1].ImageURL != want {
 		t.Fatalf("got %q want %q", out[0].TopEmotes[1].ImageURL, want)
 	}
-	moment := hubLivePulseMomentFromPeak(HubLiveChannel{Login: "xqc"}, out[0], "", time.Time{}, "s1")
+	moment, ok := hubLivePulseMomentFromPeak(HubLiveChannel{Login: "xqc"}, out[0], "", time.Time{}, "s1", 0, 0, "")
+	if !ok {
+		t.Fatal("expected moment")
+	}
 	if len(moment.TopEmotes) != 2 || moment.TopEmotes[1].ImageURL != want {
 		t.Fatalf("moment top emotes=%#v", moment.TopEmotes)
 	}

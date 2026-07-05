@@ -21,10 +21,35 @@ func TestRateLimitExceeded(t *testing.T) {
 	}
 }
 
+func hostedTestCollector(logins ...string) *Collector {
+	c := NewCollector(nil, fakeProvider{}, &fakeJoiner{}, nil, nilLogger(), 5, time.Second, time.Hour, 10)
+	if len(logins) > 0 {
+		return c.WithAlwaysTracked(logins)
+	}
+	return c
+}
+
+func TestWatchExtensionDisabledHostedWithoutAlwaysTrack(t *testing.T) {
+	h := &Handler{
+		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret-one"}},
+		collector:   hostedTestCollector(),
+	}
+	r := chi.NewRouter()
+	h.Routes(r)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/analytics/channels/xqc/watch", nil)
+	req.Header.Set("X-Streamclone-Beta-Key", "secret-one")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 extension_watch_disabled", rec.Code)
+	}
+}
+
 func TestWatchUnauthorizedHosted(t *testing.T) {
 	h := &Handler{
 		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret-one"}},
-		collector:   NewCollector(nil, fakeProvider{}, &fakeJoiner{}, nil, nilLogger(), 5, time.Second, time.Hour, 10),
+		collector:   hostedTestCollector("xqc"),
 	}
 	r := chi.NewRouter()
 	h.Routes(r)
@@ -42,7 +67,7 @@ func TestWatchInvalidBetaKeyHosted(t *testing.T) {
 	const validKey = "secret-one"
 	h := &Handler{
 		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{validKey}},
-		collector:   NewCollector(nil, fakeProvider{}, &fakeJoiner{}, nil, nilLogger(), 5, time.Second, time.Hour, 10),
+		collector:   hostedTestCollector("xqc"),
 	}
 	r := chi.NewRouter()
 	h.Routes(r)
@@ -60,7 +85,7 @@ func TestWatchInvalidBetaKeyHosted(t *testing.T) {
 func TestWatchValidBetaKeyNot401Hosted(t *testing.T) {
 	h := &Handler{
 		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret-one"}},
-		collector:   NewCollector(nil, fakeProvider{}, &fakeJoiner{}, nil, nilLogger(), 5, time.Second, time.Hour, 10),
+		collector:   hostedTestCollector("xqc"),
 	}
 	r := chi.NewRouter()
 	h.Routes(r)
@@ -94,7 +119,7 @@ func TestWatchLocalModeNot401WithoutKey(t *testing.T) {
 func TestWatchRateLimitHTTP429(t *testing.T) {
 	h := &Handler{
 		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret-one"}},
-		collector:   NewCollector(nil, fakeProvider{}, &fakeJoiner{}, nil, nilLogger(), 5, time.Second, time.Hour, 10),
+		collector:   hostedTestCollector("xqc"),
 	}
 	h.rateLimiter = &PulseRateLimiter{watchPerMin: 1}
 	h.rateLimiter.testAllowFn = func(_ string, limit int) int64 { return int64(limit + 1) }
