@@ -78,11 +78,11 @@ func setupRedis(t *testing.T, ctx context.Context) *redis.Client {
 func setupMinio(t *testing.T, ctx context.Context) *objstore.Client {
 	t.Helper()
 	endpoint := minioEndpoint()
-	client, err := objstore.New(endpoint, "minioadmin", "minioadmin", "test-emotes", false)
+	client, err := objstore.New(endpoint, "minioadmin", "minioadmin", "test-emotes", "", false)
 	if err != nil {
 		t.Fatalf("objstore.New: %v", err)
 	}
-	if err := client.EnsureBucket(ctx); err != nil {
+	if err := client.EnsureBucket(ctx, true); err != nil {
 		t.Fatalf("ensure bucket: %v", err)
 	}
 	return client
