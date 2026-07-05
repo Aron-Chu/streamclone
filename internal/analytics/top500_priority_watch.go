@@ -120,6 +120,9 @@ func (p *Top500PriorityWatchPoller) runOnce(ctx context.Context) {
 			recordTopRosterAdmissionAttempt(buildTopRosterAdmissionAttempt(row, streamID, now, outcome, message, state))
 			continue
 		}
+		if outcome == TopRosterAdmissionDuplicateStream || outcome == TopRosterAdmissionAlreadyTracking {
+			p.collector.TouchAdmissionObservation(normalizeLogin(row.Login))
+		}
 		if outcome == TopRosterAdmissionDuplicateStream {
 			recordTopRosterAdmissionMetrics(mode, outcome)
 			recordTopRosterAdmissionSkipForOutcome(mode, outcome, "duplicate stream id already tracked", skippedByReason)
