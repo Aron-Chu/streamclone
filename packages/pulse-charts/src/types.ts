@@ -17,6 +17,8 @@ export interface ChartGameSegment {
   boxArtUrl?: string
   offsetSeconds: number
   durationSeconds: number
+  /** Response-only honesty: e.g. snapshot, stored, category_fallback */
+  source?: string
 }
 
 export interface ChartPlayhead {

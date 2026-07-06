@@ -893,6 +893,8 @@ function PulseMultiSignalChartInnerImpl({
     [rollups],
   )
   const chartGames = normalizeGameSegments(games, Math.max(rollups.length * 60, 60))
+  const gameBandHeight = chartGames.length > 0 ? 16 : 0
+  const gameBandTop = padTop + 1
 
   const hoverIndex = rollups.length === 0
     ? 0
@@ -1385,10 +1387,9 @@ function PulseMultiSignalChartInnerImpl({
           rollups={rollups}
           streamStartedAt={streamStartedAt}
           padLeft={padLeft}
-          padTop={padTop}
-          padBottom={padBottom}
           plotWidth={plotWidthPx}
-          height={height}
+          gameBandTop={gameBandTop}
+          gameBandHeight={gameBandHeight}
         />
 
         {!cursorSync.synced ? (
