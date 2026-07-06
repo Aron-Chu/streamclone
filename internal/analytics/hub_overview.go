@@ -426,6 +426,86 @@ func (h *Handler) hubRecentRollupWindow(ctx context.Context, rec *StreamRecord, 
 	return rec, loaded, recent
 }
 
+// buildHubPoolWindows joins the bounded live IRC pool with recent minute rollups
+// for hub live-channel and pulse-moment builders.
+func (h *Handler) buildHubPoolWindows(ctx context.Context) []channelWindow {
+	if h == nil {
+		return nil
+	}
+	var snapshot TrackingSnapshot
+	if h.collector != nil {
+		snapshot = h.collector.TrackingSnapshot()
+	}
+	logins := make([]string, 0, len(snapshot.TrackedChannels)+hubPoolCap)
+	seenLogins := make(map[string]bool, len(snapshot.TrackedChannels)+hubPoolCap)
+	for _, login := range snapshot.TrackedChannels {
+		login = normalizeLogin(login)
+		if login == "" || seenLogins[login] {
+			continue
+		}
+		seenLogins[login] = true
+		logins = append(logins, login)
+	}
+	if h.store != nil {
+		if roster, err := h.store.ListTop500LiveForPriorityWatch(ctx, hubTrackerTopN, hubPoolCap); err == nil {
+			for _, row := range roster {
+				login := normalizeLogin(row.Login)
+				if login == "" || seenLogins[login] {
+					continue
+				}
+				seenLogins[login] = true
+				logins = append(logins, login)
+				if len(logins) >= hubPoolCap {
+					break
+				}
+			}
+		}
+	}
+	var streams map[string]*StreamRecord
+	if h.store != nil && len(logins) > 0 {
+		if loaded, err := h.store.LatestStreamsByLogins(ctx, logins); err == nil {
+			streams = loaded
+		}
+	}
+	live := make([]*StreamRecord, 0, len(streams))
+	for _, rec := range streams {
+		if rec == nil || rec.EndedAt != nil {
+			continue
+		}
+		live = append(live, rec)
+	}
+	sort.SliceStable(live, func(i, j int) bool {
+		if live[i].CurrentViewers != live[j].CurrentViewers {
+			return live[i].CurrentViewers > live[j].CurrentViewers
+		}
+		return live[i].Login < live[j].Login
+	})
+	if len(live) > hubPoolCap {
+		live = live[:hubPoolCap]
+	}
+	recentSince := time.Now().UTC().Add(-time.Duration(hubActivityWindowMinutes+5) * time.Minute)
+	windows := make([]channelWindow, 0, len(live))
+	for _, rec := range live {
+		rec, _, rollups := h.hubRecentRollupWindow(ctx, rec, recentSince, hubActivityWindowMinutes+5)
+		if len(rollups) == 0 {
+			windows = append(windows, channelWindow{record: rec, viewers: rec.CurrentViewers, coverageState: "stats_only"})
+			continue
+		}
+		windows = append(windows, summarizeChannelWindow(rec, filterPublicHubLiveRollups(rollups)))
+	}
+	return windows
+}
+
+func (h *Handler) hubLivePulseMomentsInBucket(ctx context.Context, start, end time.Time) []HubLivePulseMoment {
+	windows := h.buildHubPoolWindows(ctx)
+	if len(windows) == 0 {
+		return nil
+	}
+	liveChannels := h.buildHubLiveChannels(ctx, windows)
+	liveAll := h.buildHubLivePulseMoments(ctx, liveChannels)
+	return hubPulseMomentsInTimeRange(liveAll, start.UnixMilli(), end.UnixMilli())
+}
+
 func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) PublicHubResponse {
 	now := time.Now().UTC()
 	opts = normalizePublicHubOptions(opts)
@@ -670,7 +750,7 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 
 	// 6. Top emotes (sanitized, hosted CDN URLs when hosted).
 	topEmotes := TopEmotesFromRollups([]MinuteRollup{{Emotes: emoteTotals}}, hubEmotesCap)
-	topEmotes = h.rewriteHostedTopEmotes(ctx, topEmotes)
+	topEmotes = h.rewritePortalTopEmotes(ctx, topEmotes)
 	var emoteSum int
 	for _, e := range topEmotes {
 		emoteSum += e.Count
@@ -1657,7 +1737,7 @@ func attachHubActivityBucketTopEmotes(ctx context.Context, h *Handler, points []
 		}
 		top := TopEmotesFromRollups([]MinuteRollup{{Emotes: totals}}, hubActivityBucketTopEmotesCap)
 		if h != nil {
-			top = h.rewriteHostedTopEmotes(ctx, top)
+			top = h.rewritePortalTopEmotes(ctx, top)
 		}
 		points[i].TopEmotes = hubBucketEmotesFromTop(top)
 	}

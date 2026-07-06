@@ -187,6 +187,17 @@ var (
 		Help:    "Analytics rollup batch size by write kind.",
 		Buckets: []float64{1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
 	}, []string{"kind"})
+	AnalyticsLiveRollupFlushTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "analytics_live_rollup_flush_total", Help: "IRC live rollup flush attempts by mode and result.",
+	}, []string{"mode", "result"})
+	AnalyticsLiveRollupFlushDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "analytics_live_rollup_flush_duration_seconds",
+		Help:    "IRC live rollup flush duration by mode and result.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"mode", "result"})
+	AnalyticsIRCLinesProcessedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "analytics_irc_lines_processed_total", Help: "IRC PRIVMSG lines processed by the analytics collector.",
+	})
 	AnalyticsChatReplayRowsWrittenTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "analytics_chat_replay_rows_written_total", Help: "Persisted VOD chat replay rows written in batch inserts.",
 	})

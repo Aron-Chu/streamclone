@@ -49,6 +49,23 @@ func TestHostedEmoteCDNBaseRequiresHosted(t *testing.T) {
 	}
 }
 
+func TestRewritePortalTopEmotesWithoutHostedMode(t *testing.T) {
+	localID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
+	providerID := "62a3bf572b964d6cc2766004"
+	in := []TopEmote{{
+		ID:       localID,
+		Provider: "seventv",
+		Name:     "KEKW",
+		ImageURL: emoteimage.URL("seventv", localID, "1x"),
+		Count:    10,
+	}}
+	out := rewriteHostedTopEmoteURLs(in, map[string]string{localID: providerID}, nil, "", true)
+	want := "https://cdn.7tv.app/emote/" + providerID + "/4x.webp"
+	if out[0].ImageURL != want {
+		t.Fatalf("got %q want %q", out[0].ImageURL, want)
+	}
+}
+
 func TestRewriteHostedTopEmotesWithoutCDNBase(t *testing.T) {
 	localID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
 	providerID := "62a3bf572b964d6cc2766004"

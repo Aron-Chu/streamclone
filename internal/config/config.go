@@ -64,6 +64,7 @@ type Config struct {
 
 	MaxConcurrentTrackedChannels           int           `env:"MAX_CONCURRENT_TRACKED_CHANNELS" envDefault:"50"`
 	AnalyticsPollInterval                  time.Duration `env:"ANALYTICS_POLL_INTERVAL" envDefault:"15s"`
+	AnalyticsOpenMinuteFlushInterval       time.Duration `env:"ANALYTICS_OPEN_MINUTE_FLUSH_INTERVAL" envDefault:"10s"`
 	AnalyticsRetentionDays                 int           `env:"ANALYTICS_RETENTION_DAYS" envDefault:"30"`
 	AnalyticsVODChatRetentionDays          int           `env:"ANALYTICS_VOD_CHAT_RETENTION_DAYS" envDefault:"90"`
 	ChatLogPersistEnabled                  bool          `env:"CHAT_LOG_PERSIST_ENABLED" envDefault:"false"`
@@ -252,12 +253,13 @@ type Config struct {
 	GoldLeaseTTLSeconds                 int           `env:"GOLD_LEASE_TTL_SECONDS" envDefault:"120"`
 	GoldVODSegmentsEnabled              bool          `env:"GOLD_VOD_SEGMENTS_ENABLED" envDefault:"false"`
 
-	PulseTop500AdmissionEnabled  bool          `env:"PULSE_TOP500_ADMISSION_ENABLED" envDefault:"false"`
-	PulseTop500AdmissionTopN     int           `env:"PULSE_TOP500_ADMISSION_TOP_N" envDefault:"100"`
-	PulseTop500AdmissionInterval time.Duration `env:"PULSE_TOP500_ADMISSION_INTERVAL" envDefault:"60s"`
-	PulseTop500AdmissionSource   string        `env:"PULSE_TOP500_ADMISSION_SOURCE" envDefault:"helix_top_live"`
-	LiveAdmissionTopN            int           `env:"LIVE_ADMISSION_TOP_N" envDefault:"0"`
-	MaxActiveIRCChannels         int           `env:"MAX_ACTIVE_IRC_CHANNELS" envDefault:"0"`
+	PulseTop500AdmissionEnabled         bool          `env:"PULSE_TOP500_ADMISSION_ENABLED" envDefault:"false"`
+	PulseTop500AdmissionTopN            int           `env:"PULSE_TOP500_ADMISSION_TOP_N" envDefault:"100"`
+	PulseTop500AdmissionInterval        time.Duration `env:"PULSE_TOP500_ADMISSION_INTERVAL" envDefault:"60s"`
+	PulseTop500AdmissionSource          string        `env:"PULSE_TOP500_ADMISSION_SOURCE" envDefault:"helix_top_live"`
+	PulseTop500AdmissionMissGraceCycles int           `env:"PULSE_TOP500_ADMISSION_MISS_GRACE_CYCLES" envDefault:"3"`
+	LiveAdmissionTopN                   int           `env:"LIVE_ADMISSION_TOP_N" envDefault:"0"`
+	MaxActiveIRCChannels                int           `env:"MAX_ACTIVE_IRC_CHANNELS" envDefault:"0"`
 
 	PulseHostedMode              bool          `env:"PULSE_HOSTED_MODE" envDefault:"false"`
 	PulseBetaKeys                string        `env:"PULSE_BETA_KEYS"`
@@ -393,6 +395,7 @@ func Load() (Config, error) {
 	applyEnvAlias("PULSE_TOP500_ADMISSION_ENABLED", "PULSE_TOP_ROSTER_ADMISSION_ENABLED")
 	applyEnvAlias("PULSE_TOP500_ADMISSION_TOP_N", "PULSE_TOP_ROSTER_ADMISSION_TOP_N")
 	applyEnvAlias("PULSE_TOP500_ADMISSION_INTERVAL", "PULSE_TOP_ROSTER_ADMISSION_INTERVAL")
+	applyEnvAlias("PULSE_TOP500_ADMISSION_MISS_GRACE_CYCLES", "PULSE_TOP_ROSTER_ADMISSION_MISS_GRACE_CYCLES")
 	if strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_ENABLED")) == "" {
 		applyEnvAlias("PULSE_TOP500_ADMISSION_ENABLED", "PULSE_TOP_ROSTER_POLL_ENABLED")
 	}
@@ -456,6 +459,15 @@ func Load() (Config, error) {
 	c.PulseTop500AdmissionTopN = ClampLiveAdmissionTopN(c.PulseTop500AdmissionTopN, maxIRC)
 	if c.PulseTop500AdmissionInterval <= 0 {
 		c.PulseTop500AdmissionInterval = 60 * time.Second
+	}
+	if strings.TrimSpace(os.Getenv("ANALYTICS_OPEN_MINUTE_FLUSH_INTERVAL")) == "" && c.PulseHostedMode {
+		c.AnalyticsOpenMinuteFlushInterval = 30 * time.Second
+	}
+	if c.AnalyticsOpenMinuteFlushInterval <= 0 {
+		c.AnalyticsOpenMinuteFlushInterval = 10 * time.Second
+	}
+	if strings.TrimSpace(os.Getenv("EMOTE_RENDER_ON_CHAT_OBSERVED")) == "" && c.PulseHostedMode {
+		c.EmoteRenderOnChatObserved = false
 	}
 	switch strings.ToLower(strings.TrimSpace(c.PulseTop500AdmissionSource)) {
 	case "roster":
