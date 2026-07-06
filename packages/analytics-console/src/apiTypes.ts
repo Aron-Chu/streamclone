@@ -79,6 +79,7 @@ export interface AnalyticsStreamDetail {
   viewerSource?: string
   timelineMinutes?: number
   analyticsQuality?: string
+  coverageStartOffsetSeconds?: number
   /** Hosted portal: detail loaded but /minutes fetch failed or returned empty. */
   minutesUnavailable?: boolean
 }
@@ -98,6 +99,7 @@ export interface GameSegment {
   offsetSeconds: number
   durationSeconds: number
   createdAt: string
+  source?: string
 }
 
 export type SyncPhase =

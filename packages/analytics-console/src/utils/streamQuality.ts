@@ -1,9 +1,10 @@
 import type { AnalyticsMinuteRollup, AnalyticsStreamDetail } from '../apiTypes.ts'
-import { analyzeViewerCoverage } from '../components/analytics/chartRollupUtils.ts'
+import { analyzeViewerCoverage, viewerValue, vodClock } from '../components/analytics/chartRollupUtils.ts'
 
 export type StreamQualityIssue =
   | 'stats_only'
   | 'viewer_resync'
+  | 'live_viewer_warmup'
   | 'partial_chat'
   | 'syncing'
   | 'refresh_only_hint'
@@ -18,6 +19,52 @@ export interface StreamQualityDiagnosis {
 export interface StreamSummaryMetrics {
   sync_health_state?: string
   data_coverage_pct?: number
+  minutesWithData?: number
+  viewerSampleCount?: number
+}
+
+export type AnalyticsQualityLabel = 'Good' | 'Partial' | 'Limited' | 'No data'
+
+/** Derive coarse analytics quality label for portal honesty (design §13A.4). */
+export function deriveAnalyticsQualityLabel(input: {
+  analyticsQuality?: string
+  summaryMetrics?: StreamSummaryMetrics
+  rollupCount?: number
+  chatMessages?: number
+  vodId?: string
+}): AnalyticsQualityLabel {
+  const quality = (input.analyticsQuality ?? '').toLowerCase()
+  const coverage = input.summaryMetrics?.data_coverage_pct
+  const syncHealth = (input.summaryMetrics?.sync_health_state ?? '').toLowerCase()
+  const rollups = input.rollupCount ?? 0
+  const hasChat = (input.chatMessages ?? 0) > 0
+
+  if (rollups === 0 && !hasChat && (coverage == null || coverage <= 0)) {
+    return 'No data'
+  }
+  if (quality === 'limited' || quality === 'warming' || syncHealth === 'stats_only') {
+    return 'Limited'
+  }
+  if (quality === 'full_pulse' || (coverage != null && coverage >= 80)) {
+    return 'Good'
+  }
+  if (quality === 'partial_pulse' || (coverage != null && coverage >= 40) || rollups > 0) {
+    return 'Partial'
+  }
+  return 'No data'
+}
+
+export function analyticsQualityChipClass(label: AnalyticsQualityLabel): string {
+  switch (label) {
+    case 'Good':
+      return 'border-emerald-400/25 bg-emerald-500/10 text-emerald-200'
+    case 'Partial':
+      return 'border-amber-400/25 bg-amber-500/10 text-amber-200'
+    case 'Limited':
+      return 'border-orange-400/25 bg-orange-500/10 text-orange-200'
+    default:
+      return 'border-white/10 bg-white/[0.04] text-zinc-400'
+  }
 }
 
 function rollupsHaveChat(rollups: AnalyticsMinuteRollup[]): boolean {
@@ -35,6 +82,47 @@ function needsViewerResync(rollups: AnalyticsMinuteRollup[], isLive: boolean): b
     || coverage.hasPartialTail
     || coverage.hasShortSpan
   )
+}
+
+/** Live-only: chat/emotes in early timeline but Helix viewer samples start later. */
+export function diagnoseLiveViewerWarmup(
+  rollups: AnalyticsMinuteRollup[],
+  isLive: boolean,
+  streamStartedAt?: string,
+): { message: string } | null {
+  if (!isLive || rollups.length < 2) return null
+
+  let firstChatIdx = -1
+  let firstViewerIdx = -1
+  for (let i = 0; i < rollups.length; i++) {
+    const row = rollups[i]
+    if (row.missing) continue
+    if (
+      firstChatIdx < 0
+      && ((row.chatCount ?? 0) > 0 || (row.totalEmoteCount ?? 0) > 0)
+    ) {
+      firstChatIdx = i
+    }
+    if (
+      firstViewerIdx < 0
+      && ((row.viewerSamples ?? 0) > 0 || viewerValue(row) > 0)
+    ) {
+      firstViewerIdx = i
+    }
+    if (firstChatIdx >= 0 && firstViewerIdx >= 0) break
+  }
+  if (firstChatIdx < 0 || firstViewerIdx < 0 || firstViewerIdx <= firstChatIdx) {
+    return null
+  }
+
+  const midPoint = Math.max(1, Math.floor(rollups.length / 2))
+  if (firstChatIdx >= midPoint) return null
+
+  const viewerRow = rollups[firstViewerIdx]
+  const offsetLabel = vodClock(viewerRow.minuteTs, streamStartedAt)
+  return {
+    message: `Viewer samples started at ${offsetLabel}; chat may begin earlier.`,
+  }
 }
 
 export function diagnoseStreamQuality(input: {
@@ -90,6 +178,16 @@ export function diagnoseStreamQuality(input: {
       message: 'Viewer chart looks incomplete or flat. Chat data is present but viewer minutes may need a refresh.',
       suggestedAction: 'sync_viewers',
       actionLabel: 'Re-sync viewers',
+    }
+  }
+
+  const liveViewerWarmup = diagnoseLiveViewerWarmup(rollups, isLive, detail?.stream?.startedAt)
+  if (liveViewerWarmup) {
+    issues.push('live_viewer_warmup')
+    return {
+      issues,
+      message: liveViewerWarmup.message,
+      suggestedAction: 'none',
     }
   }
 

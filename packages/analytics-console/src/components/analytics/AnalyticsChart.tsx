@@ -18,6 +18,8 @@ import {
   vodClock,
 } from '@streamclone/pulse-charts'
 import { classifyLiveEmptyState } from '../../utils/liveEmptyState.ts'
+import { liveWarmupHintLine } from '../../utils/liveCollectionWarmup.ts'
+import { diagnoseLiveViewerWarmup } from '../../utils/streamQuality.ts'
 import { usePlayheadStore } from '../../stores/playheadStore.ts'
 import { CoreMinuteChartsNotice } from '../CoreMinuteChartsNotice.tsx'
 import LiveCollectionWarmup from './LiveCollectionWarmup.tsx'
@@ -165,15 +167,28 @@ function AnalyticsChart({
     || viewerCoverage.hasPartialTail
     || viewerCoverage.hasShortSpan
   )
+  const liveViewerWarmup = useMemo(
+    () => diagnoseLiveViewerWarmup(rollups, isLive, streamStartedAt),
+    [rollups, isLive, streamStartedAt],
+  )
   const hasChartData = useMemo(() => allRollups.some(rollupHasMinuteData), [allRollups])
   const hasViewerChartData = useMemo(() => rollupsHaveViewerData(allRollups), [allRollups])
-  const canRenderChart = hasChartData || hasViewerChartData
-  const viewerBackfillPending = syncing && (syncViewerStatus === 'pending_backfill' || syncViewerStatus === 'backfilling')
-  const partialChatCoverage = !isLive && !syncing && Boolean(detail?.chatCoverage?.partial)
   const hasChatData = useMemo(
     () => rollups.some(point => (point.chatCount ?? 0) > 0 || minuteEmoteTotal(point) > 0),
     [rollups],
   )
+  const liveViewerCollectHint = useMemo(
+    () => (isLive && hasChatData && !hasViewerChartData
+      ? liveWarmupHintLine({
+        viewerSamples: detail?.stream?.viewerSamples,
+        chatMessages: detail?.stream?.chatMessages,
+      })
+      : null),
+    [isLive, hasChatData, hasViewerChartData, detail?.stream?.viewerSamples, detail?.stream?.chatMessages],
+  )
+  const canRenderChart = hasChartData || hasViewerChartData
+  const viewerBackfillPending = syncing && (syncViewerStatus === 'pending_backfill' || syncViewerStatus === 'backfilling')
+  const partialChatCoverage = !isLive && !syncing && Boolean(detail?.chatCoverage?.partial)
 
   const series = useMemo(
     () => buildChartSeries(rollups, selectedEmotes, peakViewersFallback, avgViewersFallback, useViewerFallback),
@@ -323,6 +338,16 @@ function AnalyticsChart({
       {needsViewerResync ? (
         <div className="mb-3 rounded border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-100">
           Viewer timeline is incomplete for this sync. Click <span className="font-black">Re-sync viewers</span> to pull the TwitchTracker viewer chart (fast — chat/7TV stay as-is).
+        </div>
+      ) : null}
+      {liveViewerWarmup ? (
+        <div className="mb-3 rounded border border-sky-400/25 bg-sky-400/10 px-3 py-2 text-xs font-semibold text-sky-100">
+          {liveViewerWarmup.message}
+        </div>
+      ) : null}
+      {liveViewerCollectHint ? (
+        <div className="mb-3 rounded border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100">
+          {liveViewerCollectHint}
         </div>
       ) : null}
       {partialChatCoverage ? (

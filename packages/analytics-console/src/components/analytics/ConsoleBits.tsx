@@ -3,6 +3,12 @@ import type { AnalyticsStreamDetail, SourceStatus } from '../../apiTypes.ts'
 import { emoteProviderLabel, emoteProviderTone } from '../../emoteUtils.ts'
 import { sourceTone } from '../../utils/consoleFormat.ts'
 import { useConsoleMotion } from '../../hooks/useConsoleMotion.ts'
+import { mapViewerSourceBadge, viewerSourceBadgeClass } from '../../utils/sourceBadge.ts'
+import {
+  analyticsQualityChipClass,
+  deriveAnalyticsQualityLabel,
+  type StreamSummaryMetrics,
+} from '../../utils/streamQuality.ts'
 
 export function StatCard({ label, value, tone }: { label: string; value: string; tone?: string }) {
   const { motionEnabled } = useConsoleMotion()
@@ -94,5 +100,77 @@ export function EmoteProviderBadge({ provider }: { provider?: string }) {
     <span className={`rounded border px-1.5 py-0.5 text-[9px] font-black uppercase ${emoteProviderTone(provider)}`}>
       {emoteProviderLabel(provider)}
     </span>
+  )
+}
+
+export function ViewerSourceBadge({ source }: { source?: string }) {
+  const badge = mapViewerSourceBadge(source)
+  if (!badge) return null
+  return (
+    <span
+      className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${viewerSourceBadgeClass(badge.tone)}`}
+    >
+      {badge.label}
+    </span>
+  )
+}
+
+export function AnalyticsQualityChip({
+  detail,
+  summaryMetrics,
+}: {
+  detail?: AnalyticsStreamDetail
+  summaryMetrics?: StreamSummaryMetrics
+}) {
+  const label = deriveAnalyticsQualityLabel({
+    analyticsQuality: detail?.analyticsQuality,
+    summaryMetrics,
+    rollupCount: detail?.rollups?.length ?? detail?.timelineMinutes,
+    chatMessages: detail?.stream?.chatMessages,
+    vodId: detail?.vodId ?? detail?.stream?.vodId,
+  })
+  return (
+    <span
+      className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${analyticsQualityChipClass(label)}`}
+      title="Derived from coverage, sync health, and rollup availability"
+    >
+      Analytics {label}
+    </span>
+  )
+}
+
+export function CoverageFacets({
+  detail,
+  summaryMetrics,
+}: {
+  detail?: AnalyticsStreamDetail
+  summaryMetrics?: StreamSummaryMetrics
+}) {
+  const chatPct = detail?.chatCoveragePct ?? summaryMetrics?.data_coverage_pct
+  const viewerSamples = summaryMetrics?.viewerSampleCount ?? detail?.stream?.viewerSamples
+  if (chatPct == null && !viewerSamples) return null
+  const parts: string[] = []
+  if (chatPct != null && chatPct > 0) parts.push(`Chat ${Math.round(chatPct)}%`)
+  if (viewerSamples != null && viewerSamples > 0) parts.push(`Viewer samples ${viewerSamples}`)
+  if (parts.length === 0) return null
+  return (
+    <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] font-semibold normal-case text-zinc-400">
+      {parts.join(' · ')}
+    </span>
+  )
+}
+
+export function CoverageStartBanner({ offsetSeconds }: { offsetSeconds?: number }) {
+  if (offsetSeconds == null || offsetSeconds <= 120) return null
+  const mins = Math.floor(offsetSeconds / 60)
+  const secs = offsetSeconds % 60
+  const label = secs > 0 ? `${mins}m ${secs}s` : `${mins}m`
+  return (
+    <div
+      className="rounded border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[11px] font-semibold text-amber-100/90"
+      role="status"
+    >
+      Rollups since {label} — tracking started after stream start
+    </div>
   )
 }

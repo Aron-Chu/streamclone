@@ -47,7 +47,7 @@ import {
 } from '../utils/emotePlotSelection.ts'
 import { count, displayStreamTitle, duration, relativeTime, streamStateLabel } from '../utils/consoleFormat.ts'
 import { deriveChartGameSegments } from '../utils/gameSegmentChart.ts'
-import { ChatCoverageBadge, StatCard } from './analytics/ConsoleBits.tsx'
+import { ChatCoverageBadge, StatCard, ViewerSourceBadge, AnalyticsQualityChip, CoverageFacets, CoverageStartBanner } from './analytics/ConsoleBits.tsx'
 import { StreamSidebar } from './analytics/StreamSidebar.tsx'
 import { TopEmoteTable } from './analytics/TopEmoteTable.tsx'
 import { MomentReviewPanel } from './analytics/MomentReviewPanel.tsx'
@@ -95,8 +95,8 @@ function defaultChannelPath(login: string): string {
 }
 
 export function AnalyticsConsole({
-  mode: _mode = 'public',
-  showGameSegments: _showGameSegments = true,
+  mode = 'public',
+  showGameSegments = true,
   shellNested = false,
   enableSyncActions = false,
   buildSessionPath = defaultSessionPath,
@@ -108,6 +108,8 @@ export function AnalyticsConsole({
   const channelLogin = login.trim().toLowerCase()
   const isHistoricalRoute = Boolean(streamId)
   const isLiveRoute = !streamId
+  /** Layer 2 (games, recap, heatmap, summary, sync detail) only on explicit session routes. */
+  const layer2Enabled = isHistoricalRoute
 
   const [emotePlotSelection, setEmotePlotSelection] = useState<EmotePlotSelection>('auto')
   const [selectedRollup, setSelectedRollup] = useState<AnalyticsMinuteRollup | null>(null)
@@ -251,18 +253,21 @@ export function AnalyticsConsole({
 
   const detailQuery = isLiveRoute ? liveQuery : historicalDetailQuery
   const detail = (detailQuery.data ?? undefined) as AnalyticsStreamDetail | undefined
+  const chartDetailReady = Boolean(
+    detail?.rollups?.some(rollupHasMinuteData) || detail?.stream?.streamId,
+  )
 
   const gamesQuery = useQuery({
     queryKey: ['analytics-console-games', targetQueryStreamId],
     queryFn: () => getStreamGameSegments(targetQueryStreamId),
-    enabled: Boolean(targetQueryStreamId),
+    enabled: Boolean(layer2Enabled && showGameSegments && targetQueryStreamId),
     staleTime: 60_000,
   })
 
   const syncQuery = useQuery({
     queryKey: ['analytics-console-sync', targetQueryStreamId],
     queryFn: () => getSyncStatus(targetQueryStreamId),
-    enabled: Boolean(targetQueryStreamId),
+    enabled: Boolean(layer2Enabled && targetQueryStreamId && chartDetailReady),
     staleTime: 30_000,
     refetchInterval: syncing ? 2000 : false,
   })
@@ -270,14 +275,14 @@ export function AnalyticsConsole({
   const summaryQuery = useQuery({
     queryKey: ['analytics-console-summary', targetQueryStreamId, channelLogin],
     queryFn: () => getStreamSummary(targetQueryStreamId, channelLogin),
-    enabled: Boolean(targetQueryStreamId && channelLogin),
+    enabled: Boolean(layer2Enabled && targetQueryStreamId && channelLogin && chartDetailReady),
     staleTime: 30_000,
   })
 
   const recapQuery = useQuery({
     queryKey: ['analytics-console-recap', targetQueryStreamId],
     queryFn: () => getPulseStreamRecap(targetQueryStreamId),
-    enabled: Boolean(targetQueryStreamId),
+    enabled: Boolean(layer2Enabled && targetQueryStreamId && chartDetailReady),
     staleTime: 120_000,
     retry: 1,
   })
@@ -288,7 +293,7 @@ export function AnalyticsConsole({
       const data = await getReplayHeatmap(targetQueryStreamId, 60, channelLogin)
       return (data ?? null) as HeatmapResponse | null
     },
-    enabled: Boolean(targetQueryStreamId && channelLogin),
+    enabled: Boolean(layer2Enabled && targetQueryStreamId && channelLogin && chartDetailReady),
     staleTime: 120_000,
     retry: 1,
   })
@@ -367,23 +372,41 @@ export function AnalyticsConsole({
         historyQuery.refetch(),
         detailQuery.refetch(),
       ]
-      if (targetQueryStreamId) {
-        refetches.push(gamesQuery.refetch())
+      if (layer2Enabled && targetQueryStreamId) {
+        if (showGameSegments) refetches.push(gamesQuery.refetch())
         refetches.push(syncQuery.refetch())
         refetches.push(summaryQuery.refetch())
+        refetches.push(recapQuery.refetch())
+        refetches.push(heatmapQuery.refetch())
       }
       await Promise.race([Promise.all(refetches), new Promise((resolve) => setTimeout(resolve, 30_000))])
       setLastRefreshedAt(Date.now())
     } finally {
       setRefreshing(false)
     }
-  }, [channelLogin, refreshing, streamsQuery, historyQuery, detailQuery, gamesQuery, syncQuery, summaryQuery, targetQueryStreamId])
+  }, [
+    channelLogin,
+    refreshing,
+    streamsQuery,
+    historyQuery,
+    detailQuery,
+    gamesQuery,
+    syncQuery,
+    summaryQuery,
+    recapQuery,
+    heatmapQuery,
+    layer2Enabled,
+    showGameSegments,
+    targetQueryStreamId,
+  ])
 
   const refetchChartDuringSync = useCallback(async () => {
     await detailQuery.refetch()
     await streamsQuery.refetch()
-    await summaryQuery.refetch()
-  }, [detailQuery, streamsQuery, summaryQuery])
+    if (layer2Enabled) {
+      await summaryQuery.refetch()
+    }
+  }, [detailQuery, streamsQuery, summaryQuery, layer2Enabled])
 
   const handleSync = useCallback(
     async (opts?: { viewersOnly?: boolean; forceChat?: boolean }) => {
@@ -441,7 +464,7 @@ export function AnalyticsConsole({
   )
 
   useEffect(() => {
-    if (!enableSyncActions || !targetQueryStreamId) return
+    if (!enableSyncActions || !layer2Enabled || !targetQueryStreamId) return
     let cancelled = false
     void (async () => {
       const status = await getSyncStatus(targetQueryStreamId).catch(() => null)
@@ -464,7 +487,7 @@ export function AnalyticsConsole({
     return () => {
       cancelled = true
     }
-  }, [enableSyncActions, targetQueryStreamId, refetchChartDuringSync])
+  }, [enableSyncActions, layer2Enabled, targetQueryStreamId, refetchChartDuringSync])
 
   const stream = detail?.stream
   const streamVodId = resolveAnalyticsVodId(detail, recapForStream?.vodId)
@@ -517,10 +540,13 @@ export function AnalyticsConsole({
 
   const chartEmoteKeysOrdered = useMemo(() => Array.from(chartEmoteKeys), [chartEmoteKeys])
 
-  const chartGames = useMemo(
-    () => deriveChartGameSegments(targetQueryStreamId, detail, gamesQuery.data),
-    [targetQueryStreamId, detail, gamesQuery.data],
-  )
+  const chartGames = useMemo(() => {
+    if (!layer2Enabled || !showGameSegments) return []
+    return deriveChartGameSegments(targetQueryStreamId, detail, gamesQuery.data, {
+      // Public portal: only render backend game segments, never silent category synthesis.
+      allowCategoryFallback: mode !== 'public' && showGameSegments,
+    })
+  }, [layer2Enabled, showGameSegments, mode, targetQueryStreamId, detail, gamesQuery.data])
 
   const needsLiveCollectorRedirect = useMemo(() => {
     if (detailQuery.isLoading || streamsQuery.isLoading) return false
@@ -657,6 +683,13 @@ export function AnalyticsConsole({
                 )}
               </span>
               <ChatCoverageBadge detail={detail} />
+              {mode === 'public' ? (
+                <>
+                  <ViewerSourceBadge source={detail?.viewerSource} />
+                  <AnalyticsQualityChip detail={detail} summaryMetrics={summaryQuery.data?.metrics} />
+                  <CoverageFacets detail={detail} summaryMetrics={summaryQuery.data?.metrics} />
+                </>
+              ) : null}
             </div>
             <h1
               className="mt-3 truncate text-2xl font-black leading-tight text-white lg:text-3xl"
@@ -761,6 +794,7 @@ export function AnalyticsConsole({
             ) : null}
             {!sessionResolving && !sessionNotFound ? (
             <div className="min-w-0 space-y-4">
+              <CoverageStartBanner offsetSeconds={detail?.coverageStartOffsetSeconds} />
               <StreamQualityBanner
                 diagnosis={qualityDiagnosis}
                 syncing={syncing}
@@ -821,7 +855,7 @@ export function AnalyticsConsole({
           </section>
 
           <aside className="order-2 w-full min-w-0 space-y-3 xl:order-none">
-            {recapForStream ? (
+            {layer2Enabled && recapForStream ? (
               <StreamRecapPanel
                 recap={recapForStream}
                 topEmotesCatalog={detail?.topEmotes}
@@ -853,7 +887,7 @@ export function AnalyticsConsole({
                     onSelectRollup={setSelectedRollup}
                     onPreviewRollup={setPreviewRollup}
                     topEmotesCatalog={detail?.topEmotes}
-                    heatmapPoints={heatmapPoints}
+                    heatmapPoints={layer2Enabled ? heatmapPoints : undefined}
                     streamStartedAt={stream?.startedAt}
                     embedded
                   />
@@ -867,8 +901,12 @@ export function AnalyticsConsole({
                     embedded
                   />
                 ) : null}
-                {rightPanelTab === 'status' ? (
+                {rightPanelTab === 'status' && layer2Enabled ? (
                   <SyncStatusPanel detail={detail} syncStatus={activeSyncStatus} />
+                ) : rightPanelTab === 'status' ? (
+                  <p className="p-4 text-[11px] font-semibold text-zinc-500">
+                    Open a session from the sidebar for sync status and Layer 2 detail.
+                  </p>
                 ) : null}
               </div>
             </div>
