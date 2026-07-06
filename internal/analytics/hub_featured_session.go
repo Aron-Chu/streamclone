@@ -47,6 +47,8 @@ type HubFeaturedMoment struct {
 	Kind          string     `json:"kind,omitempty"`
 	Source        string     `json:"source,omitempty"`
 	ChatPerMin    int        `json:"chatPerMin,omitempty"`
+	EmotesPerMin  int        `json:"emotesPerMin,omitempty"`
+	Viewers       int        `json:"viewers,omitempty"`
 	ViewerDelta   string     `json:"viewerDelta,omitempty"`
 	TopEmoteCode  string     `json:"topEmoteCode,omitempty"`
 	TopEmotes     []HubEmote `json:"topEmotes,omitempty"`
@@ -178,6 +180,8 @@ func hubFeaturedMomentsFromPeaks(
 			Kind:          strings.TrimSpace(peak.DominantSignal),
 			Source:        hubFeaturedMomentSource(vodState),
 			ChatPerMin:    peak.ChatCount,
+			EmotesPerMin:  peak.EmoteCount,
+			Viewers:       peak.Viewers,
 			ViewerDelta:   peak.ViewerDelta,
 			TopEmoteCode:  peakTopEmoteCode(peak),
 			TopEmotes:     hubEmotesFromPeak(peak),
@@ -194,8 +198,10 @@ func hubFeaturedMomentsFromPeaks(
 			break
 		}
 		chat := 0
+		viewers := 0
 		if rollup, ok := rollupAtOffset(rollups, points, pt.OffsetSeconds); ok {
 			chat = rollup.ChatCount
+			viewers = rollup.ViewerLatest
 		}
 		vodState := portalVodState(vodID, pt.OffsetSeconds, vodID != "")
 		out = append(out, HubFeaturedMoment{
@@ -205,6 +211,7 @@ func hubFeaturedMomentsFromPeaks(
 			Kind:          dominantSignalFromReason(pt.Reason),
 			Source:        hubFeaturedMomentSource(vodState),
 			ChatPerMin:    chat,
+			Viewers:       viewers,
 			Confidence:    int(math.Round(pt.Confidence * 100)),
 			VodState:      vodState,
 		})

@@ -32,6 +32,7 @@ type hubHistoricalMinuteCandidate struct {
 	ChatCount         int
 	TotalEmoteCount   int
 	SevenTVEmoteCount int
+	ViewerCount       int
 	Emotes            map[string]int
 }
 
@@ -167,16 +168,19 @@ func (h *Handler) buildPublicHubMoments(ctx context.Context, opts publicHubOptio
 	if err != nil {
 		return PublicHubMomentsResponse{}, err
 	}
-	if len(candidates) == 0 {
-		return resp, nil
-	}
-	moments := h.hubHistoricalMomentsFromCandidates(ctx, candidates, limit)
-	if len(moments) == 0 {
+	corpus := h.hubHistoricalMomentsFromCandidates(ctx, candidates, limit)
+	liveInBucket := h.hubLivePulseMomentsInBucket(ctx, start, end)
+	merged, source := mergeHubPulseMoments(corpus, liveInBucket, limit)
+	if len(merged) == 0 {
+		if len(candidates) == 0 && len(liveInBucket) == 0 {
+			return resp, nil
+		}
 		return resp, nil
 	}
 	resp.Status = "ready"
 	resp.Reason = ""
-	resp.Moments = moments
+	resp.Source = source
+	resp.Moments = merged
 	return resp, nil
 }
 
@@ -218,6 +222,7 @@ func (h *Handler) hubHistoricalMomentsFromCandidates(ctx context.Context, candid
 			moment.TopEmotes = hubEmotesFromPeak(peak)
 			moment.TopEmoteCode = peakTopEmoteCode(peak)
 		}
+		normalizeHubPulseMomentFields(&moment)
 		out = append(out, moment)
 		if len(out) >= limit {
 			break
@@ -253,6 +258,8 @@ func hubHistoricalMomentFromCandidate(cand hubHistoricalMinuteCandidate) HubLive
 		Kind:            kind,
 		Source:          "corpus_historical",
 		ChatPerMin:      cand.ChatCount,
+		EmotesPerMin:    historicalCandidateEmotesPerMin(cand),
+		Viewers:         cand.ViewerCount,
 		Confidence:      100,
 		VodState:        portalVodState(vodID, offset, vodID != ""),
 		Category:        strings.TrimSpace(cand.Category),

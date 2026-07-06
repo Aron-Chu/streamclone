@@ -101,8 +101,24 @@ func (h *Handler) buildTop100ReadinessReport(ctx context.Context, topN int, admi
 	}
 	now := report.GeneratedAt
 	rows := make([]Top100ReadinessRow, 0, len(live))
+	var rollupSignals map[string]RollupChatSignal
+	if opts.SkipRollups && h.store != nil {
+		streamIDs := make([]string, 0, len(live))
+		for _, current := range live {
+			if current.StreamID != nil {
+				if id := strings.TrimSpace(*current.StreamID); id != "" {
+					streamIDs = append(streamIDs, id)
+				}
+			}
+		}
+		if len(streamIDs) > 0 {
+			if loaded, err := h.store.LatestRollupChatSignalsByStreamIDs(ctx, streamIDs); err == nil {
+				rollupSignals = loaded
+			}
+		}
+	}
 	for _, current := range live {
-		row := buildTop100ReadinessRow(ctx, h, current, now, opts.SkipRollups)
+		row := buildTop100ReadinessRow(ctx, h, current, now, opts.SkipRollups, rollupSignals)
 		rows = append(rows, row)
 		updateTop100ReadinessSummary(&report.Summary, row, current, now)
 	}
@@ -119,7 +135,7 @@ func (h *Handler) buildTop100ReadinessReport(ctx context.Context, topN int, admi
 	return report, nil
 }
 
-func buildTop100ReadinessRow(ctx context.Context, h *Handler, current Top500Current, now time.Time, skipRollups bool) Top100ReadinessRow {
+func buildTop100ReadinessRow(ctx context.Context, h *Handler, current Top500Current, now time.Time, skipRollups bool, rollupSignals map[string]RollupChatSignal) Top100ReadinessRow {
 	login := normalizeLogin(current.Login)
 	streamID := ""
 	if current.StreamID != nil {
@@ -168,6 +184,12 @@ func buildTop100ReadinessRow(ctx context.Context, h *Handler, current Top500Curr
 				row.LatestSevenTvCount = last.SevenTVEmoteCount
 				row.ViewerOnlyRecent = rollupHasViewerSignal(last) && last.ChatCount == 0 && last.SevenTVEmoteCount == 0 && last.TotalEmoteCount == 0
 			}
+		}
+	} else if skipRollups && streamID != "" && rollupSignals != nil {
+		if signal, ok := rollupSignals[streamID]; ok {
+			row.LatestChatCount = signal.ChatCount
+			row.LatestTotalEmoteCount = signal.TotalEmoteCount
+			row.LatestSevenTvCount = signal.SevenTVEmoteCount
 		}
 	}
 	row.ReadinessState = classifyTop100ReadinessState(row)

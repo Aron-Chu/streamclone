@@ -32,6 +32,19 @@ func (h *Handler) rewriteHostedTopEmotes(ctx context.Context, emotes []TopEmote)
 	return rewriteHostedTopEmoteURLs(emotes, lookup, metadata, base, hosted || base != "")
 }
 
+// rewritePortalTopEmotes resolves browser-loadable image URLs for public hub responses.
+// Always performs provider-id lookup so synced 7TV UUIDs become public CDN URLs even
+// when PULSE_HOSTED_MODE is false (local portal dev against localhost:8090).
+func (h *Handler) rewritePortalTopEmotes(ctx context.Context, emotes []TopEmote) []TopEmote {
+	if len(emotes) == 0 {
+		return emotes
+	}
+	metadata := h.lookupEmoteMetadataForTopEmotes(ctx, emotes)
+	lookup := h.lookupProviderIDsForTopEmotes(ctx, emotes)
+	base := h.hostedEmoteCDNBase()
+	return rewriteHostedTopEmoteURLs(emotes, lookup, metadata, base, true)
+}
+
 func rewriteHostedTopEmoteURLs(emotes []TopEmote, lookup map[string]string, metadata map[string]EmoteMetadata, cdnBase string, rewriteURLs bool) []TopEmote {
 	if len(emotes) == 0 {
 		return emotes

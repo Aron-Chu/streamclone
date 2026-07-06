@@ -29,6 +29,8 @@ type HubLivePulseMoment struct {
 	Kind            string     `json:"kind,omitempty"`
 	Source          string     `json:"source,omitempty"`
 	ChatPerMin      int        `json:"chatPerMin,omitempty"`
+	EmotesPerMin    int        `json:"emotesPerMin,omitempty"`
+	Viewers         int        `json:"viewers,omitempty"`
 	ViewerDelta     string     `json:"viewerDelta,omitempty"`
 	TopEmoteCode    string     `json:"topEmoteCode,omitempty"`
 	TopEmotes       []HubEmote `json:"topEmotes,omitempty"`
@@ -102,6 +104,9 @@ func (h *Handler) buildHubLivePulseMoments(ctx context.Context, liveChannels []H
 		streamAgeSec := streamAgeSeconds(bundle.startedAt, bundle.isLive)
 		for _, peak := range bundle.peaks[:limit] {
 			peak = h.enrichPortalPeakEmotes(ctx, peak, bundle.rollups, bundle.points)
+			if peak.Viewers <= 0 {
+				peak.Viewers = viewersAtOffset(bundle.rollups, bundle.points, peak.OffsetSeconds)
+			}
 			category := h.resolveHubMomentCategory(ctx, streamID, stream, ch, peak.OffsetSeconds)
 			moment, ok := hubLivePulseMomentFromPeak(ch, peak, vodID, stream.StartedAt, streamID, coverageStart, streamAgeSec, category)
 			if !ok {
@@ -161,7 +166,14 @@ func hubLivePulseMomentFromPeak(
 	if category == "" {
 		category = strings.TrimSpace(ch.Category)
 	}
-	return HubLivePulseMoment{
+	viewers := peak.Viewers
+	emotesPerMin := peak.EmoteCount
+	if emotesPerMin <= 0 && len(peak.TopEmotes) > 0 {
+		for _, emote := range peak.TopEmotes {
+			emotesPerMin += emote.Count
+		}
+	}
+	return normalizeHubLivePulseMoment(HubLivePulseMoment{
 		Login:           normalizeLogin(ch.Login),
 		DisplayName:     displayName,
 		ProfileImageURL: ch.ProfileImageURL,
@@ -174,6 +186,8 @@ func hubLivePulseMomentFromPeak(
 		Kind:            kind,
 		Source:          hubFeaturedMomentSource(vodState),
 		ChatPerMin:      peak.ChatCount,
+		EmotesPerMin:    emotesPerMin,
+		Viewers:         viewers,
 		ViewerDelta:     peak.ViewerDelta,
 		TopEmoteCode:    peakTopEmoteCode(peak),
 		TopEmotes:       hubEmotesFromPeak(peak),
@@ -182,5 +196,10 @@ func hubLivePulseMomentFromPeak(
 		Category:        category,
 		StreamStartedAt: streamStartedAt,
 		ActivityTag:     activityTag,
-	}, true
+	}), true
+}
+
+func normalizeHubLivePulseMoment(moment HubLivePulseMoment) HubLivePulseMoment {
+	normalizeHubPulseMomentFields(&moment)
+	return moment
 }

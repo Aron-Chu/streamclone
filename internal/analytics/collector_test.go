@@ -89,20 +89,23 @@ func (f *fakeStore) UpsertMinuteRollup(context.Context, string, MinuteRollup) er
 	return nil
 }
 
-func (f *fakeStore) BulkUpsertLiveMinuteRollups(context.Context, string, []MinuteRollup) error {
+func (f *fakeStore) BulkUpsertLiveMinuteRollups(context.Context, string, []MinuteRollup, ...LiveRollupWriteOptions) error {
 	return nil
 }
 
 type capturingRollupStore struct {
 	fakeStore
-	mu           sync.Mutex
-	liveStreamID string
-	liveRollups  []MinuteRollup
+	mu            sync.Mutex
+	liveStreamID  string
+	liveRollups   []MinuteRollup
+	lastWriteMode LiveRollupWriteMode
 }
 
-func (f *capturingRollupStore) BulkUpsertLiveMinuteRollups(_ context.Context, streamID string, rollups []MinuteRollup) error {
+func (f *capturingRollupStore) BulkUpsertLiveMinuteRollups(_ context.Context, streamID string, rollups []MinuteRollup, opts ...LiveRollupWriteOptions) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	options := normalizeLiveRollupWriteOptions(opts...)
+	f.lastWriteMode = options.Mode
 	f.liveStreamID = streamID
 	f.liveRollups = append(f.liveRollups, rollups...)
 	return nil

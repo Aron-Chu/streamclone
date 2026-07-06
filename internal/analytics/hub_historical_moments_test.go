@@ -190,6 +190,60 @@ func TestHistoricalMomentScoreAndLabel(t *testing.T) {
 	}
 }
 
+func TestHubHistoricalMomentFromCandidateViewersAndEmotes(t *testing.T) {
+	cand := hubHistoricalMinuteCandidate{
+		StreamID:        "s1",
+		Login:           "xqc",
+		MinuteTS:        time.Unix(1_700_000_100, 0).UTC(),
+		ChatCount:       500,
+		TotalEmoteCount: 120,
+		ViewerCount:     42_000,
+	}
+	moment := hubHistoricalMomentFromCandidate(cand)
+	if moment.Viewers != 42_000 {
+		t.Fatalf("viewers = %d, want 42000", moment.Viewers)
+	}
+	if moment.EmotesPerMin != 120 {
+		t.Fatalf("emotesPerMin = %d, want 120", moment.EmotesPerMin)
+	}
+}
+
+func TestMergeHubPulseMoments(t *testing.T) {
+	live := []HubLivePulseMoment{
+		{Login: "a", StreamID: "s1", At: 1000, Score: 90, ChatPerMin: 100, Source: "live_irc"},
+	}
+	corpus := []HubLivePulseMoment{
+		{Login: "b", StreamID: "s2", At: 2000, Score: 80, ChatPerMin: 80, Source: "corpus_historical"},
+		{Login: "a", StreamID: "s1", At: 1000, Score: 70, ChatPerMin: 50, Source: "corpus_historical"},
+	}
+	merged, source := mergeHubPulseMoments(corpus, live, 10)
+	if source != "bucket_merged" {
+		t.Fatalf("source = %q, want bucket_merged", source)
+	}
+	if len(merged) != 2 {
+		t.Fatalf("len = %d, want 2", len(merged))
+	}
+	if merged[0].Login != "a" {
+		t.Fatalf("live row should win dedupe: %+v", merged[0])
+	}
+}
+
+func TestNormalizeHubPulseMomentFields(t *testing.T) {
+	moment := HubLivePulseMoment{
+		Login: "xqc",
+		TopEmotes: []HubEmote{
+			{Name: "KEKW", Count: 40},
+		},
+	}
+	normalizeHubPulseMomentFields(&moment)
+	if moment.EmotesPerMin != 40 {
+		t.Fatalf("emotesPerMin = %d, want 40", moment.EmotesPerMin)
+	}
+	if moment.TopEmoteCode != "KEKW" {
+		t.Fatalf("topEmoteCode = %q", moment.TopEmoteCode)
+	}
+}
+
 func TestSortHubHistoricalMoments(t *testing.T) {
 	moments := []HubLivePulseMoment{
 		{Score: 10, ChatPerMin: 100},

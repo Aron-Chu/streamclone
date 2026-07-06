@@ -57,6 +57,78 @@ func TestPreferGameSegmentsUsesSnapshotWhenRicher(t *testing.T) {
 	}
 }
 
+func TestPreferGameSegmentsUsesSnapshotWhenMoreDistinctCategories(t *testing.T) {
+	stored := []GameSegment{{GameName: "Holdfast: Nations At War", OffsetSeconds: 0, DurationSeconds: 3900}}
+	snapshot := []GameSegment{
+		{GameName: "Just Chatting", OffsetSeconds: 0, DurationSeconds: 1200},
+		{GameName: "VALORANT", OffsetSeconds: 1200, DurationSeconds: 900},
+		{GameName: "Holdfast: Nations At War", OffsetSeconds: 2100, DurationSeconds: 1800},
+	}
+	got := preferGameSegments(stored, snapshot)
+	if len(got) != 3 {
+		t.Fatalf("segments = %#v, want richer snapshot timeline", got)
+	}
+}
+
+func TestMergeCategoryTimelineSamplesDedupesAndSorts(t *testing.T) {
+	startedAt := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	primary := []categoryTimelineSample{
+		{At: startedAt.Add(30 * time.Minute), Category: "Game B"},
+	}
+	extra := []categoryTimelineSample{
+		{At: startedAt.Add(10 * time.Minute), Category: "Game A"},
+		{At: startedAt.Add(30 * time.Minute), Category: "Game B"},
+	}
+	got := mergeCategoryTimelineSamples(primary, extra)
+	if len(got) != 2 {
+		t.Fatalf("samples = %#v, want 2 merged samples", got)
+	}
+	if got[0].Category != "Game A" || got[1].Category != "Game B" {
+		t.Fatalf("samples = %#v, want sorted A then B", got)
+	}
+}
+
+func TestDistinctCategoryCountIgnoresEmptyNames(t *testing.T) {
+	samples := []categoryTimelineSample{
+		{At: time.Now(), Category: "Fortnite"},
+		{At: time.Now(), Category: "Fortnite"},
+		{At: time.Now(), Category: "Live"},
+	}
+	if distinctCategoryCount(samples) != 1 {
+		t.Fatalf("distinct = %d, want 1 normalized category", distinctCategoryCount(samples))
+	}
+}
+
+func TestMeaningfulGameSegmentsAndFilterStored(t *testing.T) {
+	if meaningfulGameSegments([]GameSegment{{GameName: "Live", OffsetSeconds: 0, DurationSeconds: 60}}) {
+		t.Fatal("placeholder category should not count as meaningful")
+	}
+	got := filterMeaningfulStoredSegments([]GameSegment{
+		{GameName: "Live", OffsetSeconds: 0, DurationSeconds: 600},
+		{GameName: "Fortnite", OffsetSeconds: 600, DurationSeconds: 600},
+	})
+	if len(got) != 1 || got[0].GameName != "Fortnite" {
+		t.Fatalf("segments = %#v, want only Fortnite", got)
+	}
+}
+
+func TestResolveStreamGameSegmentsFinalizePath(t *testing.T) {
+	startedAt := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	stream := &StreamRecord{
+		StreamID:  "319387444960",
+		Login:     "jynxzi",
+		Category:  "Fortnite",
+		StartedAt: startedAt,
+	}
+	var segments []GameSegment
+	if !meaningfulGameSegments(segments) {
+		segments = fallbackGameSegmentsForStream(stream)
+	}
+	if len(segments) != 1 || segments[0].GameName != "Fortnite" {
+		t.Fatalf("segments = %#v, want Fortnite fallback", segments)
+	}
+}
+
 func TestShouldTrySnapshotGameSegmentsLiveSingleStored(t *testing.T) {
 	stream := &StreamRecord{StreamID: "s1", EndedAt: nil}
 	if !shouldTrySnapshotGameSegments([]GameSegment{{GameName: "A"}}, stream) {

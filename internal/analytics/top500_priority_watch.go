@@ -159,6 +159,20 @@ func (p *Top500PriorityWatchPoller) runOnce(ctx context.Context) {
 	if capacityBlocked {
 		metrics.TopRosterAdmissionCapacityBlockedTotal.Inc()
 	}
+	desired := make(map[string]struct{}, len(live))
+	for _, row := range live {
+		login := normalizeLogin(row.Login)
+		if login != "" && row.IsLive {
+			desired[login] = struct{}{}
+		}
+	}
+	grace := p.cfg.PulseTop500AdmissionMissGraceCycles
+	if grace <= 0 {
+		grace = 3
+	}
+	if evicted := p.collector.ReconcileTopRosterAdmissionMisses(desired, grace); evicted > 0 {
+		p.log.Info("top500 priority watch evicted stale roster channels", "evicted", evicted, "grace_cycles", grace)
+	}
 	p.log.Info("top500 priority watch admission cycle", "considered", len(live), "admitted", admitted, "skipped_by_reason", skippedByReason)
 }
 

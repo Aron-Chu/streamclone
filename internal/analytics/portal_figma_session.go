@@ -25,6 +25,7 @@ type PortalPeak struct {
 	DominantSignal string           `json:"dominantSignal"`
 	ChatCount      int              `json:"chatCount"`
 	EmoteCount     int              `json:"emoteCount"`
+	Viewers        int              `json:"viewers,omitempty"`
 	ViewerDelta    string           `json:"viewerDelta,omitempty"`
 	Confidence     int              `json:"confidence,omitempty"`
 	VodState       string           `json:"vodState,omitempty"`
@@ -121,6 +122,7 @@ func portalPeaksFromExtension(
 			DominantSignal: peak.DominantSignal,
 			ChatCount:      peak.ChatCount,
 			EmoteCount:     peak.EmoteCount,
+			Viewers:        viewersAtOffset(rollups, points, peak.OffsetSeconds),
 			ViewerDelta:    viewerDeltaAtOffset(rollups, points, peak.OffsetSeconds),
 			Confidence:     confidence,
 			VodState:       portalVodState(vodID, peak.OffsetSeconds, vodID != ""),
@@ -191,6 +193,18 @@ func (h *Handler) resolveHubMomentCategory(
 		return strings.TrimSpace(stream.Category)
 	}
 	return ""
+}
+
+func viewersAtOffset(rollups []heatmap.MinuteRollup, points []heatmap.ReplayHeatmapDetailPoint, offset int) int {
+	if rollup, ok := rollupAtOffset(rollups, points, offset); ok {
+		if rollup.ViewerLatest > 0 {
+			return rollup.ViewerLatest
+		}
+		if rollup.ViewerAvg > 0 {
+			return rollup.ViewerAvg
+		}
+	}
+	return 0
 }
 
 func viewerDeltaAtOffset(rollups []heatmap.MinuteRollup, points []heatmap.ReplayHeatmapDetailPoint, offset int) string {

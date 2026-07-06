@@ -993,10 +993,33 @@ func (h *Handler) getStreamGames(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
 		return
 	}
+	cacheKey := portalAnalyticsCachePrefix + "games:" + streamID
+	if body, ok := h.portalCacheGet(r.Context(), cacheKey); ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("X-Cache", "HIT")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+		return
+	}
 	segments, err := h.resolveStreamGameSegments(r.Context(), streamID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, segments)
+	body, err := json.Marshal(segments)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encode_failed"})
+		return
+	}
+	ttl := portalAnalyticsGamesEndedTTL
+	if stream, streamErr := h.store.StreamByID(r.Context(), streamID); streamErr == nil && stream != nil && stream.EndedAt == nil {
+		ttl = portalAnalyticsGamesLiveTTL
+	}
+	h.portalCacheSet(r.Context(), cacheKey, body, ttl)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Cache", "MISS")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
