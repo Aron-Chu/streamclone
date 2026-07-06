@@ -27,6 +27,7 @@ type ChartGameSegment = {
   offsetSeconds: number
   durationSeconds: number
   createdAt: string
+  source?: string
 }
 
 /** Synthesize one chart segment when the games API is empty but stream category is known. */
@@ -34,8 +35,10 @@ export function deriveChartGameSegments(
   streamId: string,
   detail: { stream?: { category?: string }; rollups?: Array<{ minuteTs: string }> } | null | undefined,
   apiSegments: ChartGameSegment[] | null | undefined,
+  options?: { allowCategoryFallback?: boolean },
 ): ChartGameSegment[] {
   if (apiSegments?.length) return apiSegments
+  if (options?.allowCategoryFallback === false) return []
   const category = detail?.stream?.category?.trim() ?? ''
   if (!category || PLACEHOLDER_CATEGORIES.test(category)) return []
   const rollups = detail?.rollups ?? []
@@ -50,6 +53,7 @@ export function deriveChartGameSegments(
       offsetSeconds: 0,
       durationSeconds,
       createdAt: new Date(0).toISOString(),
+      source: 'category_fallback',
     },
   ]
 }
