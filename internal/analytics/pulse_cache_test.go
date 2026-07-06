@@ -97,5 +97,6 @@ func TestInvalidatePulseCachesNilRedisDoesNotPanic(t *testing.T) {
 	ctx := context.Background()
 	InvalidatePulseBFFCache(ctx, nil, "chan", nil)
 	InvalidatePulseHeatmapCache(ctx, nil, "stream-1", nil)
+	InvalidatePortalGamesCache(ctx, nil, "stream-1", nil)
 	InvalidatePulseCaches(ctx, nil, nil, "chan", "stream-1", nil)
 }

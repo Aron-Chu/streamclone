@@ -1,15 +1,20 @@
 import type { ChartGameSegment, ChartMinuteRollup } from './types.ts'
 import { gameSegmentPlotBounds } from './gameSegmentChart.ts'
 
+const GAME_ACCENT = '#f97316'
+
 export interface GameSegmentOverlayProps {
   segments: ChartGameSegment[]
   rollups: ChartMinuteRollup[]
   streamStartedAt?: string
   padLeft: number
-  padTop: number
-  padBottom: number
   plotWidth: number
-  height: number
+  /** Top edge of the dedicated game strip (px). */
+  gameBandTop: number
+  /** Height of the game strip band (px). */
+  gameBandHeight?: number
+  /** Minimum label band width (px) before hiding title text. Default 28. */
+  minLabelWidth?: number
 }
 
 export function GameSegmentOverlay({
@@ -17,10 +22,10 @@ export function GameSegmentOverlay({
   rollups,
   streamStartedAt,
   padLeft,
-  padTop,
-  padBottom,
   plotWidth,
-  height,
+  gameBandTop,
+  gameBandHeight = 16,
+  minLabelWidth = 28,
 }: GameSegmentOverlayProps) {
   return (
     <>
@@ -33,49 +38,53 @@ export function GameSegmentOverlay({
           plotWidth,
         )
         if (!bounds) return null
-        const { startX, centerX, textWidth } = bounds
-        const maxChars = Math.floor(textWidth / 8)
-        const displayTitle = segment.gameName.length > maxChars
-          ? `${segment.gameName.slice(0, Math.max(0, maxChars - 3))}...`
-          : segment.gameName
+        const { startX, endX, centerX, textWidth } = bounds
+        const bandWidth = Math.max(1, endX - startX)
+        const maxChars = Math.floor(textWidth / 7.5)
+        const isEstimated = segment.source === 'category_fallback'
+        const title = isEstimated ? `Est. ${segment.gameName}` : segment.gameName
+        const displayTitle = title.length > maxChars
+          ? `${title.slice(0, Math.max(0, maxChars - 3))}...`
+          : title
 
         return (
           <g key={segment.id ?? index}>
+            <rect
+              x={startX}
+              y={gameBandTop}
+              width={bandWidth}
+              height={gameBandHeight}
+              rx={4}
+              fill={isEstimated ? 'rgba(249, 115, 22, 0.08)' : 'rgba(249, 115, 22, 0.14)'}
+              stroke={isEstimated ? 'rgba(249, 115, 22, 0.28)' : 'rgba(249, 115, 22, 0.38)'}
+              strokeWidth={0.75}
+              strokeDasharray={isEstimated ? '4 3' : undefined}
+              shapeRendering="geometricPrecision"
+            />
             {segment.offsetSeconds > 0 ? (
               <line
                 x1={startX}
-                y1={padTop}
                 x2={startX}
-                y2={height - padBottom}
-                stroke="#f97316"
-                strokeWidth="1.5"
-                strokeDasharray="4 4"
-                opacity="0.6"
+                y1={gameBandTop + gameBandHeight}
+                y2={gameBandTop + gameBandHeight + 120}
+                stroke={GAME_ACCENT}
+                strokeWidth="1"
+                strokeDasharray="5 6"
+                opacity="0.45"
               />
             ) : null}
-            {textWidth > 30 ? (
-              <g>
-                <rect
-                  x={startX + 4}
-                  y={padTop - 24}
-                  width={textWidth - 8}
-                  height={18}
-                  rx={4}
-                  fill="#f97316"
-                  opacity="0.12"
-                />
-                <text
-                  x={centerX}
-                  y={padTop - 11}
-                  fill="#f97316"
-                  fontSize="9.5"
-                  fontWeight="900"
-                  textAnchor="middle"
-                  opacity="0.95"
-                >
-                  {displayTitle}
-                </text>
-              </g>
+            {textWidth > minLabelWidth ? (
+              <text
+                x={centerX}
+                y={gameBandTop + gameBandHeight * 0.68}
+                fill={GAME_ACCENT}
+                fontSize="9"
+                fontWeight="800"
+                textAnchor="middle"
+                opacity="0.96"
+              >
+                {displayTitle}
+              </text>
             ) : null}
           </g>
         )

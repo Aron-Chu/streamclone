@@ -1179,6 +1179,7 @@ func (s *SyncService) SyncHistoricalStream(ctx context.Context, streamID string,
 		if err = s.store.SaveGameSegments(ctx, streamID, segments); err != nil {
 			return "", fmt.Errorf("failed to save game segments to DB: %w", err)
 		}
+		InvalidatePortalGamesCache(ctx, s.rdb, streamID, s.log)
 		if len(segments) > 0 {
 			syncCategory := dominantCategoryFromSegments(segments, category)
 			if syncCategory != "" {
@@ -1467,6 +1468,7 @@ func buildGameSegments(games []scrapedGame, totalDurationSeconds int) []GameSegm
 			BoxArtURL:       g.BoxArt,
 			OffsetSeconds:   offset,
 			DurationSeconds: dur,
+			Source:          "timeline",
 		})
 		offset += dur
 	}
@@ -2519,6 +2521,8 @@ func (s *SyncService) persistEarlyViewerChart(
 		}
 		if err := s.store.SaveGameSegments(ctx, streamID, segments); err != nil {
 			s.log.Warn("early game segment write failed", "stream_id", streamID, "err", err)
+		} else {
+			InvalidatePortalGamesCache(ctx, s.rdb, streamID, s.log)
 		}
 	}
 	endTS := rollupStart.Add(time.Duration(durationSeconds) * time.Second)

@@ -75,6 +75,7 @@ func fallbackGameSegmentsForStream(stream *StreamRecord) []GameSegment {
 		GameName:        gameName,
 		OffsetSeconds:   0,
 		DurationSeconds: durationSeconds,
+		Source:          "category_fallback",
 	}}
 }
 

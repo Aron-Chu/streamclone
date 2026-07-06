@@ -451,6 +451,69 @@ func TestPortalGuestJSONForbiddenKeys(t *testing.T) {
 	})
 }
 
+func TestPortalHonestyContractJSON(t *testing.T) {
+	t.Run("PortalStreamDetail includes viewerSource", func(t *testing.T) {
+		body, err := json.Marshal(PortalStreamDetail{
+			Channel:      "xqc",
+			State:        "live",
+			ViewerSource: "live",
+			Sources:      []SourceStatus{{Source: "analytics_db", State: "ready"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["viewerSource"] != "live" {
+			t.Fatalf("viewerSource = %v", payload["viewerSource"])
+		}
+	})
+
+	t.Run("PortalChannelLiveResponse includes honesty fields", func(t *testing.T) {
+		body, err := json.Marshal(PortalChannelLiveResponse{
+			Channel:                    "xqc",
+			State:                      "live",
+			CoverageStartOffsetSeconds: 180,
+			ViewerSource:               "merged",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["coverageStartOffsetSeconds"] != float64(180) {
+			t.Fatalf("coverageStartOffsetSeconds = %v", payload["coverageStartOffsetSeconds"])
+		}
+		if payload["viewerSource"] != "merged" {
+			t.Fatalf("viewerSource = %v", payload["viewerSource"])
+		}
+	})
+
+	t.Run("GameSegment includes source", func(t *testing.T) {
+		body, err := json.Marshal(GameSegment{
+			StreamID:        "s1",
+			GameName:        "Fortnite",
+			OffsetSeconds:   0,
+			DurationSeconds: 3600,
+			Source:          "snapshot",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["source"] != "snapshot" {
+			t.Fatalf("source = %v", payload["source"])
+		}
+	})
+}
+
 func TestAllowPortalSummaryRateLimitFailOpen(t *testing.T) {
 	rl := NewPulseRateLimiter(nil, 10, 5)
 	ok, _ := rl.AllowPortalSummary(t.Context(), "principal-a")
