@@ -305,6 +305,7 @@ func scanClipCandidate(row clipCandidateScanner) (ClipCandidate, error) {
 		_ = json.Unmarshal(jobResponseBytes, &job.Response)
 		item.Job = &job
 	}
+	enrichClipCandidateInbox(&item)
 	return item, nil
 }
 

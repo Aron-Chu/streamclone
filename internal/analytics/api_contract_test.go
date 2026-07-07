@@ -77,16 +77,20 @@ func TestContractClipCandidateJSONKeys(t *testing.T) {
 	assertJSONFieldNames(t, reflect.TypeOf(ClipCandidate{}), []string{
 		"chatCount",
 		"confidence",
+		"confidenceBand",
 		"coverageState",
 		"createdAt",
 		"emoteCount",
 		"endSeconds",
 		"id",
+		"inboxState",
 		"job",
 		"login",
 		"minuteTs",
 		"offsetSeconds",
+		"pickReason",
 		"reason",
+		"renderabilityStatus",
 		"score",
 		"signals",
 		"sourceCheckedAt",
@@ -94,6 +98,7 @@ func TestContractClipCandidateJSONKeys(t *testing.T) {
 		"sourceStatus",
 		"startSeconds",
 		"state",
+		"statusCopy",
 		"streamCategory",
 		"streamId",
 		"streamTitle",
@@ -141,4 +146,57 @@ func TestContractHubCorpusPipelineJSONKeys(t *testing.T) {
 		"state",
 		"topN",
 	})
+}
+
+func TestContractPublicStatusResponseJSONKeys(t *testing.T) {
+	assertJSONFieldNames(t, reflect.TypeOf(PublicStatusResponse{}), []string{
+		"api",
+		"degraded",
+		"incident",
+		"status",
+		"updatedAt",
+	})
+}
+
+func TestContractPublicHubMomentsResponseJSONKeys(t *testing.T) {
+	assertJSONFieldNames(t, reflect.TypeOf(PublicHubMomentsResponse{}), []string{
+		"activityWindowMinutes",
+		"bucketEnd",
+		"bucketStart",
+		"bucketT",
+		"hubGeneratedAt",
+		"moments",
+		"reason",
+		"source",
+		"status",
+	})
+}
+
+func TestContractExtensionPulseResponseCriticalJSONKeys(t *testing.T) {
+	got := jsonFieldNames(reflect.TypeOf(ExtensionPulseResponse{}))
+	critical := []string{
+		"coverage",
+		"coverageStartOffsetSeconds",
+		"currentOffsetSeconds",
+		"isLive",
+		"lanes",
+		"login",
+		"peaks",
+		"rollups",
+		"streamId",
+		"tracking",
+		"vodId",
+	}
+	for _, key := range critical {
+		found := false
+		for _, g := range got {
+			if g == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("ExtensionPulseResponse missing critical json key %q (have %v)", key, got)
+		}
+	}
 }

@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	ClipCandidateSourceRecap     = "recap"
-	ClipCandidateSourceAvailable = "available"
-	ClipCandidateSourceMissing   = "missing"
-	ClipCandidateSourceUnknown   = "unknown"
+	ClipCandidateSourceRecap      = "recap"
+	ClipCandidateSourceAvailable  = "available"
+	ClipCandidateSourceMissing    = "missing"
+	ClipCandidateSourceRestricted = "restricted"
+	ClipCandidateSourceUnknown    = "unknown"
 
 	ClipCandidateStatusNew       = "new"
 	ClipCandidateStatusSaved     = "saved"
@@ -63,33 +64,38 @@ type ClipCandidateEmote struct {
 }
 
 type ClipCandidate struct {
-	ID              string                 `json:"id"`
-	Login           string                 `json:"login"`
-	StreamID        string                 `json:"streamId"`
-	VodID           *string                `json:"vodId,omitempty"`
-	StreamTitle     string                 `json:"streamTitle,omitempty"`
-	StreamCategory  string                 `json:"streamCategory,omitempty"`
-	StartedAt       *time.Time             `json:"startedAt,omitempty"`
-	MinuteTS        *time.Time             `json:"minuteTs,omitempty"`
-	OffsetSeconds   int                    `json:"offsetSeconds"`
-	StartSeconds    int                    `json:"startSeconds"`
-	EndSeconds      int                    `json:"endSeconds"`
-	Score           int                    `json:"score"`
-	Confidence      float64                `json:"confidence,omitempty"`
-	Reason          string                 `json:"reason"`
-	ChatCount       int                    `json:"chatCount,omitempty"`
-	EmoteCount      int                    `json:"emoteCount,omitempty"`
-	ViewerCount     int                    `json:"viewerCount,omitempty"`
-	TopEmotes       []ClipCandidateEmote   `json:"topEmotes,omitempty"`
-	SourceKind      string                 `json:"sourceKind"`
-	CoverageState   string                 `json:"coverageState,omitempty"`
-	SourceStatus    string                 `json:"sourceStatus"`
-	SourceCheckedAt *time.Time             `json:"sourceCheckedAt,omitempty"`
-	Signals         map[string]interface{} `json:"signals,omitempty"`
-	State           *ClipCandidateState    `json:"state,omitempty"`
-	Job             *ClipCandidateJob      `json:"job,omitempty"`
-	CreatedAt       time.Time              `json:"createdAt,omitempty"`
-	UpdatedAt       time.Time              `json:"updatedAt,omitempty"`
+	ID                  string                 `json:"id"`
+	Login               string                 `json:"login"`
+	StreamID            string                 `json:"streamId"`
+	VodID               *string                `json:"vodId,omitempty"`
+	StreamTitle         string                 `json:"streamTitle,omitempty"`
+	StreamCategory      string                 `json:"streamCategory,omitempty"`
+	StartedAt           *time.Time             `json:"startedAt,omitempty"`
+	MinuteTS            *time.Time             `json:"minuteTs,omitempty"`
+	OffsetSeconds       int                    `json:"offsetSeconds"`
+	StartSeconds        int                    `json:"startSeconds"`
+	EndSeconds          int                    `json:"endSeconds"`
+	Score               int                    `json:"score"`
+	Confidence          float64                `json:"confidence,omitempty"`
+	Reason              string                 `json:"reason"`
+	PickReason          string                 `json:"pickReason,omitempty"`
+	ConfidenceBand      string                 `json:"confidenceBand,omitempty"`
+	InboxState          string                 `json:"inboxState,omitempty"`
+	RenderabilityStatus string                 `json:"renderabilityStatus,omitempty"`
+	StatusCopy          string                 `json:"statusCopy,omitempty"`
+	ChatCount           int                    `json:"chatCount,omitempty"`
+	EmoteCount          int                    `json:"emoteCount,omitempty"`
+	ViewerCount         int                    `json:"viewerCount,omitempty"`
+	TopEmotes           []ClipCandidateEmote   `json:"topEmotes,omitempty"`
+	SourceKind          string                 `json:"sourceKind"`
+	CoverageState       string                 `json:"coverageState,omitempty"`
+	SourceStatus        string                 `json:"sourceStatus"`
+	SourceCheckedAt     *time.Time             `json:"sourceCheckedAt,omitempty"`
+	Signals             map[string]interface{} `json:"signals,omitempty"`
+	State               *ClipCandidateState    `json:"state,omitempty"`
+	Job                 *ClipCandidateJob      `json:"job,omitempty"`
+	CreatedAt           time.Time              `json:"createdAt,omitempty"`
+	UpdatedAt           time.Time              `json:"updatedAt,omitempty"`
 }
 
 type ClipCandidateState struct {
@@ -308,6 +314,7 @@ func BuildClipCandidatesFromRecap(stream *StreamRecord, rec recap.StreamRecap, o
 			}
 		}
 		reason := firstClipReason(moment.Reasons)
+		pickReason := clipCandidatePickReasonFromMoment(moment)
 		vodID := candidateVodID(stream, rec)
 		sourceStatus := ClipCandidateSourceMissing
 		if vodID != nil && strings.TrimSpace(*vodID) != "" {
@@ -339,6 +346,7 @@ func BuildClipCandidatesFromRecap(stream *StreamRecord, rec recap.StreamRecap, o
 			Score:          clipClampInt(moment.Score, 0, 100),
 			Confidence:     clipClampFloat(moment.Confidence, 0, 1),
 			Reason:         reason,
+			PickReason:     pickReason,
 			ChatCount:      clipMaxInt(0, moment.ChatCount),
 			EmoteCount:     clipMaxInt(0, moment.EmoteCount),
 			ViewerCount:    clipMaxInt(0, moment.ViewerCount),
@@ -351,8 +359,10 @@ func BuildClipCandidatesFromRecap(stream *StreamRecord, rec recap.StreamRecap, o
 				"emoteCount":  clipMaxInt(0, moment.EmoteCount),
 				"viewerCount": clipMaxInt(0, moment.ViewerCount),
 				"confidence":  clipClampFloat(moment.Confidence, 0, 1),
+				"pickReason":  pickReason,
 			},
 		}
+		enrichClipCandidateInbox(&candidate)
 		out = append(out, candidate)
 		if opts.MaxCandidatesPerHour > 0 {
 			perHour[moment.OffsetSeconds/3600]++

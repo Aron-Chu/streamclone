@@ -112,6 +112,106 @@ func TestBuildClipCandidatesFromRecapMarksMissingSourceWithoutVod(t *testing.T) 
 	if got[0].StartSeconds != 70 || got[0].EndSeconds != 120 {
 		t.Fatalf("candidate range = %d-%d, want 70-120", got[0].StartSeconds, got[0].EndSeconds)
 	}
+	if got[0].InboxState != ClipCandidateInboxNeedsSource {
+		t.Fatalf("inbox state = %q, want needs_source", got[0].InboxState)
+	}
+	if got[0].RenderabilityStatus != ClipCandidateRenderabilityNotRenderable {
+		t.Fatalf("renderability = %q, want not_renderable", got[0].RenderabilityStatus)
+	}
+	if got[0].StatusCopy == "" {
+		t.Fatal("status copy must explain missing source")
+	}
+}
+
+func TestBuildClipCandidatesFromRecapLabelsEmoteSpikeOnlyCandidates(t *testing.T) {
+	startedAt := time.Date(2026, 7, 4, 19, 0, 0, 0, time.UTC)
+	stream := &StreamRecord{
+		StreamID:  "stream-emote-only",
+		Login:     "xqc",
+		StartedAt: startedAt,
+		VodID:     "vod-emote-only",
+	}
+	rec := recap.StreamRecap{
+		StreamID:        "stream-emote-only",
+		Login:           "xqc",
+		DurationSeconds: 600,
+		ClipCandidates: []recap.Moment{{
+			OffsetSeconds: 120,
+			Score:         88,
+			Confidence:    0.82,
+			Reasons:       []string{"emote_spike"},
+			ChatCount:     12,
+			EmoteCount:    240,
+		}},
+	}
+
+	got := BuildClipCandidatesFromRecap(stream, rec, ClipCandidateBuildOptions{})
+	if len(got) != 1 {
+		t.Fatalf("len(candidates) = %d, want 1", len(got))
+	}
+	if got[0].PickReason != ClipCandidatePickEmoteSpikeOnly {
+		t.Fatalf("pick reason = %q, want emote_spike_only", got[0].PickReason)
+	}
+	if got[0].InboxState != ClipCandidateInboxLowConfidence {
+		t.Fatalf("inbox state = %q, want low_confidence", got[0].InboxState)
+	}
+	if got[0].ConfidenceBand != ClipCandidateConfidenceLow {
+		t.Fatalf("confidence band = %q, want low", got[0].ConfidenceBand)
+	}
+}
+
+func TestBuildClipCandidatesFromRecapMarksQueueableWhenSourceAvailable(t *testing.T) {
+	startedAt := time.Date(2026, 7, 4, 19, 0, 0, 0, time.UTC)
+	stream := &StreamRecord{
+		StreamID:  "stream-queueable",
+		Login:     "xqc",
+		StartedAt: startedAt,
+		VodID:     "vod-queueable",
+	}
+	rec := recap.StreamRecap{
+		StreamID:        "stream-queueable",
+		Login:           "xqc",
+		DurationSeconds: 600,
+		ClipCandidates: []recap.Moment{{
+			OffsetSeconds: 120,
+			Score:         91,
+			Confidence:    0.88,
+			Reasons:       []string{"chat_spike"},
+			ChatCount:     320,
+			EmoteCount:    90,
+		}},
+	}
+
+	got := BuildClipCandidatesFromRecap(stream, rec, ClipCandidateBuildOptions{})
+	if len(got) != 1 {
+		t.Fatalf("len(candidates) = %d, want 1", len(got))
+	}
+	if got[0].InboxState != ClipCandidateInboxQueueable {
+		t.Fatalf("inbox state = %q, want queueable", got[0].InboxState)
+	}
+	if got[0].RenderabilityStatus != ClipCandidateRenderabilityQueueable {
+		t.Fatalf("renderability = %q, want queueable", got[0].RenderabilityStatus)
+	}
+}
+
+func TestClipCandidateRenderabilityUsesJobWithoutClaimingPlaybackReady(t *testing.T) {
+	candidate := ClipCandidate{
+		SourceStatus: ClipCandidateSourceAvailable,
+		Reason:       "chat_spike",
+		ChatCount:    200,
+		EmoteCount:   80,
+		Confidence:   0.9,
+		Job: &ClipCandidateJob{
+			Status: ClipCandidateJobReady,
+		},
+	}
+	enrichClipCandidateInbox(&candidate)
+	if candidate.RenderabilityStatus != ClipCandidateRenderabilityWorkerReadyUnverified {
+		t.Fatalf("renderability = %q, want worker_ready_unverified", candidate.RenderabilityStatus)
+	}
+	if strings.Contains(strings.ToLower(candidate.StatusCopy), "playable") {
+		t.Fatalf("status copy must not claim playback ready: %q", candidate.StatusCopy)
+	}
 }
 
 func TestBuildClipCandidatesFromRecapAppliesQualityFilters(t *testing.T) {
@@ -766,6 +866,7 @@ func TestClipCandidateJSONOmitsPrivateAndRawFields(t *testing.T) {
 			Status:      ClipCandidateStatusNew,
 		},
 	}
+	enrichClipCandidateInbox(&candidate)
 	body, err := json.Marshal(candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -776,7 +877,7 @@ func TestClipCandidateJSONOmitsPrivateAndRawFields(t *testing.T) {
 		"token", "webhook", "principalId", "principalKind",
 	})
 	raw := string(body)
-	for _, required := range []string{"topEmotes", "sourceStatus", "state", "offsetSeconds"} {
+	for _, required := range []string{"topEmotes", "sourceStatus", "state", "offsetSeconds", "pickReason", "inboxState", "renderabilityStatus", "statusCopy"} {
 		if !strings.Contains(raw, required) {
 			t.Fatalf("candidate json missing %q: %s", required, raw)
 		}
