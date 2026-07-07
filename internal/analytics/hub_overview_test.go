@@ -311,6 +311,48 @@ func TestGetPublicHubRouteIsOpen(t *testing.T) {
 	}
 }
 
+func TestGetPublicHubCacheControlHeaders(t *testing.T) {
+	h := &Handler{pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret"}}}
+	r := chi.NewRouter()
+	h.Routes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/public/hub?activityWindow=30m", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	want := "public, max-age=15, s-maxage=30, stale-while-revalidate=60"
+	if got := rec.Header().Get("Cache-Control"); got != want {
+		t.Fatalf("Cache-Control = %q, want %q", got, want)
+	}
+	if xCache := rec.Header().Get("X-Cache"); xCache != "HIT" && xCache != "MISS" {
+		t.Fatalf("X-Cache = %q, want HIT or MISS", xCache)
+	}
+}
+
+func TestPublicHubPayloadListCaps(t *testing.T) {
+	// Guardrails for hosted-safe fanout payload size — keep in sync with portal UI expectations.
+	if hubLiveCap != 96 {
+		t.Fatalf("hubLiveCap = %d, want 96", hubLiveCap)
+	}
+	if hubMoversCap != 12 {
+		t.Fatalf("hubMoversCap = %d, want 12", hubMoversCap)
+	}
+	if hubEmotesCap != 12 {
+		t.Fatalf("hubEmotesCap = %d, want 12", hubEmotesCap)
+	}
+	if hubMomentsCap != 12 {
+		t.Fatalf("hubMomentsCap = %d, want 12", hubMomentsCap)
+	}
+	if hubActivityMaxPoints != 240 {
+		t.Fatalf("hubActivityMaxPoints = %d, want 240", hubActivityMaxPoints)
+	}
+	if hubActivityBucketTopEmotesCap != 10 {
+		t.Fatalf("hubActivityBucketTopEmotesCap = %d, want 10", hubActivityBucketTopEmotesCap)
+	}
+}
+
 func TestForwardFillTop500ViewerTrail(t *testing.T) {
 	bucketT := int64(1_719_000_000_000)
 	nextT := bucketT + 6*60_000
