@@ -48,7 +48,7 @@ Historical Pulse Wire notes: [`.kiro/steering/pulse-wire.md`](.kiro/steering/pul
 4. **Use the code graph MCP** before grepping the whole tree (`get_ast_chunk`, `get_blast_radius`).
 5. **Route through Caddy** — browser and probes use `http://localhost:8090`, not raw service ports.
 6. **Summarize API payloads** — do not paste full JSON into chat.
-7. **Never commit secrets** — `.env`, tokens, `oauth-bundle.env`, machine-specific `.cursor/mcp.json`.
+7. **Never commit secrets or production topology** — `.env`, tokens, `oauth-bundle.env`, machine-specific `.cursor/mcp.json`; also no host IPs, SSH fingerprints, VPS paths, operator runbooks, or deploy evidence (private **streampulse-ops** only). See [`docs/security.md`](docs/security.md) § Public repo boundary.
 8. **Never edit applied migrations** — add new migration files only.
 9. **Run narrow tests first**, then `make check-quick` or `make check` before a PR.
 10. **Update steering/docs** after scraper, analytics, install, OAuth, or large frontend changes; run `make codegraph` when symbols move.
@@ -110,7 +110,7 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 | Clipper (legacy stub) | `.kiro/steering/clipper.md`, `clipper/README.md` | Deprecated in compose |
 | System health / optional services | `.kiro/steering/windows-dev.md` | `stack_health`, `get_ast_chunk("SystemHealthPanel")` |
 | Scraping archive / Azure blob backfill | `docs/scraping-archive/requirements.md` | `get_ast_chunk("SyncService")` |
-| **Hosted production (operator)** | [`docs/hosted-production-vps.md`](docs/hosted-production-vps.md) (**SSH:** `root` + `~/.ssh/id_ed25519` via Tailscale `hosted-production-vps`), [`docs/ops-migration-truth-table.md`](docs/ops-migration-truth-table.md) (tags vs private ops FAQ), [`docs/production-promotion-contract.md`](docs/production-promotion-contract.md), [`docs/production-artifact-contract.md`](docs/production-artifact-contract.md), sibling [image exit audit](../streamclone-pulse/docs/pulse-extension/evidence/streamclone-image-exit-audit-2026-07.md), private **streampulse-ops**, sibling [`improvements.md`](../streamclone-pulse/docs/pulse-extension/evidence/improvements.md) | `curl https://api.streampulse.stream/v1/extension/health`, `bash scripts/hosted-launch-probes.sh`, `bash scripts/ops/ssh-access-preflight.sh` |
+| **Hosted production (operator)** | [`docs/hosted-production-ops.md`](docs/hosted-production-ops.md), [`docs/ops-migration-truth-table.md`](docs/ops-migration-truth-table.md), [`docs/production-promotion-contract.md`](docs/production-promotion-contract.md), [`docs/production-artifact-contract.md`](docs/production-artifact-contract.md), sibling [image exit audit](../streamclone-pulse/docs/pulse-extension/evidence/streamclone-image-exit-audit-2026-07.md), private **streampulse-ops**, sibling [`improvements.md`](../streamclone-pulse/docs/pulse-extension/evidence/improvements.md) | `curl https://api.streampulse.stream/v1/extension/health`, `bash scripts/hosted-launch-probes.sh` (public API only) |
 | **BearHost rollback (operator)** | private **streampulse-ops** `archive/bearhost/` | stub: [`docs/bearhost-production.md`](docs/bearhost-production.md) |
 | **Azure archive → R2 migration / storage SoT** | [`docs/storage/README.md`](docs/storage/README.md), [`docs/storage/azure-to-r2-migration.md`](docs/storage/azure-to-r2-migration.md) | Read-only inventory: `scripts/storage/azure-prefix-inventory.sh` |
 | Security / secrets | `SECURITY.md`, `docs/security.md` | `make security-scan` |
@@ -192,7 +192,7 @@ Load the matching skill from `.cursor/skills/streamclone/` when the task fits (r
 | Release | `VERSION`, `.github/workflows/release-images.yml` | Tag push triggers GHCR + Setup.exe |
 | Production promotion | `docs/production-promotion-contract.md`, sibling image exit audit | Pre-cutover: `streamclone/*`; target: promoted `streampulse/*` by digest |
 | Agent config | `.cursor/mcp.json` | Gitignored; use `*.example` only |
-| VPS SSH (hosted ops) | Operator WSL `~/.ssh/id_ed25519` → `operator-host` | Not in git; BearHost keys rejected; `aron-wsl` not authorized yet — see [`docs/hosted-production-vps.md`](docs/hosted-production-vps.md) |
+| Hosted ops (private) | private **streampulse-ops** checkout | SSH, deploy scripts, and runbooks never belong in this public repo |
 
 ---
 

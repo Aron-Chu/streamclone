@@ -1,40 +1,30 @@
-# Public ops cleanup inventory (prep PR)
+# Public ops cleanup inventory
 
-**Branch:** `chore/public-ops-cleanup-prep`
-**Base:** `origin/master` (`1557d75`)
-**Private mirror:** `Aron-Chu/streampulse-ops` (`0840cd2`)
+**Status:** Executed 2026-07-07 — operator artifacts mirrored to private **streampulse-ops** at `b8d595f`, then removed from public tree.
 
-This PR removes host-specific production ops from public **streamclone** after private import validation. **Do not merge** until post-cutover soak is stable and explicitly approved.
+Private mirror: `streampulse-ops/archive/public-import/2026-07-07/`
 
-## Removed from public streamclone → streampulse-ops mapping
+## Removed from public streamclone
 
-| Category | Public paths removed | Private destination | Status |
-|----------|---------------------|-------------------|--------|
-| BearHost scripts | `scripts/bearhost*`, `scripts/lib/bearhost*` | `archive/bearhost/` | archived |
-| VPS deploy scripts | `scripts/hosted-production-vps*`, `scripts/lib/hosted-production-vps-production-compose.sh` | `scripts/deploy/`, `archive/deploy-legacy/` | active + archived |
-| BearHost compose | `deploy/docker-compose.bearhost*` | `archive/bearhost/` | archived |
-| VPS compose overlays | `deploy/docker-compose.hosted-production-vps*` | `compose/production/overlays/`, `compose/archive/` | active |
-| VPS env example | `deploy/env/profile-hosted-production-vps-production.env.example` | `env/examples/production.env.example` | active |
-| BearHost env | `deploy/env/profile-bearhost*` | `archive/bearhost/` | archived |
-| Grafana/Prometheus | `deploy/grafana/`, `deploy/prometheus/` | obsolete (ops UI strip 2026-07) | documented removed |
-| Helm | `scripts/helm-*`, `charts/pulse/` | obsolete | documented removed |
-| Observability compose | `deploy/docker-compose.observability*.yml` | obsolete | documented removed |
-| Host runbooks | `docs/agent-notes/*vps*`, `docs/launch-readiness/` | `docs/deployments/`, `docs/architecture/` | active in private |
-| BearHost doc (full) | *(replaced earlier)* | `archive/bearhost/bearhost-production.md` | stub remains public |
+| Category | Public paths removed | Private destination |
+|----------|---------------------|---------------------|
+| Ops scripts | `scripts/ops/*`, `scripts/load/hosted-*`, `scripts/load/pulse-load-*`, `scripts/cloudflared-tunnel-token-rotate.sh`, `scripts/batch-q-*` | `archive/public-import/2026-07-07/` + active private scripts |
+| Ops runbooks | `docs/ops/**` (replaced by stub README) | private ops |
+| Operator host doc | `docs/hosted-production-vps.md` (replaced by stub) | private ops |
+| Deploy evidence | `docs/agent-notes/*hosted*`, `docs/pulse-extension/*evidence*.txt` with host topology | private ops |
+| Internal ops smoke | `deploy/smoke/hosted-internal-ops-smoke.sh` | private ops |
+| Migration internals | `migration-baseline.md`, `docs/ops-migration-plan.md`, `docs/ops-migration-prepared-report.md` | private ops |
 
 ## Stays in public streamclone
 
-- App code, migrations, local compose (`deploy/docker-compose.yml`, `release.yml`, `prod.yml`, `laptopworker-dev`)
-- CI / GHCR release workflows
-- `scripts/ops-stub.sh`, `make up`, `make compose-config-check`
-- Stubs: `docs/bearhost-production.md`, `docs/hosted-production-ops.md`, `docs/production-artifact-contract.md`
+- App code, migrations, local compose, CI / GHCR release workflows
+- `scripts/ops-stub.sh` and **public-API-only** `scripts/hosted-launch-probes.sh`
+- Contract docs (redacted): `production-artifact-contract.md`, `production-promotion-contract.md`, `hosted-production-ops.md`
+- Env templates: `deploy/env/profile-hosted-*.env.example`
+- Public API smoke: `deploy/smoke/test-*-hosted.sh`
 
-## Desktop bundle
+## History rewrite
 
-`scripts/package-release.sh` uses rsync allowlists + filename audit — no `*bearhost*`, `*hosted-production-vps*`, `grafana/`, `prometheus/`, `charts/pulse/` in `dist/streamclone-*`.
+After merge, run `scripts/ops/run-filter-repo-redaction.sh` from a **mirror clone** (path removal + identifier redaction). Force-push only after fresh-clone audit.
 
-## Merge gate
-
-- [ ] Soak stable on `v0.3.0-rc7` (hub not critical/missing; containers healthy)
-- [ ] Explicit operator approval
-- [ ] **Not** before `v0.3.0-rc8` packaging decision
+**Do not** push pre-redaction backup refs to public GitHub.

@@ -56,9 +56,9 @@ Pre-cutover: private compose may still list `streamclone/*` names. Reconcile run
 
 ## Required private manifest fields
 
-Copy template: [`docs/ops/promotion-manifest.template.md`](ops/promotion-manifest.template.md)
+Copy template from **private streampulse-ops** (not committed in this public repo).
 
-Every promotion in `streampulse-ops/docs/deployments/` must record:
+Every promotion in private `streampulse-ops/docs/deployments/` must record:
 
 | Field | Purpose |
 |-------|---------|
@@ -88,7 +88,7 @@ Phase 0 VPS reconcile (from exit audit) must exist **before** changing productio
 
 ## Operator entrypoints
 
-Public runbooks and probes: [`hosted-production-ops.md`](hosted-production-ops.md), [`hosted-production-vps.md`](hosted-production-vps.md)
+Public contracts: [`hosted-production-ops.md`](hosted-production-ops.md), [`production-artifact-contract.md`](production-artifact-contract.md)
 
 Private (streampulse-ops only):
 

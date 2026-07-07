@@ -1,0 +1,35 @@
+---
+description: Public repo boundary — never commit hosted production topology or operator runbooks
+alwaysApply: true
+---
+
+# Public repo boundary (Streamclone)
+
+This repository is **application source, local dev, CI, and contracts only**.
+
+## Never commit to this public repo
+
+- Production host IPs (`141.11.243.*`, `23.173.152.*`, or similar)
+- SSH fingerprints, `root@…` accounts, or private key path names used for production
+- Private ops checkout paths, production env file paths, or live env values
+- Operator runbooks under `docs/ops/` (except the stub README)
+- VPS deploy/smoke scripts (`scripts/ops/*`, SSH launch probes, soak loops)
+- Deploy evidence files with host topology
+
+## Where hosted ops live
+
+**Private streampulse-ops** — deploy, secrets, SSH probes, promotion manifests, soak evidence.
+
+## Safe public checks
+
+```bash
+curl -fsS https://api.streampulse.stream/v1/extension/health
+bash scripts/hosted-launch-probes.sh
+make smoke   # local stack only
+```
+
+## When adding docs
+
+Use generic labels: `legacy-rollback-host`, `hosted-production-vps`, `private-streampulse-ops-checkout`.
+
+Do not reintroduce resolvable infrastructure names as SSH/deploy targets.

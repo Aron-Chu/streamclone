@@ -59,21 +59,19 @@ Hosted promotion details: [`production-promotion-contract.md`](production-promot
 
 - Pull service images by pinned `IMAGE_TAG` (pre-cutover: `streamclone/*`; target: promoted `streampulse/*`) — no app source bind mounts in default production path.
 - Run `migrate` from a digest compatible with the API/workers source revision.
-- Store secrets on host (`/etc/streamclone/secrets/`) — never in git.
-- Run smoke after deploy; record evidence in `docs/deployments/`.
+- Store secrets on the production host — never in git.
+- Run smoke after deploy; record evidence in private `streampulse-ops/docs/deployments/`.
 - Keep deployed version env aligned with `IMAGE_TAG` (host checkout `VERSION` is not deploy truth).
-- Set `PULSE_OPS_PROBE_TOKEN` for operator routes `/v1/internal/ops/*` (readiness + launch snapshot).
-- Use public templates: [`docs/ops/promotion-manifest.template.md`](ops/promotion-manifest.template.md), [`docs/ops/cap250-soak-runbook.md`](ops/cap250-soak-runbook.md).
+- Configure internal ops probe tokens on the host only (private ops runbooks).
 
-Operator probes (from laptop with SSH):
+Public repo safe checks:
 
 ```bash
-bash scripts/hosted-launch-probes.sh          # PULSE_PROBE_SSH_TARGET + token on host
-bash scripts/ops/hosted-promotion-reconcile.sh # on VPS — tag/digest checklist
-curl -H "X-Ops-Probe-Token: $TOKEN" http://127.0.0.1:8090/v1/internal/ops/launch-snapshot
+curl -fsS https://api.streampulse.stream/v1/extension/health
+bash scripts/hosted-launch-probes.sh
 ```
 
-Public `/v1/analytics/top100/readiness` stays blocked at the Caddy edge; launch probes use the internal ops path above.
+Internal ops routes and SSH probes are documented in **private streampulse-ops** only.
 
 ## Rollback
 
