@@ -14,7 +14,8 @@ import (
 
 const (
 	publicHubMomentsCachePrefix = "sp:public:hub:moments"
-	publicHubMomentsCacheTTL    = 2 * time.Minute
+	publicHubMomentsOpenTTL     = 2 * time.Minute
+	publicHubMomentsClosedTTL   = 45 * time.Minute
 	publicHubMomentsEmptyTTL    = 20 * time.Second
 	hubHistoricalMomentsCap     = 10
 	hubHistoricalCandidateCap   = 40
@@ -75,6 +76,16 @@ func (h *Handler) getPublicHubMoments(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("X-Cache", "MISS")
 	}
+	now := time.Now().UTC()
+	bucketEnd := payload.BucketEnd
+	if bucketEnd.IsZero() {
+		_, bucketEnd = hubBucketTimeRange(bucketT, opts.ActivityWindowMinutes)
+	}
+	if bucketEnd.Before(now) {
+		w.Header().Set("Cache-Control", "public, max-age=900, s-maxage=3600, stale-while-revalidate=300")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=15, s-maxage=30")
+	}
 	writeJSON(w, http.StatusOK, payload)
 }
 
@@ -128,22 +139,44 @@ func (h *Handler) loadPublicHubMoments(ctx context.Context, forceRefresh bool, o
 			}
 		}
 	}
-	payload, err := h.buildPublicHubMoments(ctx, opts, bucketT, limit)
+	v, err, _ := h.hubGroup.Do(cacheKey, func() (any, error) {
+		if !forceRefresh && h.rdb != nil {
+			if cached, err := h.rdb.Get(ctx, cacheKey).Bytes(); err == nil && len(cached) > 0 {
+				var payload PublicHubMomentsResponse
+				if json.Unmarshal(cached, &payload) == nil {
+					return payload, nil
+				}
+			}
+		}
+		payload, err := h.buildPublicHubMoments(ctx, opts, bucketT, limit)
+		if err != nil {
+			return PublicHubMomentsResponse{}, err
+		}
+		if h.rdb != nil {
+			body, _ := json.Marshal(payload)
+			now := time.Now().UTC()
+			bucketEnd := payload.BucketEnd
+			if bucketEnd.IsZero() {
+				_, bucketEnd = hubBucketTimeRange(bucketT, opts.ActivityWindowMinutes)
+			}
+			_ = h.rdb.Set(ctx, cacheKey, body, publicHubMomentsCacheTTLForPayload(payload, bucketEnd, now)).Err()
+		}
+		return payload, nil
+	})
 	if err != nil {
 		return PublicHubMomentsResponse{}, false, err
 	}
-	if h.rdb != nil {
-		body, _ := json.Marshal(payload)
-		_ = h.rdb.Set(ctx, cacheKey, body, publicHubMomentsCacheTTLForPayload(payload)).Err()
-	}
-	return payload, false, nil
+	return v.(PublicHubMomentsResponse), false, nil
 }
 
-func publicHubMomentsCacheTTLForPayload(payload PublicHubMomentsResponse) time.Duration {
-	if payload.Status == "empty" && payload.Reason == "no_corpus_peaks_in_bucket" {
+func publicHubMomentsCacheTTLForPayload(payload PublicHubMomentsResponse, bucketEnd time.Time, now time.Time) time.Duration {
+	if payload.Status == "empty" {
 		return publicHubMomentsEmptyTTL
 	}
-	return publicHubMomentsCacheTTL
+	if bucketEnd.Before(now) {
+		return publicHubMomentsClosedTTL
+	}
+	return publicHubMomentsOpenTTL
 }
 
 func (h *Handler) buildPublicHubMoments(ctx context.Context, opts publicHubOptions, bucketT int64, limit int) (PublicHubMomentsResponse, error) {

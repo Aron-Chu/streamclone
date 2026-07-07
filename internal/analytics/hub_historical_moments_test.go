@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -119,20 +120,70 @@ func TestPublicHubMomentsStoreErrorReturns503(t *testing.T) {
 }
 
 func TestPublicHubMomentsCacheTTLForEmptyBucketIsShort(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	closedEnd := now.Add(-time.Hour)
+	openEnd := now.Add(time.Hour)
+
 	empty := PublicHubMomentsResponse{Status: "empty", Reason: "no_corpus_peaks_in_bucket"}
-	if got := publicHubMomentsCacheTTLForPayload(empty); got != publicHubMomentsEmptyTTL {
+	if got := publicHubMomentsCacheTTLForPayload(empty, closedEnd, now); got != publicHubMomentsEmptyTTL {
 		t.Fatalf("empty ttl = %v, want %v", got, publicHubMomentsEmptyTTL)
 	}
-	if publicHubMomentsEmptyTTL >= publicHubMomentsCacheTTL {
-		t.Fatalf("empty ttl %v must be shorter than normal ttl %v", publicHubMomentsEmptyTTL, publicHubMomentsCacheTTL)
+	if publicHubMomentsEmptyTTL >= publicHubMomentsOpenTTL {
+		t.Fatalf("empty ttl %v must be shorter than open ttl %v", publicHubMomentsEmptyTTL, publicHubMomentsOpenTTL)
 	}
-	ready := PublicHubMomentsResponse{Status: "ready"}
-	if got := publicHubMomentsCacheTTLForPayload(ready); got != publicHubMomentsCacheTTL {
-		t.Fatalf("ready ttl = %v, want %v", got, publicHubMomentsCacheTTL)
+
+	readyClosed := PublicHubMomentsResponse{Status: "ready"}
+	if got := publicHubMomentsCacheTTLForPayload(readyClosed, closedEnd, now); got != publicHubMomentsClosedTTL {
+		t.Fatalf("closed ready ttl = %v, want %v", got, publicHubMomentsClosedTTL)
 	}
+
+	readyOpen := PublicHubMomentsResponse{Status: "ready"}
+	if got := publicHubMomentsCacheTTLForPayload(readyOpen, openEnd, now); got != publicHubMomentsOpenTTL {
+		t.Fatalf("open ready ttl = %v, want %v", got, publicHubMomentsOpenTTL)
+	}
+
 	storeUnavailable := PublicHubMomentsResponse{Status: "empty", Reason: "store_unavailable"}
-	if got := publicHubMomentsCacheTTLForPayload(storeUnavailable); got != publicHubMomentsCacheTTL {
-		t.Fatalf("store unavailable ttl = %v, want %v", got, publicHubMomentsCacheTTL)
+	if got := publicHubMomentsCacheTTLForPayload(storeUnavailable, openEnd, now); got != publicHubMomentsEmptyTTL {
+		t.Fatalf("store unavailable ttl = %v, want %v", got, publicHubMomentsEmptyTTL)
+	}
+}
+
+func TestPublicHubMomentsCacheControl_closedBucket(t *testing.T) {
+	h := &Handler{}
+	bucketT := time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC).UnixMilli()
+	req := httptest.NewRequest(http.MethodGet, "/v1/public/hub/moments?bucketT="+strconv.FormatInt(bucketT, 10)+"&activityWindow=24h", nil)
+	rec := httptest.NewRecorder()
+
+	h.getPublicHubMoments(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	want := "public, max-age=900, s-maxage=3600, stale-while-revalidate=300"
+	if got := rec.Header().Get("Cache-Control"); got != want {
+		t.Fatalf("Cache-Control = %q, want %q", got, want)
+	}
+}
+
+func TestPublicHubMomentsCacheControl_openBucket(t *testing.T) {
+	h := &Handler{}
+	now := time.Now().UTC()
+	windowMinutes := 24 * 60
+	bucketMinutes := hubActivityBucketMinutes(windowMinutes)
+	bucketMs := int64(bucketMinutes) * 60 * 1000
+	bucketT := (now.UnixMilli() / bucketMs) * bucketMs
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/public/hub/moments?bucketT="+strconv.FormatInt(bucketT, 10)+"&activityWindow=24h", nil)
+	rec := httptest.NewRecorder()
+
+	h.getPublicHubMoments(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	want := "public, max-age=15, s-maxage=30"
+	if got := rec.Header().Get("Cache-Control"); got != want {
+		t.Fatalf("Cache-Control = %q, want %q", got, want)
 	}
 }
 
