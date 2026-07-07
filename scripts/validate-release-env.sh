@@ -49,7 +49,7 @@ assert_eq() {
   fi
 }
 
-assert_eq PULSE_WIRE_ENABLED true
+assert_eq PULSE_WIRE_ENABLED false
 assert_eq REDDIT_COMMERCIAL_OK true
 assert_eq TWITCH_DEV_TOKEN_IMPORT_ENABLED false
 
@@ -65,4 +65,4 @@ if [ "$bundle_tag" != "$VERSION" ]; then
   exit 1
 fi
 
-echo "validate-release-env: OK (core profile, IMAGE_TAG=$VERSION, Pulse Wire defaults)"
+echo "validate-release-env: OK (core profile, IMAGE_TAG=$VERSION, Pulse Wire off in desktop bundle)"
