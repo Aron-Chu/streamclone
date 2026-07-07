@@ -26,7 +26,7 @@ Small index for docs, cleanup, and install bug-fix notes.
 | [docs/storage/README.md](storage/README.md) | Storage SoT index — Azure authoritative, R2 planned, VOD Library direction |
 | [docs/storage/azure-to-r2-migration.md](storage/azure-to-r2-migration.md) | Azure → R2 migration audit (Phase 0.6 inventory, Phase 1 prep) |
 | [docs/agents-streamclone-and-replayforge.md](agents-streamclone-and-replayforge.md) | Clip Studio / ReplayForge boundary |
-| [deploy/FREE_DEPLOYMENT.md](../deploy/FREE_DEPLOYMENT.md) | Public VM notes |
+| [docs/production-artifact-contract.md](production-artifact-contract.md) | GHCR image tags and ops deploy contract |
 
 Agent docs live in `AGENTS.md`, `.kiro/steering/`, `.cursor/skills/streamclone/`, and `tools/*/README.md`.
 
@@ -46,6 +46,37 @@ Enable:
 - Dependabot security updates
 - branch protection on `master`
 - required CI and CodeQL checks
+
+### Branch protection on `master` (exact)
+
+Required status check names (must match job `name:` in `.github/workflows/ci.yml`):
+
+- `Secret scan`
+- `Full gate (make check)`
+- `Code graph rebuild`
+- `Core compose smoke`
+
+Optional: add CodeQL job name from `.github/workflows/codeql.yml` after verifying in Actions UI.
+
+```bash
+gh api --method PUT \
+  -H "Accept: application/vnd.github+json" \
+  repos/Aron-Chu/streamclone/branches/master/protection \
+  -f required_status_checks[strict]=true \
+  -f required_status_checks[contexts][]='Secret scan' \
+  -f required_status_checks[contexts][]='Full gate (make check)' \
+  -f required_status_checks[contexts][]='Code graph rebuild' \
+  -f required_status_checks[contexts][]='Core compose smoke' \
+  -f enforce_admins=true \
+  -f required_pull_request_reviews[required_approving_review_count]=1 \
+  -f restrictions=null \
+  -f allow_force_pushes=false \
+  -f allow_deletions=false
+```
+
+Verify: `gh api repos/Aron-Chu/streamclone/branches/master/protection --jq '.required_status_checks.contexts'`
+
+If API returns 403, document these settings manually in GitHub → Settings → Branches.
 
 ## Naming
 
