@@ -11,7 +11,7 @@ import (
 func TestEmoteAssetRoutesProxyToEmoteService(t *testing.T) {
 	files := map[string][]string{
 		"Caddyfile":      {"Caddyfile", "Caddyfile.local-tunnel", "Caddyfile.pulse-api"},
-		"nginx.conf":     {"../frontend/nginx.conf", "nginx.bearhost.conf"},
+		"nginx.conf":     {"../frontend/nginx.conf"},
 		"vite.config.ts": {"../frontend/vite.config.ts"},
 	}
 
