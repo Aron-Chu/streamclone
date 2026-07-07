@@ -98,7 +98,7 @@ Some services cache env at start; prefer `reload-env` over editing running conta
 | **Dev repo** | `.env.example` + `profile-dev.env`, `TWITCH_DEV_TOKEN_IMPORT_ENABLED` may be true |
 | **Desktop install** | `%USERPROFILE%\streamclone` — not this checkout; fixes ship via git tag |
 | **CI / release compose** | `deploy/docker-compose.release.yml`, `deploy/docker-compose.prod.yml` — validated by `make compose-config-check` |
-| **Production deploy** | Private **streampulse-ops** + pinned `IMAGE_TAG` — see [production-artifact-contract.md](production-artifact-contract.md) |
+| **Production deploy** | Private **streampulse-ops** + pinned `IMAGE_TAG` — see [production-promotion-contract.md](production-promotion-contract.md), [production-artifact-contract.md](production-artifact-contract.md) (source-build) |
 | **Azure hybrid** | `deploy/docker-compose.azure-scraper.yml`, `deploy/docker-compose.azure-archive-plane.yml` — `make azure-scraper-config-check`, `make azure-archive-plane-config-check` |
 
 Version tag: `VERSION` file must match git tag for `release-images.yml`.

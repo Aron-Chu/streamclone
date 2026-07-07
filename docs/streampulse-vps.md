@@ -52,15 +52,18 @@ bash scripts/pulse-hosted-boundary-smoke.sh
 
 Optional: **streamclone-hosted-data** MCP (read-only Postgres/Redis via SSH tunnel) — see [MCP.md](MCP.md) and `deploy/env/profile-hosted-data-mcp.env.example`.
 
-**Local stack** (`http://localhost:8090`) is for Streamclone backend development only — not representative hosted corpus scale.
+**Local stack** (`http://localhost:8090`) is for Streamclone backend development only — not representative hosted corpus scale. **StreamPulse portal dev** (`streampulse-web`) reads `https://api.streampulse.stream` by default; see sibling [streamclone-pulse local-dev-runbook](https://github.com/Aron-Chu/streamclone-pulse/blob/master/docs/website-portal/local-dev-runbook.md).
 
 ## Launch hardening (2026-07)
 
-Hosted production stays on **Streamclone GHCR tags** — no backend image split before public launch. Promotion discipline, caps, Redis/container limits, and soak evidence live in private **streampulse-ops**.
+**Pre-cutover:** hosted production manifests may still reference **Streamclone GHCR source tags** (`ghcr.io/aron-chu/streamclone/*`). **Target:** digest-promoted **StreamPulse images** (`ghcr.io/aron-chu/streampulse/*`) per promotion contract. Promotion discipline, caps, Redis/container limits, and soak evidence live in private **streampulse-ops**.
 
 | Doc | Location |
 |-----|----------|
-| Production artifact decision | Sibling [`streamclone-pulse/docs/pulse-extension/evidence/production-artifact-decision-2026-07.md`](../../streamclone-pulse/docs/pulse-extension/evidence/production-artifact-decision-2026-07.md) |
+| Image namespace exit audit | Sibling [`streamclone-image-exit-audit-2026-07.md`](../../streamclone-pulse/docs/pulse-extension/evidence/streamclone-image-exit-audit-2026-07.md) |
+| Production promotion contract | [docs/production-promotion-contract.md](production-promotion-contract.md) |
+| Source-build contract | [docs/production-artifact-contract.md](production-artifact-contract.md) |
+| Production artifact decision (launch) | Sibling [`production-artifact-decision-2026-07.md`](../../streamclone-pulse/docs/pulse-extension/evidence/production-artifact-decision-2026-07.md) |
 | Full review + 7-day soak plan | Sibling [`streamclone-pulse/docs/pulse-extension/evidence/improvements.md`](../../streamclone-pulse/docs/pulse-extension/evidence/improvements.md) |
 | Promotion manifest template | [docs/ops/promotion-manifest.template.md](ops/promotion-manifest.template.md) |
 | Cap-250 soak runbook | [docs/ops/cap250-soak-runbook.md](ops/cap250-soak-runbook.md) |
@@ -77,6 +80,7 @@ curl -fsS -H "X-Ops-Probe-Token: $PULSE_OPS_PROBE_TOKEN" http://127.0.0.1:8090/v
 ## Related docs
 
 - [hosted-production-ops.md](hosted-production-ops.md) — operator entrypoints
-- [production-artifact-contract.md](production-artifact-contract.md) — `IMAGE_TAG`, GHCR images, migrate invariant
+- [production-artifact-contract.md](production-artifact-contract.md) — source-build contract
+- [production-promotion-contract.md](production-promotion-contract.md) — hosted promotion contract
 - [ops-migration-manifest.md](ops-migration-manifest.md) — public vs private file boundary
 - [requirements/corpus-scaling-observability.md](requirements/corpus-scaling-observability.md) — live / VOD / corpus planes on hosted-production-vps

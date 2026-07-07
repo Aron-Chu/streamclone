@@ -1,32 +1,34 @@
-# Production artifact contract
+# Production source-build contract (Streamclone)
 
-Public contract between **Streamclone** (app source + GHCR image builds) and **streampulse-ops** (private production execution). No host IPs or operator secrets belong in this document.
+Public contract for **Streamclone CI image builds** and local/self-hosted releases. **StreamPulse hosted production promotion** (digest promotion, private compose, cutover) is defined separately in [`production-promotion-contract.md`](production-promotion-contract.md).
+
+> **Migration in progress:** Production manifests are moving from `ghcr.io/aron-chu/streamclone/*` to digest-promoted `ghcr.io/aron-chu/streampulse/*`. See sibling [streamclone-image-exit-audit-2026-07.md](../../streamclone-pulse/docs/pulse-extension/evidence/streamclone-image-exit-audit-2026-07.md). Do not claim cutover complete until private **streampulse-ops** evidence shows promoted images and post-cutover smoke.
+
+Private production execution (deploy, secrets, smoke, rollback) lives in **streampulse-ops**. No host IPs or operator secrets belong in this document.
 
 ## Release identity
 
-- Every production deploy is identified by an immutable **`IMAGE_TAG`** (git release tag matching `VERSION`, e.g. `v0.2.10`).
+- Every release is identified by an immutable **`IMAGE_TAG`** (git release tag matching `VERSION`, e.g. `v0.2.10`).
 - Optional SHA tags may exist for traceability; production deploy uses the release tag unless break-glass.
 
 ## StreamPulse relationship
 
-**StreamPulse production intentionally deploys Streamclone images.** StreamPulse is the hosted product surface (`streampulse.stream`, `api.streampulse.stream`, Chrome extension, portal), while Streamclone is the backend application and release train that builds the Go APIs, analytics BFF, workers, migrations, Redis/Postgres integrations, and supporting services.
+**Streamclone builds source images; StreamPulse ops promotes them for hosted production.** StreamPulse is the hosted product surface (`streampulse.stream`, `api.streampulse.stream`, Chrome extension, portal). Streamclone is the backend application and release train that builds Go APIs, analytics BFF, workers, migrations, Redis/Postgres integrations, and supporting services.
 
-The separated analytics boundary today is a **runtime/service boundary** inside this release train:
+The separated analytics boundary is a **runtime/service boundary** inside this release train:
 
 ```text
 streamclone repo -> ghcr.io/aron-chu/streamclone/analytics:${IMAGE_TAG}
-				 -> analytics API container
-				 -> analytics worker container(s)
-				 -> migrate image with matching schema code
+                 -> analytics API container (hosted: promoted as streampulse/api)
+                 -> analytics worker container(s) (hosted: promoted as streampulse/workers)
+                 -> migrate image (hosted: promoted as streampulse/migrate)
 ```
-
-It is not yet a separately promoted `streampulse/analytics` image family or a second backend repository. If operators want StreamPulse-branded images later, use a deliberate promotion step from the same Streamclone release artifact rather than rebuilding from different source. The private ops repo may introduce aliases such as `STREAMPULSE_API_IMAGE_TAG`, but `analytics` and `migrate` must still be proven to come from one compatible source revision.
 
 Do not treat the sibling `streamclone-pulse` repo as a backend image source. It owns the Chrome MV3 extension, the StreamPulse portal frontend, and product docs/specs; it calls the hosted API.
 
-## GHCR images (built from `Aron-Chu/streamclone`)
+## GHCR source images (built from `Aron-Chu/streamclone`)
 
-Published on tag push via `.github/workflows/release-images.yml`:
+Published on tag push via `.github/workflows/release-images.yml`. These are **source artifacts** for local dev, self-hosted Streamclone, and digest promotion to StreamPulse production:
 
 | Image | Purpose |
 |-------|---------|
@@ -39,9 +41,9 @@ Published on tag push via `.github/workflows/release-images.yml`:
 | `ghcr.io/aron-chu/streamclone/scraper` | Optional TwitchTracker scraper |
 | `ghcr.io/aron-chu/streamclone/migrate` | DB migrations baked at tag |
 
-## Invariant
+## Source-build invariant
 
-For a given production deploy:
+For a given release tag:
 
 ```
 IMAGE_TAG(metadata) == IMAGE_TAG(analytics) == IMAGE_TAG(analytics-workers) == IMAGE_TAG(migrate)
@@ -53,11 +55,13 @@ Private ops must record any intentional per-service tag exception in deploy evid
 
 ## Ops responsibilities (`streampulse-ops`, private)
 
-- Pull all service images by pinned `IMAGE_TAG` — no app source bind mounts in default production path.
-- Run `migrate` container from `ghcr.io/aron-chu/streamclone/migrate:${IMAGE_TAG}` before or during deploy.
+Hosted promotion details: [`production-promotion-contract.md`](production-promotion-contract.md)
+
+- Pull service images by pinned `IMAGE_TAG` (pre-cutover: `streamclone/*`; target: promoted `streampulse/*`) — no app source bind mounts in default production path.
+- Run `migrate` from a digest compatible with the API/workers source revision.
 - Store secrets on host (`/etc/streamclone/secrets/`) — never in git.
 - Run smoke after deploy; record evidence in `docs/deployments/`.
-- Keep `STREAMCLONE_VERSION` env aligned with `IMAGE_TAG` (host checkout `VERSION` is not deploy truth).
+- Keep deployed version env aligned with `IMAGE_TAG` (host checkout `VERSION` is not deploy truth).
 - Set `PULSE_OPS_PROBE_TOKEN` for operator routes `/v1/internal/ops/*` (readiness + launch snapshot).
 - Use public templates: [`docs/ops/promotion-manifest.template.md`](ops/promotion-manifest.template.md), [`docs/ops/cap250-soak-runbook.md`](ops/cap250-soak-runbook.md).
 
@@ -73,7 +77,7 @@ Public `/v1/analytics/top100/readiness` stays blocked at the Caddy edge; launch 
 
 ## Rollback
 
-Redeploy the previous known-good **`IMAGE_TAG`**. Migrations may not be reversible across schema changes — review migration compatibility before rollback across major versions.
+Redeploy the previous known-good **`IMAGE_TAG`** (and digests from the private manifest). Migrations may not be reversible across schema changes — review migration compatibility before rollback across major versions.
 
 ## Local / self-hosted
 

@@ -1,7 +1,7 @@
 # Ops migration file manifest
 
 Classification for `streamclone` → `streampulse-ops` boundary migration.
-**Copy first, delete from public repo only after validation** (see `docs/ops-migration-plan.md`).
+Current production ownership lives in private `streampulse-ops`; this manifest is retained as the public reference for what stayed public, moved private, or became historical during the migration. See [hosted-production-ops.md](hosted-production-ops.md), [production-promotion-contract.md](production-promotion-contract.md), and [production-artifact-contract.md](production-artifact-contract.md) for the current contract.
 
 ---
 

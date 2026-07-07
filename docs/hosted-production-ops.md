@@ -1,12 +1,14 @@
 # Hosted production ops (private)
 
-Streamclone **application source**, migrations, local dev compose, CI, and GHCR image builds live in this public repository.
+Streamclone **application source**, migrations, local dev compose, CI, and GHCR **source** image builds live in this public repository.
 
-**Hosted production execution** (hosted-production-vps deploy, secrets, smoke, rollback evidence) lives in private **streampulse-ops**.
+**Hosted production execution** (hosted-production-vps deploy, secrets, smoke, rollback evidence) lives in private **streampulse-ops** — never add that checkout to public multi-root workspaces.
 
 ## Public contract
 
-- [production-artifact-contract.md](production-artifact-contract.md) — `IMAGE_TAG`, GHCR images, migrate invariant
+- [production-artifact-contract.md](production-artifact-contract.md) — source-build: `IMAGE_TAG`, GHCR source images, migrate invariant
+- [production-promotion-contract.md](production-promotion-contract.md) — hosted promotion: digest promotion, target `streampulse/*` namespace
+- Sibling [streamclone-image-exit-audit-2026-07.md](../../streamclone-pulse/docs/pulse-extension/evidence/streamclone-image-exit-audit-2026-07.md) — active migration spec (pre-cutover)
 - [ops-migration-manifest.md](ops-migration-manifest.md) — what stays public vs private
 
 ## Operator entrypoints (private)
