@@ -159,26 +159,46 @@ phase_a_public_boundary() {
   for path in \
     "/v1/analytics/channels/ludwig/live" \
     "/v1/analytics/channels/ludwig/live?sparse=false" \
-    "/v1/analytics/streams/${STREAM_ID}" \
-    "/v1/portal/analytics/channels/ludwig/live" \
-    "/v1/portal/analytics/channels/ludwig/streams"; do
+    "/v1/analytics/streams/${STREAM_ID}"; do
     code="$(curl_code "${BASE}${path}")"
     if [[ "${code}" != "401" ]]; then
-      echo "FAIL: ${path} HTTP ${code} (want 401 unauthenticated)" >&2
+      echo "FAIL: ${path} HTTP ${code} (want 401 unauthenticated raw analytics)" >&2
       fail=1
     else
       echo "OK: ${path} HTTP 401"
     fi
   done
 
-  # Emote Atlas retired (migration 000058): public emotes routes must not be live.
+  # Sanitized portal BFF routes are public-safe (no auth); see portal_analytics_api_test.go.
+  for path in \
+    "/v1/portal/analytics/channels/ludwig/live" \
+    "/v1/portal/analytics/channels/ludwig/streams"; do
+    code="$(curl_code "${BASE}${path}")"
+    if [[ "${code}" != "200" ]]; then
+      echo "FAIL: ${path} HTTP ${code} (want 200 public-safe portal JSON)" >&2
+      fail=1
+    else
+      echo "OK: ${path} HTTP 200 (portal public-safe)"
+    fi
+  done
+
+  # Public emotes overview remains live; atlas route retirement is deferred (P2-021 policy).
+  local emotes_tmp
+  emotes_tmp="$(mktemp)"
   code="$(curl_code "${BASE}/v1/public/emotes/overview?range=7d")"
-  if [[ "${code}" != "404" && "${code}" != "410" ]]; then
-    echo "FAIL: /v1/public/emotes/overview HTTP ${code} (want 404/410 after atlas retirement)" >&2
+  if [[ "${code}" != "200" ]]; then
+    echo "FAIL: /v1/public/emotes/overview HTTP ${code} (want 200 public overview)" >&2
     fail=1
   else
-    echo "OK: /v1/public/emotes/overview HTTP ${code} (atlas retired)"
+    curl_body "${emotes_tmp}" "${BASE}/v1/public/emotes/overview?range=7d"
+    if ! jq -e '.range == "7d"' "${emotes_tmp}" >/dev/null 2>&1; then
+      echo "FAIL: /v1/public/emotes/overview payload missing range=7d" >&2
+      fail=1
+    else
+      echo "OK: /v1/public/emotes/overview HTTP 200 (range=7d)"
+    fi
   fi
+  rm -f "${emotes_tmp}"
 
   echo "==> Phase A: blocked hosted edge routes"
   local blocked_fail=0

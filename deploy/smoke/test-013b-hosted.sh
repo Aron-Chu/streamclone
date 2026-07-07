@@ -70,7 +70,17 @@ fi
 # 5 — public status
 code="$(curl -s -o /tmp/status.json -w '%{http_code}' "${API_BASE}/v1/public/status")"
 if [[ "${code}" == "200" ]]; then
-  pass "public status 200"
+  if python3 -c "
+import json
+d=json.load(open('/tmp/status.json'))
+for k in ('status','api','degraded','updatedAt'):
+    assert k in d, k
+print('PASS: public status shape')
+" 2>/dev/null; then
+    pass "public status 200 + shape"
+  else
+    fail_msg "public status shape invalid"
+  fi
 else
   fail_msg "public status HTTP ${code}"
 fi
