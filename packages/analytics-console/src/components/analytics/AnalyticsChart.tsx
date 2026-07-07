@@ -273,7 +273,7 @@ function AnalyticsChart({
       )
     }
     const isTwitchTracker = detail?.sources?.some(s => s.source === 'twitchtracker')
-    const canShowSync = canSync || detail?.state === 'historical' || isTwitchTracker
+    const canShowSync = canSync
     const liveEmpty = classifyLiveEmptyState({
       collectingNow: isLive,
       rollupCount: rollups.filter(point => !point.missing).length,
@@ -293,13 +293,17 @@ function AnalyticsChart({
     return (
       <div className="grid min-h-80 place-items-center rounded border border-white/10 bg-[#0d0d12]/50 backdrop-blur-md px-4 text-center">
         <div>
-          <div className="text-base font-black text-zinc-100">{(isTwitchTracker || canSync) ? 'Chat & Emotes Offline' : 'No recent data'}</div>
-          <div className="mt-1 text-sm font-semibold text-zinc-500 max-w-md">
-            {(isTwitchTracker || canSync)
-              ? 'This stream has TwitchTracker averages only. Sync pulls minute-level viewers, chat, and 7TV data (large VODs can take a few minutes).'
-              : 'Analytics start collecting when this channel is viewed in Streamclone.'}
+          <div className="text-base font-black text-zinc-100">
+            {canSync && isTwitchTracker ? 'Chat & Emotes Offline' : 'No recent data'}
           </div>
-          {notInAnalyticsDb ? (
+          <div className="mt-1 text-sm font-semibold text-zinc-500 max-w-md">
+            {canSync && isTwitchTracker
+              ? 'This stream has TwitchTracker averages only. Sync pulls minute-level viewers, chat, and 7TV data (large VODs can take a few minutes).'
+              : isTwitchTracker
+                ? 'This stream has TwitchTracker averages only. Minute charts appear when backend collection completes.'
+                : 'Analytics start collecting when this channel is viewed in Streamclone.'}
+          </div>
+          {notInAnalyticsDb && canSync ? (
             <div className="mt-2 text-[11px] font-semibold text-zinc-600">
               Stream not in analytics DB yet — sync will create it.
             </div>
@@ -335,7 +339,7 @@ function AnalyticsChart({
 
   return (
     <div className="sc-chart-root rounded border border-white/10 bg-[#0d0d12] p-3" data-view-mode={viewMode}>
-      {needsViewerResync ? (
+      {canSync && needsViewerResync ? (
         <div className="mb-3 rounded border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-100">
           Viewer timeline is incomplete for this sync. Click <span className="font-black">Re-sync viewers</span> to pull the TwitchTracker viewer chart (fast — chat/7TV stay as-is).
         </div>
@@ -354,7 +358,8 @@ function AnalyticsChart({
         <div className="mb-3 rounded border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-100">
           Chat only covers the first {formatVodClock((detail?.chatCoverage?.chatSpanMinutes ?? 0) * 60)} of this{' '}
           {formatVodClock((detail?.chatCoverage?.streamSpanMinutes ?? 0) * 60)} stream
-          {detail?.vodId ? ` (VOD ${detail.vodId})` : ''}. Twitch may still be processing the archive — re-sync later.
+          {detail?.vodId ? ` (VOD ${detail.vodId})` : ''}.
+          {canSync ? ' Twitch may still be processing the archive — re-sync later.' : ' Backend collection may fill gaps when available.'}
         </div>
       ) : null}
       {viewerBackfillPending && hasViewerChartData ? (

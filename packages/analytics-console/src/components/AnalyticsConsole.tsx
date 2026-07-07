@@ -635,8 +635,9 @@ export function AnalyticsConsole({
         analyticsQuality: summaryQuery.data?.analyticsQuality ?? detail?.analyticsQuality,
         isLive: isActiveLiveCollector,
         syncing: syncing || detail?.state === 'syncing',
+        allowSyncActions: enableSyncActions,
       }),
-    [detail, summaryQuery.data, isActiveLiveCollector, syncing],
+    [detail, summaryQuery.data, isActiveLiveCollector, syncing, enableSyncActions],
   )
 
   const activeSyncStatus = liveSyncStatus ?? syncQuery.data ?? null

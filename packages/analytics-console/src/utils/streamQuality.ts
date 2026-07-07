@@ -131,8 +131,11 @@ export function diagnoseStreamQuality(input: {
   analyticsQuality?: string
   isLive?: boolean
   syncing?: boolean
+  /** When false (public hosted portal), never suggest operator sync/repair actions. */
+  allowSyncActions?: boolean
 }): StreamQualityDiagnosis | null {
   const { detail, summaryMetrics, analyticsQuality, isLive = false, syncing = false } = input
+  const allowSyncActions = input.allowSyncActions ?? true
   if (!detail && !summaryMetrics) return null
 
   const rollups = detail?.rollups ?? []
@@ -164,14 +167,15 @@ export function diagnoseStreamQuality(input: {
     issues.push('stats_only')
     return {
       issues,
-      message:
-        'Session metadata only (duration, averages). Minute-level viewers, chat, and emotes are not synced yet.',
-      suggestedAction: 'sync_full',
-      actionLabel: 'Sync chat & emotes',
+      message: allowSyncActions
+        ? 'Session metadata only (duration, averages). Minute-level viewers, chat, and emotes are not synced yet.'
+        : 'Session metadata only (duration, averages). Minute-level rollups appear when backend collection completes.',
+      suggestedAction: allowSyncActions ? 'sync_full' : 'none',
+      actionLabel: allowSyncActions ? 'Sync chat & emotes' : undefined,
     }
   }
 
-  if (needsViewerResync(rollups, isLive)) {
+  if (allowSyncActions && needsViewerResync(rollups, isLive)) {
     issues.push('viewer_resync')
     return {
       issues,
@@ -191,7 +195,7 @@ export function diagnoseStreamQuality(input: {
     }
   }
 
-  if (detail?.chatCoverage?.partial || (detail?.chatCoveragePct != null && detail.chatCoveragePct < 35)) {
+  if (allowSyncActions && (detail?.chatCoverage?.partial || (detail?.chatCoveragePct != null && detail.chatCoveragePct < 35))) {
     issues.push('partial_chat')
     return {
       issues,
@@ -201,10 +205,18 @@ export function diagnoseStreamQuality(input: {
     }
   }
 
-  if (issues.length === 0 && canSyncActionsHelp(detail, summaryMetrics)) {
+  if (allowSyncActions && issues.length === 0 && canSyncActionsHelp(detail, summaryMetrics)) {
     return {
       issues: ['refresh_only_hint'],
       message: 'Refresh data reloads charts from the server. Use sync actions below to pull missing minute rollups.',
+      suggestedAction: 'none',
+    }
+  }
+
+  if (!allowSyncActions && issues.length === 0 && (detail?.chatCoverage?.partial || statsOnly)) {
+    return {
+      issues: ['refresh_only_hint'],
+      message: 'Charts reflect hosted backend rollups. Refresh reloads data from the server.',
       suggestedAction: 'none',
     }
   }

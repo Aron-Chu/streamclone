@@ -65,6 +65,54 @@ export function getAnalyticsStreamDateSlug(startedAt?: string): string {
   return `${year}-${month}-${day}`
 }
 
+export type ResolveCanonicalSessionSlugArgs = {
+  isLiveRoute: boolean
+  listsLoading: boolean
+  sidebarStreams: AnalyticsStream[]
+  targetStreamId: string
+  liveHasChartMinutes?: boolean
+  isActiveLiveCollector?: boolean
+  currentViewers?: number
+  liveStreamId?: string
+}
+
+/**
+ * Live-route canonical session slug for redirecting empty collectors or synced live rows.
+ * Returns undefined on historical routes, while lists load, or when no synced target exists.
+ */
+export function resolveCanonicalSessionSlug(args: ResolveCanonicalSessionSlugArgs): string | undefined {
+  const {
+    isLiveRoute,
+    listsLoading,
+    sidebarStreams,
+    targetStreamId,
+    liveHasChartMinutes = false,
+    isActiveLiveCollector = false,
+    currentViewers = 0,
+    liveStreamId,
+  } = args
+
+  if (listsLoading || !isLiveRoute) return undefined
+
+  const target = sidebarStreams.find(stream => stream.streamId === targetStreamId)
+
+  if (liveHasChartMinutes && target && streamHasSyncedMinutes(target)) {
+    return getAnalyticsStreamDateSlug(target.startedAt)
+  }
+
+  if (!liveHasChartMinutes && !isActiveLiveCollector && currentViewers <= 0) {
+    const redirectTarget = pickSyncedLiveStreamTarget(sidebarStreams, {
+      liveStreamId: liveStreamId ?? targetStreamId,
+      channelLive: true,
+    })
+    if (redirectTarget) {
+      return analyticsStreamPathSlug(redirectTarget, sidebarStreams)
+    }
+  }
+
+  return undefined
+}
+
 /** Route slug for /analytics/{login}/{slug} — date when unique that day, else stream id. */
 export function analyticsStreamPathSlug(
   stream: AnalyticsStream,
