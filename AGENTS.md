@@ -50,7 +50,7 @@ Historical Pulse Wire notes: [`.kiro/steering/pulse-wire.md`](.kiro/steering/pul
 8. **Never edit applied migrations** — add new migration files only.
 9. **Run narrow tests first**, then `make check-quick` or `make check` before a PR.
 10. **Update steering/docs** after scraper, analytics, install, OAuth, or large frontend changes; run `make codegraph` when symbols move.
-11. **Hosting split** — **Hosted production ops** live in private **streampulse-ops** (deploy by pinned `IMAGE_TAG` from GHCR). **streamclone** = app source, migrations, local dev, CI, release images. Public API: `https://api.streampulse.stream`. **laptopworker** = tailnet core dev only (`docs/laptopworker-dev.md`). Do not run scraper/workers on laptop. See [`docs/production-artifact-contract.md`](docs/production-artifact-contract.md), [`docs/ops-migration-manifest.md`](docs/ops-migration-manifest.md).
+11. **Hosting split** — **Hosted production ops** live in private **streampulse-ops** (deploy by pinned `IMAGE_TAG` from GHCR). **streamclone** = app source, migrations, local dev, CI, release images. Public API: `https://api.streampulse.stream`. StreamPulse production **intentionally** deploys `ghcr.io/aron-chu/streamclone/*` — see [`docs/production-artifact-contract.md`](docs/production-artifact-contract.md) and sibling [`production-artifact-decision-2026-07.md`](../streamclone-pulse/docs/pulse-extension/evidence/production-artifact-decision-2026-07.md). Launch review ledger: [`improvements.md`](../streamclone-pulse/docs/pulse-extension/evidence/improvements.md). **laptopworker** = tailnet core dev only (`docs/laptopworker-dev.md`). Do not run scraper/workers on laptop. See [`docs/ops-migration-manifest.md`](docs/ops-migration-manifest.md).
 
 ## Agent context workflow (required)
 
@@ -108,7 +108,7 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 | Clipper (legacy stub) | `.kiro/steering/clipper.md`, `clipper/README.md` | Deprecated in compose |
 | System health / optional services | `.kiro/steering/windows-dev.md` | `stack_health`, `get_ast_chunk("SystemHealthPanel")` |
 | Scraping archive / Azure blob backfill | `docs/scraping-archive/requirements.md` | `get_ast_chunk("SyncService")` |
-| **Hosted production (operator)** | [`docs/production-artifact-contract.md`](docs/production-artifact-contract.md), private **streampulse-ops** | `curl https://api.streampulse.stream/v1/extension/health` |
+| **Hosted production (operator)** | [`docs/production-artifact-contract.md`](docs/production-artifact-contract.md), private **streampulse-ops**, sibling [`streamclone-pulse` evidence/improvements.md](../streamclone-pulse/docs/pulse-extension/evidence/improvements.md) | `curl https://api.streampulse.stream/v1/extension/health`, `bash scripts/hosted-launch-probes.sh` |
 | **BearHost rollback (operator)** | private **streampulse-ops** `archive/bearhost/` | stub: [`docs/bearhost-production.md`](docs/bearhost-production.md) |
 | **Azure archive → R2 migration / storage SoT** | [`docs/storage/README.md`](docs/storage/README.md), [`docs/storage/azure-to-r2-migration.md`](docs/storage/azure-to-r2-migration.md) | Read-only inventory: `scripts/storage/azure-prefix-inventory.sh` |
 | Security / secrets | `SECURITY.md`, `docs/security.md` | `make security-scan` |

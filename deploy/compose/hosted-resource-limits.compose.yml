@@ -1,0 +1,42 @@
+# Reference resource limits — apply ONE service at a time during soak Day 2
+#
+# Do NOT merge this file wholesale into production. Use staged fragments under
+# deploy/compose/limits/ and docs/ops/hosted-limits-staged-runbook.md.
+#
+# Uses Compose-native mem_limit/cpus/pids_limit (not deploy.resources — ignored
+# on plain docker compose without Swarm).
+#
+# Live measured peaks (2026-07 review): Redis ~1.66G, analytics ~2.5G, MinIO ~2.7G.
+
+services:
+  redis:
+    mem_limit: 2560m
+    restart: unless-stopped
+
+  analytics:
+    mem_limit: 3584m
+    cpus: "2.0"
+    restart: unless-stopped
+
+  analytics-workers:
+    mem_limit: 1280m
+    cpus: "1.0"
+    pids_limit: 256
+    restart: unless-stopped
+
+  scraper:
+    mem_limit: 1280m
+    pids_limit: 256
+    restart: unless-stopped
+
+  postgres:
+    mem_limit: 2560m
+    shm_size: 256mb
+    restart: unless-stopped
+
+  minio:
+    mem_limit: 3584m
+    restart: unless-stopped
+
+  caddy:
+    restart: unless-stopped

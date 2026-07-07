@@ -9,11 +9,32 @@ MAX_DEPLOY_DRIFT_DAYS="${PULSE_PROBE_MAX_DEPLOY_DRIFT_DAYS:-3}"
 SSH_TARGET="${PULSE_PROBE_SSH_TARGET:-}"
 REMOTE_APP="${PULSE_PROBE_REMOTE_APP:-/opt/streamclone/app}"
 SSH_KEY="${PULSE_PROBE_SSH_KEY:-}"
+OPS_LOCAL_BASE="${PULSE_OPS_LOCAL_BASE:-http://127.0.0.1:8090}"
+OPS_TOKEN="${PULSE_OPS_PROBE_TOKEN:-}"
+STRICT=0
 
 fail=0
 warn=0
 
-echo "==> Hosted launch probes: ${BASE} activityWindow=${WINDOW}"
+usage() {
+  cat <<'EOF'
+Usage: bash scripts/hosted-launch-probes.sh [--strict]
+
+Collects hosted launch evidence. By default continues after hub/readiness
+failures so operators get a full checklist transcript. --strict exits on
+first hub fetch/validation failure (CI mode).
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --strict) STRICT=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+echo "==> Hosted launch probes: ${BASE} activityWindow=${WINDOW} strict=${STRICT}"
 
 fetch_json() {
   local url="$1"
@@ -27,15 +48,30 @@ fetch_json() {
   return 0
 }
 
+fetch_json_with_header() {
+  local url="$1"
+  local out="$2"
+  local header="$3"
+  local code
+  code="$(curl -fsS -H "${header}" -o "${out}" -w '%{http_code}' "${url}" || true)"
+  if [[ "${code}" != "200" ]]; then
+    echo "FAIL: GET ${url} HTTP ${code:-curl_error}" >&2
+    return 1
+  fi
+  return 0
+}
+
 hub_tmp="$(mktemp)"
 readiness_tmp="$(mktemp)"
 trap 'rm -f "${hub_tmp}" "${readiness_tmp}"' EXIT
 
 if ! fetch_json "${BASE}/v1/public/hub?activityWindow=${WINDOW}" "${hub_tmp}"; then
-  exit 1
-fi
-
-python3 - "${hub_tmp}" "${MAX_METADATA_STALE_RATIO}" "${MAX_OLDEST_QUEUED_SECONDS}" <<'PY'
+  fail=1
+  if [[ "${STRICT}" -eq 1 ]]; then
+    exit 1
+  fi
+else
+  if ! python3 - "${hub_tmp}" "${MAX_METADATA_STALE_RATIO}" "${MAX_OLDEST_QUEUED_SECONDS}" <<'PY'
 import json
 import sys
 
@@ -96,12 +132,40 @@ if failures:
         print(f"FAIL: {failure}", file=sys.stderr)
     sys.exit(1)
 PY
-if [[ $? -ne 0 ]]; then
-  fail=1
+  then
+    fail=1
+    if [[ "${STRICT}" -eq 1 ]]; then
+      exit 1
+    fi
+  fi
 fi
 
-if fetch_json "${BASE}/v1/analytics/top100/readiness?topN=500" "${readiness_tmp}"; then
-  python3 - "${readiness_tmp}" <<'PY'
+readiness_ok=0
+if [[ -n "${SSH_TARGET}" ]]; then
+  ssh_args=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+  if [[ -n "${SSH_KEY}" ]]; then
+    ssh_args+=(-i "${SSH_KEY}")
+  fi
+  remote_readiness="set -euo pipefail; token=\$(grep -E '^PULSE_OPS_PROBE_TOKEN=' private-host-env-file 2>/dev/null | cut -d= -f2- || true); if [[ -z \"\${token}\" ]]; then token=\${PULSE_OPS_PROBE_TOKEN:-}; fi; code=\$(curl -sS -o /tmp/sp-readiness.json -w '%{http_code}' -H \"X-Ops-Probe-Token: \${token}\" '${OPS_LOCAL_BASE}/v1/internal/ops/readiness?topN=500'); if [[ \"\${code}\" != \"200\" ]]; then echo \"FAIL: internal ops readiness HTTP \${code}\" >&2; exit 1; fi; cat /tmp/sp-readiness.json"
+  if ssh "${ssh_args[@]}" "${SSH_TARGET}" "${remote_readiness}" >"${readiness_tmp}"; then
+    readiness_ok=1
+  else
+    echo "FAIL: internal ops readiness via SSH failed" >&2
+    fail=1
+  fi
+elif [[ -n "${OPS_TOKEN}" ]]; then
+  if fetch_json_with_header "${OPS_LOCAL_BASE}/v1/internal/ops/readiness?topN=500" "${readiness_tmp}" "X-Ops-Probe-Token: ${OPS_TOKEN}"; then
+    readiness_ok=1
+  else
+    fail=1
+  fi
+else
+  echo "WARN: set PULSE_PROBE_SSH_TARGET or PULSE_OPS_PROBE_TOKEN for internal readiness" >&2
+  warn=1
+fi
+
+if [[ "${readiness_ok}" -eq 1 ]]; then
+  if ! python3 - "${readiness_tmp}" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as fh:
@@ -114,9 +178,9 @@ print("readiness: admissionEnabled={admission} liveRows={live} collectorMax={col
     stale=summary.get("metadataStaleRows"),
 ))
 PY
-else
-  echo "WARN: top100 readiness endpoint unavailable; public hub probes still ran" >&2
-  warn=1
+  then
+    fail=1
+  fi
 fi
 
 if [[ -n "${SSH_TARGET}" ]]; then
@@ -124,7 +188,7 @@ if [[ -n "${SSH_TARGET}" ]]; then
   if [[ -n "${SSH_KEY}" ]]; then
     ssh_args+=(-i "${SSH_KEY}")
   fi
-  remote_cmd="set -e; cd '${REMOTE_APP}'; deployed=\$(cat DEPLOYED_SHA 2>/dev/null || true); head=\$(git rev-parse HEAD 2>/dev/null || true); age=\$(find DEPLOYED_SHA -maxdepth 0 -mtime +${MAX_DEPLOY_DRIFT_DAYS} -print 2>/dev/null || true); cloud=\$(systemctl is-active cloudflared 2>/dev/null || true); printf 'remote: deployed=%s head=%s cloudflared=%s\\n' \"\${deployed}\" \"\${head}\" \"\${cloud}\"; test -z \"\${age}\"; test \"\${cloud}\" = active"
+  remote_cmd="set -e; cd '${REMOTE_APP}'; deployed=\$(cat DEPLOYED_SHA 2>/dev/null || true); head=\$(git rev-parse HEAD 2>/dev/null || true); age=\$(find DEPLOYED_SHA -maxdepth 0 -mtime +${MAX_DEPLOY_DRIFT_DAYS} -print 2>/dev/null || true); cloud=\$(systemctl is-active cloudflared 2>/dev/null || true); stream_ver=\$(docker exec \$(docker ps --format '{{.Names}}' | grep analytics | head -n1) printenv STREAMCLONE_VERSION 2>/dev/null || true); printf 'remote: deployed=%s head=%s cloudflared=%s streamclone_version=%s\\n' \"\${deployed}\" \"\${head}\" \"\${cloud}\" \"\${stream_ver}\"; test -z \"\${age}\"; test \"\${cloud}\" = active"
   if ! ssh "${ssh_args[@]}" "${SSH_TARGET}" "${remote_cmd}"; then
     echo "FAIL: remote deployed SHA/cloudflared probe failed" >&2
     fail=1

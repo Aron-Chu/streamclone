@@ -1,0 +1,5 @@
+# Stage 1 — Redis (+20% headroom over ~1.66G measured)
+services:
+  redis:
+    mem_limit: 2560m
+    restart: unless-stopped

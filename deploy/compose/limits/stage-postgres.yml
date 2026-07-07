@@ -1,0 +1,6 @@
+# Stage 4 — Postgres
+services:
+  postgres:
+    mem_limit: 2560m
+    shm_size: 256mb
+    restart: unless-stopped

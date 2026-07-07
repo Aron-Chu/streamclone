@@ -1,0 +1,5 @@
+# Stage 5 — MinIO (last; consider moving off API hot path instead)
+services:
+  minio:
+    mem_limit: 3584m
+    restart: unless-stopped

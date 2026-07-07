@@ -240,6 +240,7 @@ func (h *Handler) getPublicHub(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("X-Cache", "MISS")
 	}
+	w.Header().Set("Cache-Control", "public, max-age=15, s-maxage=30, stale-while-revalidate=60")
 	writeJSON(w, http.StatusOK, payload)
 }
 

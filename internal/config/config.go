@@ -261,22 +261,26 @@ type Config struct {
 	LiveAdmissionTopN                   int           `env:"LIVE_ADMISSION_TOP_N" envDefault:"0"`
 	MaxActiveIRCChannels                int           `env:"MAX_ACTIVE_IRC_CHANNELS" envDefault:"0"`
 
-	PulseHostedMode              bool          `env:"PULSE_HOSTED_MODE" envDefault:"false"`
-	PulseBetaKeys                string        `env:"PULSE_BETA_KEYS"`
-	PulseMaxActiveChannels       int           `env:"PULSE_MAX_ACTIVE_CHANNELS" envDefault:"0"`
-	PulseMaxBackfills            int           `env:"PULSE_MAX_BACKFILLS" envDefault:"0"`
-	PulseMaxChannelsPerPrincipal int           `env:"PULSE_MAX_CHANNELS_PER_PRINCIPAL" envDefault:"0"`
-	PulseWatchRatePerMin         int           `env:"PULSE_WATCH_RATE_PER_MIN" envDefault:"0"`
-	PulseBackfillRatePerHour     int           `env:"PULSE_BACKFILL_RATE_PER_HOUR" envDefault:"0"`
-	PulseCFAccessTeamDomain      string        `env:"PULSE_CF_ACCESS_TEAM_DOMAIN"`
-	PulseCFAccessAud             string        `env:"PULSE_CF_ACCESS_AUD"`
-	PulseAdminLocalBypass        bool          `env:"PULSE_ADMIN_LOCAL_BYPASS" envDefault:"false"`
-	PulseAutoBackfillEnabled     bool          `env:"PULSE_AUTO_BACKFILL_ENABLED" envDefault:"false"`
-	PulseAutoBackfillInterval    time.Duration `env:"PULSE_AUTO_BACKFILL_INTERVAL" envDefault:"15m"`
-	PulseAutoBackfillCooldown    time.Duration `env:"PULSE_AUTO_BACKFILL_COOLDOWN" envDefault:"30m"`
-	PulseAutoBackfillSince       time.Duration `env:"PULSE_AUTO_BACKFILL_SINCE" envDefault:"48h"`
-	PulseAutoBackfillMaxPerRun   int           `env:"PULSE_AUTO_BACKFILL_MAX_PER_RUN" envDefault:"1"`
-	PulseAutoBackfillScanLimit   int           `env:"PULSE_AUTO_BACKFILL_SCAN_LIMIT" envDefault:"20"`
+	PulseHostedMode                bool          `env:"PULSE_HOSTED_MODE" envDefault:"false"`
+	PulseBetaKeys                  string        `env:"PULSE_BETA_KEYS"`
+	PulseMaxActiveChannels         int           `env:"PULSE_MAX_ACTIVE_CHANNELS" envDefault:"0"`
+	PulseMaxBackfills              int           `env:"PULSE_MAX_BACKFILLS" envDefault:"0"`
+	PulseMaxChannelsPerPrincipal   int           `env:"PULSE_MAX_CHANNELS_PER_PRINCIPAL" envDefault:"0"`
+	PulseWatchRatePerMin           int           `env:"PULSE_WATCH_RATE_PER_MIN" envDefault:"0"`
+	PulseBackfillRatePerHour       int           `env:"PULSE_BACKFILL_RATE_PER_HOUR" envDefault:"0"`
+	PulseCFAccessTeamDomain        string        `env:"PULSE_CF_ACCESS_TEAM_DOMAIN"`
+	PulseCFAccessAud               string        `env:"PULSE_CF_ACCESS_AUD"`
+	PulseAdminLocalBypass          bool          `env:"PULSE_ADMIN_LOCAL_BYPASS" envDefault:"false"`
+	PulseOpsProbeToken             string        `env:"PULSE_OPS_PROBE_TOKEN"`
+	PulseOpsProbeTokenFile         string        `env:"PULSE_OPS_PROBE_TOKEN_FILE"`
+	HostedRetentionPruneEnabled    bool          `env:"HOSTED_RETENTION_PRUNE_ENABLED" envDefault:"false"`
+	HostedBackfillJobRetentionDays int           `env:"HOSTED_BACKFILL_JOB_RETENTION_DAYS" envDefault:"30"`
+	PulseAutoBackfillEnabled       bool          `env:"PULSE_AUTO_BACKFILL_ENABLED" envDefault:"false"`
+	PulseAutoBackfillInterval      time.Duration `env:"PULSE_AUTO_BACKFILL_INTERVAL" envDefault:"15m"`
+	PulseAutoBackfillCooldown      time.Duration `env:"PULSE_AUTO_BACKFILL_COOLDOWN" envDefault:"30m"`
+	PulseAutoBackfillSince         time.Duration `env:"PULSE_AUTO_BACKFILL_SINCE" envDefault:"48h"`
+	PulseAutoBackfillMaxPerRun     int           `env:"PULSE_AUTO_BACKFILL_MAX_PER_RUN" envDefault:"1"`
+	PulseAutoBackfillScanLimit     int           `env:"PULSE_AUTO_BACKFILL_SCAN_LIMIT" envDefault:"20"`
 
 	BackfillEnabled                  bool          `env:"BACKFILL_ENABLED" envDefault:"false"`
 	BackfillWorkerInterval           time.Duration `env:"BACKFILL_WORKER_INTERVAL" envDefault:"30s"`

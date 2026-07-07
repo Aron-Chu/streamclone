@@ -59,6 +59,10 @@
  /v1/internal/corpus/inventory/*
 	}
 
+	@internal_ops {
+		path /v1/internal/ops /v1/internal/ops/*
+	}
+
 	@analytics {
 		path_regexp analytics ^/v1/(analytics|extension|pulse|public|portal)(/|$)
 	}
@@ -80,6 +84,7 @@
 		respond @admin_blocked 404
 		respond @pulse_api_blocked 404
 		reverse_proxy @internal_corpus_ops analytics:8080
+		reverse_proxy @internal_ops analytics:8080
 		reverse_proxy @analytics analytics:8080 {
 			transport http {
 				read_timeout 15m

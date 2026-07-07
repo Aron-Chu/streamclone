@@ -615,6 +615,12 @@ func main() {
 	} else {
 		logger.Info("public cache refresh disabled: corpus worker process")
 	}
+	if cfg.HostedRetentionPruneEnabled && shouldStartPublicCacheRefreshForThisProcess() {
+		analytics.StartHostedRetentionMaintainer(ctx, store, cfg.HostedBackfillJobRetentionDays, logger)
+		logger.Info("hosted retention maintainer started",
+			"backfill_job_retention_days", cfg.HostedBackfillJobRetentionDays,
+		)
+	}
 	adminArchiveHandler := analytics.NewAdminArchiveHandler(pool, cfg)
 	chatReplayStore := chatreplay.NewStore(pool).WithArchiveProtectRetention(cfg.ArchiveProtectRetention)
 	chatReplayHandler := chatreplay.NewHandler(chatReplayStore).WithLogger(logger).WithIngestEnabled(func() bool {

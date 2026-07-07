@@ -136,6 +136,7 @@ func (h *Handler) Routes(r chi.Router) {
 	h.PortalRoutes(r)
 	h.EmoteHistoryRoutes(r)
 	h.CorpusRoutes(r)
+	h.OpsRoutes(r)
 	r.Route("/v1/analytics", func(r chi.Router) {
 		if h.pulseHosted.Hosted {
 			r.Group(func(r chi.Router) {
