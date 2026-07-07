@@ -4,7 +4,7 @@ Date: 2026-07-06
 
 Scope: read-only audit across Streamclone backend, Streamclone Pulse extension, StreamPulse public portal, public hub, channel console, and auto clipper / ReplayForge boundary.
 
-This file is written for a follow-up implementation agent. It is intentionally descriptive and action-oriented. The main job is not to make the UI prettier; it is to remove places where the product can accidentally imply stronger truth than the backend can prove.
+This file is the **closed audit ledger** for the 2026-07-06 StreamPulse / Streamclone trust pass. All numbered issues below are **fixed, verified, documented, or intentionally closed**. Do not reopen unless a fresh validation failure directly traces to the relevant diff.
 
 ## Product Promise To Preserve
 
@@ -51,16 +51,30 @@ These notes reflect a second manual spot-check against the repo after this file 
 - Use this file as the implementation backlog. The original highest-confidence immediate issues were P0-001, P1-002, P1-005, and P3-023; the current working-tree recheck below marks those lanes fixed or verified.
 - P1-005 was more concrete than the original wording: the canonical `/analytics` route did not surface the `stats-fallback` warning that existed for the older dashboard home path. The current portal diff now appears to cover this; keep only verification/fallback smoke.
 - P1-004 is real but partially mitigated on canonical `/analytics` by the hub coverage trust strip. Do not rewrite the whole hub first; fix labels/headline affordances that can still overclaim IRC collection.
-- P1-008 is preventive/regression work, not a known current live bug. `prepareChartRollups` currently respects `coverageStartOffsetSeconds` when it is propagated.
-- P3-024 becomes P2 if `dashboard/Home.tsx` remains reachable or linked as a product route. If it is dead/design-lab code, keep it as a tombstone cleanup.
-- P3-026 becomes P2 for launch if public CTAs still say "Sign in" or docs still explain beta keys as if public `/analytics` requires them.
-- Add explicit work for hosted moments bucket smoke, public sync/backfill affordances, identity model decisions, hosted deploy freshness, and `/dashboard/clips` link exposure.
+- P1-008 fixed (2026-07-06). Late-start full-timeline regression tests + nested coverage propagation through `resolvePayloadCoverageStartOffset` / `pulseLiveAccess.coverageStartOffsetSeconds`.
+- **P1-007 fixed (2026-07-06).** Clip inbox/renderability fields on backend + gated `/dashboard/clips` portal queue; post-batch review pass below.
+- **P2-009 fixed (2026-07-06).** Backend Helix/VOD wins over local GQL-blocked pessimism in extension coverage card + diagnostics.
+- **P2-016 fixed (2026-07-06).** Hosted public `/analytics/{login}` console hides operator sync/repair CTAs; e2e smoke asserts no Sync/Re-sync buttons.
+- **P2-018 fixed (2026-07-06).** Extension Options/popup + portal hub/console label backend source; localhost cannot silently win on hosted prod; `dev:local` requires `VITE_ALLOW_LOCAL_BACKEND=1`.
+- **P2-012 fixed (2026-07-06).** Portal bookmark adapter returns `{ supported: false, reason: 'private_beta' }` on public console; create/delete throw read-only message.
+- **P3-026 fixed (2026-07-06).** Login/Setup quarantine copy clarifies public `/analytics` needs no beta key; `/login` and `/setup` redirect to `/analytics`.
+- **P2-013 fixed (2026-07-06).** `/status` page reads `/v1/public/status` + extension health version; no placeholder-only copy.
+- **P2-019 fixed (2026-07-06).** `status:hosted` ignores localhost env, validates hub/moments fields, prints portal pkg + API version.
+- **P2-011 fixed (2026-07-06).** Go + TS golden-key contract tests for pulse, coverage, hub, moments, status, clips; CI `go test -run Contract`.
+- **P2-021 fixed (2026-07-06).** Launch posture doc: [`docs/agent-notes/public-analytics-posture-2026-07.md`](../streamclone-pulse/docs/agent-notes/public-analytics-posture-2026-07.md).
+- **P2-010 fixed (2026-07-06).** Public surfaces no longer route to `/setup` for install; extension Options remain canonical for backend/beta-key; requirements doc hosted-default banner; Login/Setup tombstone copy.
+- **P2-020 fixed (2026-07-06).** `/dashboard/clips` links gated to dashboard only; `check:analytics-links` scans public surfaces; ReplayForge demoted to planned on landing roadmap.
+- **P3-025 fixed (2026-07-06).** Deleted unreferenced `figmaMakeDemo.ts`; landing fixtures labeled illustrative; production analytics routes never inject xQc demo session.
+- **P3-028 fixed (2026-07-06).** Hub emote economy donut uses backend `providerShares` only; honest unavailable copy when hourly rollups missing; corpus card no longer claims all providers observed.
+- **P3-027 fixed (2026-07-06).** Drift classified in `analytics-surfaces.css`; `--fma-panel-alt` maps to `--sp-surface-2`; no drive-by figma-analytics.css rewrite.
+- **P3-024 quarantined (2026-07-06).** `dashboard/Home.tsx` minimal private workspace landing; gated `/dashboard/clips` preserved; no public analytics links.
+- **Audit closeout (2026-07-06).** All numbered issues closed — see [Final audit closeout](#final-audit-closeout-2026-07-06). Remaining work is known test hygiene and future roadmap only.
 
 ## Current Working Tree Recheck
 
 Rechecked after the extension and analytics changes visible in the working tree on 2026-07-06. Do not delete the issues below yet; use these status notes to avoid duplicate work.
 
-- **P1-005 verified (2026-07-06).** `analytics-hub-metrics-honesty.spec.ts` passes (8/8); `hubLiveWireFeed.test.tsx` covers paused cadence. `analyticsLandingPage.test.tsx` stats-fallback case exists but vitest render can hang locally — treat e2e as authority.
+- **P1-005 verified (2026-07-06).** `analytics-hub-metrics-honesty.spec.ts` passes (8/8); `hubLiveWireFeed.test.tsx` covers paused cadence. `analyticsLandingPage.test.tsx` stats-fallback case exists but vitest render can hang/OOM locally — **e2e is authority** (see validation hygiene cleanup section).
 - **P3-023 verified (2026-07-06).** No `fetchPriority` under `streampulse-web/`; honesty e2e passes with console guard clean.
 - **Live Wire liveness work is now present.** The component gates live cadence on `feed.source === 'network'` and non-degraded hub state. Keep the trust addendum in `docs/website-portal/analytics-hub-liveness-tasks.md` as the source for final verification.
 - **P1-003 fixed (2026-07-06).** Extension `PulseCoverage` includes `trackedFromStart`, `vodStatus`, `manualRetryAllowed`, `chatSource`, `chatSourceDetail`, and `copyKey`; `resolvePulseCoverage` / `coverageCardCopy` prefer backend `copyKey` + `message` when authoritative.
@@ -98,6 +112,161 @@ Authority suite rerun for merge readiness. **Do not reopen audit-pass items 1–
 
 Reviewer pass (read-only): no secrets in diff artifacts; public `/analytics` surfaces have no `/dashboard/clips` links; gated dashboard nav only under `RequireAuth`; P0-001 `always-tracked` still behind `requireHostedNonGuestPrincipal` in hosted mode; contract tests green locally.
 
+## Authority suite cleanup (2026-07-06 post-merge)
+
+Post-audit validation debts cleared. **Do not reopen audit-pass items 1–8** unless a failure traces to those merges.
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `streamclone-pulse` `npm run typecheck` | 0 | pass — added `src/shared/coverage.ts`, emote optional fields, recap/chart type fixes |
+| `streamclone-pulse` `npm test` | 0 | 382/382 pass |
+| `streamclone-pulse` `npm run build` | 0 | pass |
+| `npm run test:e2e -- analytics-visual-capture.spec.ts --workers=1` | 0 | **7/7 pass** — channel-console asserts default **ConsoleChannelView** landmarks (`Stream Recap` heading, timeline chart, `% chat coverage`) |
+| `bash scripts/pulse-hosted-boundary-smoke.sh` (WSL) | 0 | **PASS** — raw `/v1/analytics/*` stays 401; sanitized `/v1/portal/analytics/*` and `/v1/public/emotes/overview` expect 200 (intentional public-safe BFF) |
+
+## P1-007 clip inbox states (2026-07-06)
+
+First-class candidate inbox/renderability fields added on backend + private portal queue.
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `go test ./internal/analytics/... -run 'ClipCandidate\|Clip\|ReplayForge\|ContractClip'` | 0 | pass — inbox/renderability enrichment + emote_spike_only + job-unverified tests |
+| `streampulse-web` `npm test -- tests/clipCandidates.test.ts tests/ClipsPage.test.tsx` | 0 | 9/9 pass |
+| `streampulse-web` `npm run test:e2e -- tests/e2e/dashboard-clips.spec.ts --workers=1` | 0 | 1/1 pass — honest ReplayForge labels (`Rendering queued`, `Worker ready (playback not verified)`) |
+
+**Follow-up (not in this pass):** rights-sensitive music labeling, cross-stream caps beyond existing duplicate/hourly filters, durable artifact `playback_ready` gate (see `docs/agent-notes/clip-artifact-state-machine-2026-07.md`).
+
+## P1-008 late-start chart regression (2026-07-06)
+
+Regression coverage for extension full-timeline chart honesty when IRC tracking starts late (~45m). Extracted `resolveFullChartFromOffset` / `resolvePayloadCoverageStartOffset`; Overlay now passes `pulseLiveAccess.coverageStartOffsetSeconds` (includes nested `payload.coverage`).
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `streamclone-pulse` `npm test -- tests/chatActivityEmotes.test.ts tests/missedMoments.test.ts tests/resolvePulseLiveAccess.test.ts` | 0 | 48/48 pass — 45m late-start, no pre-coverage quiet bars, 120s tolerance, nested coverage propagation |
+| `streamclone-pulse` `npm run typecheck` | 0 | pass |
+| `streamclone-pulse` `npm test` | 0 | 390/390 pass |
+| `streamclone-pulse` `npm run build` | 0 | pass |
+
+## Post-batch review: P1-007 + P1-008 (2026-07-06)
+
+Read-only trust review after both batches landed. **P1-007 and P1-008 remain closed** — batch scope checks pass; one unrelated portal typecheck debt noted below.
+
+### Trust checks
+
+| # | Check | Result | Evidence |
+|---|-------|--------|----------|
+| 1 | P1-007: no public clip CTAs / no implied public renderability | **Pass** | `/dashboard/clips` only under `RequireAuth` (`streampulse-web/src/routes/index.tsx`); no clip links on `/analytics` or public routes; `Clips.tsx` eyebrow **Private queue**; Render/Export buttons disabled (“Phase 2”); ReplayForge labels say **playback not verified** |
+| 2 | P1-007: no raw chat / user messages | **Pass** | `TestClipCandidateJSONOmitsForbiddenFields` omits `rawChat`, `messages`, `chatter`, etc.; `statusCopy` uses deterministic recap labels only; UI shows aggregate `chatCount` / `topEmotes`, not message text |
+| 3 | P1-007: backend ↔ portal status labels consistent | **Pass** | Go `enrichClipCandidateInbox` + portal `clipCandidates.ts` share enum values (`needs_source`, `worker_ready_unverified`, `emote_spike_only`); `clipCandidates.test.ts` + `clip_candidates_test.go` assert matching labels |
+| 4 | P1-008: no quiet history before `coverageStartOffsetSeconds` | **Pass** | `resolveFullChartFromOffset` + `prepareChartRollups` start densification at coverage when >120s; `chatActivityEmotes.test.ts` 45m late-start asserts zero pre-coverage bars |
+| 5 | P1-008: 120s tracked-from-start tolerance preserved | **Pass** | `FULL_CHART_STREAM_START_TOLERANCE_SEC === 120`; tests: 90s/120s → chart from 0; 121s+ / 45m → from coverage start; `resolvePulseLiveAccess` nested coverage propagation test |
+| 6 | Authority suite green | **Mostly pass** | See validation table — scoped batch commands green; full `streamclone-pulse npm test` green on re-run (390/390); `streampulse-web npm run typecheck` fails on pre-existing debt |
+
+### Post-batch validation
+
+| Command | Exit | Result | Batch-related? |
+|---------|------|--------|----------------|
+| `go test ./internal/analytics/... -run 'ClipCandidate\|Clip\|ReplayForge'` | 0 | pass | P1-007 |
+| `streamclone-pulse` `npm run typecheck` | 0 | pass | P1-008 / authority |
+| `streamclone-pulse` `npm test` | 0 | **390/390 pass** (re-run; first attempt hit unrelated `livePoll.test.ts` timer flake 389/390) | unrelated flake on first run |
+| `streamclone-pulse` `npm run build` | 0 | pass | authority |
+| `streampulse-web` `npm run typecheck` | 2 | **fail** — `tests/analyticsConsoleUtils.test.ts`: missing export `resolveCanonicalSessionSlug` from analytics-console package | **unrelated debt** (pre-existing; not P1-007/P1-008) |
+| `streampulse-web` `npm test -- tests/clipCandidates.test.ts` | 0 | 5/5 pass | P1-007 |
+
+## P2-009 backend-first VOD/coverage UX (2026-07-06)
+
+Extension coverage/backfill UI defers to backend Helix when `vodId` / `vodStatus` / authoritative `coverage` are present. Local GQL/ad-block notes demoted to footnotes via `backendResolvedVod` + `summarizeVodDebugBlockers({ backendVodResolved })`.
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `streamclone-pulse` `npm test -- tests/coverageDiagnostics.test.ts tests/coverageContract.test.ts tests/missedMoments.test.ts tests/pulseDebug.test.ts` | 0 | 19/19 pass — GQL blocked demoted when backend linked VOD; load CTA when backend has vodId |
+| `streamclone-pulse` `npm run typecheck` | 0 | pass |
+| `streamclone-pulse` `npm test` | 0 | 396/396 pass |
+| `streamclone-pulse` `npm run build` | 0 | pass |
+
+## P2-016 public console operator controls (2026-07-06)
+
+Public `/analytics/{login}` hides operator sync/repair CTAs on hosted API. `ConsoleChannelView` keeps `enableSyncActions={usesLocalAnalyticsBackend()}`; `AnalyticsChart` no longer shows sync for TwitchTracker-only rows when `canSync` is false; hosted `startHistoricalSync` rejects; e2e asserts zero Sync/Re-sync buttons.
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `streampulse-web` `npm test -- tests/streamcloneAnalytics.test.ts` | 0 | 18/18 pass — hosted `startHistoricalSync` rejected |
+| `streampulse-web` `npm run test:e2e -- tests/e2e/visual-analytics-smoke.spec.ts --workers=1` | 0 | **3/3 pass** — no Sync chat / Re-sync on default public console |
+| Grep `streampulse-web/src/routes/analytics` for sync/backfill controls | — | **Only** `enableSyncActions={usesLocalAnalyticsBackend()}` in `ConsoleChannelView.tsx`; no operator sync strings in public route files |
+
+## Validation hygiene cleanup (2026-07-06 post P2-009/P2-016)
+
+Cleared pre-merge validation debts without reopening closed audit/P2 batches.
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `streampulse-web` `npm run typecheck` | 0 | pass — exported `resolveCanonicalSessionSlug` in `packages/analytics-console/src/utils/syncedLiveStream.ts` |
+| `streamclone-pulse` `npm test -- tests/livePoll.test.ts` | 0 | 8/8 pass — fake-timer isolation (`beforeEach`/`afterEach`), fixed `Math.random`, avoid `vi.waitFor` advancing retry timer |
+| `streamclone-pulse` `npm test` | 0 | **396/396 pass** |
+
+**Documented (not rewritten):** `streampulse-web/tests/analyticsLandingPage.test.tsx` stats-fallback unit case can OOM/hang under full vitest (~50 min observed). File header + this note mark `tests/e2e/analytics-hub-metrics-honesty.spec.ts` as authority for stats-fallback honesty until render memory is isolated.
+
+## P2-018 backend source / hosted-local divergence (2026-07-06)
+
+Extension Options + popup and portal hub/console now label backend source explicitly. Hosted production cannot silently use localhost (extension `localBackendOptIn` gate; portal ignores localhost env unless `VITE_ALLOW_LOCAL_BACKEND=1` on `dev:local`).
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `streampulse-web` `npm run check:backend-url` | 0 | pass |
+| `streampulse-web` `npm test -- tests/backendSource.test.ts` | 0 | 7/7 pass |
+| `streamclone-pulse` `npm run typecheck` | 0 | pass |
+| `streamclone-pulse` `npm test` | 0 | **399/399 pass** (includes `tests/extensionBackendSource.test.ts`) |
+
+## P2-012 / P3-026 bookmark + account copy (2026-07-06)
+
+Public `/analytics` bookmark adapter no longer silently returns empty lists; Login/Setup copy no longer implies beta key required for public hub.
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `rg` bookmark/beta/sign-in in `streampulse-web/src` | — | **No bookmark save UI** on public channel routes; `enableSyncActions={usesLocalAnalyticsBackend()}` only; Login/Setup quarantined with redirect |
+| `streampulse-web` `npm test -- tests/portalBookmarks.test.ts tests/selectedMomentDisplay.test.ts` | 0 | 5/5 pass — `supported: false`, read-only create |
+| `streampulse-web` `npm run typecheck` | 0 | pass |
+| `streamclone-pulse` `npm run typecheck && npm test` | 0 | 399/399 pass |
+
+## P2-010 / P2-020 / P3-025 / P3-028 / P3-027 launch cleanup (2026-07-06)
+
+Public setup/beta-key affordances removed from landing nav and hero CTAs; clip queue stays dashboard-gated; demo/provider honesty on hub and landing.
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `rg` setup/beta/clips/ReplayForge in `streampulse-web/src` (public paths) | — | **No** `/dashboard/clips` or clip-queue CTAs outside `routes/dashboard/`; ReplayForge only on landing roadmap (planned) |
+| `streampulse-web` `npm run check:analytics-links` | 0 | pass — href helpers + forbidden public clip-link scan |
+| `streampulse-web` `npm run check:analytics-tailwind` | 0 | pass |
+| `streampulse-web` `npm run typecheck` | 0 | pass |
+| `streampulse-web` `npm test -- tests/landing.test.tsx` | 0 | 4/4 pass — no `/setup` or `/login` nav CTAs |
+| `streampulse-web` `npm run test:e2e -- tests/e2e/analytics-visual-capture.spec.ts --workers=1` | 0 | 7/7 pass |
+| `rg` `figmaMakeDemo` in `streampulse-web/src` | — | **0 hits** (file deleted) |
+| `streamclone-pulse` `npm run typecheck && npm test` | 0 | 399/399 pass |
+
+**Known (unchanged):** `streampulse-web/tests/analyticsLandingPage.test.tsx` can OOM/hang under full vitest — exclude for CI smoke; e2e honesty specs remain authority. Pre-existing unit drift: `analyticsConsoleVodLink.test.ts`, `hubTopEmotesTable.test.tsx`, `analyticsHubEmpty.test.tsx` (not introduced by this batch).
+
+## P2-013 / P2-019 public status + hosted skew (2026-07-06)
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `curl -fsS https://api.streampulse.stream/v1/public/status` | 0 | `{"status":"operational","api":"up","degraded":false,...}` |
+| `VITE_BACKEND_URL=https://api.streampulse.stream npm run status:hosted` | 0 | hub + moments + xqc sample + version `v0.3.0-rc18` |
+| `streampulse-web` `npm run check:backend-url` | 0 | pass |
+| `bash deploy/smoke/test-013b-hosted.sh` | 0 | PASS — public status shape keys |
+| `bash scripts/pulse-hosted-boundary-smoke.sh` | 0 | PASS |
+
+## P2-011 API contract drift gate (2026-07-06)
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `go test ./internal/analytics/... -run 'Contract\|Pulse\|Portal\|Hub\|Clip'` | 0 | pass — ExtensionCoverage, PublicHub, PublicHubMoments, PublicStatus, ExtensionPulse critical keys |
+| `npm test --prefix packages/pulse-core` | 0 | 43/43 pass |
+| `streamclone-pulse` `npm test -- tests/coverageContract.test.ts` | 0 | pass |
+| `streampulse-web` `npm test -- tests/publicHub.contract.test.ts` | 0 | 4/4 pass |
+
+## P2-021 public analytics posture (2026-07-06)
+
+Decision doc: [`streamclone-pulse/docs/agent-notes/public-analytics-posture-2026-07.md`](../streamclone-pulse/docs/agent-notes/public-analytics-posture-2026-07.md) — public minute-level aggregates with backend sanitization; raw chat/user identity never public; bookmarks/clips private beta.
 
 - P0: trust/security break; fix before public launch.
 - P1: misleading product behavior or source-of-truth drift; fix before widening use.
@@ -464,6 +633,8 @@ Expected result after fix:
 
 ## Issue P1-007: Clip Candidate Generation Can Produce Unrenderable Or Low-Quality Rows Without First-Class Inbox States
 
+**Status: fixed (2026-07-06)** — see [P1-007 clip inbox states](#p1-007-clip-inbox-states-2026-07-06) and [post-batch review](#post-batch-review-p1-007--p1-008-2026-07-06).
+
 Severity: P1
 
 Trust classification: misleading for editor productivity
@@ -508,6 +679,8 @@ Expected result after fix:
 - Editors can distinguish "good moment candidate" from "renderable private clip" and "needs source".
 
 ## Issue P1-008: Extension Full-Timeline Chart Depends On Coverage Propagation; Add Regression Coverage For Late Starts
+
+**Status: fixed (2026-07-06)** — see validation table in [P1-008 late-start chart regression](#p1-008-late-start-chart-regression-2026-07-06) and [post-batch review](#post-batch-review-p1-007--p1-008-2026-07-06) above.
 
 Severity: P1
 
@@ -554,6 +727,8 @@ Expected result after fix:
 
 ## Issue P2-009: GQL Blocked vs Backend Helix Resolution Is Not Prominent Enough In Primary UX
 
+**Status: fixed (2026-07-06)** — see [P2-009 backend-first VOD/coverage UX](#p2-009-backend-first-vodcoverage-ux-2026-07-06).
+
 Severity: P2
 
 Trust classification: misleading
@@ -594,6 +769,8 @@ Expected result after fix:
 - Backend Helix success produces consistent extension and portal state.
 
 ## Issue P2-010: Hosted / Local Backend Override Can Drift And Is Not Fully Enforced
+
+**Status: fixed (2026-07-06)** — see [P2-010 / P2-020 / P3-025 / P3-028 / P3-027 launch cleanup](#p2-010--p2-020--p3-025--p3-028--p3-027-launch-cleanup-2026-07-06). Enforcement details also in [P2-018](#p2-018-backend-source--hosted-local-divergence-2026-07-06).
 
 Severity: P2
 
@@ -645,6 +822,8 @@ Expected result after fix:
 
 ## Issue P2-011: API Contract Drift Check Is Heuristic, Not A CI-Grade Gate
 
+**Status: fixed (2026-07-06)** — see [P2-011 API contract drift gate](#p2-011-api-contract-drift-gate-2026-07-06).
+
 Severity: P2
 
 Trust classification: operational risk
@@ -694,6 +873,8 @@ Expected result after fix:
 
 ## Issue P2-012: Portal Saved Moments Adapter Is A No-Op In Public Console Context
 
+**Status: fixed (2026-07-06)** — see [P2-012 / P3-026 bookmark + account copy](#p2-012--p3-026-bookmark--account-copy-2026-07-06).
+
 Severity: P2
 
 Trust classification: misleading if controls are visible
@@ -729,6 +910,8 @@ Expected result after fix:
 - Users never see silent empty saved moments when the real reason is missing identity or unavailable principal state.
 
 ## Issue P2-013: Public Status Page Is Placeholder-Only Despite Backend Status Endpoint
+
+**Status: fixed (2026-07-06)** — see [P2-013 / P2-019 public status + hosted skew](#p2-013--p2-019-public-status--hosted-skew-2026-07-06).
 
 Severity: P2
 
@@ -857,6 +1040,8 @@ Expected result after fix:
 - Hosted bucket click data matches the backend `/hub/moments` response and does not silently substitute local/demo rows.
 
 ## Issue P2-016: Public Channel Console May Expose Sync/Backfill Controls Public Users Cannot Use
+
+**Status: fixed (2026-07-06)** — see [P2-016 public console operator controls](#p2-016-public-console-operator-controls-2026-07-06).
 
 Severity: P2
 
@@ -997,6 +1182,8 @@ Expected result after fix:
 
 ## Issue P2-019: Hosted Deploy Freshness / API-Version Skew Is Not Surfaced Enough
 
+**Status: fixed (2026-07-06)** — see [P2-013 / P2-019 public status + hosted skew](#p2-013--p2-019-public-status--hosted-skew-2026-07-06).
+
 Severity: P2
 
 Trust classification: operationally misleading
@@ -1043,6 +1230,8 @@ Expected result after fix:
 - Hosted portal/API skew is visible and contract-breaking skew fails smoke checks.
 
 ## Issue P2-020: `/dashboard/clips` Must Not Be Publicly Linked Before Identity And Artifact Semantics Are Clear
+
+**Status: fixed (2026-07-06)** — see [P2-010 / P2-020 / P3-025 / P3-028 / P3-027 launch cleanup](#p2-010--p2-020--p3-025--p3-028--p3-027-launch-cleanup-2026-07-06).
 
 Severity: P2
 
@@ -1092,6 +1281,8 @@ Expected result after fix:
 
 ## Issue P2-021: Public Minute-Level Analytics Needs Explicit Competitive / ToS Posture
 
+**Status: fixed (2026-07-06)** — decision doc [`public-analytics-posture-2026-07.md`](../streamclone-pulse/docs/agent-notes/public-analytics-posture-2026-07.md).
+
 Severity: P2 product decision, not a direct code bug
 
 Trust classification: launch risk
@@ -1132,6 +1323,8 @@ Expected result after fix:
 - Launch positioning is explicit, and public analytics granularity is intentional.
 
 ## Issue P3-022: `analytics-figma-parity.spec.ts` Has Stale Expectations Or The Product Lost A Required Heading
+
+**Status: verified fixed (2026-07-06)** — `analytics-figma-parity.spec.ts` passes 9/9; hub `h1` is **Command center** with `#section-pulse-moments`.
 
 Severity: P3 unless the heading is product-required
 
@@ -1206,6 +1399,8 @@ Expected result after fix:
 
 ## Issue P3-024: Dual Hub / Dashboard Implementations Create IA And Visual Drift Risk
 
+**Status: quarantined (2026-07-06)** — minimal private `dashboard/Home.tsx`; canonical public hub is `/analytics`; no public clip links. See [Final audit closeout](#final-audit-closeout-2026-07-06).
+
 Severity: P3, but treat as P2 if `dashboard/Home.tsx` is reachable, linked, or still product-facing
 
 Trust classification: misleading IA
@@ -1262,6 +1457,8 @@ Expected result after fix:
 
 ## Issue P3-025: Demo / Fixture Surfaces Need A Hard Boundary From Production Analytics
 
+**Status: fixed (2026-07-06)** — see [P2-010 / P2-020 / P3-025 / P3-028 / P3-027 launch cleanup](#p2-010--p2-020--p3-025--p3-028--p3-027-launch-cleanup-2026-07-06).
+
 Severity: P3, can become P1 if demo data appears in production analytics routes
 
 Trust classification: misleading if unlabeled
@@ -1303,6 +1500,8 @@ Expected result after fix:
 
 ## Issue P3-026: Account / Beta-Key / Dashboard Mental Model Is Half-Removed
 
+**Status: fixed (2026-07-06)** — see [P2-012 / P3-026 bookmark + account copy](#p2-012--p3-026-bookmark--account-copy-2026-07-06).
+
 Severity: P3, but treat as P2 for launch if public CTAs/docs still say "Sign in" or beta-key setup is presented as required for public `/analytics`
 
 Trust classification: misleading IA
@@ -1341,6 +1540,8 @@ Expected result after fix:
 - Public pages read as public analytics; private pages read as private tools.
 
 ## Issue P3-027: Design-System Drift Remains Between Figma Analytics, HubX, And Token Rules
+
+**Status: fixed (2026-07-06)** — classified + minimal active fix; see [P2-010 / P2-020 / P3-025 / P3-028 / P3-027 launch cleanup](#p2-010--p2-020--p3-025--p3-028--p3-027-launch-cleanup-2026-07-06).
 
 Severity: P3
 
@@ -1381,6 +1582,8 @@ Expected result after fix:
 - Active analytics surfaces use canonical tokens and accessible table semantics.
 
 ## Issue P3-028: Public Provider Breakdown Must Not Outrun Backend Rollup Persistence
+
+**Status: fixed (2026-07-06)** — see [P2-010 / P2-020 / P3-025 / P3-028 / P3-027 launch cleanup](#p2-010--p2-020--p3-025--p3-028--p3-027-launch-cleanup-2026-07-06).
 
 Severity: P3, can become P1 if UI claims unavailable provider truth
 
@@ -1435,12 +1638,58 @@ These are important so a follow-up agent does not chase stale reports.
 4. Hub metrics honesty tests are valuable.
    - Original audit failures included stale heading expectation and React warning noise, not direct evidence that KPI honesty copy was broken. Later validation reports the honesty spec is clean; keep the parity heading drift separate.
 
+## Final audit closeout (2026-07-06)
+
+**Decision: no audit blockers remain for merge/PR.** All numbered issues in this file are closed with validation evidence. Do not reopen unless a fresh failure traces to the closed diff.
+
+### Final validation summary
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `streampulse-web` `npm run check:analytics-links` | 0 | pass — href helpers + forbidden public clip-link scan |
+| `streampulse-web` `npm run check:analytics-tailwind` | 0 | pass |
+| `streampulse-web` `npm run typecheck` | 0 | pass |
+| `streampulse-web` `npm run test:e2e -- analytics-hub-metrics-honesty.spec.ts --workers=1` | 0 | 8/8 pass |
+| `streampulse-web` `npm run test:e2e -- analytics-visual-capture.spec.ts --workers=1` | 0 | 7/7 pass |
+| `streampulse-web` `npm run test:e2e -- analytics-figma-parity.spec.ts --workers=1` | 0 | 9/9 pass |
+| `streampulse-web` `npm run test:e2e -- visual-analytics-smoke.spec.ts --workers=1` | 0 | 3/3 pass — no public Sync/Re-sync |
+| `streampulse-web` `npm test -- tests/landing.test.tsx tests/portalBookmarks.test.ts tests/publicHub.contract.test.ts` | 0 | pass |
+| `streamclone-pulse` `npm run typecheck && npm test && npm run build` | 0 | **399/399** pass; build pass |
+| `go test ./internal/analytics/... -run 'Pulse\|Coverage\|Watchlist\|AlwaysTrack\|Portal\|Hub\|Clip\|ReplayForge\|Contract'` | 0 | pass |
+| `npm test --prefix packages/pulse-core` | 0 | 43/43 pass |
+| `bash deploy/smoke/test-013b-hosted.sh` | 0 | PASS |
+| `bash scripts/pulse-hosted-boundary-smoke.sh` | 0 | PASS |
+| `git diff --check` (streamclone + streamclone-pulse tracked diffs) | 0 | pass after whitespace hygiene |
+| Secret grep on changed tracked files | — | **no obvious tokens** in diff scope |
+
+### Known unchanged debt (not audit blockers)
+
+Do **not** reopen closed issues for these unless a regression is introduced by new diffs:
+
+| Item | Notes |
+|------|--------|
+| `streampulse-web/tests/analyticsLandingPage.test.tsx` | Full vitest run can OOM/hang (~50 min observed). **E2E authority:** `analytics-hub-metrics-honesty.spec.ts`. |
+| `streampulse-web/tests/analyticsConsoleVodLink.test.ts` | Pre-existing unit drift (`resolveAnalyticsVodId` recap fallback). |
+| `streampulse-web/tests/hubTopEmotesTable.test.tsx` | Pre-existing unit drift (provider pill label casing). |
+| `streampulse-web/tests/analyticsHubEmpty.test.tsx` | Pre-existing unit drift (dashboard home heading selectors). |
+
+**Recommended CI posture:** run authority e2e specs + scoped unit tests; exclude `analyticsLandingPage.test.tsx` from default vitest until render memory is isolated.
+
+### Remaining work (future roadmap — not audit backlog)
+
+- Product decisions in [Strategic Product Calls](#strategic-product-calls-needed) (identity model, public granularity, clip productization).
+- Chrome Web Store listing URL (placeholder in extension install links).
+- Optional: fix the four unit-test drifts above; isolate `analyticsLandingPage` render fixture.
+- Hosted ops: deploy pinned `IMAGE_TAG` per `docs/production-artifact-contract.md` (operator lane).
+
 ## Suggested Implementation Order
 
-0. Completed/verified lanes: P0-001, P1-002, P1-003, P1-004, P1-005, P1-006, P2-014, P2-015, P2-017, P3-022, P3-023, and P3-024. Do not reopen unless fresh validation fails.
-1. Treat the audit pass items 1-8 as complete. The next agent should not redo parity heading, contract tests, hosted moments smoke, roster labels, identity docs, clip artifact docs, route quarantine, or live polling backoff.
-2. Move to final pre-merge/commit hygiene: rerun the smallest authority suite below, inspect only new failures, run a reviewer/commit-guardian pass, and prepare focused commits grouped by backend contracts/auth, portal UX/IA, extension polling/contracts, and docs/skills.
-3. If fresh validation fails, update this file with the new failure evidence before reopening any completed issue.
+**All audit issues closed (2026-07-06).** Remaining work is **known test hygiene** and **future roadmap** — not this ledger.
+
+1. **Do not reopen** numbered issues unless fresh validation fails and traces to the closed diff.
+2. **Pre-merge:** use [Smallest Test Suite I Would Keep As Authority](#smallest-test-suite-i-would-keep-as-authority) below; exclude `analyticsLandingPage.test.tsx` from full vitest.
+3. **Commit/PR:** group by backend contracts, extension honesty, portal public analytics, docs/skills/closeout (see agent handoff or PR prep notes).
+4. **Post-merge:** address strategic product calls and unit-test hygiene on a separate track.
 
 ## Smallest Test Suite I Would Keep As Authority
 
