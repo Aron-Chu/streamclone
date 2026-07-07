@@ -37,7 +37,7 @@ const defaults: UiSettings = {
   theme: 'obsidian',
   railSections: { live: true, offline: true, top: true, categories: true },
   emoteProviders: ['seventv', 'twitch'],
-  emoteAutoLoad: false,
+  emoteAutoLoad: true,
   preferredQuality: 'auto-high-stable',
   playbackLatencyMode: 'fast',
   videoFit: 'fit',

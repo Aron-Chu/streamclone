@@ -31,6 +31,7 @@
     --accent-2: #22d3ee;
     --scroll-track: #0d0d13;
     --scroll-thumb: #7c5cff;
+    --chat-column-width: 340px;
   }
 
   :root[data-theme="midnight"] {

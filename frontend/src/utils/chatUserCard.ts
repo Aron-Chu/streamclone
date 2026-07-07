@@ -8,7 +8,7 @@ export function normalizeChatUserLogin(displayName: string, login?: string): str
 }
 
 export function messageMatchesUser(msg: Message, displayName: string, login?: string): boolean {
-  if (msg.deleted || msg.kind === 'mod_event') return false
+  if (msg.deleted || msg.kind === 'mod_event' || msg.kind === 'notice') return false
   const targetLogin = normalizeChatUserLogin(displayName, login)
   const msgLogin = msg.login?.trim().toLowerCase()
   if (targetLogin && msgLogin && msgLogin === targetLogin) return true

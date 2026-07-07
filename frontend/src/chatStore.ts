@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { CHAT_WS, MAX_RETAINED_MESSAGES } from './config'
 import type { AuthUser, ChannelEmote } from './api'
 import { buildEmoteLookup, splitZeroWidthSuffix } from './emoteText'
+import { applyChatModEvents } from './chatModEvents.ts'
 
 export interface Fragment {
   t: 'text' | 'emote' | 'mention'
@@ -29,9 +30,11 @@ export interface Message {
   ackState?: 'pending' | 'queued' | 'sent' | 'live' | 'error'
   error?: string
   echoLatencyMs?: number
-  kind?: 'message' | 'mod_event'
+  kind?: 'message' | 'mod_event' | 'notice'
   modText?: string
   deleted?: boolean
+  moderation?: 'timeout' | 'ban' | 'deleted'
+  moderationDurationSec?: number
 }
 
 export interface LatencySummary {
@@ -370,30 +373,9 @@ export interface ChatModEventFrame {
 
 function mergeEvents(state: ChatState, events: ChatModEventFrame[]): Partial<ChatState> {
   if (!events.length) return {}
-  const rows: Message[] = [...state.messages]
-  for (const ev of events) {
-    if (ev.kind === 'delete_message' && ev.messageId) {
-      for (let i = 0; i < rows.length; i++) {
-        if (rows[i].id === ev.messageId) {
-          rows[i] = { ...rows[i], deleted: true }
-        }
-      }
-    }
-    rows.push({
-      id: `mod-${ev.kind}-${ev.ts}-${ev.messageId ?? ev.targetLogin ?? Math.random().toString(36).slice(2)}`,
-      user: 'moderator',
-      color: '#fbbf24',
-      badges: [],
-      ts: ev.ts,
-      fragments: [{ t: 'text', c: ev.summaryText || ev.displayText || ev.kind }],
-      source: 'remote',
-      kind: 'mod_event',
-      modText: ev.summaryText || ev.displayText || ev.kind,
-    })
-  }
-  const nextMessages = trimMessages(rows)
+  const nextMessages = trimMessages(applyChatModEvents(state.messages, events))
   if (state.activeChannel) {
-    schedulePersistMessages(state.activeChannel, nextMessages.filter(m => m.kind !== 'mod_event'))
+    schedulePersistMessages(state.activeChannel, nextMessages.filter(m => m.kind !== 'mod_event' && m.kind !== 'notice'))
   }
   return { messages: nextMessages, restoredFromCache: false }
 }

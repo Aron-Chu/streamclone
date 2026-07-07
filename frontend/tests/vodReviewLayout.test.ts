@@ -16,8 +16,8 @@ test('isEmbedAnalyticsVodReview is true only for analytics Twitch embed review',
   assert.equal(isEmbedAnalyticsVodReview(false, true), false)
 })
 
-test('defaultAnalyticsVodSidebarTab opens Pulse for analytics streams with sid', () => {
-  assert.equal(defaultAnalyticsVodSidebarTab(true, 'abc123'), 'pulse')
+test('defaultAnalyticsVodSidebarTab always opens chat sidebar', () => {
+  assert.equal(defaultAnalyticsVodSidebarTab(true, 'abc123'), 'chat')
   assert.equal(defaultAnalyticsVodSidebarTab(true, ''), 'chat')
   assert.equal(defaultAnalyticsVodSidebarTab(false, 'abc123'), 'chat')
 })

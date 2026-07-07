@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { STREAMCLONE_INSTALL_ID } from '../config'
 import { isOnboardingDismissed, markOnboardingDismissed } from '../onboardingStorage'
-import { OPEN_STACK_STATUS_EVENT, dispatchOpenStackStatus } from '../stackStatusEvents'
-import { useOptionalServices } from '../hooks/useOptionalServices'
+import { OPEN_STACK_STATUS_EVENT } from '../stackStatusEvents'
 import SystemHealthPanel from './SystemHealthPanel'
 
 export default function WelcomeOverlay() {
@@ -11,12 +10,10 @@ export default function WelcomeOverlay() {
   const navigate = useNavigate()
   const [forcedOpen, setForcedOpen] = useState(false)
   const [sessionDismissed, setSessionDismissed] = useState(false)
-  const offlinePromptedRef = useRef(false)
   const showOnboarding = Boolean((location.state as { showOnboarding?: boolean } | null)?.showOnboarding)
   const installId = STREAMCLONE_INSTALL_ID
   const autoShow = location.pathname === '/' && !sessionDismissed && (showOnboarding || !isOnboardingDismissed(installId))
   const open = forcedOpen || autoShow
-  const { setup, scraperOffline, clipperOffline } = useOptionalServices({ pollActive: open })
 
   useEffect(() => {
     const onOpen = () => setForcedOpen(true)
@@ -42,16 +39,6 @@ export default function WelcomeOverlay() {
     setForcedOpen(true)
     navigate('.', { replace: true, state: {} })
   }, [showOnboarding, navigate])
-
-  useEffect(() => {
-    if (!setup.data?.incomplete) return
-    if (offlinePromptedRef.current) return
-    if (!isOnboardingDismissed(installId) && location.pathname === '/') return
-    if (scraperOffline || clipperOffline) {
-      offlinePromptedRef.current = true
-      dispatchOpenStackStatus()
-    }
-  }, [setup.data?.incomplete, scraperOffline, clipperOffline, location.pathname, installId])
 
   if (!open) return null
 

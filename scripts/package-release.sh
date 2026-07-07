@@ -88,8 +88,8 @@ STREAMCLONE_USE_IMAGES=1
 SCRAPER_USE_IMAGES=1
 # Loopback token-import/device-code endpoints are dev-only (docs/security.md).
 TWITCH_DEV_TOKEN_IMPORT_ENABLED=false
-# Pulse Wire (story graph + /pulse-wire) — on by default in desktop releases
-PULSE_WIRE_ENABLED=true
+# Pulse Wire removed from desktop install bundle (hosted prod + extension cover Pulse).
+PULSE_WIRE_ENABLED=false
 PULSE_WIRE_SEMANTIC=false
 REDDIT_COMMERCIAL_OK=true
 STORYGRAPH_YT_KEYWORDS=kai cenat,xqc,caseoh,streamer drama
@@ -121,9 +121,9 @@ cat >"$STAGE/README-quickstart.md" <<'EOF'
 3. Every day: double-click **Start Streamclone.cmd**
 4. Open http://localhost:8090/
 
-**Pulse Wire** (enabled by default): open **Pulse Wire** in the nav for cross-platform story spread (Reddit, clips, news). Works without Twitch login; optional Sign in unlocks Helix-backed sources.
+**Analytics charts** (optional): enable the **scraper** compose profile for TwitchTracker minute charts on channel pages. Core watch + chat + emotes work without it.
 
-**Pulse dashboards** (optional): open **Stack status** to start Grafana/InfluxDB chart export — separate from Pulse Wire; normal Analytics works without it.
+**StreamPulse** (hosted): Pulse live coverage, hub analytics, and the browser extension live at [streampulse.stream](https://streampulse.stream) — not bundled in the desktop install.
 
 **ReplayForge / Clip Studio** (optional): install [ReplayForge](https://github.com/Aron-Chu/replayforge) separately on `:8095` (API) and `:8096` (UI). Streamclone links to it when running; no clipper container in the release stack.
 

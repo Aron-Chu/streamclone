@@ -14,10 +14,10 @@ export function isEmbedAnalyticsVodReview(
 }
 
 export function defaultAnalyticsVodSidebarTab(
-  fromAnalytics: boolean,
-  streamId: string | null | undefined,
+  _fromAnalytics: boolean,
+  _streamId: string | null | undefined,
 ): AnalyticsVodSidebarTab {
-  return fromAnalytics && (streamId?.trim().length ?? 0) > 0 ? 'pulse' : 'chat'
+  return 'chat'
 }
 
 function streamDurationFromBounds(stream?: AnalyticsStream): number | null {

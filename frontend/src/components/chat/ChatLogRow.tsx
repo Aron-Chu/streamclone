@@ -173,6 +173,14 @@ function formatMs(value: number | null | undefined) {
   return `${(value / 1000).toFixed(1)}s`
 }
 
+function moderationSuffix(msg: Message): string | null {
+  if (msg.moderation === 'timeout') {
+    return msg.moderationDurationSec ? `Timed out (${msg.moderationDurationSec}s)` : 'Timed out'
+  }
+  if (msg.moderation === 'ban') return 'Banned'
+  return null
+}
+
 export const ChatLogRow = memo(function ChatLogRow({
   msg,
   badges = {},
@@ -183,6 +191,14 @@ export const ChatLogRow = memo(function ChatLogRow({
   recentMessages,
   showAck = true,
 }: ChatLogRowProps) {
+  if (msg.kind === 'notice') {
+    return (
+      <div className="chat-row px-3 py-1 text-center text-sm leading-snug text-zinc-400 transition hover:bg-white/[0.03]">
+        <span className="text-[11px] font-semibold">{msg.modText ?? msg.fragments.map(f => f.c).join('')}</span>
+      </div>
+    )
+  }
+
   if (msg.kind === 'mod_event') {
     return (
       <div className="chat-row px-3 py-1 text-sm leading-snug text-amber-200/90 transition hover:bg-white/[0.03]">
@@ -194,7 +210,7 @@ export const ChatLogRow = memo(function ChatLogRow({
     )
   }
 
-  if (msg.deleted) {
+  if (msg.deleted || msg.moderation === 'deleted') {
     return (
       <div className="chat-row px-3 py-1 text-sm leading-snug text-zinc-600 italic transition hover:bg-white/[0.03]">
         <span className="mr-2 inline-block w-10 align-baseline text-[11px] font-semibold">{Number.isFinite(msg.ts) ? new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
@@ -203,6 +219,8 @@ export const ChatLogRow = memo(function ChatLogRow({
     )
   }
 
+  const isModerated = msg.moderation === 'timeout' || msg.moderation === 'ban'
+  const suffix = isModerated ? moderationSuffix(msg) : null
   const time = Number.isFinite(msg.ts) ? new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
   const tone = msg.ackState === 'error'
     ? 'text-red-300'
@@ -211,7 +229,7 @@ export const ChatLogRow = memo(function ChatLogRow({
       : 'text-zinc-600'
 
   return (
-    <div className={`chat-row px-3 py-1 text-sm leading-snug transition hover:bg-white/[0.045] ${msg.pending ? 'opacity-70' : ''}`}>
+    <div className={`chat-row px-3 py-1 text-sm leading-snug transition hover:bg-white/[0.045] ${msg.pending ? 'opacity-70' : ''} ${isModerated ? 'opacity-45 line-through decoration-zinc-500/70' : ''}`}>
       <span className={`mr-2 inline-block w-10 align-baseline text-[11px] font-semibold ${tone}`}>{time}</span>
       <BadgeStrip rawBadges={msg.badges ?? []} badges={badges} />
       <ChatUserMenu
@@ -235,6 +253,11 @@ export const ChatLogRow = memo(function ChatLogRow({
           recentMessages,
         })}
       </span>
+      {suffix ? (
+        <span className="ml-2 align-baseline text-[11px] font-semibold not-italic no-underline text-zinc-500">
+          {suffix}
+        </span>
+      ) : null}
       {showAck && msg.ackState && msg.source === 'local' ? (
         <span className={`ml-2 align-baseline text-[11px] font-bold ${msg.ackState === 'error' ? 'text-red-300' : msg.ackState === 'live' ? 'text-emerald-300' : 'text-zinc-500'}`}>
           {msg.ackState === 'live' ? `live ${formatMs(msg.echoLatencyMs)}` : msg.error ?? msg.ackState}

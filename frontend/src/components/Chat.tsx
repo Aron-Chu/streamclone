@@ -153,6 +153,8 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
   const [statsOpen, setStatsOpen] = useState(false)
   const [focused, setFocused] = useState(false)
   const [completion, setCompletion] = useState<CompletionState | null>(null)
+  const [emotesReadyBanner, setEmotesReadyBanner] = useState(false)
+  const prevEmoteStateRef = useRef<ChatEmoteStatus['state'] | undefined>(undefined)
   const mentionNames = useMemo(() => mentionAliases(user), [user?.displayName, user?.display_name, user?.login])
   const token = currentToken(draft, inputRef.current?.selectionStart ?? draft.length)
   const activeBase = completion?.base || token.token
@@ -200,6 +202,20 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
   }, [messages.length, rowVirtualizer])
 
   const jumpLabel = newMessages > 0 ? `↓ ${newMessages} new message${newMessages === 1 ? '' : 's'}` : 'Jump to bottom'
+
+  useEffect(() => {
+    setEmotesReadyBanner(false)
+    prevEmoteStateRef.current = undefined
+  }, [channel])
+
+  useEffect(() => {
+    const state = emotes?.state
+    const prev = prevEmoteStateRef.current
+    prevEmoteStateRef.current = state
+    if ((prev === 'loading' || prev === 'processing' || prev === 'partial') && state === 'ready') {
+      setEmotesReadyBanner(true)
+    }
+  }, [emotes?.state])
 
   useEffect(() => {
     const prev = lastCountRef.current
@@ -356,6 +372,18 @@ export default function Chat({ channel, user, isAuthenticated, emotes, badgeCata
           {connectionState === 'open'
             ? 'Showing recent cached chat from before reload. New live messages will append here.'
             : 'Showing recent cached chat while the live connection comes back.'}
+        </div>
+      ) : null}
+      {emotesReadyBanner ? (
+        <div className="flex items-center justify-between gap-2 border-b border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100">
+          <span>Emotes loaded — new messages will render third-party emotes.</span>
+          <button
+            type="button"
+            onClick={() => setEmotesReadyBanner(false)}
+            className="shrink-0 rounded px-2 py-0.5 text-[10px] font-black uppercase text-emerald-200 transition hover:bg-emerald-500/20"
+          >
+            Dismiss
+          </button>
         </div>
       ) : null}
       <div className="relative min-h-0 flex-1">
