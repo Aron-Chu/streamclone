@@ -89,8 +89,8 @@ if [ "$PROFILE" = "clipper" ]; then
   warn "Profile clipper is deprecated — compose uses core only; install ReplayForge separately" "See docs/agents-streamclone-and-replayforge.md"
 fi
 
-require_nonempty DATABASE_URL "Run make setup to synthesize .env from .env.dev"
-require_nonempty REDIS_URL "Run make setup to synthesize .env from .env.dev"
+require_nonempty DATABASE_URL "Run make setup to synthesize .env from .env.example"
+require_nonempty REDIS_URL "Run make setup to synthesize .env from .env.example"
 require_not_placeholder CURATOR_API_TOKEN change-me "Run make setup or scripts/validate-env.sh --fix"
 require_nonempty PUBLIC_ORIGIN "Set PUBLIC_ORIGIN=http://localhost:8090 for local dev"
 require_nonempty FRONTEND_ORIGIN "Set FRONTEND_ORIGIN=http://localhost:8090"
@@ -117,7 +117,7 @@ if [ "$use_images" = "1" ]; then
     warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true on loopback release install" "Run scripts/reload-env-if-stale.ps1 or restart Streamclone to enable Sign in (optional)"
   fi
 elif [ "$dev_import" != "true" ]; then
-  warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true" "Run make setup (.env.dev sets this for in-app local token import)"
+  warn "TWITCH_DEV_TOKEN_IMPORT_ENABLED is not true" "Run make setup (profile-dev.env sets this for in-app local token import)"
 fi
 
 if [ "$non_loopback_origin" = true ]; then
