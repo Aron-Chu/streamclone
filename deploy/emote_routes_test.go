@@ -4,15 +4,34 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+func deployTestPaths(t *testing.T) (deployDir, repoRoot string) {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	deployDir = filepath.Dir(file)
+	repoRoot = filepath.Join(deployDir, "..")
+	return deployDir, repoRoot
+}
+
 func TestEmoteAssetRoutesProxyToEmoteService(t *testing.T) {
+	deployDir, repoRoot := deployTestPaths(t)
 	files := map[string][]string{
-		"Caddyfile":      {"Caddyfile", "Caddyfile.local-tunnel", "Caddyfile.pulse-api"},
-		"nginx.conf":     {"../frontend/nginx.conf", "nginx.bearhost.conf"},
-		"vite.config.ts": {"../frontend/vite.config.ts"},
+		"Caddyfile": {
+			filepath.Join(deployDir, "Caddyfile"),
+			filepath.Join(deployDir, "Caddyfile.local-tunnel"),
+			filepath.Join(deployDir, "Caddyfile.pulse-api"),
+		},
+		"nginx.conf": {
+			filepath.Join(repoRoot, "frontend", "nginx.conf"),
+		},
+		"vite.config.ts": {filepath.Join(repoRoot, "frontend", "vite.config.ts")},
 	}
 
 	for kind, paths := range files {
@@ -88,7 +107,8 @@ func extractBetween(text, start, end string) string {
 var terminalJobRequeueSQL = regexp.MustCompile(`state IN \(3, 4\)`)
 
 func TestInsertOrRequeueJobResetsTerminalStates(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "internal", "emote", "store", "store.go"))
+	_, repoRoot := deployTestPaths(t)
+	data, err := os.ReadFile(filepath.Join(repoRoot, "internal", "emote", "store", "store.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
