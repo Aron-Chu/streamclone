@@ -174,8 +174,19 @@ func (h *Handler) deletePulseWatchlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if entry.AlwaysTrack && h.collector != nil {
-		h.collector.SetPoolAlwaysTrack(login, false)
 		h.collector.ReleaseForPrincipal(login, principal.ID)
+		stillProtected := false
+		if h.store != nil {
+			var err error
+			stillProtected, err = h.store.IsLoginGloballyProtected(r.Context(), login)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		}
+		if !stillProtected {
+			h.collector.SetPoolAlwaysTrack(login, false)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

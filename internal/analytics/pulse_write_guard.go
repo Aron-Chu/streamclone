@@ -1,6 +1,9 @@
 package analytics
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 func (h *Handler) requirePulseWrite(w http.ResponseWriter) bool {
 	if h == nil || !h.pulseRuntimeConfig().ReadOnlyMode {
@@ -50,6 +53,17 @@ func (h *Handler) requireHostedPrivateClipsPrincipal(w http.ResponseWriter, r *h
 	writeJSON(w, http.StatusUnauthorized, map[string]string{
 		"error": "unauthorized",
 		"hint":  "Set X-Streamclone-Beta-Key or Authorization to use private Pulse clips.",
+	})
+	return PulsePrincipal{}, false
+}
+
+func (h *Handler) requireHostedNonGuestPrincipal(w http.ResponseWriter, r *http.Request) (PulsePrincipal, bool) {
+	principal, ok := pulsePrincipalFromContext(r.Context())
+	if ok && principal.Kind != "guest" && strings.TrimSpace(principal.ID) != "" {
+		return principal, true
+	}
+	writeJSON(w, http.StatusUnauthorized, map[string]string{
+		"error": "unauthorized",
 	})
 	return PulsePrincipal{}, false
 }
