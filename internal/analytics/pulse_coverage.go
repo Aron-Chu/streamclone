@@ -39,6 +39,8 @@ type ExtensionCoverage struct {
 	BackfillReason             string                   `json:"backfillReason,omitempty"`
 	VODStatus                  string                   `json:"vodStatus,omitempty"`
 	ManualRetryAllowed         bool                     `json:"manualRetryAllowed,omitempty"`
+	ChatSource                 string                   `json:"chatSource,omitempty"`
+	ChatSourceDetail           string                   `json:"chatSourceDetail,omitempty"`
 	CopyKey                    string                   `json:"copyKey,omitempty"`
 	Message                    string                   `json:"message"`
 }
@@ -181,6 +183,42 @@ func decoratePulseCoverage(c ExtensionCoverage, vodID string) ExtensionCoverage 
 	}
 	if c.CopyKey == "" {
 		c.CopyKey = c.State
+	}
+	return c
+}
+
+func enrichCoverageChatSources(c ExtensionCoverage, rollups []MinuteRollup) ExtensionCoverage {
+	hasLive := false
+	hasGQL := false
+	hasManual := false
+	for _, r := range rollups {
+		if r.ChatCount <= 0 {
+			continue
+		}
+		switch strings.TrimSpace(r.ChatSource) {
+		case RollupChatSourceGQL:
+			hasGQL = true
+			if r.ChatSourceDetail == RollupDetailManualImport {
+				hasManual = true
+			}
+		case RollupChatSourceLive:
+			hasLive = true
+		case "":
+			if r.SourceConfidence == SourceConfidenceVerified {
+				hasLive = true
+			}
+		}
+	}
+	switch {
+	case hasManual:
+		c.ChatSource = ChatSourceGQL
+		c.ChatSourceDetail = RollupDetailManualImport
+	case hasGQL && hasLive:
+		c.ChatSource = ChatSourceMixed
+	case hasGQL:
+		c.ChatSource = ChatSourceGQL
+	case hasLive:
+		c.ChatSource = ChatSourceLive
 	}
 	return c
 }

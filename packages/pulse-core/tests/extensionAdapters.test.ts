@@ -161,7 +161,7 @@ describe('peaksToLiveHeatPoints', () => {
     assert.equal(points.length, 1)
     assert.equal(points[0]?.score, 88)
     assert.equal(points[0]?.estimated, false)
-    assert.equal(points[0]?.reasonLabel, 'Twitch emote spike')
+    assert.equal(points[0]?.reasonLabel, 'Emote spike')
     assert.equal(points[0]?.chatCount, 214)
     assert.equal(points[0]?.topEmotes[0]?.name, 'LUL')
     assert.equal(points[0]?.topEmotes[0]?.count, 2)

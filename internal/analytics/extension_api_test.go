@@ -153,9 +153,9 @@ func TestExtensionPeaksWarmingUnderMinimum(t *testing.T) {
 func TestExtensionReasonLabel(t *testing.T) {
 	cases := map[string]string{
 		heatmap.ReasonChatSpike:        "Chat spike",
-		heatmap.ReasonSevenTVSpike:     "7TV emote spike",
-		heatmap.ReasonTwitchEmoteSpike: "Twitch emote spike",
-		heatmap.ReasonFFZSpike:         "FFZ emote spike",
+		heatmap.ReasonSevenTVSpike:     "Emote spike",
+		heatmap.ReasonTwitchEmoteSpike: "Emote spike",
+		heatmap.ReasonFFZSpike:         "Emote spike",
 		heatmap.ReasonViewerSpike:      "Viewer spike",
 		heatmap.ReasonManual:           "Moment",
 		"emote_spike":                  "Emote spike",
@@ -165,8 +165,8 @@ func TestExtensionReasonLabel(t *testing.T) {
 			t.Fatalf("extensionReasonLabel(%q) = %q, want %q", reason, got, want)
 		}
 	}
-	if got := extensionReasonLabel("game_change"); got != "game change" {
-		t.Fatalf("fallback label = %q, want %q", got, "game change")
+	if got := extensionReasonLabel("game_change"); got != "Game change" {
+		t.Fatalf("fallback label = %q, want %q", got, "Game change")
 	}
 }
 
@@ -524,15 +524,36 @@ func TestPeakEmotePerMinFromHeatmapRollups(t *testing.T) {
 
 func TestResolveExtensionGamesFallback(t *testing.T) {
 	existing := []ExtensionGameSegment{{GameName: "Minecraft", OffsetSeconds: 0, DurationSeconds: 3600}}
-	if got := resolveExtensionGames(existing, true, 7200, "Just Chatting"); len(got) != 1 || got[0].GameName != "Minecraft" {
+	if got := resolveExtensionGames(existing, 7200, "Just Chatting"); len(got) != 1 || got[0].GameName != "Minecraft" {
 		t.Fatalf("expected existing segments preserved, got %+v", got)
 	}
-	if got := resolveExtensionGames(nil, false, 7200, "Just Chatting"); len(got) != 0 {
-		t.Fatalf("expected no fallback while live, got %+v", got)
+	if got := resolveExtensionGames(nil, 0, "Just Chatting"); len(got) != 0 {
+		t.Fatalf("expected no fallback without duration, got %+v", got)
 	}
-	got := resolveExtensionGames(nil, true, 7200, "Just Chatting")
+	got := resolveExtensionGames(nil, 7200, "Just Chatting")
 	if len(got) != 1 || got[0].GameName != "Just Chatting" || got[0].DurationSeconds != 7200 {
 		t.Fatalf("fallback = %+v", got)
+	}
+	gotLive := resolveExtensionGames(nil, 3600, "VALORANT")
+	if len(gotLive) != 1 || gotLive[0].GameName != "VALORANT" {
+		t.Fatalf("live fallback = %+v", gotLive)
+	}
+}
+
+func TestExtendLiveGameSegments(t *testing.T) {
+	segments := []ExtensionGameSegment{
+		{GameName: "Just Chatting", OffsetSeconds: 0, DurationSeconds: 600},
+		{GameName: "VALORANT", OffsetSeconds: 600, DurationSeconds: 300},
+	}
+	got := extendLiveGameSegments(segments, 3600, true)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[1].DurationSeconds != 3000 {
+		t.Fatalf("last duration = %d, want 3000", got[1].DurationSeconds)
+	}
+	if extendLiveGameSegments(segments, 3600, false)[1].DurationSeconds != 300 {
+		t.Fatal("offline should not extend last segment")
 	}
 }
 
@@ -550,5 +571,19 @@ func TestConvertGameSegmentsForExtension(t *testing.T) {
 	}
 	if got[0].OffsetSeconds != 0 || got[1].DurationSeconds != 900 {
 		t.Fatalf("offsets/durations = %+v", got)
+	}
+}
+
+func TestViewerStartOffsetSeconds(t *testing.T) {
+	streamStart := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	rollups := []heatmap.MinuteRollup{
+		{MinuteTS: streamStart.Add(2 * time.Minute), ChatCount: 40, ViewerSamples: 0},
+		{MinuteTS: streamStart.Add(5 * time.Minute), ChatCount: 80, ViewerSamples: 2, ViewerLatest: 41000},
+	}
+	if got := viewerStartOffsetSeconds(rollups, streamStart); got != 300 {
+		t.Fatalf("viewerStartOffsetSeconds = %d, want 300", got)
+	}
+	if got := coverageStartOffsetSeconds(rollups, streamStart); got != 120 {
+		t.Fatalf("coverageStartOffsetSeconds = %d, want 120", got)
 	}
 }

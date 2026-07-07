@@ -29,11 +29,16 @@ type HubLivePulseMoment struct {
 	Kind            string     `json:"kind,omitempty"`
 	Source          string     `json:"source,omitempty"`
 	ChatPerMin      int        `json:"chatPerMin,omitempty"`
+	EmotesPerMin    int        `json:"emotesPerMin,omitempty"`
+	Viewers         int        `json:"viewers,omitempty"`
 	ViewerDelta     string     `json:"viewerDelta,omitempty"`
 	TopEmoteCode    string     `json:"topEmoteCode,omitempty"`
 	TopEmotes       []HubEmote `json:"topEmotes,omitempty"`
 	Confidence      int        `json:"confidence,omitempty"`
 	VodState        string     `json:"vodState,omitempty"`
+	Category        string     `json:"category,omitempty"`
+	StreamStartedAt int64      `json:"streamStartedAt,omitempty"`
+	ActivityTag     string     `json:"activityTag,omitempty"`
 }
 
 // hubLivePulseMomentsMeta exposes a hosted-safe deploy/readiness signal for the
@@ -95,8 +100,19 @@ func (h *Handler) buildHubLivePulseMoments(ctx context.Context, liveChannels []H
 		if limit > len(bundle.peaks) {
 			limit = len(bundle.peaks)
 		}
+		coverageStart := coverageStartOffsetSeconds(bundle.rollups, bundle.startedAt)
+		streamAgeSec := streamAgeSeconds(bundle.startedAt, bundle.isLive)
 		for _, peak := range bundle.peaks[:limit] {
-			candidates = append(candidates, hubLivePulseMomentFromPeak(ch, peak, vodID, stream.StartedAt, streamID))
+			peak = h.enrichPortalPeakEmotes(ctx, peak, bundle.rollups, bundle.points)
+			if peak.Viewers <= 0 {
+				peak.Viewers = viewersAtOffset(bundle.rollups, bundle.points, peak.OffsetSeconds)
+			}
+			category := h.resolveHubMomentCategory(ctx, streamID, stream, ch, peak.OffsetSeconds)
+			moment, ok := hubLivePulseMomentFromPeak(ch, peak, vodID, stream.StartedAt, streamID, coverageStart, streamAgeSec, category)
+			if !ok {
+				continue
+			}
+			candidates = append(candidates, moment)
 		}
 	}
 
@@ -116,7 +132,20 @@ func (h *Handler) buildHubLivePulseMoments(ctx context.Context, liveChannels []H
 	return candidates
 }
 
-func hubLivePulseMomentFromPeak(ch HubLiveChannel, peak PortalPeak, vodID string, startedAt time.Time, streamID string) HubLivePulseMoment {
+func hubLivePulseMomentFromPeak(
+	ch HubLiveChannel,
+	peak PortalPeak,
+	vodID string,
+	startedAt time.Time,
+	streamID string,
+	coverageStart int,
+	streamAgeSec int,
+	category string,
+) (HubLivePulseMoment, bool) {
+	label, kind, activityTag, skip := enrichHubPulseMoment(peak, coverageStart, streamAgeSec)
+	if skip {
+		return HubLivePulseMoment{}, false
+	}
 	vodState := strings.TrimSpace(peak.VodState)
 	if vodState == "" {
 		vodState = portalVodState(vodID, peak.OffsetSeconds, vodID != "")
@@ -126,10 +155,25 @@ func hubLivePulseMomentFromPeak(ch HubLiveChannel, peak PortalPeak, vodID string
 		displayName = ch.Login
 	}
 	var at int64
-	if !startedAt.IsZero() && peak.OffsetSeconds >= 0 {
-		at = startedAt.Add(time.Duration(peak.OffsetSeconds) * time.Second).UnixMilli()
+	var streamStartedAt int64
+	if !startedAt.IsZero() {
+		streamStartedAt = startedAt.UTC().UnixMilli()
+		if peak.OffsetSeconds >= 0 {
+			at = startedAt.Add(time.Duration(peak.OffsetSeconds) * time.Second).UnixMilli()
+		}
 	}
-	return HubLivePulseMoment{
+	category = strings.TrimSpace(category)
+	if category == "" {
+		category = strings.TrimSpace(ch.Category)
+	}
+	viewers := peak.Viewers
+	emotesPerMin := peak.EmoteCount
+	if emotesPerMin <= 0 && len(peak.TopEmotes) > 0 {
+		for _, emote := range peak.TopEmotes {
+			emotesPerMin += emote.Count
+		}
+	}
+	return normalizeHubLivePulseMoment(HubLivePulseMoment{
 		Login:           normalizeLogin(ch.Login),
 		DisplayName:     displayName,
 		ProfileImageURL: ch.ProfileImageURL,
@@ -138,14 +182,24 @@ func hubLivePulseMomentFromPeak(ch HubLiveChannel, peak PortalPeak, vodID string
 		OffsetSeconds:   peak.OffsetSeconds,
 		At:              at,
 		Score:           peak.Score,
-		Label:           peak.ReasonLabel,
-		Kind:            strings.TrimSpace(peak.DominantSignal),
+		Label:           label,
+		Kind:            kind,
 		Source:          hubFeaturedMomentSource(vodState),
 		ChatPerMin:      peak.ChatCount,
+		EmotesPerMin:    emotesPerMin,
+		Viewers:         viewers,
 		ViewerDelta:     peak.ViewerDelta,
 		TopEmoteCode:    peakTopEmoteCode(peak),
 		TopEmotes:       hubEmotesFromPeak(peak),
 		Confidence:      peak.Confidence,
 		VodState:        vodState,
-	}
+		Category:        category,
+		StreamStartedAt: streamStartedAt,
+		ActivityTag:     activityTag,
+	}), true
+}
+
+func normalizeHubLivePulseMoment(moment HubLivePulseMoment) HubLivePulseMoment {
+	normalizeHubPulseMomentFields(&moment)
+	return moment
 }

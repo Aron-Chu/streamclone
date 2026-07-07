@@ -25,6 +25,7 @@ type PortalPeak struct {
 	DominantSignal string           `json:"dominantSignal"`
 	ChatCount      int              `json:"chatCount"`
 	EmoteCount     int              `json:"emoteCount"`
+	Viewers        int              `json:"viewers,omitempty"`
 	ViewerDelta    string           `json:"viewerDelta,omitempty"`
 	Confidence     int              `json:"confidence,omitempty"`
 	VodState       string           `json:"vodState,omitempty"`
@@ -121,6 +122,7 @@ func portalPeaksFromExtension(
 			DominantSignal: peak.DominantSignal,
 			ChatCount:      peak.ChatCount,
 			EmoteCount:     peak.EmoteCount,
+			Viewers:        viewersAtOffset(rollups, points, peak.OffsetSeconds),
 			ViewerDelta:    viewerDeltaAtOffset(rollups, points, peak.OffsetSeconds),
 			Confidence:     confidence,
 			VodState:       portalVodState(vodID, peak.OffsetSeconds, vodID != ""),
@@ -137,6 +139,72 @@ func detailPointAtOffset(points []heatmap.ReplayHeatmapDetailPoint, offset int) 
 		}
 	}
 	return heatmap.ReplayHeatmapDetailPoint{}, false
+}
+
+func (h *Handler) enrichPortalPeakEmotes(
+	ctx context.Context,
+	peak PortalPeak,
+	rollups []heatmap.MinuteRollup,
+	points []heatmap.ReplayHeatmapDetailPoint,
+) PortalPeak {
+	if len(peak.TopEmotes) > 0 || h == nil {
+		return peak
+	}
+	rollup, ok := rollupAtOffset(rollups, points, peak.OffsetSeconds)
+	if !ok || len(rollup.Emotes) == 0 {
+		return peak
+	}
+	top := TopEmotesFromRollups(storeRollupsFromHeatmap([]heatmap.MinuteRollup{rollup}), 3)
+	if len(top) == 0 {
+		return peak
+	}
+	ext := make([]ExtensionEmote, 0, len(top))
+	for _, emote := range top {
+		ext = append(ext, ExtensionEmote{
+			ID:       emote.ID,
+			Name:     emote.Name,
+			Provider: emote.Provider,
+			ImageURL: emote.ImageURL,
+			Count:    emote.Count,
+		})
+	}
+	peak.TopEmotes = h.decorateExtensionEmotesBatch(ctx, ext)
+	return peak
+}
+
+func (h *Handler) resolveHubMomentCategory(
+	ctx context.Context,
+	streamID string,
+	stream *StreamRecord,
+	ch HubLiveChannel,
+	offsetSec int,
+) string {
+	if h != nil && strings.TrimSpace(streamID) != "" {
+		if segments, err := h.resolveStreamGameSegments(ctx, streamID); err == nil {
+			if cat := gameCategoryAtOffset(segments, offsetSec); cat != "" {
+				return cat
+			}
+		}
+	}
+	if cat := strings.TrimSpace(ch.Category); cat != "" {
+		return cat
+	}
+	if stream != nil {
+		return strings.TrimSpace(stream.Category)
+	}
+	return ""
+}
+
+func viewersAtOffset(rollups []heatmap.MinuteRollup, points []heatmap.ReplayHeatmapDetailPoint, offset int) int {
+	if rollup, ok := rollupAtOffset(rollups, points, offset); ok {
+		if rollup.ViewerLatest > 0 {
+			return rollup.ViewerLatest
+		}
+		if rollup.ViewerAvg > 0 {
+			return rollup.ViewerAvg
+		}
+	}
+	return 0
 }
 
 func viewerDeltaAtOffset(rollups []heatmap.MinuteRollup, points []heatmap.ReplayHeatmapDetailPoint, offset int) string {

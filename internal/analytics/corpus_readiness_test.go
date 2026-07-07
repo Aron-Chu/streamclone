@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"streamclone/internal/config"
 )
 
 func TestCorpusReadinessRouteReportsCriticalWithoutStore(t *testing.T) {
@@ -77,6 +79,39 @@ func TestCorpusPipelineStateFromReadinessFlagsCriticalTrackerFailures(t *testing
 	report.Summary.AdmissionDisabledRows = 95
 	if got := corpusPipelineStateFromReadiness(cfg, report); got != CorpusStatusCritical {
 		t.Fatalf("state with disabled admission rows = %q, want critical", got)
+	}
+}
+
+func TestCorpusPipelineStateMetadataStaleProportional(t *testing.T) {
+	cfg := CorpusRuntimeConfig{
+		MetadataEnabled:      true,
+		MetadataWriteEnabled: true,
+		LiveAdmissionEnabled: true,
+	}
+	report := Top100ReadinessReport{
+		CollectorMax: 300,
+		Summary: Top100ReadinessSummary{
+			LiveRows:              115,
+			CollectorTrackingRows: 99,
+			ExpectedCollectorRows: 115,
+			MetadataStaleRows:     15,
+		},
+	}
+	// 15/115 stale (~13%) is below the 20% critical fraction → degraded, not critical.
+	if got := corpusPipelineStateFromReadiness(cfg, report); got != CorpusStatusDegraded {
+		t.Fatalf("state with 13%% stale metadata = %q, want degraded", got)
+	}
+
+	report.Summary.MetadataStaleRows = 30
+	if got := corpusPipelineStateFromReadiness(cfg, report); got != CorpusStatusCritical {
+		t.Fatalf("state with 26%% stale metadata = %q, want critical", got)
+	}
+
+	// Sub-threshold stale rows must not mask a harder critical condition.
+	report.Summary.MetadataStaleRows = 5
+	report.Summary.CollectorTrackingRows = 0
+	if got := corpusPipelineStateFromReadiness(cfg, report); got != CorpusStatusCritical {
+		t.Fatalf("state with zero collector tracking = %q, want critical", got)
 	}
 }
 
@@ -198,4 +233,22 @@ func testContainsString(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestCorpusRuntimeConfigFromAppPreservesLiveAdmissionTopN5000(t *testing.T) {
+	cfg := config.Config{
+		Top500MetadataTopN:       1000,
+		PulseTop500AdmissionTopN: 5000,
+		PulseMaxActiveChannels:   5000,
+	}
+	runtime := CorpusRuntimeConfigFromApp(cfg)
+	if runtime.TargetTopN != 1000 {
+		t.Fatalf("TargetTopN = %d, want metadata cap 1000", runtime.TargetTopN)
+	}
+	if runtime.LiveAdmissionTopN != 5000 {
+		t.Fatalf("LiveAdmissionTopN = %d, want 5000", runtime.LiveAdmissionTopN)
+	}
+	if runtime.MaxActiveIRCChannels != 5000 {
+		t.Fatalf("MaxActiveIRCChannels = %d, want 5000", runtime.MaxActiveIRCChannels)
+	}
 }

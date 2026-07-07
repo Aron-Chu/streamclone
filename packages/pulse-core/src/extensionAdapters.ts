@@ -7,7 +7,7 @@ import type {
   LiveHeatRollup,
 } from './liveHeat.ts'
 import { LIVE_HEAT_MAX_EMOTES } from './liveHeat.ts'
-import { momentScoreReasonLabel } from './momentScore.ts'
+import { displayMomentReasonLabel } from './momentScore.ts'
 import { resolveEmoteImageUrl } from './emoteImageUrl.ts'
 import type { LiveStatsInput, LiveStatsRollup, LiveTopEmote } from './liveStats.ts'
 
@@ -118,7 +118,7 @@ export function peaksToLiveHeatPoints(
   return peaks.map(peak => {
     const reasonCode = peak.reasons[0]
     const reason = peakReasonToLiveHeatReason(reasonCode)
-    const reasonLabel = peak.reasonLabel?.trim() || momentScoreReasonLabel(reasonCode ?? '')
+    const reasonLabel = displayMomentReasonLabel(reasonCode ?? '', peak.reasonLabel)
     return {
       minuteTs: minuteTsFromOffset(startedAt, peak.offsetSeconds) ?? '',
       offsetSeconds: Math.max(0, peak.offsetSeconds),

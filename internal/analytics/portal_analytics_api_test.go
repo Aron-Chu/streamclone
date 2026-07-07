@@ -129,6 +129,40 @@ func TestPortalStreamMinutesEmptyRollups(t *testing.T) {
 	assertJSONOmitsForbiddenFields(t, body, []string{"emotes"})
 }
 
+func TestPortalMinutePointsExposeTotalEmoteCountBeyondTopThree(t *testing.T) {
+	start := time.Date(2026, 6, 25, 18, 0, 0, 0, time.UTC)
+	stream := &StreamRecord{
+		StreamID:  "123",
+		Login:     "xqc",
+		StartedAt: start,
+	}
+	rollups := []MinuteRollup{{
+		MinuteTS:          start.Add(2 * time.Minute),
+		ChatCount:         200,
+		TotalEmoteCount:   200,
+		SevenTVEmoteCount: 0,
+		Emotes: map[string]int{
+			"twitch:1:LUL":      80,
+			"twitch:2:BabyRage": 60,
+			"twitch:3:Clap":     40,
+			"twitch:4:Kappa":    20,
+		},
+	}}
+	points := portalMinutePointsFromRollups(stream, rollups)
+	if len(points) != 1 {
+		t.Fatalf("expected 1 point, got %d", len(points))
+	}
+	got := points[0].TotalEmoteCount
+	if got != 200 {
+		t.Fatalf("totalEmoteCount = %d, want 200 (full rollup total, not top-3 sum 180)", got)
+	}
+	body, err := json.Marshal(portalMinutesFromRollups(stream, rollups, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSONOmitsForbiddenFields(t, body, []string{"emotes"})
+}
+
 func TestPortalStreamMinutesTopEmotesSanitized(t *testing.T) {
 	start := time.Date(2026, 6, 25, 18, 0, 0, 0, time.UTC)
 	twitchUUID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
@@ -321,6 +355,8 @@ func TestHostedPortalGuestRoutesAllowUnauthenticated(t *testing.T) {
 		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/replay-heatmap"},
 		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/games"},
 		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/recap"},
+		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/peaks"},
+		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/coverage-truth"},
 		{http.MethodGet, "/v1/portal/analytics/streams/stream-1/minutes"},
 		{http.MethodGet, "/v1/portal/analytics/channels/xqc/emotes?range=30d"},
 		{http.MethodGet, "/v1/portal/analytics/channels/xqc/streams"},
@@ -412,6 +448,69 @@ func TestPortalGuestJSONForbiddenKeys(t *testing.T) {
 			"operator", "gql", "corpus", "archive", "lease", "recentAdmissions", "rows",
 		}
 		assertJSONOmitsForbiddenFields(t, body, syncForbidden)
+	})
+}
+
+func TestPortalHonestyContractJSON(t *testing.T) {
+	t.Run("PortalStreamDetail includes viewerSource", func(t *testing.T) {
+		body, err := json.Marshal(PortalStreamDetail{
+			Channel:      "xqc",
+			State:        "live",
+			ViewerSource: "live",
+			Sources:      []SourceStatus{{Source: "analytics_db", State: "ready"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["viewerSource"] != "live" {
+			t.Fatalf("viewerSource = %v", payload["viewerSource"])
+		}
+	})
+
+	t.Run("PortalChannelLiveResponse includes honesty fields", func(t *testing.T) {
+		body, err := json.Marshal(PortalChannelLiveResponse{
+			Channel:                    "xqc",
+			State:                      "live",
+			CoverageStartOffsetSeconds: 180,
+			ViewerSource:               "merged",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["coverageStartOffsetSeconds"] != float64(180) {
+			t.Fatalf("coverageStartOffsetSeconds = %v", payload["coverageStartOffsetSeconds"])
+		}
+		if payload["viewerSource"] != "merged" {
+			t.Fatalf("viewerSource = %v", payload["viewerSource"])
+		}
+	})
+
+	t.Run("GameSegment includes source", func(t *testing.T) {
+		body, err := json.Marshal(GameSegment{
+			StreamID:        "s1",
+			GameName:        "Fortnite",
+			OffsetSeconds:   0,
+			DurationSeconds: 3600,
+			Source:          "snapshot",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["source"] != "snapshot" {
+			t.Fatalf("source = %v", payload["source"])
+		}
 	})
 }
 

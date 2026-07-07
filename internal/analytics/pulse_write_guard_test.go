@@ -71,3 +71,16 @@ func TestHostedUserStateRejectsMissingPrincipal(t *testing.T) {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
+
+func TestRequireHostedNonGuestPrincipalRejectsGuest(t *testing.T) {
+	h := &Handler{pulseHosted: PulseHostedConfig{Hosted: true}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/analytics/always-tracked", nil)
+	ctx := context.WithValue(req.Context(), pulsePrincipalCtxKey{}, guestPulsePrincipal(req))
+	if _, ok := h.requireHostedNonGuestPrincipal(rec, req.WithContext(ctx)); ok {
+		t.Fatal("expected guest principal to be rejected")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}

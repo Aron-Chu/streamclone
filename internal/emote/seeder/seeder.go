@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 	"streamclone/internal/emote/dict"
 	"streamclone/internal/emote/flags"
 	"streamclone/internal/emote/objstore"
+	"streamclone/internal/emote/render"
 	"streamclone/internal/emote/store"
 	"streamclone/internal/metadata/helix"
 )
@@ -33,6 +35,11 @@ const (
 	ProviderBTTV          Provider = "bttv"
 	sourceDownloadTimeout          = 6 * time.Second
 )
+
+// errProviderNotFound marks a provider 404 for a channel that never registered
+// with that provider (BTTV user / FFZ room). It means "no channel emotes",
+// not a seed failure — globals should still be imported.
+var errProviderNotFound = errors.New("provider has no record for channel")
 
 type ProviderResult struct {
 	Provider      string
@@ -76,6 +83,7 @@ type Seeder struct {
 	st                *store.Store
 	obj               *objstore.Client
 	d                 *dict.Dict
+	render            *render.Queue
 	log               *slog.Logger
 	apiURL            string
 	cdnURL            string
@@ -91,10 +99,15 @@ func New(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger, 
 }
 
 func NewWithImportConcurrency(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger, apiURL, cdnURL, ffzURL, bttvURL string, twitch *helix.Client, importConcurrency int) *Seeder {
+	return NewWithRenderQueue(st, obj, d, nil, log, apiURL, cdnURL, ffzURL, bttvURL, twitch, importConcurrency)
+}
+
+func NewWithRenderQueue(st *store.Store, obj *objstore.Client, d *dict.Dict, rq *render.Queue, log *slog.Logger, apiURL, cdnURL, ffzURL, bttvURL string, twitch *helix.Client, importConcurrency int) *Seeder {
 	return &Seeder{
 		st:                st,
 		obj:               obj,
 		d:                 d,
+		render:            rq,
 		log:               log,
 		apiURL:            strings.TrimRight(apiURL, "/"),
 		cdnURL:            strings.TrimRight(cdnURL, "/"),
@@ -137,6 +150,11 @@ type ffzResponse struct {
 		DisplayName string `json:"display_name"`
 	} `json:"room"`
 	Sets map[string]ffzSet `json:"sets"`
+}
+
+type ffzGlobalResponse struct {
+	DefaultSets []int64           `json:"default_sets"`
+	Sets        map[string]ffzSet `json:"sets"`
 }
 
 type ffzSet struct {
@@ -307,7 +325,14 @@ func (s *Seeder) seedSevenTV(ctx context.Context, twitchID, setID string) (int, 
 func (s *Seeder) seedSevenTVWithResult(ctx context.Context, twitchID, setID string) (ImportResult, error) {
 	u, err := s.fetchSevenTVUser(ctx, twitchID)
 	if err != nil {
-		return ImportResult{}, err
+		if !errors.Is(err, errProviderNotFound) {
+			return ImportResult{}, err
+		}
+		// Channel has no 7TV account — still import 7TV globals below.
+		u = &sevenTVUser{}
+		if s.log != nil {
+			s.log.Info("7tv user not registered; importing globals only", "twitch_id", twitchID)
+		}
 	}
 	if u.User.Username != "" {
 		_ = s.st.UpsertChannel(ctx, twitchID, strings.ToLower(u.User.Username), u.User.DisplayName)
@@ -429,6 +454,9 @@ func (s *Seeder) fetchSevenTVUser(ctx context.Context, twitchID string) (*sevenT
 		return nil, fmt.Errorf("fetch 7tv user: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("7tv user %s: %w", twitchID, errProviderNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("7tv returned %d", resp.StatusCode)
 	}
@@ -521,7 +549,14 @@ func (s *Seeder) seedFFZ(ctx context.Context, login, twitchID, setID string) (in
 func (s *Seeder) seedFFZWithResult(ctx context.Context, login, twitchID, setID string) (ImportResult, error) {
 	resp, err := s.fetchFFZRoom(ctx, login, twitchID)
 	if err != nil {
-		return ImportResult{}, err
+		if !errors.Is(err, errProviderNotFound) {
+			return ImportResult{}, err
+		}
+		// Channel has no FFZ room — still import FFZ globals below.
+		resp = &ffzResponse{}
+		if s.log != nil {
+			s.log.Info("ffz room not registered; importing globals only", "login", login, "twitch_id", twitchID)
+		}
 	}
 	if resp.Room.ID != "" || resp.Room.DisplayName != "" {
 		roomLogin := strings.ToLower(strings.TrimSpace(resp.Room.ID))
@@ -531,33 +566,87 @@ func (s *Seeder) seedFFZWithResult(ctx context.Context, login, twitchID, setID s
 		_ = s.st.UpsertChannel(ctx, twitchID, roomLogin, resp.Room.DisplayName)
 	}
 	var emotes []remoteEmote
-	for key, set := range resp.Sets {
-		providerSetID := key
-		if set.ID != 0 {
-			providerSetID = strconv.FormatInt(set.ID, 10)
-		}
-		for _, em := range set.Emoticons {
-			if err := ctx.Err(); err != nil {
-				return ImportResult{}, err
+	appendFFZSets := func(sets map[string]ffzSet, isGlobal bool) error {
+		for key, set := range sets {
+			providerSetID := key
+			if set.ID != 0 {
+				providerSetID = strconv.FormatInt(set.ID, 10)
 			}
-			sourceURL := bestFFZURL(em.URLs)
-			if sourceURL == "" || em.Name == "" || em.ID == 0 {
-				continue
+			for _, em := range set.Emoticons {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				sourceURL := bestFFZURL(em.URLs)
+				if sourceURL == "" || em.Name == "" || em.ID == 0 {
+					continue
+				}
+				emotes = append(emotes, remoteEmote{
+					Provider:        ProviderFFZ,
+					ProviderEmoteID: strconv.FormatInt(em.ID, 10),
+					ProviderSetID:   providerSetID,
+					Name:            em.Name,
+					OwnerID:         twitchID,
+					SourceURL:       sourceURL,
+					Animated:        rawTruthy(em.Animated),
+					ZeroWidth:       em.Modifier,
+					IsGlobal:        isGlobal,
+				})
 			}
-			emotes = append(emotes, remoteEmote{
-				Provider:        ProviderFFZ,
-				ProviderEmoteID: strconv.FormatInt(em.ID, 10),
-				ProviderSetID:   providerSetID,
-				Name:            em.Name,
-				OwnerID:         twitchID,
-				SourceURL:       sourceURL,
-				Animated:        rawTruthy(em.Animated),
-				ZeroWidth:       em.Modifier,
-			})
 		}
+		return nil
+	}
+	if err := appendFFZSets(resp.Sets, false); err != nil {
+		return ImportResult{}, err
+	}
+	globalSets, gErr := s.fetchFFZGlobalSets(ctx)
+	if gErr != nil {
+		if s.log != nil {
+			s.log.Warn("ffz global fetch failed", "twitch_id", twitchID, "err", gErr)
+		}
+	} else if err := appendFFZSets(globalSets, true); err != nil {
+		return ImportResult{}, err
 	}
 	sortRemoteEmotes(emotes)
 	return s.importRemoteEmotesToSet(ctx, setID, emotes)
+}
+
+// fetchFFZGlobalSets returns the FFZ global emote sets (default_sets only).
+func (s *Seeder) fetchFFZGlobalSets(ctx context.Context) (map[string]ffzSet, error) {
+	url := fmt.Sprintf("%s/set/global", s.ffzURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch ffz global: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ffz global returned %d", resp.StatusCode)
+	}
+	var out ffzGlobalResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode ffz global: %w", err)
+	}
+	if len(out.DefaultSets) == 0 {
+		return out.Sets, nil
+	}
+	wanted := make(map[string]struct{}, len(out.DefaultSets))
+	for _, id := range out.DefaultSets {
+		wanted[strconv.FormatInt(id, 10)] = struct{}{}
+	}
+	sets := make(map[string]ffzSet, len(out.DefaultSets))
+	for key, set := range out.Sets {
+		setKey := key
+		if set.ID != 0 {
+			setKey = strconv.FormatInt(set.ID, 10)
+		}
+		if _, ok := wanted[setKey]; ok {
+			sets[key] = set
+		}
+	}
+	return sets, nil
 }
 
 func (s *Seeder) seedBTTV(ctx context.Context, twitchID, setID string) (int, error) {
@@ -568,7 +657,14 @@ func (s *Seeder) seedBTTV(ctx context.Context, twitchID, setID string) (int, err
 func (s *Seeder) seedBTTVWithResult(ctx context.Context, twitchID, setID string) (ImportResult, error) {
 	user, err := s.fetchBTTVUser(ctx, twitchID)
 	if err != nil {
-		return ImportResult{}, err
+		if !errors.Is(err, errProviderNotFound) {
+			return ImportResult{}, err
+		}
+		// Channel has no BTTV account — still import BTTV globals below.
+		user = &bttvUserResponse{}
+		if s.log != nil {
+			s.log.Info("bttv user not registered; importing globals only", "twitch_id", twitchID)
+		}
 	}
 	global, err := s.fetchBTTVGlobal(ctx)
 	if err != nil && s.log != nil {
@@ -614,6 +710,9 @@ func (s *Seeder) fetchBTTVUser(ctx context.Context, twitchID string) (*bttvUserR
 		return nil, fmt.Errorf("fetch bttv user: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("bttv user %s: %w", twitchID, errProviderNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("bttv returned %d", resp.StatusCode)
 	}
@@ -707,7 +806,10 @@ func (s *Seeder) fetchFFZRoom(ctx context.Context, login, twitchID string) (*ffz
 		if err == nil {
 			return out, nil
 		}
-		lastErr = err
+		// Prefer surfacing a real failure over a not-registered 404.
+		if lastErr == nil || !errors.Is(err, errProviderNotFound) {
+			lastErr = err
+		}
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("ffz room unavailable")
@@ -725,6 +827,9 @@ func (s *Seeder) fetchFFZURL(ctx context.Context, url string) (*ffzResponse, err
 		return nil, fmt.Errorf("fetch ffz room: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("ffz room %s: %w", url, errProviderNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("ffz returned %d", resp.StatusCode)
 	}
@@ -773,12 +878,21 @@ func (s *Seeder) importRemoteEmoteOnce(ctx context.Context, em remoteEmote) (str
 		if existing.Flags != wantFlags {
 			_ = s.st.UpdateEmoteFlags(ctx, existing.ID, wantFlags)
 		}
-		if existing.Status != 1 && existing.SourceHash != "" {
-			_, _ = s.st.InsertJob(ctx, existing.ID, existing.SourceHash)
+		if existing.SourceURL != em.SourceURL && em.SourceURL != "" {
+			_ = s.st.UpdateEmoteSourceURL(ctx, existing.ID, em.SourceURL)
+		}
+		if s.shouldEagerRender(em.Provider) && existing.Status != 1 && existing.SourceHash != "" {
+			_, _ = s.enqueueRender(ctx, existing.ID, string(em.Provider), em.ProviderEmoteID, "", render.ReasonEnsure, "")
+		} else if !s.shouldEagerRender(em.Provider) && existing.Status == 0 && em.ProviderEmoteID != "" {
+			_ = s.st.SetEmoteMetadataReady(ctx, existing.ID)
 		}
 		return existing.ID, true, nil
 	} else if err != pgx.ErrNoRows {
 		return "", false, err
+	}
+
+	if !s.shouldEagerRender(em.Provider) {
+		return s.importMetadataOnly(ctx, em, wantFlags)
 	}
 
 	sourceCtx, cancel := context.WithTimeout(ctx, sourceDownloadTimeout)
@@ -836,10 +950,63 @@ func (s *Seeder) importRemoteEmoteOnce(ctx context.Context, em remoteEmote) (str
 	if err := s.obj.PutSrc(ctx, emoteID, data, mimeType); err != nil {
 		return "", false, fmt.Errorf("store src: %w", err)
 	}
-	if _, err := s.st.InsertJob(ctx, emoteID, e.SourceHash); err != nil {
+	if _, err := s.enqueueRender(ctx, emoteID, string(em.Provider), em.ProviderEmoteID, em.SourceURL, render.ReasonEnsure, e.SourceHash); err != nil {
 		return "", false, err
 	}
 	return emoteID, false, nil
+}
+
+func (s *Seeder) shouldEagerRender(provider Provider) bool {
+	if s.render == nil {
+		return true
+	}
+	return s.render.ShouldEagerRender(string(provider))
+}
+
+func (s *Seeder) importMetadataOnly(ctx context.Context, em remoteEmote, wantFlags int) (string, bool, error) {
+	e := store.Emote{
+		Name:            em.Name,
+		OwnerID:         em.OwnerID,
+		IsGlobal:        em.IsGlobal,
+		Flags:           wantFlags,
+		Animated:        em.Animated,
+		MimeType:        em.MimeType,
+		Provider:        string(em.Provider),
+		ProviderEmoteID: em.ProviderEmoteID,
+		ProviderSetID:   em.ProviderSetID,
+		SourceURL:       em.SourceURL,
+		Status:          1,
+	}
+	if e.MimeType == "" {
+		e.MimeType = "image/webp"
+	}
+	emoteID, existing, err := s.st.UpsertEmoteByHash(ctx, e)
+	if err != nil {
+		return "", false, err
+	}
+	return emoteID, existing, nil
+}
+
+func (s *Seeder) enqueueRender(ctx context.Context, emoteID, provider, providerEmoteID, sourceURL string, reason render.Reason, sourceHash string) (bool, error) {
+	if s.render == nil {
+		_, err := s.st.InsertJob(ctx, emoteID, render.JobSourceKey(sourceHash, s.defaultRenderScales("")))
+		return err == nil, err
+	}
+	return s.render.Enqueue(ctx, render.Request{
+		EmoteID:         emoteID,
+		Provider:        provider,
+		ProviderEmoteID: providerEmoteID,
+		SourceURL:       sourceURL,
+		SourceHash:      sourceHash,
+		Reason:          reason,
+	})
+}
+
+func (s *Seeder) defaultRenderScales(scale string) []string {
+	if s.render == nil {
+		return []string{"1x", "2x", "3x", "4x"}
+	}
+	return s.render.DefaultScales(scale)
 }
 
 func (s *Seeder) importRemoteEmotesToSet(ctx context.Context, setID string, emotes []remoteEmote) (ImportResult, error) {

@@ -130,8 +130,8 @@ func TestCorpusTargetTopNAliasesLegacyTop500Config(t *testing.T) {
 	if cfg.Top500MetadataTopN != 1000 {
 		t.Fatalf("Top500MetadataTopN = %d, want 1000", cfg.Top500MetadataTopN)
 	}
-	if cfg.PulseTop500AdmissionTopN != 1000 {
-		t.Fatalf("PulseTop500AdmissionTopN = %d, want 1000", cfg.PulseTop500AdmissionTopN)
+	if cfg.PulseTop500AdmissionTopN != 75 {
+		t.Fatalf("PulseTop500AdmissionTopN = %d, want 75 (clamped to IRC max)", cfg.PulseTop500AdmissionTopN)
 	}
 	if cfg.Top500GoldVODInventoryTopN != 1000 {
 		t.Fatalf("Top500GoldVODInventoryTopN = %d, want 1000", cfg.Top500GoldVODInventoryTopN)

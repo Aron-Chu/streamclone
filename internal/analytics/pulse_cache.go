@@ -28,6 +28,17 @@ func InvalidatePulseHeatmapCache(ctx context.Context, heatmapCache *heatmap.Cach
 	}
 }
 
+// InvalidatePortalGamesCache clears the portal /games response cache for a stream.
+func InvalidatePortalGamesCache(ctx context.Context, rdb *redis.Client, streamID string, log *slog.Logger) {
+	streamID = strings.TrimSpace(streamID)
+	if rdb != nil && streamID != "" {
+		key := portalAnalyticsCachePrefix + "games:" + streamID
+		if err := rdb.Del(ctx, key).Err(); err != nil && log != nil {
+			log.Warn("portal games cache invalidation failed", "stream_id", streamID, "err", err)
+		}
+	}
+}
+
 // InvalidatePulseCaches clears public Pulse/BFF and heatmap caches after rollup writes.
 // Cache invalidation is best-effort so Redis never becomes required for live collection.
 func InvalidatePulseCaches(ctx context.Context, rdb *redis.Client, heatmapCache *heatmap.Cache, login, streamID string, log *slog.Logger) {

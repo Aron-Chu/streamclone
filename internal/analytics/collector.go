@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"streamclone/internal/chat/batch"
 	"streamclone/internal/chat/enrich"
 	"streamclone/internal/chat/parse"
+	"streamclone/internal/metrics"
 )
 
 type StreamProvider interface {
@@ -24,6 +26,7 @@ type RollupStore interface {
 	UpsertLiveStream(ctx context.Context, stream LiveStream, profile UserProfile, seenAt time.Time) error
 	CloseStream(ctx context.Context, streamID string, endedAt time.Time) error
 	UpsertMinuteRollup(ctx context.Context, streamID string, rollup MinuteRollup) error
+	BulkUpsertLiveMinuteRollups(ctx context.Context, streamID string, rollups []MinuteRollup, opts ...LiveRollupWriteOptions) error
 	PurgeOlderThan(ctx context.Context, cutoff time.Time) error
 	AddAlwaysTracked(ctx context.Context, login string) error
 	RemoveAlwaysTracked(ctx context.Context, login string) error
@@ -37,18 +40,26 @@ type channelJoiner interface {
 	Part(ctx context.Context, channel string)
 }
 
+const collectorBucketShardCount = 32
+
+type collectorBucketShard struct {
+	mu      sync.Mutex
+	buckets map[string]*minuteAccumulator
+}
+
 type Collector struct {
-	store                 RollupStore
-	helix                 StreamProvider
-	irc                   channelJoiner
-	enricher              *enrich.Enricher
-	log                   *slog.Logger
-	maxTracked            int
-	pollInterval          time.Duration
-	retention             time.Duration
-	topEmotes             int
-	idleTTL               time.Duration
-	pulseCacheInvalidator func(ctx context.Context, login, streamID string, includeHeatmap bool)
+	store                   RollupStore
+	helix                   StreamProvider
+	irc                     channelJoiner
+	enricher                *enrich.Enricher
+	log                     *slog.Logger
+	maxTracked              int
+	pollInterval            time.Duration
+	retention               time.Duration
+	topEmotes               int
+	idleTTL                 time.Duration
+	openMinuteFlushInterval time.Duration
+	pulseCacheInvalidator   func(ctx context.Context, login, streamID string, includeHeatmap bool)
 	// nowClock supports fake-clock VOD finalization tests; defaults to time.Now().UTC.
 	nowClock            func() time.Time
 	goLiveByStream      sync.Map // streamID -> pulseGoLiveObservation
@@ -59,27 +70,29 @@ type Collector struct {
 	// The final offset bounds the 5-minute resolution window (Requirement 19.3).
 	vodResolveOffsets []time.Duration
 
-	mu            sync.Mutex
-	tracked       map[string]*trackedChannel
-	buckets       map[string]*minuteAccumulator
-	runCtx        context.Context
-	stop          chan struct{}
-	startOnce     sync.Once
-	stopOnce      sync.Once
-	alwaysTracked map[string]bool
-	liveEmote     *LiveEmoteEnsurer
+	mu                  sync.Mutex
+	tracked             map[string]*trackedChannel
+	bucketShards        [collectorBucketShardCount]collectorBucketShard
+	openMinuteFlushLast map[string]time.Time
+	runCtx              context.Context
+	stop                chan struct{}
+	startOnce           sync.Once
+	stopOnce            sync.Once
+	alwaysTracked       map[string]bool
+	liveEmote           *LiveEmoteEnsurer
 }
 
 type trackedChannel struct {
-	login           string
-	currentStreamID string
-	offlinePolls    int
-	addedAt         time.Time
-	lastPollAt      time.Time
-	lastViewedAt    time.Time
-	refCounts       map[string]int
-	poolAlwaysTrack bool
-	watchPriority   int
+	login               string
+	currentStreamID     string
+	offlinePolls        int
+	addedAt             time.Time
+	lastPollAt          time.Time
+	lastViewedAt        time.Time
+	refCounts           map[string]int
+	poolAlwaysTrack     bool
+	watchPriority       int
+	admissionMissCycles int
 }
 
 type minuteAccumulator struct {
@@ -118,26 +131,31 @@ func NewCollector(
 	if topEmotes <= 0 {
 		topEmotes = 200
 	}
-	return &Collector{
-		store:         store,
-		helix:         helix,
-		irc:           irc,
-		enricher:      enricher,
-		log:           logger,
-		maxTracked:    maxTracked,
-		pollInterval:  pollInterval,
-		retention:     retention,
-		topEmotes:     topEmotes,
-		idleTTL:       15 * time.Minute,
-		tracked:       map[string]*trackedChannel{},
-		buckets:       map[string]*minuteAccumulator{},
-		runCtx:        context.Background(),
-		stop:          make(chan struct{}),
-		alwaysTracked: map[string]bool{},
+	c := &Collector{
+		store:                   store,
+		helix:                   helix,
+		irc:                     irc,
+		enricher:                enricher,
+		log:                     logger,
+		maxTracked:              maxTracked,
+		pollInterval:            pollInterval,
+		retention:               retention,
+		topEmotes:               topEmotes,
+		idleTTL:                 15 * time.Minute,
+		openMinuteFlushInterval: 10 * time.Second,
+		tracked:                 map[string]*trackedChannel{},
+		openMinuteFlushLast:     map[string]time.Time{},
+		runCtx:                  context.Background(),
+		stop:                    make(chan struct{}),
+		alwaysTracked:           map[string]bool{},
 		// Resolve the VOD id at close, then at 30s / 2m / 5m / 15m / 60m after
 		// close. The final offset is the auto-retry upper bound (Req 19.3/19.4).
 		vodResolveOffsets: []time.Duration{0, 30 * time.Second, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute, 60 * time.Minute},
 	}
+	for i := range c.bucketShards {
+		c.bucketShards[i].buckets = map[string]*minuteAccumulator{}
+	}
+	return c
 }
 
 func (c *Collector) WithIdleTTL(d time.Duration) *Collector {
@@ -145,6 +163,29 @@ func (c *Collector) WithIdleTTL(d time.Duration) *Collector {
 		c.idleTTL = d
 	}
 	return c
+}
+
+func (c *Collector) WithOpenMinuteFlushInterval(d time.Duration) *Collector {
+	if c != nil && d > 0 {
+		c.openMinuteFlushInterval = d
+	}
+	return c
+}
+
+func collectorBucketShardIndex(streamID string) int {
+	if streamID == "" {
+		return 0
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(streamID))
+	return int(h.Sum32() % collectorBucketShardCount)
+}
+
+func (c *Collector) bucketShard(streamID string) *collectorBucketShard {
+	if c == nil {
+		return nil
+	}
+	return &c.bucketShards[collectorBucketShardIndex(streamID)]
 }
 
 func (c *Collector) WithMaxTracked(max int) *Collector {
@@ -269,8 +310,12 @@ func (c *Collector) WatchWithPriority(ctx context.Context, login, principalID st
 		if incomingPriority >= TrackPriorityPrincipalAlwaysTrack {
 			tc.poolAlwaysTrack = true
 		}
+		tc.admissionMissCycles = 0
 		active := len(c.tracked)
 		c.mu.Unlock()
+		if tc.currentStreamID == "" {
+			c.bindStreamIDNow(ctx, login)
+		}
 		c.kickoffLiveEmoteEnsure(login)
 		return WatchResponse{
 			Channel:  login,
@@ -319,6 +364,7 @@ func (c *Collector) WatchWithPriority(ctx context.Context, login, principalID st
 	ircCtx := c.runCtx
 	c.mu.Unlock()
 	c.irc.Join(ircCtx, login)
+	c.bindStreamIDNow(ctx, login)
 	c.kickoffLiveEmoteEnsure(login)
 	return WatchResponse{
 		Channel:  login,
@@ -388,6 +434,34 @@ func (c *Collector) touchPrincipalLocked(tc *trackedChannel, principalID string,
 	if tc.refCounts[principalID] == 0 {
 		tc.refCounts[principalID] = 1
 	}
+}
+
+// TouchAdmissionObservation refreshes idle retention for a channel that recurring
+// top-roster admission still considers live and already tracked. It does not grant
+// poolAlwaysTrack, principal refs, or global protected status.
+func (c *Collector) TouchAdmissionObservation(login string) bool {
+	if c == nil {
+		return false
+	}
+	login = normalizeLogin(login)
+	if login == "" {
+		return false
+	}
+	now := time.Now().UTC()
+	c.mu.Lock()
+	tc, ok := c.tracked[login]
+	if !ok || tc == nil {
+		c.mu.Unlock()
+		return false
+	}
+	tc.lastViewedAt = now
+	tc.admissionMissCycles = 0
+	needsBind := tc.currentStreamID == ""
+	c.mu.Unlock()
+	if needsBind {
+		go c.bindStreamIDNow(context.Background(), login)
+	}
+	return true
 }
 
 func (c *Collector) channelRefCount(tc *trackedChannel) int {
@@ -522,6 +596,88 @@ func (c *Collector) evictIdleChannels(now time.Time) {
 	}
 }
 
+// ReconcileTopRosterAdmissionMisses evicts top-roster-only channels that have fallen
+// out of the desired admission set for graceCycles consecutive cycles.
+func (c *Collector) ReconcileTopRosterAdmissionMisses(desired map[string]struct{}, graceCycles int) int {
+	if c == nil {
+		return 0
+	}
+	if graceCycles <= 0 {
+		graceCycles = 3
+	}
+	var evict []string
+	c.mu.Lock()
+	for login, tc := range c.tracked {
+		if tc == nil || tc.watchPriority != TrackPriorityTopRoster {
+			continue
+		}
+		if c.alwaysTracked[login] || tc.poolAlwaysTrack || c.channelRefCount(tc) > 0 {
+			tc.admissionMissCycles = 0
+			continue
+		}
+		if _, ok := desired[login]; ok {
+			tc.admissionMissCycles = 0
+			continue
+		}
+		tc.admissionMissCycles++
+		if tc.admissionMissCycles >= graceCycles {
+			evict = append(evict, login)
+		}
+	}
+	outcomes := c.collectUntrackOutcomesLocked(evict)
+	c.mu.Unlock()
+	c.finalizeUntracking(context.Background(), outcomes)
+	return len(outcomes)
+}
+
+type untrackOutcome struct {
+	login    string
+	streamID string
+}
+
+func (c *Collector) collectUntrackOutcomesLocked(logins []string) []untrackOutcome {
+	outcomes := make([]untrackOutcome, 0, len(logins))
+	for _, login := range logins {
+		streamID := ""
+		if tc := c.tracked[login]; tc != nil {
+			streamID = tc.currentStreamID
+		}
+		delete(c.tracked, login)
+		outcomes = append(outcomes, untrackOutcome{login: login, streamID: streamID})
+	}
+	return outcomes
+}
+
+func (c *Collector) finalizeUntracking(ctx context.Context, outcomes []untrackOutcome) {
+	if c == nil || len(outcomes) == 0 {
+		return
+	}
+	now := c.nowUTC()
+	for _, outcome := range outcomes {
+		if c.irc != nil {
+			c.irc.Part(context.Background(), outcome.login)
+		}
+		if outcome.streamID == "" {
+			continue
+		}
+		c.flushStreamToStore(ctx, outcome.streamID)
+		if err := c.store.CloseStream(ctx, outcome.streamID, now); err != nil && c.log != nil {
+			c.log.Warn("analytics close stream on untrack failed", "stream_id", outcome.streamID, "login", outcome.login, "err", err)
+			continue
+		}
+		c.scheduleVodIDResolve(outcome.streamID)
+	}
+}
+
+func (c *Collector) flushStreamToStore(ctx context.Context, streamID string) {
+	if streamID == "" {
+		return
+	}
+	c.flushWhere(ctx, func(acc *minuteAccumulator) bool {
+		return acc != nil && acc.streamID == streamID
+	})
+}
+
 func (c *Collector) SetAlwaysTracked(ctx context.Context, login string, always bool, skipStoreWrite ...bool) WatchResponse {
 	login = normalizeLogin(login)
 	skipStore := len(skipStoreWrite) > 0 && skipStoreWrite[0]
@@ -622,6 +778,99 @@ func (c *Collector) ActiveCount() int {
 	return len(c.tracked)
 }
 
+const defaultOpenMinuteFlushMinInterval = 10 * time.Second
+
+func (c *Collector) openMinuteFlushIntervalOrDefault() time.Duration {
+	if c == nil || c.openMinuteFlushInterval <= 0 {
+		return defaultOpenMinuteFlushMinInterval
+	}
+	return c.openMinuteFlushInterval
+}
+
+func (c *Collector) bindStreamIDNow(ctx context.Context, login string) {
+	login = normalizeLogin(login)
+	if login == "" || c.helix == nil || c.store == nil {
+		return
+	}
+	c.mu.Lock()
+	tc := c.tracked[login]
+	if tc == nil || tc.currentStreamID != "" {
+		c.mu.Unlock()
+		return
+	}
+	c.mu.Unlock()
+
+	streams, err := c.helix.StreamsByLogin(ctx, []string{login})
+	if err != nil {
+		c.log.Warn("analytics bind stream helix failed", "login", login, "err", err)
+		return
+	}
+	stream, live := streams[login]
+	if !live {
+		return
+	}
+	profiles, err := c.helix.UsersByLogin(ctx, []string{login})
+	if err != nil {
+		c.log.Warn("analytics bind stream users failed", "login", login, "err", err)
+		profiles = map[string]UserProfile{}
+	}
+	now := time.Now().UTC()
+	if err := c.store.UpsertLiveStream(ctx, stream, profiles[login], now); err != nil {
+		c.log.Warn("analytics bind stream upsert failed", "login", login, "err", err)
+		return
+	}
+	c.mu.Lock()
+	if tracked := c.tracked[login]; tracked != nil && tracked.currentStreamID == "" {
+		tracked.currentStreamID = stream.ID
+		tracked.lastPollAt = now
+	}
+	c.mu.Unlock()
+	c.addViewerSample(stream.ID, now, stream.ViewerCount)
+	c.flushOpenMinuteToStore(ctx, stream.ID)
+}
+
+func (c *Collector) flushOpenMinuteToStore(ctx context.Context, streamID string) {
+	if c == nil || c.store == nil || streamID == "" {
+		return
+	}
+	now := c.nowUTC()
+	c.mu.Lock()
+	if c.openMinuteFlushLast == nil {
+		c.openMinuteFlushLast = map[string]time.Time{}
+	}
+	if last, ok := c.openMinuteFlushLast[streamID]; ok && now.Sub(last) < c.openMinuteFlushIntervalOrDefault() {
+		c.mu.Unlock()
+		return
+	}
+	minute := now.UTC().Truncate(time.Minute)
+	key := streamID + "|" + minute.Format(time.RFC3339)
+	shard := c.bucketShard(streamID)
+	if shard == nil {
+		c.mu.Unlock()
+		return
+	}
+	shard.mu.Lock()
+	acc := shard.buckets[key]
+	var rollup MinuteRollup
+	hasAcc := acc != nil
+	if hasAcc {
+		rollup = acc.snapshotRollup(c.topEmotes)
+	}
+	shard.mu.Unlock()
+	if !hasAcc {
+		c.mu.Unlock()
+		return
+	}
+	c.openMinuteFlushLast[streamID] = now
+	c.mu.Unlock()
+	if rollup.ViewerSamples == 0 && rollup.ChatCount == 0 && rollup.TotalEmoteCount == 0 && rollup.SevenTVEmoteCount == 0 {
+		return
+	}
+	if err := c.store.BulkUpsertLiveMinuteRollups(ctx, streamID, []MinuteRollup{rollup}, LiveRollupWriteOptions{Mode: LiveRollupWriteOpenMinute}); err != nil && c.log != nil {
+		c.log.Warn("analytics flush open minute failed", "stream_id", streamID, "err", err)
+	}
+}
+
 func (c *Collector) HandleIRCLine(line string) {
 	msg, ok := parse.ParseLine(line)
 	if !ok {
@@ -638,6 +887,7 @@ func (c *Collector) HandleIRCLine(line string) {
 	if streamID == "" {
 		return
 	}
+	metrics.AnalyticsIRCLinesProcessedTotal.Inc()
 	fragments := c.enricher.Tokenize(channel, msg.Text, msg.Emotes)
 	c.addChat(streamID, msg.TS, fragments)
 }
@@ -715,6 +965,7 @@ func (c *Collector) pollOnce(ctx context.Context) {
 			}
 			c.mu.Unlock()
 			c.addViewerSample(helixStreamID, now, stream.ViewerCount)
+			c.flushOpenMinuteToStore(ctx, helixStreamID)
 			continue
 		}
 		tracked.offlinePolls++
@@ -771,9 +1022,13 @@ func (c *Collector) addViewerSample(streamID string, at time.Time, viewers int) 
 	if streamID == "" {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	acc := c.bucketLocked(streamID, at)
+	shard := c.bucketShard(streamID)
+	if shard == nil {
+		return
+	}
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	acc := bucketLocked(shard, streamID, at)
 	acc.viewerSum += viewers
 	acc.viewerSamples++
 	if viewers > acc.viewerMax {
@@ -790,9 +1045,13 @@ func (c *Collector) addChat(streamID string, ts int64, fragments []batch.Fragmen
 	if ts > 0 {
 		at = time.UnixMilli(ts).UTC()
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	acc := c.bucketLocked(streamID, at)
+	shard := c.bucketShard(streamID)
+	if shard == nil {
+		return
+	}
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	acc := bucketLocked(shard, streamID, at)
 	acc.chatCount++
 	for _, fragment := range fragments {
 		if fragment.T != "emote" {
@@ -807,13 +1066,13 @@ func (c *Collector) addChat(streamID string, ts int64, fragments []batch.Fragmen
 	}
 }
 
-func (c *Collector) bucketLocked(streamID string, at time.Time) *minuteAccumulator {
+func bucketLocked(shard *collectorBucketShard, streamID string, at time.Time) *minuteAccumulator {
 	minute := at.UTC().Truncate(time.Minute)
 	key := streamID + "|" + minute.Format(time.RFC3339)
-	acc := c.buckets[key]
+	acc := shard.buckets[key]
 	if acc == nil {
 		acc = &minuteAccumulator{streamID: streamID, minute: minute, emotes: map[string]int{}}
-		c.buckets[key] = acc
+		shard.buckets[key] = acc
 	}
 	return acc
 }
@@ -830,22 +1089,44 @@ func (c *Collector) flushAll(ctx context.Context) {
 }
 
 func (c *Collector) flushWhere(ctx context.Context, shouldFlush func(*minuteAccumulator) bool) {
-	var flush []*minuteAccumulator
-	c.mu.Lock()
-	for key, acc := range c.buckets {
-		if shouldFlush(acc) {
-			flush = append(flush, acc)
-			delete(c.buckets, key)
-		}
+	type flushedMinute struct {
+		streamID string
+		minute   time.Time
+		rollup   MinuteRollup
 	}
-	c.mu.Unlock()
-	for _, acc := range flush {
-		rollup := acc.rollup(c.topEmotes)
-		if err := c.store.UpsertMinuteRollup(ctx, acc.streamID, rollup); err != nil {
-			c.log.Warn("analytics flush rollup failed", "stream_id", acc.streamID, "minute", acc.minute, "err", err)
+	var flush []flushedMinute
+	for i := range c.bucketShards {
+		shard := &c.bucketShards[i]
+		shard.mu.Lock()
+		for key, acc := range shard.buckets {
+			if shouldFlush(acc) {
+				flush = append(flush, flushedMinute{
+					streamID: acc.streamID,
+					minute:   acc.minute,
+					rollup:   acc.snapshotRollup(c.topEmotes),
+				})
+				delete(shard.buckets, key)
+			}
+		}
+		shard.mu.Unlock()
+	}
+	if len(flush) == 0 {
+		return
+	}
+	byStream := make(map[string][]MinuteRollup)
+	minutesByStream := make(map[string][]time.Time)
+	for _, item := range flush {
+		byStream[item.streamID] = append(byStream[item.streamID], item.rollup)
+		minutesByStream[item.streamID] = append(minutesByStream[item.streamID], item.minute)
+	}
+	for streamID, rollups := range byStream {
+		if err := c.store.BulkUpsertLiveMinuteRollups(ctx, streamID, rollups, LiveRollupWriteOptions{Mode: LiveRollupWriteCompletedMinute}); err != nil {
+			c.log.Warn("analytics flush rollup failed", "stream_id", streamID, "count", len(rollups), "err", err)
 			continue
 		}
-		c.recordFirstRollupMetrics(acc.streamID, acc.minute)
+		for _, minute := range minutesByStream[streamID] {
+			c.recordFirstRollupMetrics(streamID, minute)
+		}
 	}
 }
 
@@ -970,6 +1251,20 @@ func (a *minuteAccumulator) rollup(topN int) MinuteRollup {
 		SevenTVEmoteCount: a.sevenTVEmoteCount,
 		Emotes:            topNMap(a.emotes, topN),
 	}
+}
+
+// snapshotRollup copies accumulator state under the bucket shard lock before rollup.
+func (a *minuteAccumulator) snapshotRollup(topN int) MinuteRollup {
+	if a == nil {
+		return MinuteRollup{}
+	}
+	emotesCopy := make(map[string]int, len(a.emotes))
+	for k, v := range a.emotes {
+		emotesCopy[k] = v
+	}
+	snap := *a
+	snap.emotes = emotesCopy
+	return snap.rollup(topN)
 }
 
 func emoteKey(fragment batch.Fragment) string {

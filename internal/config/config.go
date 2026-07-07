@@ -12,6 +12,8 @@ import (
 
 const defaultScraperAPIURL = "http://scraper:8000/v2/scrape"
 const maxCorpusTopN = 1000
+const MaxLiveAdmissionTopN = 5000
+const DefaultLiveAdmissionTopN = 100
 
 type Config struct {
 	HTTPAddr    string `env:"HTTP_ADDR" envDefault:":8080"`
@@ -62,6 +64,7 @@ type Config struct {
 
 	MaxConcurrentTrackedChannels           int           `env:"MAX_CONCURRENT_TRACKED_CHANNELS" envDefault:"50"`
 	AnalyticsPollInterval                  time.Duration `env:"ANALYTICS_POLL_INTERVAL" envDefault:"15s"`
+	AnalyticsOpenMinuteFlushInterval       time.Duration `env:"ANALYTICS_OPEN_MINUTE_FLUSH_INTERVAL" envDefault:"10s"`
 	AnalyticsRetentionDays                 int           `env:"ANALYTICS_RETENTION_DAYS" envDefault:"30"`
 	AnalyticsVODChatRetentionDays          int           `env:"ANALYTICS_VOD_CHAT_RETENTION_DAYS" envDefault:"90"`
 	ChatLogPersistEnabled                  bool          `env:"CHAT_LOG_PERSIST_ENABLED" envDefault:"false"`
@@ -108,21 +111,36 @@ type Config struct {
 	TimeseriesQueueSize       int    `env:"TIMESERIES_QUEUE_SIZE" envDefault:"1024"`
 	TimeseriesBackfillOnStart bool   `env:"TIMESERIES_BACKFILL_ON_START" envDefault:"false"`
 
-	TwitchOAuthClientID     string `env:"TWITCH_OAUTH_CLIENT_ID"`
-	TwitchOAuthClientSecret string `env:"TWITCH_OAUTH_CLIENT_SECRET"`
-	TwitchOAuthRedirectURL  string `env:"TWITCH_OAUTH_REDIRECT_URL" envDefault:"http://localhost:8083/v1/auth/twitch/callback"`
-	TwitchAuthScopes        string `env:"TWITCH_AUTH_SCOPES" envDefault:"chat:read chat:edit user:read:follows clips:edit"`
-	TwitchOAuthURL          string `env:"TWITCH_OAUTH_URL" envDefault:"https://id.twitch.tv/oauth2/authorize"`
-	TwitchTokenURL          string `env:"TWITCH_TOKEN_URL" envDefault:"https://id.twitch.tv/oauth2/token"`
-	TwitchValidateURL       string `env:"TWITCH_VALIDATE_URL" envDefault:"https://id.twitch.tv/oauth2/validate"`
-	TwitchAPIURL            string `env:"TWITCH_API_URL" envDefault:"https://api.twitch.tv/helix"`
-	TwitchDevTokenImport    bool   `env:"TWITCH_DEV_TOKEN_IMPORT_ENABLED" envDefault:"false"`
-	ClipperAuthSyncPath     string `env:"CLIPPER_AUTH_SYNC_PATH"`
-	StreamcloneProfile      string `env:"STREAMCLONE_PROFILE" envDefault:"core"`
-	ClipperServiceURL       string `env:"CLIPPER_SERVICE_URL" envDefault:"http://host.docker.internal:8095"`
-	FrontendOrigin          string `env:"FRONTEND_ORIGIN" envDefault:"http://localhost:8090"`
-	AuthCookieSecret        string `env:"AUTH_COOKIE_SECRET" envDefault:"dev-insecure-cookie-secret"`
-	AuthCookieSameSite      string `env:"AUTH_COOKIE_SAMESITE" envDefault:"lax"`
+	TwitchOAuthClientID      string `env:"TWITCH_OAUTH_CLIENT_ID"`
+	TwitchOAuthClientSecret  string `env:"TWITCH_OAUTH_CLIENT_SECRET"`
+	TwitchOAuthRedirectURL   string `env:"TWITCH_OAUTH_REDIRECT_URL" envDefault:"http://localhost:8083/v1/auth/twitch/callback"`
+	TwitchAuthScopes         string `env:"TWITCH_AUTH_SCOPES" envDefault:"chat:read chat:edit user:read:follows clips:edit"`
+	TwitchOAuthURL           string `env:"TWITCH_OAUTH_URL" envDefault:"https://id.twitch.tv/oauth2/authorize"`
+	TwitchTokenURL           string `env:"TWITCH_TOKEN_URL" envDefault:"https://id.twitch.tv/oauth2/token"`
+	TwitchValidateURL        string `env:"TWITCH_VALIDATE_URL" envDefault:"https://id.twitch.tv/oauth2/validate"`
+	TwitchAPIURL             string `env:"TWITCH_API_URL" envDefault:"https://api.twitch.tv/helix"`
+	TwitchDevTokenImport     bool   `env:"TWITCH_DEV_TOKEN_IMPORT_ENABLED" envDefault:"false"`
+	ClipperAuthSyncPath      string `env:"CLIPPER_AUTH_SYNC_PATH"`
+	StreamcloneProfile       string `env:"STREAMCLONE_PROFILE" envDefault:"core"`
+	ClipperServiceURL        string `env:"CLIPPER_SERVICE_URL" envDefault:"http://host.docker.internal:8095"`
+	ClipperWebhookToken      string `env:"CLIPPER_WEBHOOK_TOKEN"`
+	ReplayForgeCallbackToken string `env:"REPLAYFORGE_CALLBACK_TOKEN"`
+	FrontendOrigin           string `env:"FRONTEND_ORIGIN" envDefault:"http://localhost:8090"`
+	AuthCookieSecret         string `env:"AUTH_COOKIE_SECRET" envDefault:"dev-insecure-cookie-secret"`
+	AuthCookieSameSite       string `env:"AUTH_COOKIE_SAMESITE" envDefault:"lax"`
+
+	PulseClipMaxCandidates              int     `env:"PULSE_CLIP_MAX_CANDIDATES" envDefault:"0"`
+	PulseClipMinScore                   int     `env:"PULSE_CLIP_MIN_SCORE" envDefault:"0"`
+	PulseClipMinConfidence              float64 `env:"PULSE_CLIP_MIN_CONFIDENCE" envDefault:"0"`
+	PulseClipMinChatCount               int     `env:"PULSE_CLIP_MIN_CHAT_COUNT" envDefault:"0"`
+	PulseClipMaxChatCount               int     `env:"PULSE_CLIP_MAX_CHAT_COUNT" envDefault:"0"`
+	PulseClipMinEmoteCount              int     `env:"PULSE_CLIP_MIN_EMOTE_COUNT" envDefault:"0"`
+	PulseClipMinProviderEmoteCount      int     `env:"PULSE_CLIP_MIN_PROVIDER_EMOTE_COUNT" envDefault:"0"`
+	PulseClipProviderEmoteProvider      string  `env:"PULSE_CLIP_PROVIDER_EMOTE_PROVIDER" envDefault:"seventv"`
+	PulseClipMinNonMissingRollupMinutes int     `env:"PULSE_CLIP_MIN_NON_MISSING_ROLLUP_MINUTES" envDefault:"0"`
+	PulseClipDuplicateRadiusSeconds     int     `env:"PULSE_CLIP_DUPLICATE_RADIUS_SECONDS" envDefault:"0"`
+	PulseClipMaxCandidatesPerHour       int     `env:"PULSE_CLIP_MAX_CANDIDATES_PER_HOUR" envDefault:"0"`
+	PulseClipRequireSourceAvailable     bool    `env:"PULSE_CLIP_REQUIRE_SOURCE_AVAILABLE" envDefault:"false"`
 
 	S3Endpoint    string `env:"S3_ENDPOINT"`
 	S3Bucket      string `env:"S3_BUCKET" envDefault:"emotes"`
@@ -235,11 +253,13 @@ type Config struct {
 	GoldLeaseTTLSeconds                 int           `env:"GOLD_LEASE_TTL_SECONDS" envDefault:"120"`
 	GoldVODSegmentsEnabled              bool          `env:"GOLD_VOD_SEGMENTS_ENABLED" envDefault:"false"`
 
-	PulseTop500AdmissionEnabled  bool          `env:"PULSE_TOP500_ADMISSION_ENABLED" envDefault:"false"`
-	PulseTop500AdmissionTopN     int           `env:"PULSE_TOP500_ADMISSION_TOP_N" envDefault:"100"`
-	PulseTop500AdmissionInterval time.Duration `env:"PULSE_TOP500_ADMISSION_INTERVAL" envDefault:"60s"`
-	LiveAdmissionTopN            int           `env:"LIVE_ADMISSION_TOP_N" envDefault:"0"`
-	MaxActiveIRCChannels         int           `env:"MAX_ACTIVE_IRC_CHANNELS" envDefault:"0"`
+	PulseTop500AdmissionEnabled         bool          `env:"PULSE_TOP500_ADMISSION_ENABLED" envDefault:"false"`
+	PulseTop500AdmissionTopN            int           `env:"PULSE_TOP500_ADMISSION_TOP_N" envDefault:"100"`
+	PulseTop500AdmissionInterval        time.Duration `env:"PULSE_TOP500_ADMISSION_INTERVAL" envDefault:"60s"`
+	PulseTop500AdmissionSource          string        `env:"PULSE_TOP500_ADMISSION_SOURCE" envDefault:"helix_top_live"`
+	PulseTop500AdmissionMissGraceCycles int           `env:"PULSE_TOP500_ADMISSION_MISS_GRACE_CYCLES" envDefault:"3"`
+	LiveAdmissionTopN                   int           `env:"LIVE_ADMISSION_TOP_N" envDefault:"0"`
+	MaxActiveIRCChannels                int           `env:"MAX_ACTIVE_IRC_CHANNELS" envDefault:"0"`
 
 	PulseHostedMode              bool          `env:"PULSE_HOSTED_MODE" envDefault:"false"`
 	PulseBetaKeys                string        `env:"PULSE_BETA_KEYS"`
@@ -274,6 +294,7 @@ type Config struct {
 	SilverEnqueueInterval            time.Duration `env:"SILVER_ENQUEUE_INTERVAL" envDefault:"15m"`
 
 	GoldBackfillEnabled    bool          `env:"GOLD_BACKFILL_ENABLED" envDefault:"false"`
+	GoldAutoEnqueueEnabled bool          `env:"GOLD_AUTO_ENQUEUE_ENABLED" envDefault:"false"`
 	GoldMinPeakViewers     int           `env:"GOLD_MIN_PEAK_VIEWERS" envDefault:"0"`
 	GoldMinDurationMinutes int           `env:"GOLD_MIN_DURATION_MINUTES" envDefault:"0"`
 	GoldEnqueuerInterval   time.Duration `env:"GOLD_ENQUEUER_INTERVAL" envDefault:"5m"`
@@ -331,21 +352,31 @@ type Config struct {
 	ArchiveMetricsRefreshInterval time.Duration `env:"ARCHIVE_METRICS_REFRESH_INTERVAL" envDefault:"30s"`
 	PulsewireArchiveEnabled       bool          `env:"PULSEWIRE_ARCHIVE_ENABLED" envDefault:"false"`
 
-	EmoteImportConcurrency             int           `env:"EMOTE_IMPORT_CONCURRENCY" envDefault:"8"`
-	EmoteWorkerConcurrency             int           `env:"EMOTE_WORKER_CONCURRENCY" envDefault:"8"`
-	EmoteDictionaryDebounceMS          int           `env:"EMOTE_DICTIONARY_DEBOUNCE_MS" envDefault:"3000"`
-	EmoteRosterPreloadEnabled          bool          `env:"EMOTE_ROSTER_PRELOAD_ENABLED" envDefault:"false"`
-	EmoteRosterPreloadInterval         time.Duration `env:"EMOTE_ROSTER_PRELOAD_INTERVAL" envDefault:"6h"`
-	EmoteRosterPreloadTopN             int           `env:"EMOTE_ROSTER_PRELOAD_TOP_N" envDefault:"200"`
-	EmoteHistorySnapshotEnabled        bool          `env:"EMOTE_HISTORY_SNAPSHOT_ENABLED" envDefault:"false"`
-	EmoteHistorySnapshotInterval       time.Duration `env:"EMOTE_HISTORY_SNAPSHOT_INTERVAL" envDefault:"6h"`
-	EmoteHistorySnapshotBatchSize      int           `env:"EMOTE_HISTORY_SNAPSHOT_BATCH_SIZE" envDefault:"25"`
-	EmoteHistoryNormalizeEnabled       bool          `env:"EMOTE_HISTORY_NORMALIZE_ENABLED" envDefault:"false"`
-	EmoteHistoryNormalizeInterval      time.Duration `env:"EMOTE_HISTORY_NORMALIZE_INTERVAL" envDefault:"15m"`
-	EmoteHistoryNormalizeSince         time.Duration `env:"EMOTE_HISTORY_NORMALIZE_SINCE" envDefault:"720h"`
-	EmoteHistoryNormalizeBatchSize     int           `env:"EMOTE_HISTORY_NORMALIZE_BATCH_SIZE" envDefault:"25"`
-	PublicEmoteProviderRefreshEnabled  bool          `env:"PUBLIC_EMOTE_PROVIDER_REFRESH_ENABLED" envDefault:"false"`
-	PublicEmoteProviderRefreshInterval time.Duration `env:"PUBLIC_EMOTE_PROVIDER_REFRESH_INTERVAL" envDefault:"15m"`
+	EmoteImportConcurrency                 int           `env:"EMOTE_IMPORT_CONCURRENCY" envDefault:"8"`
+	EmoteWorkerConcurrency                 int           `env:"EMOTE_WORKER_CONCURRENCY" envDefault:"8"`
+	EmoteRenderTwitchEager                 bool          `env:"EMOTE_RENDER_TWITCH_EAGER" envDefault:"false"`
+	EmoteRenderThirdpartyEager             bool          `env:"EMOTE_RENDER_THIRDPARTY_EAGER" envDefault:"false"`
+	EmoteRenderOnChatObserved              bool          `env:"EMOTE_RENDER_ON_CHAT_OBSERVED" envDefault:"true"`
+	EmoteRenderOnUIRequest                 bool          `env:"EMOTE_RENDER_ON_UI_REQUEST" envDefault:"true"`
+	EmoteRenderDefaultScales               string        `env:"EMOTE_RENDER_DEFAULT_SCALES" envDefault:"1x"`
+	EmoteRenderAllowedScales               string        `env:"EMOTE_RENDER_ALLOWED_SCALES" envDefault:"1x,2x,3x,4x"`
+	EmoteRenderQueueMaxDepth               int           `env:"EMOTE_RENDER_QUEUE_MAX_DEPTH" envDefault:"5000"`
+	EmoteRenderChatObservedRateLimitPerMin int           `env:"EMOTE_RENDER_CHAT_OBSERVED_RATE_LIMIT_PER_MIN" envDefault:"120"`
+	EmoteRenderUIRequestRateLimitPerMin    int           `env:"EMOTE_RENDER_UI_REQUEST_RATE_LIMIT_PER_MIN" envDefault:"300"`
+	EmoteRenderBackfillEnabled             bool          `env:"EMOTE_RENDER_BACKFILL_ENABLED" envDefault:"false"`
+	EmoteDictionaryDebounceMS              int           `env:"EMOTE_DICTIONARY_DEBOUNCE_MS" envDefault:"3000"`
+	EmoteRosterPreloadEnabled              bool          `env:"EMOTE_ROSTER_PRELOAD_ENABLED" envDefault:"false"`
+	EmoteRosterPreloadInterval             time.Duration `env:"EMOTE_ROSTER_PRELOAD_INTERVAL" envDefault:"6h"`
+	EmoteRosterPreloadTopN                 int           `env:"EMOTE_ROSTER_PRELOAD_TOP_N" envDefault:"200"`
+	EmoteHistorySnapshotEnabled            bool          `env:"EMOTE_HISTORY_SNAPSHOT_ENABLED" envDefault:"false"`
+	EmoteHistorySnapshotInterval           time.Duration `env:"EMOTE_HISTORY_SNAPSHOT_INTERVAL" envDefault:"6h"`
+	EmoteHistorySnapshotBatchSize          int           `env:"EMOTE_HISTORY_SNAPSHOT_BATCH_SIZE" envDefault:"25"`
+	EmoteHistoryNormalizeEnabled           bool          `env:"EMOTE_HISTORY_NORMALIZE_ENABLED" envDefault:"false"`
+	EmoteHistoryNormalizeInterval          time.Duration `env:"EMOTE_HISTORY_NORMALIZE_INTERVAL" envDefault:"15m"`
+	EmoteHistoryNormalizeSince             time.Duration `env:"EMOTE_HISTORY_NORMALIZE_SINCE" envDefault:"720h"`
+	EmoteHistoryNormalizeBatchSize         int           `env:"EMOTE_HISTORY_NORMALIZE_BATCH_SIZE" envDefault:"25"`
+	PublicEmoteProviderRefreshEnabled      bool          `env:"PUBLIC_EMOTE_PROVIDER_REFRESH_ENABLED" envDefault:"false"`
+	PublicEmoteProviderRefreshInterval     time.Duration `env:"PUBLIC_EMOTE_PROVIDER_REFRESH_INTERVAL" envDefault:"15m"`
 
 	Upstream upstream.Endpoints
 }
@@ -364,6 +395,7 @@ func Load() (Config, error) {
 	applyEnvAlias("PULSE_TOP500_ADMISSION_ENABLED", "PULSE_TOP_ROSTER_ADMISSION_ENABLED")
 	applyEnvAlias("PULSE_TOP500_ADMISSION_TOP_N", "PULSE_TOP_ROSTER_ADMISSION_TOP_N")
 	applyEnvAlias("PULSE_TOP500_ADMISSION_INTERVAL", "PULSE_TOP_ROSTER_ADMISSION_INTERVAL")
+	applyEnvAlias("PULSE_TOP500_ADMISSION_MISS_GRACE_CYCLES", "PULSE_TOP_ROSTER_ADMISSION_MISS_GRACE_CYCLES")
 	if strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_ENABLED")) == "" {
 		applyEnvAlias("PULSE_TOP500_ADMISSION_ENABLED", "PULSE_TOP_ROSTER_POLL_ENABLED")
 	}
@@ -408,8 +440,8 @@ func Load() (Config, error) {
 			c.SilverEnqueueTopN = c.CorpusTargetTopN
 		}
 	}
-	if c.LiveAdmissionTopN > 0 {
-		c.PulseTop500AdmissionTopN = clampCorpusTopN(c.LiveAdmissionTopN)
+	if c.LiveAdmissionTopN > 0 && strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_TOP_N")) == "" {
+		c.PulseTop500AdmissionTopN = c.LiveAdmissionTopN
 	}
 	if c.MaxActiveIRCChannels > 0 && strings.TrimSpace(os.Getenv("PULSE_MAX_ACTIVE_CHANNELS")) == "" {
 		c.PulseMaxActiveChannels = c.MaxActiveIRCChannels
@@ -420,11 +452,28 @@ func Load() (Config, error) {
 	if c.Top500MetadataBatchSize <= 0 || c.Top500MetadataBatchSize > 100 {
 		c.Top500MetadataBatchSize = 100
 	}
-	if c.PulseTop500AdmissionTopN <= 0 || c.PulseTop500AdmissionTopN > maxCorpusTopN {
-		c.PulseTop500AdmissionTopN = 100
+	maxIRC := 0
+	if c.PulseMaxActiveChannels > 0 {
+		maxIRC = c.PulseMaxActiveChannels
 	}
+	c.PulseTop500AdmissionTopN = ClampLiveAdmissionTopN(c.PulseTop500AdmissionTopN, maxIRC)
 	if c.PulseTop500AdmissionInterval <= 0 {
 		c.PulseTop500AdmissionInterval = 60 * time.Second
+	}
+	if strings.TrimSpace(os.Getenv("ANALYTICS_OPEN_MINUTE_FLUSH_INTERVAL")) == "" && c.PulseHostedMode {
+		c.AnalyticsOpenMinuteFlushInterval = 30 * time.Second
+	}
+	if c.AnalyticsOpenMinuteFlushInterval <= 0 {
+		c.AnalyticsOpenMinuteFlushInterval = 10 * time.Second
+	}
+	if strings.TrimSpace(os.Getenv("EMOTE_RENDER_ON_CHAT_OBSERVED")) == "" && c.PulseHostedMode {
+		c.EmoteRenderOnChatObserved = false
+	}
+	switch strings.ToLower(strings.TrimSpace(c.PulseTop500AdmissionSource)) {
+	case "roster":
+		c.PulseTop500AdmissionSource = "roster"
+	default:
+		c.PulseTop500AdmissionSource = "helix_top_live"
 	}
 	if c.Top500SilverGateMaxCandidates <= 0 || c.Top500SilverGateMaxCandidates > 100 {
 		c.Top500SilverGateMaxCandidates = 5
@@ -546,6 +595,22 @@ func clampCorpusTopN(n int) int {
 	}
 	if n > maxCorpusTopN {
 		return maxCorpusTopN
+	}
+	return n
+}
+
+// ClampLiveAdmissionTopN bounds IRC live-admission roster size separately from
+// corpus metadata top-N. When maxIRC is set, admission cannot exceed the IRC slot ceiling.
+func ClampLiveAdmissionTopN(n, maxIRC int) int {
+	if n <= 0 {
+		return DefaultLiveAdmissionTopN
+	}
+	ceiling := MaxLiveAdmissionTopN
+	if maxIRC > 0 && maxIRC < ceiling {
+		ceiling = maxIRC
+	}
+	if n > ceiling {
+		return ceiling
 	}
 	return n
 }

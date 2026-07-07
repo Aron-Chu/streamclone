@@ -30,8 +30,20 @@ npm test && npm run typecheck
 
 ## Script
 
+From streamclone repo root (or set `STREAMCLONE_ROOT`):
+
 ```bash
 python .cursor/skills/pulse/api-contract-drift-check/scripts/contract-keys.py
+# Windows Store python alias fallback:
+wsl.exe --cd /mnt/c/Users/Aron/twitch-7tv-clone bash -lc 'python3 .cursor/skills/pulse/api-contract-drift-check/scripts/contract-keys.py'
+```
+
+Strict contract tests (fail on drift):
+
+```bash
+go test ./internal/analytics/... -run Contract
+cd ../streamclone-pulse && npm test -- coverageContract
+cd streampulse-web && npm test -- publicHub.contract
 ```
 
 ## Block merge if

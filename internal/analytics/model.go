@@ -159,6 +159,7 @@ type GameSegment struct {
 	BoxArtURL       string    `json:"boxArtUrl"`
 	OffsetSeconds   int       `json:"offsetSeconds"`
 	DurationSeconds int       `json:"durationSeconds"`
+	Source          string    `json:"source,omitempty"`
 	CreatedAt       time.Time `json:"createdAt"`
 }
 

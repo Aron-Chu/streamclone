@@ -2,13 +2,37 @@ import type { HeatmapEmote, ReplayHeatmapDetailPoint, ReplayHeatmapPoint } from 
 
 const REASON_LABELS: Record<string, string> = {
   chat_spike: 'Chat spike',
-  seventv_spike: '7TV emote spike',
-  twitch_emote_spike: 'Twitch emote spike',
-  ffz_spike: 'FFZ emote spike',
+  seventv_spike: 'Emote spike',
+  twitch_emote_spike: 'Emote spike',
+  ffz_spike: 'Emote spike',
+  bttv_spike: 'Emote spike',
   viewer_spike: 'Viewer spike',
   emote_spike: 'Emote spike',
   game_change: 'Game change',
   manual: 'Moment',
+}
+
+const EMOTE_SPIKE_REASONS = new Set([
+  'emote_spike',
+  'seventv_spike',
+  'twitch_emote_spike',
+  'ffz_spike',
+  'bttv_spike',
+])
+
+export function isEmoteSpikeReason(reason: string): boolean {
+  const normalized = reason.trim().toLowerCase()
+  if (EMOTE_SPIKE_REASONS.has(normalized)) return true
+  return normalized.includes('emote') && normalized.includes('spike')
+}
+
+/** User-facing spike label — provider-specific codes collapse to Emote spike. */
+export function displayMomentReasonLabel(reason: string, reasonLabel?: string): string {
+  if (isEmoteSpikeReason(reason)) return REASON_LABELS.emote_spike
+  const label = reasonLabel?.trim()
+  if (label && label.toLowerCase().includes('emote spike')) return REASON_LABELS.emote_spike
+  if (reason.trim()) return momentScoreReasonLabel(reason)
+  return label || REASON_LABELS.manual
 }
 
 export interface MomentScoreModel {

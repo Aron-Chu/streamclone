@@ -31,6 +31,9 @@ type CollectorLeaseReconcileResult struct {
 // ownership for a single collector instance. It is safe for concurrent use by
 // the heartbeat and rebalance loops. All persistence goes through the injected
 // CollectorLeaseStore so the logic is unit-testable without Postgres.
+//
+// Runtime note (2026-07): not wired in cmd/analytics/main.go. Hosted production
+// admission uses Top500PriorityWatchPoller plus the in-process Collector cap.
 type CollectorLeaseManager struct {
 	store       CollectorLeaseStore
 	instanceID  string

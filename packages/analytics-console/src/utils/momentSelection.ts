@@ -8,6 +8,19 @@ export function parseMomentHash(hash: string): number | null {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
 }
 
+/** Reads `#t=` (portal) or `?offset=` / `?t=` (extension / legacy) deep links. */
+export function parseDeepLinkOffset(hash: string, search: string): number | null {
+  const fromHash = parseMomentHash(hash)
+  if (fromHash != null) return fromHash
+  const query = search.startsWith('?') ? search.slice(1) : search
+  if (!query) return null
+  const params = new URLSearchParams(query)
+  const raw = params.get('offset') ?? params.get('t')
+  if (!raw) return null
+  const seconds = Number(raw)
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
+}
+
 export function rollupOffsetSeconds(rollup: AnalyticsMinuteRollup, startedAt?: string): number {
   if (!startedAt) return 0
   const startedMs = Date.parse(startedAt)

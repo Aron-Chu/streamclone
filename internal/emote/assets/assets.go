@@ -27,6 +27,14 @@ type Rendition struct {
 }
 
 func Render(srcPath string) ([]Rendition, error) {
+	names := make([]string, 0, len(Scales))
+	for _, sc := range Scales {
+		names = append(names, sc.Name)
+	}
+	return RenderScales(srcPath, names)
+}
+
+func RenderScales(srcPath string, scaleNames []string) ([]Rendition, error) {
 	dir, err := os.MkdirTemp("", "emote-*")
 	if err != nil {
 		return nil, err
@@ -34,7 +42,11 @@ func Render(srcPath string) ([]Rendition, error) {
 	defer os.RemoveAll(dir)
 
 	var results []Rendition
-	for _, sc := range Scales {
+	for _, name := range scaleNames {
+		sc, ok := scaleByName(name)
+		if !ok {
+			return nil, fmt.Errorf("unsupported scale %s", name)
+		}
 		out := filepath.Join(dir, sc.Name+".webp")
 		err := runVips(srcPath, out, sc.Height)
 		if err != nil {
@@ -47,6 +59,15 @@ func Render(srcPath string) ([]Rendition, error) {
 		results = append(results, Rendition{Scale: sc.Name, Data: data})
 	}
 	return results, nil
+}
+
+func scaleByName(name string) (Scale, bool) {
+	for _, sc := range Scales {
+		if sc.Name == name {
+			return sc, true
+		}
+	}
+	return Scale{}, false
 }
 
 func runVips(src, dst string, height int) error {

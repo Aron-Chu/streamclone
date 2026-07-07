@@ -14,6 +14,7 @@ import (
 	"streamclone/internal/emote/dict"
 	"streamclone/internal/emote/flags"
 	"streamclone/internal/emote/objstore"
+	"streamclone/internal/emote/render"
 	"streamclone/internal/emote/store"
 	"streamclone/internal/metrics"
 )
@@ -28,6 +29,7 @@ type Worker struct {
 	st                 *store.Store
 	obj                *objstore.Client
 	d                  *dict.Dict
+	renderCfg          render.Config
 	log                *slog.Logger
 	dirtyChannels      chan string
 	dictionaryDebounce time.Duration
@@ -35,10 +37,20 @@ type Worker struct {
 }
 
 func New(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger) *Worker {
-	return NewWithDictionaryDebounce(st, obj, d, log, defaultDictionaryDebounce)
+	return NewWithConfig(st, obj, d, render.Config{
+		DefaultScales: []string{"1x", "2x", "3x", "4x"},
+		AllowedScales: []string{"1x", "2x", "3x", "4x"},
+	}, log, defaultDictionaryDebounce)
 }
 
 func NewWithDictionaryDebounce(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger, debounce time.Duration) *Worker {
+	return NewWithConfig(st, obj, d, render.Config{
+		DefaultScales: []string{"1x", "2x", "3x", "4x"},
+		AllowedScales: []string{"1x", "2x", "3x", "4x"},
+	}, log, debounce)
+}
+
+func NewWithConfig(st *store.Store, obj *objstore.Client, d *dict.Dict, cfg render.Config, log *slog.Logger, debounce time.Duration) *Worker {
 	if debounce < minDictionaryDebounce {
 		debounce = minDictionaryDebounce
 	}
@@ -46,6 +58,7 @@ func NewWithDictionaryDebounce(st *store.Store, obj *objstore.Client, d *dict.Di
 		st:                 st,
 		obj:                obj,
 		d:                  d,
+		renderCfg:          cfg,
 		log:                log,
 		dirtyChannels:      make(chan string, 2048),
 		dictionaryDebounce: debounce,
@@ -100,6 +113,12 @@ func (w *Worker) processOne(ctx context.Context) error {
 
 	w.log.Info("processing job", "job_id", job.ID, "emote_id", job.EmoteID)
 
+	emote, emoteErr := w.st.GetEmote(ctx, job.EmoteID)
+	provider := "custom"
+	if emoteErr == nil && emote.Provider != "" {
+		provider = emote.Provider
+	}
+
 	src, err := w.obj.GetSrc(ctx, job.EmoteID)
 	if err != nil {
 		return fail("fetch source: " + err.Error())
@@ -116,20 +135,29 @@ func (w *Worker) processOne(ctx context.Context) error {
 		return fail("write src: " + err.Error())
 	}
 
-	renditions, err := assets.Render(srcPath)
+	_, jobScales := render.ParseJobSourceKey(job.SourceKey)
+	renditions, err := assets.RenderScales(srcPath, render.ResolveScales(
+		jobScales,
+		w.renderCfg.DefaultScales,
+		w.renderCfg.AllowedScales,
+	))
 	if err != nil {
 		return fail("render: " + err.Error())
 	}
 
 	var written []string
 	for _, r := range renditions {
+		scaleStarted := time.Now()
 		if err := w.obj.Put(ctx, job.EmoteID, r.Scale, r.Data); err != nil {
 			for _, scale := range written {
 				_ = w.obj.Delete(ctx, job.EmoteID, scale)
 			}
+			metrics.EmoteRenderFailed.WithLabelValues(provider, r.Scale, "upload").Inc()
 			return fail("upload " + r.Scale + ": " + err.Error())
 		}
 		written = append(written, r.Scale)
+		metrics.EmoteRenderCompleted.WithLabelValues(provider, r.Scale).Inc()
+		metrics.EmoteRenderDuration.WithLabelValues(provider, r.Scale).Observe(time.Since(scaleStarted).Seconds())
 	}
 
 	if err := w.st.SetEmoteStatus(ctx, job.EmoteID, 1); err != nil {
@@ -142,7 +170,9 @@ func (w *Worker) processOne(ctx context.Context) error {
 
 	metrics.AssetJobs.WithLabelValues("success").Inc()
 	metrics.AssetProcessSeconds.WithLabelValues("success").Observe(time.Since(started).Seconds())
-	return w.st.FinishJob(ctx, job.ID, true, "")
+	err = w.st.FinishJob(ctx, job.ID, true, "")
+	render.SyncQueueDepthMetric(ctx, w.st)
+	return err
 }
 
 func (w *Worker) queueAffectedDictionaries(ctx context.Context, emoteID string) {
@@ -240,11 +270,15 @@ func (w *Worker) rebuildChannelDictionary(ctx context.Context, login string) (in
 
 func (w *Worker) failOrRetry(ctx context.Context, job *store.Job, errMsg string) error {
 	w.log.Warn("job failed", "job_id", job.ID, "err", errMsg, "attempts", job.Attempts)
+	var err error
 	if job.Attempts >= maxAttempts {
 		_ = w.st.SetEmoteStatus(ctx, job.EmoteID, 2)
 		metrics.AssetJobs.WithLabelValues("failed").Inc()
-		return w.st.FinishJob(ctx, job.ID, false, errMsg)
+		err = w.st.FinishJob(ctx, job.ID, false, errMsg)
+	} else {
+		metrics.AssetJobs.WithLabelValues("retry").Inc()
+		err = w.st.RetryJob(ctx, job.ID, errMsg)
 	}
-	metrics.AssetJobs.WithLabelValues("retry").Inc()
-	return w.st.RetryJob(ctx, job.ID, errMsg)
+	render.SyncQueueDepthMetric(ctx, w.st)
+	return err
 }

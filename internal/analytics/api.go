@@ -25,29 +25,31 @@ import (
 var loginRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{2,24}$`)
 
 type Handler struct {
-	store            *Store
-	collector        *Collector
-	helix            *HelixClient
-	syncService      *SyncService
-	pulseBackfill    *PulseBackfillManager
-	heatmapCache     *heatmap.Cache
-	timeseries       timeseries.Writer
-	rdb              *redis.Client
-	rateLimiter      *PulseRateLimiter
-	pulseHosted      PulseHostedConfig
-	pulseRuntime     PulseRuntimeConfig
-	corpusRuntime    CorpusRuntimeConfig
-	emoteHistoryJobs EmoteHistoryJobConfig
-	cdnPublicBase    string
-	appConfig        config.Config
-	statsGroup       singleflight.Group
-	statusGroup      singleflight.Group
-	hubGroup         singleflight.Group
-	storyboardCache  *vodStoryboardCache
-	refreshStop      chan struct{}
-	refreshOnce      sync.Once
-	hubRefreshMu     sync.Mutex
-	hubLastRefresh   map[string]time.Time
+	store             *Store
+	collector         *Collector
+	helix             *HelixClient
+	syncService       *SyncService
+	pulseBackfill     *PulseBackfillManager
+	heatmapCache      *heatmap.Cache
+	timeseries        timeseries.Writer
+	rdb               *redis.Client
+	rateLimiter       *PulseRateLimiter
+	pulseHosted       PulseHostedConfig
+	pulseRuntime      PulseRuntimeConfig
+	corpusRuntime     CorpusRuntimeConfig
+	emoteHistoryJobs  EmoteHistoryJobConfig
+	cdnPublicBase     string
+	appConfig         config.Config
+	replayForge       ReplayForgeClient
+	clipCandidateOpts ClipCandidateBuildOptions
+	statsGroup        singleflight.Group
+	statusGroup       singleflight.Group
+	hubGroup          singleflight.Group
+	storyboardCache   *vodStoryboardCache
+	refreshStop       chan struct{}
+	refreshOnce       sync.Once
+	hubRefreshMu      sync.Mutex
+	hubLastRefresh    map[string]time.Time
 }
 
 func NewHandler(store *Store, collector *Collector, helix *HelixClient, syncService *SyncService) *Handler {
@@ -88,7 +90,35 @@ func (h *Handler) WithEmoteHistoryJobs(cfg EmoteHistoryJobConfig) *Handler {
 
 func (h *Handler) WithAppConfig(cfg config.Config) *Handler {
 	h.appConfig = cfg
+	h.clipCandidateOpts = clipCandidateBuildOptionsFromConfig(cfg)
+	if strings.TrimSpace(cfg.ClipperServiceURL) != "" {
+		h.replayForge = NewReplayForgeHTTPClient(cfg.ClipperServiceURL, cfg.ClipperWebhookToken)
+	}
 	return h
+}
+
+func (h *Handler) clipCandidateBuildOptions() ClipCandidateBuildOptions {
+	if h == nil {
+		return ClipCandidateBuildOptions{}
+	}
+	return h.clipCandidateOpts
+}
+
+func clipCandidateBuildOptionsFromConfig(cfg config.Config) ClipCandidateBuildOptions {
+	return ClipCandidateBuildOptions{
+		MaxCandidates:              clipMaxInt(0, cfg.PulseClipMaxCandidates),
+		MinScore:                   clipMaxInt(0, cfg.PulseClipMinScore),
+		MinConfidence:              clipClampFloat(cfg.PulseClipMinConfidence, 0, 1),
+		MinChatCount:               clipMaxInt(0, cfg.PulseClipMinChatCount),
+		MaxChatCount:               clipMaxInt(0, cfg.PulseClipMaxChatCount),
+		MinEmoteCount:              clipMaxInt(0, cfg.PulseClipMinEmoteCount),
+		MinProviderEmoteCount:      clipMaxInt(0, cfg.PulseClipMinProviderEmoteCount),
+		ProviderEmoteProvider:      strings.TrimSpace(strings.ToLower(cfg.PulseClipProviderEmoteProvider)),
+		MinNonMissingRollupMinutes: clipMaxInt(0, cfg.PulseClipMinNonMissingRollupMinutes),
+		RequireSourceAvailable:     cfg.PulseClipRequireSourceAvailable,
+		DuplicateRadiusSeconds:     clipMaxInt(0, cfg.PulseClipDuplicateRadiusSeconds),
+		MaxCandidatesPerHour:       clipMaxInt(0, cfg.PulseClipMaxCandidatesPerHour),
+	}
 }
 
 func (h *Handler) corpusRuntimeConfig() CorpusRuntimeConfig {
@@ -102,15 +132,21 @@ func (h *Handler) Routes(r chi.Router) {
 	h.PublicRoutes(r)
 	h.ExtensionRoutes(r)
 	h.PulseRoutes(r)
+	h.registerReplayForgeWebhookRoutes(r)
 	h.PortalRoutes(r)
 	h.EmoteHistoryRoutes(r)
 	h.CorpusRoutes(r)
 	r.Route("/v1/analytics", func(r chi.Router) {
-		r.Get("/always-tracked", h.getAlwaysTracked)
-		r.Post("/always-tracked", h.setAlwaysTracked)
 		if h.pulseHosted.Hosted {
+			r.Group(func(r chi.Router) {
+				r.Use(h.pulseHostedAuthMiddleware)
+				r.Get("/always-tracked", h.getAlwaysTracked)
+				r.Post("/always-tracked", h.setAlwaysTracked)
+			})
 			r.With(h.pulseHostedAuthMiddleware).Post("/channels/{login}/watch", h.watchChannel)
 		} else {
+			r.Get("/always-tracked", h.getAlwaysTracked)
+			r.Post("/always-tracked", h.setAlwaysTracked)
 			r.Post("/channels/{login}/watch", h.watchChannel)
 		}
 		r.Get("/channels/{login}/streams", h.channelStreams)
@@ -144,6 +180,15 @@ func (h *Handler) Routes(r chi.Router) {
 }
 
 func (h *Handler) getAlwaysTracked(w http.ResponseWriter, r *http.Request) {
+	if h.pulseHosted.Hosted {
+		if _, ok := h.requireHostedNonGuestPrincipal(w, r); !ok {
+			return
+		}
+	}
+	if h.collector == nil {
+		writeJSON(w, http.StatusOK, map[string][]string{"channels": {}})
+		return
+	}
 	logins := h.collector.GetAlwaysTracked()
 	writeJSON(w, http.StatusOK, map[string][]string{"channels": logins})
 }
@@ -151,6 +196,11 @@ func (h *Handler) getAlwaysTracked(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) setAlwaysTracked(w http.ResponseWriter, r *http.Request) {
 	if !h.requirePulseWrite(w) {
 		return
+	}
+	if h.pulseHosted.Hosted {
+		if _, ok := h.requireHostedNonGuestPrincipal(w, r); !ok {
+			return
+		}
 	}
 	var req struct {
 		Channel string `json:"channel"`
@@ -194,6 +244,32 @@ func (h *Handler) watchChannel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_channel"})
 		return
+	}
+	if h.pulseHosted.Hosted && h.store != nil {
+		eligible, err := h.store.IsTop500RosterMember(r.Context(), login)
+		if err == nil && !eligible {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error":   "top500_required",
+				"message": "Channel is not in the StreamPulse top-500 roster",
+			})
+			return
+		}
+	}
+	if h.pulseHosted.Hosted && h.collector != nil {
+		allowed := false
+		for _, item := range h.collector.GetAlwaysTracked() {
+			if normalizeLogin(item) == login {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error":   "extension_watch_disabled",
+				"message": "Extension-initiated IRC watch is disabled on hosted; protect the channel for go-live tracking",
+			})
+			return
+		}
 	}
 	principalID := ""
 	if p, ok := pulsePrincipalFromContext(r.Context()); ok {
@@ -936,18 +1012,33 @@ func (h *Handler) getStreamGames(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable"})
 		return
 	}
-	segments, err := h.store.GetGameSegments(r.Context(), streamID)
+	cacheKey := portalAnalyticsCachePrefix + "games:" + streamID
+	if body, ok := h.portalCacheGet(r.Context(), cacheKey); ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("X-Cache", "HIT")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+		return
+	}
+	segments, err := h.resolveStreamGameSegments(r.Context(), streamID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if len(segments) == 0 {
-		if stream, streamErr := h.store.StreamByID(r.Context(), streamID); streamErr == nil {
-			segments = fallbackGameSegmentsForStream(stream)
-		}
+	body, err := json.Marshal(segments)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encode_failed"})
+		return
 	}
-	if segments == nil {
-		segments = []GameSegment{}
+	ttl := portalAnalyticsGamesEndedTTL
+	if stream, streamErr := h.store.StreamByID(r.Context(), streamID); streamErr == nil && stream != nil && stream.EndedAt == nil {
+		ttl = portalAnalyticsGamesLiveTTL
 	}
-	writeJSON(w, http.StatusOK, segments)
+	h.portalCacheSet(r.Context(), cacheKey, body, ttl)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Cache", "MISS")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }

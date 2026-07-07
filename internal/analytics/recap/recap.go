@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	maxTopMoments     = 10
+	maxTopMoments     = 20
 	maxTopEmotes      = 10
 	maxClipCandidates = 5
 	clipScoreCutoff   = 70
@@ -26,28 +26,36 @@ type Input struct {
 }
 
 type StreamRecap struct {
-	StreamID              string      `json:"streamId"`
-	Login                 string      `json:"login"`
-	VodID                 *string     `json:"vodId,omitempty"`
-	DurationSeconds       int         `json:"durationSeconds"`
-	TotalMessages         int         `json:"totalMessages"`
-	PeakChatPerMin        int         `json:"peakChatPerMin"`
-	TopMoments            []Moment    `json:"topMoments"`
-	TopEmotes             []Emote     `json:"topEmotes"`
-	EmoteEnrichmentStatus string      `json:"emoteEnrichmentStatus,omitempty"`
-	BiggestChatSpike      *ChatSpike  `json:"biggestChatSpike,omitempty"`
-	FunniestEmoteBurst    *EmoteBurst `json:"funniestEmoteBurst,omitempty"`
-	ClipCandidates        []Moment    `json:"clipCandidates"`
+	StreamID                string          `json:"streamId"`
+	Login                   string          `json:"login"`
+	VodID                   *string         `json:"vodId,omitempty"`
+	DurationSeconds         int             `json:"durationSeconds"`
+	TotalMessages           int             `json:"totalMessages"`
+	PeakChatPerMin          int             `json:"peakChatPerMin"`
+	NonMissingRollupMinutes int             `json:"nonMissingRollupMinutes,omitempty"`
+	MissingWindows          []MissingWindow `json:"missingWindows,omitempty"`
+	TopMoments              []Moment        `json:"topMoments"`
+	TopEmotes               []Emote         `json:"topEmotes"`
+	EmoteEnrichmentStatus   string          `json:"emoteEnrichmentStatus,omitempty"`
+	BiggestChatSpike        *ChatSpike      `json:"biggestChatSpike,omitempty"`
+	FunniestEmoteBurst      *EmoteBurst     `json:"funniestEmoteBurst,omitempty"`
+	ClipCandidates          []Moment        `json:"clipCandidates"`
 }
 
 type Moment struct {
 	OffsetSeconds int      `json:"offsetSeconds"`
 	Score         int      `json:"score"`
+	Confidence    float64  `json:"confidence,omitempty"`
 	Reasons       []string `json:"reasons"`
 	TopEmotes     []Emote  `json:"topEmotes,omitempty"`
 	ChatCount     int      `json:"chatCount,omitempty"`
 	EmoteCount    int      `json:"emoteCount,omitempty"`
 	ViewerCount   int      `json:"viewerCount,omitempty"`
+}
+
+type MissingWindow struct {
+	StartSeconds int `json:"startSeconds"`
+	EndSeconds   int `json:"endSeconds"`
 }
 
 type Emote struct {
@@ -81,6 +89,7 @@ func Build(input Input) StreamRecap {
 	if recap.DurationSeconds <= 0 {
 		recap.DurationSeconds = len(input.Rollups) * 60
 	}
+	recap.NonMissingRollupMinutes, recap.MissingWindows = rollupCoverage(input.Rollups, input.StartedAt)
 	recap.ClipCandidates = clipCandidates(recap.TopMoments)
 	recap.TotalMessages, recap.PeakChatPerMin, recap.BiggestChatSpike, recap.FunniestEmoteBurst = summarizeRollups(input.Rollups, input.StartedAt)
 	return recap
@@ -94,16 +103,48 @@ func topMoments(points []heatmap.ReplayHeatmapDetailPoint, rollups []heatmap.Min
 		}
 		items = append(items, momentFromPoint(point, rollups, startedAt))
 	}
+	sortMomentsByRank(items, streamHasReactionCoverage(rollups))
+	if len(items) > maxTopMoments {
+		items = items[:maxTopMoments]
+	}
+	return items
+}
+
+func momentHasReactionData(m Moment) bool {
+	return m.ChatCount > 0 || m.EmoteCount > 0
+}
+
+func streamHasReactionCoverage(rollups []heatmap.MinuteRollup) bool {
+	for _, rollup := range rollups {
+		if rollup.Missing {
+			continue
+		}
+		if rollup.ChatCount > 0 || rollupEmoteCount(rollup) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func reactionDeprioritizeRank(m Moment, hasReactionCoverage bool) int {
+	if !hasReactionCoverage || momentHasReactionData(m) {
+		return 0
+	}
+	return 1
+}
+
+func sortMomentsByRank(items []Moment, hasReactionCoverage bool) {
 	sort.Slice(items, func(i, j int) bool {
+		ri := reactionDeprioritizeRank(items[i], hasReactionCoverage)
+		rj := reactionDeprioritizeRank(items[j], hasReactionCoverage)
+		if ri != rj {
+			return ri < rj
+		}
 		if items[i].Score != items[j].Score {
 			return items[i].Score > items[j].Score
 		}
 		return items[i].OffsetSeconds < items[j].OffsetSeconds
 	})
-	if len(items) > maxTopMoments {
-		items = items[:maxTopMoments]
-	}
-	return items
 }
 
 func momentFromPoint(point heatmap.ReplayHeatmapDetailPoint, rollups []heatmap.MinuteRollup, startedAt time.Time) Moment {
@@ -114,29 +155,77 @@ func momentFromPoint(point heatmap.ReplayHeatmapDetailPoint, rollups []heatmap.M
 	moment := Moment{
 		OffsetSeconds: point.OffsetSeconds,
 		Score:         point.Score,
+		Confidence:    point.Confidence,
 		Reasons:       []string{reason},
 		TopEmotes:     convertHeatmapEmotes(point.TopEmotes),
 	}
 	if rollup, ok := rollupForMomentOffset(rollups, startedAt, point.OffsetSeconds); ok {
 		moment.ChatCount = rollup.ChatCount
 		moment.EmoteCount = rollupEmoteCount(rollup)
-		if rollup.ViewerAvg > 0 && rollup.ViewerSamples > 0 {
-			moment.ViewerCount = int(rollup.ViewerAvg)
+		if count := viewerCountFromRollup(rollup); count > 0 {
+			moment.ViewerCount = count
 		}
 	}
 	return moment
 }
 
+func viewerCountFromRollup(rollup heatmap.MinuteRollup) int {
+	if rollup.ViewerLatest > 0 {
+		return rollup.ViewerLatest
+	}
+	if rollup.ViewerMax > 0 {
+		return rollup.ViewerMax
+	}
+	if rollup.ViewerAvg > 0 && rollup.ViewerSamples > 0 {
+		return rollup.ViewerAvg
+	}
+	return 0
+}
+
 func rollupForMomentOffset(rollups []heatmap.MinuteRollup, startedAt time.Time, offsetSeconds int) (heatmap.MinuteRollup, bool) {
+	var nearest heatmap.MinuteRollup
+	found := false
+	bestDistance := 61
 	for i, rollup := range rollups {
 		if rollup.Missing {
 			continue
 		}
-		if offsetForRollup(i, rollup, startedAt) == offsetSeconds {
-			return rollup, true
+		distance := offsetForRollup(i, rollup, startedAt) - offsetSeconds
+		if distance < 0 {
+			distance = -distance
+		}
+		if distance <= 60 && distance < bestDistance {
+			bestDistance = distance
+			nearest = rollup
+			found = true
 		}
 	}
-	return heatmap.MinuteRollup{}, false
+	return nearest, found
+}
+
+func rollupCoverage(rollups []heatmap.MinuteRollup, startedAt time.Time) (nonMissing int, missing []MissingWindow) {
+	var open *MissingWindow
+	for i, rollup := range rollups {
+		offset := offsetForRollup(i, rollup, startedAt)
+		if !rollup.Missing {
+			nonMissing++
+			if open != nil {
+				missing = append(missing, *open)
+				open = nil
+			}
+			continue
+		}
+		end := offset + 59
+		if open == nil {
+			open = &MissingWindow{StartSeconds: offset, EndSeconds: end}
+			continue
+		}
+		open.EndSeconds = end
+	}
+	if open != nil {
+		missing = append(missing, *open)
+	}
+	return nonMissing, missing
 }
 
 func rollupEmoteCount(rollup heatmap.MinuteRollup) int {
@@ -165,6 +254,8 @@ func convertHeatmapEmotes(in []heatmap.HeatmapEmote) []Emote {
 			Code:     item.Name,
 			Count:    item.Count,
 			Provider: item.Provider,
+			ID:       strings.TrimSpace(item.ID),
+			ImageURL: strings.TrimSpace(item.ImageURL),
 		})
 	}
 	return out

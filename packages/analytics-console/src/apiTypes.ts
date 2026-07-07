@@ -6,18 +6,30 @@ export interface SourceStatus {
 
 export interface AnalyticsStream {
   streamId: string
+  broadcasterId?: string
+  canonicalStreamId?: string
   login: string
   displayName?: string
   title?: string
   category?: string
+  gamesSummary?: string
   startedAt: string
   endedAt?: string | null
+  lastSeenAt?: string
   currentViewers?: number
   peakViewers?: number
   avgViewers?: number
   viewerSamples?: number
   chatMessages?: number
   vodId?: string
+}
+
+export interface ChannelEmote {
+  name: string
+  emote_id: string
+  url: string
+  zw: boolean
+  provider?: string
 }
 
 export interface ChatCoverageSummary {
@@ -29,14 +41,14 @@ export interface ChatCoverageSummary {
 
 export interface AnalyticsMinuteRollup {
   minuteTs: string
-  viewerAvg: number
-  viewerMax: number
-  viewerLatest: number
-  viewerSamples: number
-  chatCount: number
-  totalEmoteCount: number
-  seventvEmoteCount: number
-  emotes: Record<string, number>
+  viewerAvg?: number
+  viewerMax?: number
+  viewerLatest?: number
+  viewerSamples?: number
+  chatCount?: number
+  totalEmoteCount?: number
+  seventvEmoteCount?: number
+  emotes?: Record<string, number>
   missing?: boolean
 }
 
@@ -54,6 +66,8 @@ export interface AnalyticsStreamDetail {
   state: 'live' | 'historical' | 'not_collected' | 'syncing' | string
   stream?: AnalyticsStream
   rollups: AnalyticsMinuteRollup[]
+  /** Full timeline rollups for moments panel; chart uses downsampled `rollups`. */
+  momentRollups?: AnalyticsMinuteRollup[]
   topEmotes: AnalyticsTopEmote[]
   sources: SourceStatus[]
   updatedAt: number
@@ -65,6 +79,9 @@ export interface AnalyticsStreamDetail {
   viewerSource?: string
   timelineMinutes?: number
   analyticsQuality?: string
+  coverageStartOffsetSeconds?: number
+  /** Hosted portal: detail loaded but /minutes fetch failed or returned empty. */
+  minutesUnavailable?: boolean
 }
 
 export interface AnalyticsStreamsResponse {
@@ -82,6 +99,7 @@ export interface GameSegment {
   offsetSeconds: number
   durationSeconds: number
   createdAt: string
+  source?: string
 }
 
 export type SyncPhase =
@@ -97,6 +115,20 @@ export type SyncPhase =
   | 'failed'
   | string
 
+export interface StreamSummaryMetrics {
+  sync_health_state?: string
+  data_coverage_pct?: number
+  minutesWithData?: number
+  viewerSampleCount?: number
+}
+
+export interface StreamSummaryResponse {
+  channel?: string
+  metrics?: StreamSummaryMetrics
+  analyticsQuality?: string
+  updatedAt?: number
+}
+
 export interface SyncStatus {
   streamId: string
   phase: SyncPhase
@@ -106,6 +138,8 @@ export interface SyncStatus {
   stale?: boolean
   error?: string
   viewerStatus?: string
+  rollupsWritten?: number
+  viewersOnly?: boolean
 }
 
 export interface PulseBookmark {
@@ -115,7 +149,38 @@ export interface PulseBookmark {
   label?: string
 }
 
+export interface PulseRecapEmote {
+  code: string
+  count: number
+  provider?: string
+  id?: string
+  imageUrl?: string
+}
+
+export interface PulseRecapMoment {
+  offsetSeconds: number
+  score: number
+  reasons?: string[]
+  topEmotes?: PulseRecapEmote[]
+}
+
 export interface PulseStreamRecap {
   streamId: string
-  clipCandidates?: unknown[]
+  login?: string
+  vodId?: string
+  durationSeconds?: number
+  totalMessages?: number
+  peakChatPerMin?: number
+  topMoments?: PulseRecapMoment[]
+  topEmotes?: PulseRecapEmote[]
+  biggestChatSpike?: {
+    offsetSeconds: number
+    chatPerMin: number
+  }
+  funniestEmoteBurst?: {
+    offsetSeconds: number
+    code?: string
+    count: number
+  }
+  clipCandidates?: PulseRecapMoment[]
 }

@@ -67,6 +67,8 @@ export interface LiveHeatPoint {
   emoteCount: number
   topEmotes: LiveHeatEmote[]
   collecting: boolean
+  viewerCount?: number
+  viewerDelta?: number
 }
 
 export interface LiveHeatInput {
@@ -88,9 +90,9 @@ export interface LiveHeatResult {
 const REASON_LABELS: Record<LiveHeatReason, string> = {
   chat_spike: 'Chat spike',
   emote_spike: 'Emote spike',
-  seventv_spike: '7TV emote spike',
-  twitch_emote_spike: 'Twitch emote spike',
-  ffz_spike: 'FFZ emote spike',
+  seventv_spike: 'Emote spike',
+  twitch_emote_spike: 'Emote spike',
+  ffz_spike: 'Emote spike',
   viewer_spike: 'Viewer spike',
   manual: 'Moment',
 }

@@ -168,8 +168,12 @@ func (h *Handler) buildExtensionCoverageTier(ctx context.Context, login string) 
 			return ExtensionCoverageTierResponse{}, err
 		}
 		if stream != nil {
+			stream, isLive, err := h.reconcileExtensionLiveStream(ctx, login, stream, inputs.tracking)
+			if err != nil {
+				return ExtensionCoverageTierResponse{}, err
+			}
 			inputs.stream = stream
-			inputs.isLive = stream.EndedAt == nil
+			inputs.isLive = isLive
 			rollups, err := h.store.RollupsByStream(ctx, stream.StreamID)
 			if err != nil {
 				return ExtensionCoverageTierResponse{}, err

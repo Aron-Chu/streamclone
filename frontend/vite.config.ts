@@ -38,7 +38,7 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/emotes': {
-        target: 'http://localhost:9000',
+        target: 'http://localhost:8084',
         changeOrigin: true,
       },
       '/v1/auth': {
