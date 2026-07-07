@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "${ROOT}"
 
-PATTERN='141\.11\.243|23\.173\.152|SHA256:[A-Za-z0-9+/=]{20,}|private-streampulse-ops-checkout|/etc/streamclone/pulse\.env|operator-host|id_ed25519_bearhost|PULSE_PROBE_SSH_|hosted-production-vps-production-deploy|production\.local\.env'
+PATTERN='141\.11\.243|23\.173\.152|SHA256:[A-Za-z0-9+/=]{20,}|/root/streampulse-ops|/etc/streamclone/pulse\.env|root@streampulse-vps|id_ed25519_bearhost|PULSE_PROBE_SSH_|streampulse-vps-production-deploy|production\.local\.env'
 
 if git diff --cached --name-only | rg -q '^\.env\.example$|^deploy/env/profile-.*\.env\.example$|^docs/ops-migration-manifest\.md$|^scripts/pre-commit-public-ops-guard\.sh$|^scripts/ops/filter-repo-'; then
   ALLOW_EXTRA=1
