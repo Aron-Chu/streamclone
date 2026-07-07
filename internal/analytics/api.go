@@ -137,11 +137,16 @@ func (h *Handler) Routes(r chi.Router) {
 	h.EmoteHistoryRoutes(r)
 	h.CorpusRoutes(r)
 	r.Route("/v1/analytics", func(r chi.Router) {
-		r.Get("/always-tracked", h.getAlwaysTracked)
-		r.Post("/always-tracked", h.setAlwaysTracked)
 		if h.pulseHosted.Hosted {
+			r.Group(func(r chi.Router) {
+				r.Use(h.pulseHostedAuthMiddleware)
+				r.Get("/always-tracked", h.getAlwaysTracked)
+				r.Post("/always-tracked", h.setAlwaysTracked)
+			})
 			r.With(h.pulseHostedAuthMiddleware).Post("/channels/{login}/watch", h.watchChannel)
 		} else {
+			r.Get("/always-tracked", h.getAlwaysTracked)
+			r.Post("/always-tracked", h.setAlwaysTracked)
 			r.Post("/channels/{login}/watch", h.watchChannel)
 		}
 		r.Get("/channels/{login}/streams", h.channelStreams)
@@ -175,6 +180,15 @@ func (h *Handler) Routes(r chi.Router) {
 }
 
 func (h *Handler) getAlwaysTracked(w http.ResponseWriter, r *http.Request) {
+	if h.pulseHosted.Hosted {
+		if _, ok := h.requireHostedNonGuestPrincipal(w, r); !ok {
+			return
+		}
+	}
+	if h.collector == nil {
+		writeJSON(w, http.StatusOK, map[string][]string{"channels": {}})
+		return
+	}
 	logins := h.collector.GetAlwaysTracked()
 	writeJSON(w, http.StatusOK, map[string][]string{"channels": logins})
 }
@@ -182,6 +196,11 @@ func (h *Handler) getAlwaysTracked(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) setAlwaysTracked(w http.ResponseWriter, r *http.Request) {
 	if !h.requirePulseWrite(w) {
 		return
+	}
+	if h.pulseHosted.Hosted {
+		if _, ok := h.requireHostedNonGuestPrincipal(w, r); !ok {
+			return
+		}
 	}
 	var req struct {
 		Channel string `json:"channel"`

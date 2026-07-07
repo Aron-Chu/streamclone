@@ -2,10 +2,13 @@ package analytics
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -124,6 +127,47 @@ func TestHostedReplayHeatmapUnauthorizedWithoutAuth(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestHostedAlwaysTrackedUnauthorizedWithoutAuth(t *testing.T) {
+	h := &Handler{
+		pulseHosted: PulseHostedConfig{Hosted: true, BetaKeys: []string{"secret-one"}},
+	}
+	r := chi.NewRouter()
+	h.Routes(r)
+
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			var req *http.Request
+			if method == http.MethodPost {
+				req = httptest.NewRequest(method, "/v1/analytics/always-tracked", strings.NewReader(`{"channel":"xqc","track":true}`))
+				req.Header.Set("Content-Type", "application/json")
+			} else {
+				req = httptest.NewRequest(method, "/v1/analytics/always-tracked", nil)
+			}
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s status = %d, want 401: %s", method, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestNonHostedAlwaysTrackedAllowsGuestRead(t *testing.T) {
+	h := &Handler{
+		pulseHosted: PulseHostedConfig{Hosted: false},
+		collector:   NewCollector(nil, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), 50, time.Hour, 30*24*time.Hour, 200),
+	}
+	r := chi.NewRouter()
+	h.Routes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/analytics/always-tracked", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 }
 

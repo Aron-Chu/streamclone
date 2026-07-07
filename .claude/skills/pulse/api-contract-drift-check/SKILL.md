@@ -9,10 +9,10 @@ description: Detect drift between extension/portal clients and streamclone BFF c
 
 | Layer | Location |
 |-------|----------|
-| Go BFF | `internal/analytics/extension_api.go`, portal handlers |
-| Shared types | `packages/pulse-core/` |
-| Extension SW | sibling `streamclone-pulse/src/background/api.ts`, `src/shared/messages.ts` |
-| Portal client | sibling `streamclone-pulse/streampulse-web/` (when present) |
+| Go BFF | streamclone `internal/analytics/extension_api.go`, portal handlers |
+| Shared types | streamclone `packages/pulse-core/` |
+| Extension SW | `src/background/api.ts`, `src/shared/messages.ts` |
+| Portal client | `streampulse-web/` apiClient (when present) |
 
 ## Workflow
 
@@ -22,29 +22,22 @@ description: Detect drift between extension/portal clients and streamclone BFF c
 4. Run narrow tests:
 
 ```bash
+# streamclone
 go test ./internal/analytics/... -run Pulse
 npm test --prefix packages/pulse-core
-# streamclone-pulse checkout:
-npm test && npm run typecheck
+
+# streamclone-pulse
+npm test
+npm run typecheck
 ```
 
 ## Script
 
-From streamclone repo root (or set `STREAMCLONE_ROOT`):
-
 ```bash
-python .cursor/skills/pulse/api-contract-drift-check/scripts/contract-keys.py
-# Windows Store python alias fallback:
-wsl.exe --cd /mnt/c/Users/Aron/twitch-7tv-clone bash -lc 'python3 .cursor/skills/pulse/api-contract-drift-check/scripts/contract-keys.py'
+python .cursor/skills/api-contract-drift-check/scripts/contract-keys.py
 ```
 
-Strict contract tests (fail on drift):
-
-```bash
-go test ./internal/analytics/... -run Contract
-cd ../streamclone-pulse && npm test -- coverageContract
-cd streampulse-web && npm test -- publicHub.contract
-```
+Reports pulse-core export names vs common BFF JSON keys (heuristic, not exhaustive).
 
 ## Block merge if
 
