@@ -1,10 +1,10 @@
-export const SCRAPER_SETUP_DOC_URL =
-  'https://github.com/Aron-Chu/streamclone/blob/master/docs/scraper-cloudflare-and-proxy.md'
+export const STREAMPULSE_ANALYTICS_URL = 'https://streampulse.stream/analytics'
 
-export function profileNeedsScraper(profile: string) {
-  return profile === 'scraper' || profile === 'full'
+/** Desktop install no longer bundles the TwitchTracker scraper profile. */
+export function profileNeedsScraper(_profile: string) {
+  return false
 }
 
-export function coreMinuteChartsNeedScraper(profile: string, scraperState: string) {
-  return profile === 'core' && scraperState === 'offline'
+export function coreMinuteChartsNeedScraper(_profile: string, _scraperState: string) {
+  return false
 }

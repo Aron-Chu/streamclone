@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { SCRAPER_SETUP_DOC_URL } from '../setupProfile'
 import { useSystemHealth } from '../hooks/useSystemHealth'
 import OptionalServicesPanel from './OptionalServicesPanel'
 
@@ -133,9 +132,6 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
           </button>
           <a href={INSTALL_GUIDE_URL} target="_blank" rel="noreferrer" className="rounded border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-white/10">
             Desktop install guide
-          </a>
-          <a href={SCRAPER_SETUP_DOC_URL} target="_blank" rel="noreferrer" className="rounded border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-white/10">
-            Scraper setup doc
           </a>
         </div>
       </div>

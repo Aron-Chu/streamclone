@@ -1,72 +1,37 @@
 import { Link } from 'react-router-dom'
 import type { ReactNode } from 'react'
-import { profileNeedsScraper, SCRAPER_SETUP_DOC_URL } from '../setupProfile'
+import { STREAMPULSE_ANALYTICS_URL } from '../setupProfile'
 import { SETUP_CONTROL_WAKE_ENABLED, REPLAYFORGE_UI } from '../config'
-import { useOptionalServices, type ServiceStartProgress } from '../hooks/useOptionalServices'
+import { useOptionalServices } from '../hooks/useOptionalServices'
 
 type ServiceStatus = 'ready' | 'offline' | 'checking'
-export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean }) {
-  const { isStarting, startService } = useOptionalServices({ probeControl: true })
 
+export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean }) {
   return (
     <div className={compact ? 'mt-2 text-left' : 'max-w-md'}>
       <div className={`font-black text-zinc-100 ${compact ? 'text-[11px]' : 'text-base'}`}>
-        Minute charts need Analytics tier
+        Minute charts on StreamPulse
       </div>
       <p className={`mt-1 font-semibold text-zinc-500 ${compact ? 'text-[10px] leading-4' : 'text-sm'}`}>
-        Core Watch includes Helix/VOD stream lists and TwitchTracker summary stats (avg/peak).
-        Per-minute viewer, chat, and emote charts require the optional scraper profile.
+        Per-minute viewer, chat, and emote analytics are hosted on StreamPulse — not bundled in the desktop install.
+        Core Watch still includes live playback, IRC chat, and emotes.
       </p>
       <div className={`mt-2 flex flex-wrap items-center gap-2 ${compact ? 'text-[10px]' : 'text-xs'}`}>
-        <button
-          type="button"
-          onClick={() => void startService('scraper')}
-          disabled={isStarting('scraper')}
-          className={`rounded border border-violet-400/40 bg-violet-500/15 px-2.5 py-1 font-black text-violet-100 transition hover:bg-violet-500/25 disabled:opacity-50 ${compact ? 'text-[10px]' : 'text-xs'}`}
+        <a
+          href={STREAMPULSE_ANALYTICS_URL}
+          target="_blank"
+          rel="noreferrer"
+          className={`rounded border border-violet-400/40 bg-violet-500/15 px-2.5 py-1 font-black text-violet-100 transition hover:bg-violet-500/25 ${compact ? 'text-[10px]' : 'text-xs'}`}
         >
-          {isStarting('scraper') ? 'Starting…' : 'Start Analytics'}
-        </button>
+          Open StreamPulse Analytics
+        </a>
         <Link
           to="/"
           className="font-bold text-zinc-300 underline decoration-zinc-500/40 underline-offset-2 transition hover:text-white"
         >
           Live directory
         </Link>
-        <a
-          href={SCRAPER_SETUP_DOC_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="font-bold text-violet-300 underline decoration-violet-400/30 underline-offset-2 transition hover:text-violet-200"
-        >
-          Scraper setup guide →
-        </a>
       </div>
-    </div>
-  )
-}
-
-function ServiceStartProgressBar({ progress, compact = false }: { progress: ServiceStartProgress; compact?: boolean }) {
-  const width = Math.max(0, Math.min(100, progress.percent))
-  const label = progress.service === 'scraper' ? 'Analytics' : progress.service
-  return (
-    <div className={`rounded-lg border border-white/10 bg-white/[0.035] ${compact ? 'p-2.5' : 'p-3'}`}>
-      <div className={`mb-2 flex items-center justify-between gap-2 font-black uppercase tracking-wide text-zinc-300 ${
-        compact ? 'text-[10px]' : 'text-[11px]'
-      }`}>
-        <span>{label} · {progress.phase}</span>
-        <span className="text-zinc-500">{width}%</span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-        <div
-          className="h-full rounded-full bg-emerald-400/85 transition-all duration-500 ease-out"
-          style={{ width: `${width}%` }}
-        />
-      </div>
-      {progress.detail ? (
-        <p className={`mt-2 font-semibold leading-4 text-zinc-500 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
-          {progress.detail}
-        </p>
-      ) : null}
     </div>
   )
 }
@@ -75,11 +40,6 @@ function ServiceCard({
   title,
   detail,
   status,
-  actionLabel,
-  onAction,
-  busy,
-  error,
-  progress,
   readyHref,
   readyLabel,
   onReadyOpen,
@@ -90,18 +50,14 @@ function ServiceCard({
   title: string
   detail: string
   status: ServiceStatus
-  actionLabel?: string
-  onAction?: () => void
-  busy?: boolean
-  error?: string | null
-  progress?: ServiceStartProgress | null
   readyHref?: string
   readyLabel?: string
   onReadyOpen?: () => void
   offlineHref?: string
   offlineLabel?: string
   children?: ReactNode
-}) {  const good = status === 'ready'
+}) {
+  const good = status === 'ready'
   const checking = status === 'checking'
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
@@ -114,22 +70,6 @@ function ServiceCard({
         </span>
       </div>
       <p className="mb-3 text-xs font-semibold leading-5 text-zinc-400">{detail}</p>
-      {progress ? <ServiceStartProgressBar progress={progress} /> : null}
-      {error ? (
-        <div className="mb-3 rounded border border-red-300/20 bg-red-500/10 px-2 py-1.5 text-xs font-semibold text-red-100">
-          {error}
-        </div>
-      ) : null}
-      {actionLabel && onAction && status !== 'ready' && !offlineHref ? (
-        <button
-          type="button"
-          onClick={onAction}
-          disabled={busy}
-          className="rounded border border-violet-400/40 bg-violet-500/15 px-3 py-2 text-xs font-black text-violet-100 transition hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy ? 'Starting…' : actionLabel}
-        </button>
-      ) : null}
       {offlineHref && status !== 'ready' ? (
         <a
           href={offlineHref}
@@ -155,9 +95,10 @@ function ServiceCard({
     </div>
   )
 }
+
 type OptionalServicesPanelProps = {
   variant: 'overlay' | 'banner'
-  focus?: 'scraper' | 'clipper' | 'all'
+  focus?: 'clipper' | 'all'
   onDismiss?: () => void
   onBrowse?: () => void
   channelLogin?: string
@@ -174,83 +115,36 @@ export default function OptionalServicesPanel({
     hasServiceSnapshot,
     statusLoading,
     profile,
-    services,
-    controlReady,
-    scraperOffline,
     clipperOffline,
     clipperReady,
-    isStarting,
-    startProgressByService,
-    actionError,
-    startService,
     refreshStatus,
   } = useOptionalServices({ probeControl: true, pollActive: variant === 'overlay' })
 
   const coreStatus: ServiceStatus = statusLoading ? 'checking' : hasServiceSnapshot ? 'ready' : 'offline'
-  const scraperStatus: ServiceStatus = statusLoading ? 'checking' : services?.scraper ?? 'offline'
   const clipperStatus: ServiceStatus = statusLoading ? 'checking' : clipperReady ? 'ready' : 'offline'
   const replayforgeUi = REPLAYFORGE_UI.replace(/\/$/, '')
 
-  const showScraper = focus === 'all' || focus === 'scraper'
   const showClipper = focus === 'all' || focus === 'clipper'
 
   if (variant === 'banner') {
-    const scraperBanner = showScraper && scraperOffline && (profile === 'core' || profileNeedsScraper(profile))
     const clipperBanner = showClipper && clipperOffline
-
-    if (!scraperBanner && !clipperBanner) return null
-
-    const isCoreInfo = profile === 'core' && scraperBanner && !clipperBanner
+    if (!clipperBanner) return null
 
     return (
-      <div className={`rounded-lg border px-3 py-2.5 sm:px-4 ${
-        isCoreInfo ? 'border-cyan-300/20 bg-cyan-400/10' : 'border-amber-300/20 bg-amber-400/10'
-      }`}>
+      <div className="rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2.5 sm:px-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className={`text-xs font-semibold leading-5 sm:text-sm ${
-            isCoreInfo ? 'text-cyan-50/90' : 'text-amber-50/90'
-          }`}>
-            {clipperBanner && !scraperBanner
-              ? 'ReplayForge is offline — start ReplayForge to edit clips.'
-              : isCoreInfo
-                ? 'Viewer charts need Analytics setup — optional charts and VOD chat load from a second profile.'
-                : 'Viewer charts are paused — Analytics is not running.'}
+          <p className="text-xs font-semibold leading-5 text-amber-50/90 sm:text-sm">
+            ReplayForge is offline — start ReplayForge to edit clips.
           </p>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {scraperBanner ? (
-              <a
-                href={SCRAPER_SETUP_DOC_URL}
-                target="_blank"
-                rel="noreferrer"
-                className={`rounded border px-2.5 py-1 text-[11px] font-black uppercase tracking-wide transition ${
-                  isCoreInfo
-                    ? 'border-cyan-200/30 bg-cyan-300/15 text-cyan-50 hover:bg-cyan-300/25'
-                    : 'border-amber-200/30 bg-amber-300/15 text-amber-50 hover:bg-amber-300/25'
-                }`}
-              >
-                {isCoreInfo ? 'Analytics setup' : 'Setup guide'}
-              </a>
-            ) : null}
-            {scraperBanner ? (
-              <button
-                type="button"
-                onClick={() => void startService('scraper')}
-                disabled={isStarting('scraper')}
-                className="rounded border border-amber-200/30 bg-amber-300/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-amber-50 transition hover:bg-amber-300/25 disabled:opacity-50"
-              >
-                {isStarting('scraper') ? 'Starting…' : 'Start Analytics'}
-              </button>
-            ) : null}
-            {clipperBanner ? (
-              <a
-                href={replayforgeUi}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded border border-amber-200/30 bg-amber-300/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-amber-50 transition hover:bg-amber-300/25"
-              >
-                Start ReplayForge
-              </a>
-            ) : null}
+            <a
+              href={replayforgeUi}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded border border-amber-200/30 bg-amber-300/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-amber-50 transition hover:bg-amber-300/25"
+            >
+              Start ReplayForge
+            </a>
             {clipperReady ? (
               <a
                 href={replayforgeUi}
@@ -277,14 +171,6 @@ export default function OptionalServicesPanel({
             ) : null}
           </div>
         </div>
-        {startProgressByService.scraper ? (
-          <div className="mt-2 space-y-2">
-            <ServiceStartProgressBar progress={startProgressByService.scraper} compact />
-          </div>
-        ) : null}
-        {actionError ? (
-          <p className="mt-2 text-[11px] font-semibold text-amber-100/80">{actionError}</p>
-        ) : null}
       </div>
     )
   }
@@ -295,7 +181,7 @@ export default function OptionalServicesPanel({
         <div className="text-xs font-black uppercase tracking-[0.2em] text-violet-300">Welcome to Streamclone</div>
         <h1 className="text-2xl font-black text-white">What is running right now</h1>
         <p className="text-sm font-semibold leading-6 text-zinc-400">
-          Live checks for the core stack and optional Analytics (scraper) and ReplayForge.
+          Live checks for the core stack and optional ReplayForge. Minute analytics live on StreamPulse.
         </p>
       </div>
 
@@ -304,9 +190,9 @@ export default function OptionalServicesPanel({
           Profile {profile}
         </span>
         <span className={`rounded px-2.5 py-1 text-[11px] font-black uppercase ${
-          controlReady ? 'bg-emerald-500/15 text-emerald-100' : SETUP_CONTROL_WAKE_ENABLED ? 'bg-cyan-500/15 text-cyan-100' : 'bg-zinc-500/20 text-zinc-400'
+          SETUP_CONTROL_WAKE_ENABLED ? 'bg-cyan-500/15 text-cyan-100' : 'bg-zinc-500/20 text-zinc-400'
         }`}>
-          {controlReady ? 'One-click start available' : SETUP_CONTROL_WAKE_ENABLED ? 'One-click start (helper wakes on click)' : 'Launcher control offline'}
+          {SETUP_CONTROL_WAKE_ENABLED ? 'Launcher control available' : 'Launcher control offline'}
         </span>
         <button
           type="button"
@@ -317,39 +203,16 @@ export default function OptionalServicesPanel({
         </button>
       </div>
 
-      {startProgressByService.scraper ? (
-        <div className="space-y-2">
-          <ServiceStartProgressBar progress={startProgressByService.scraper} />
-        </div>
-      ) : null}
-
-      {actionError ? (
-        <div className="rounded border border-amber-300/20 bg-amber-400/10 p-3 text-xs font-semibold text-amber-100">
-          {actionError}
-        </div>
-      ) : null}
-
       <div className="mx-auto grid w-full max-w-5xl justify-center gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))]">
         <ServiceCard
           title="Core app"
           detail="Directory, playback, chat, emotes, and analytics API."
           status={coreStatus}
         />
-        {showScraper ? (
-          <ServiceCard
-            title="Analytics (scraper)"
-            detail="TwitchTracker viewer charts for analytics sync."
-            status={scraperStatus}
-            actionLabel="Start Analytics"
-            onAction={() => void startService('scraper')}
-            busy={isStarting('scraper')}
-            progress={startProgressByService.scraper ?? null}
-          />
-        ) : null}
         {showClipper ? (
           <ServiceCard
             title="ReplayForge"
-            detail="Clip Studio jobs and rendered clips. Install and run ReplayForge separately (API :8095, UI :8096) — not started from Streamclone Stack status."
+            detail="Clip Studio jobs and rendered clips. Install and run ReplayForge separately (API :8095, UI :8096)."
             status={clipperStatus}
             offlineHref={replayforgeUi}
             offlineLabel="Start ReplayForge"

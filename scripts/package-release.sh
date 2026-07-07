@@ -36,12 +36,17 @@ RELEASE_DEPLOY_EXCLUDES=(
   --exclude='docker-compose.bearhost*'
   --exclude='docker-compose.hosted-production-vps*'
   --exclude='docker-compose.observability*'
+  --exclude='docker-compose.scraper-source.yml'
+  --exclude='docker-compose.azure-scraper.yml'
   --exclude='grafana/'
   --exclude='prometheus/'
   --exclude='env/profile-bearhost*'
   --exclude='env/profile-hosted-production-vps*'
   --exclude='env/profile-pulse.env'
   --exclude='env/profile-clipper.env'
+  --exclude='env/profile-scraper.env'
+  --exclude='env/profile-full.env'
+  --exclude='env/profile-azure-scraper.env'
   --exclude='Caddyfile.bearhost'
   --exclude='nginx.bearhost.conf'
   --exclude='smoke/bearhost*'
@@ -58,6 +63,10 @@ RELEASE_SCRIPT_EXCLUDES=(
   --exclude='lib/hosted-production-vps*'
   --exclude='lib/deploy-rsync.sh'
   --exclude='pulse-hosted-boundary*'
+  --exclude='scraper-preflight*'
+  --exclude='scraper-proxy-benchmark*'
+  --exclude='scraper-turnstile-benchmark*'
+  --exclude='scraper-warm*'
   --exclude='dev/'
 )
 
@@ -85,7 +94,6 @@ cat >"$STAGE/deploy/env/release-bundle.env" <<EOF
 # Auto-generated release bundle — pull GHCR images pinned to this tag
 IMAGE_TAG=$VERSION
 STREAMCLONE_USE_IMAGES=1
-SCRAPER_USE_IMAGES=1
 # Loopback token-import/device-code endpoints are dev-only (docs/security.md).
 TWITCH_DEV_TOKEN_IMPORT_ENABLED=false
 # Pulse Wire removed from desktop install bundle (hosted prod + extension cover Pulse).
@@ -121,9 +129,7 @@ cat >"$STAGE/README-quickstart.md" <<'EOF'
 3. Every day: double-click **Start Streamclone.cmd**
 4. Open http://localhost:8090/
 
-**Analytics charts** (optional): enable the **scraper** compose profile for TwitchTracker minute charts on channel pages. Core watch + chat + emotes work without it.
-
-**StreamPulse** (hosted): Pulse live coverage, hub analytics, and the browser extension live at [streampulse.stream](https://streampulse.stream) — not bundled in the desktop install.
+**StreamPulse** (hosted): per-minute analytics, Pulse live coverage, and the browser extension live at [streampulse.stream](https://streampulse.stream) — not bundled in the desktop install.
 
 **ReplayForge / Clip Studio** (optional): install [ReplayForge](https://github.com/Aron-Chu/replayforge) separately on `:8095` (API) and `:8096` (UI). Streamclone links to it when running; no clipper container in the release stack.
 

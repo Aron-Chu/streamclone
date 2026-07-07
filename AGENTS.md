@@ -24,13 +24,13 @@ Recent scope changes agents should treat as current truth (do not reintroduce re
 
 | Change | What removed / changed | What remains optional |
 |--------|------------------------|------------------------|
-| **Ops UI strip** | Local Grafana/Influx/Prometheus compose profile; Stack status / Network panels for those tiers; Channel **Stats** tab and **Pulse** sidebar | Core + **scraper** in stack status; in-app Analytics charts |
+| **Ops UI strip** | Local Grafana/Influx/Prometheus compose profile; Stack status / Network panels for those tiers; Channel **Stats** tab and **Pulse** sidebar; **TwitchTracker scraper** tier and minute-chart start prompts | Core stack + ReplayForge link in stack status; in-app session stats only |
 | **Pulse Wire removal** | `/pulse-wire` UI, `storygraph` / `x-ingest` / `media-matcher` compose services, `/v1/pulse-wire/*` Caddy routes, `cmd/storygraph`, `internal/storygraph`, `PULSE_WIRE_ENABLED` frontend flag | `internal/social/` Reddit/LSF helpers (metadata); archive `pulsewire/*` cold export paths |
 | **UX polish** | — | `content-enter` / `content-stagger` load motion; `useMinSkeletonTime`; horizontal shelf wheel-scroll + softer chrome; channel workspace fade-in |
 
-**Stack status (UI):** core services + scraper only — not Grafana, not Pulse Wire.
+**Stack status (UI):** core services + ReplayForge link only — not Grafana, not Pulse Wire, not scraper.
 
-**Compose profiles (local):** `core` (default), `scraper`, `full` (= core + scraper). No `pulse`, `pulse-wire`, or `pulse-wire-semantic`.
+**Compose profiles (local dev checkout):** `core` (default). Optional `scraper` / `full` remain in source for operators (`streamclone-scraper` sibling); **desktop install bundles exclude scraper**.
 
 **Verify after doc/code drift:** `make compose-config-check`, `cd frontend && npx tsc -b && npm test`, `curl http://127.0.0.1:8090/v1/extension/health`.
 

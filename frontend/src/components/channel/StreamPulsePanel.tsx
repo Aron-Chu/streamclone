@@ -7,7 +7,6 @@ import type {
   InsightCard,
 } from '../../api.ts'
 import { PULSE_WIRE_ENABLED } from '../../config.ts'
-import { useOptionalServices } from '../../hooks/useOptionalServices.ts'
 import { insightToCommunityPost } from '../../utils/insightCommunityPost.ts'
 import {
   isLsfPending,
@@ -133,10 +132,8 @@ function StreamPulsePanel({
   autoUpdate,
   onAutoUpdateChange,
 }: StreamPulsePanelProps) {
-  const { scraperOffline, startService, isStarting } = useOptionalServices({ probeControl: false })
-
   const lsfPosts = insights?.lsf ?? []
-  const lsfEmpty = summarizeLsfEmptyState(insights?.sources, { scraperOffline })
+  const lsfEmpty = summarizeLsfEmptyState(insights?.sources)
   const lsfWarming = isLsfWarming(insights?.sources)
   const lsfPending = isLsfPending(insights?.sources)
   const clipSpike = insights?.clips?.[0]
@@ -243,16 +240,6 @@ function StreamPulsePanel({
                   className="mt-3 rounded bg-violet-600 px-3 py-1.5 text-[11px] font-black uppercase text-white transition hover:bg-violet-500 disabled:opacity-60"
                 >
                   {lsfLoadPending || insightsFetching ? 'Searching Reddit…' : 'Search r/LivestreamFail'}
-                </button>
-              ) : null}
-              {lsfEmpty.showScraperAction ? (
-                <button
-                  type="button"
-                  disabled={isStarting('scraper')}
-                  onClick={() => void startService('scraper')}
-                  className="mt-3 rounded bg-violet-600 px-3 py-1.5 text-[11px] font-black uppercase text-white transition hover:bg-violet-500 disabled:opacity-60"
-                >
-                  {isStarting('scraper') ? 'Starting…' : 'Start Analytics'}
                 </button>
               ) : null}
               <p className="mt-3 text-[11px] font-semibold text-zinc-600">

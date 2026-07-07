@@ -87,7 +87,7 @@ import {
   viewerValue,
 } from './analytics/chartRollupUtils'
 import { useAnalyticsLive } from '../hooks/useAnalyticsLive'
-import OptionalServicesPanel, { CoreMinuteChartsNotice } from './OptionalServicesPanel'
+import { CoreMinuteChartsNotice } from './OptionalServicesPanel'
 import ClipperAuthHelp from './ClipperAuthHelp'
 import StackStatusButton from './StackStatusButton'
 import {
@@ -793,7 +793,7 @@ function SyncProgressPanel({
         <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] font-semibold leading-snug text-amber-100">
           {viewerDetailLabel}
           <div className="mt-1 text-[10px] font-medium text-amber-200/80">
-            Run <code className="rounded bg-black/20 px-1 py-0.5">scripts/scraper-preflight.ps1</code> or use Re-sync viewers after the scraper recovers.
+            Re-sync viewers after connectivity recovers, or use StreamPulse for hosted minute charts.
           </div>
         </div>
       ) : null}
@@ -1204,7 +1204,7 @@ function StreamSidebar({
                           : hasMinuteData
                             ? 'Minute-level viewer, chat, and emote rollups are synced for charts.'
                             : coreMinuteChartsBlocked
-                              ? 'Session stats only. Minute charts require the Analytics (scraper) tier.'
+                              ? 'Session stats only. Minute charts live on StreamPulse.'
                               : 'Session stats only (duration, title). Open the stream detail page to sync minute charts.'
                       }
                     >
@@ -2778,10 +2778,6 @@ export default function Analytics() {
             <SourcePills sources={detail?.sources} />
           </div>
         </header>
-
-        {setupQuery.data?.services.scraper === 'offline' ? (
-          <OptionalServicesPanel variant="banner" focus="scraper" channelLogin={login} />
-        ) : null}
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-6">
           <StatCard
