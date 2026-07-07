@@ -99,7 +99,7 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 | **Playback / HLS** | `.kiro/steering/playback.md`, `docs/low-latency-relay/requirements.md` | `get_ast_chunk("Channel")`, `playback_probe` |
 | **Analytics / VOD / rollups** | `.kiro/steering/analytics.md` | `get_blast_radius("mergeMinuteRollups")`, `get_ast_chunk("SyncProgressPanel")` |
 | **Pulse extension / pulse-core / BFF** | [docs/workspace.md](docs/workspace.md), `docs/pulse-extension/` (redirect), sibling [streamclone-pulse `docs/pulse-extension/`](https://github.com/Aron-Chu/streamclone-pulse/tree/master/docs/pulse-extension), `internal/analytics/extension_api.go`, `packages/pulse-core/` | `get_ast_chunk("ExtensionRoutes")`, `curl :8090/v1/extension/health` |
-| **Pulse live coverage / VOD backfill / Protect** | sibling [`live-coverage-requirements.md`](../streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md), [`docs/roadmapping.md`](docs/roadmapping.md), [`docs/tools.md`](docs/tools.md), [`docs/CODEX.md`](docs/CODEX.md) § Pulse review | Skill `pulse-live-coverage-review`, `get_blast_radius("SyncPulseMissedChat")`, `curl :8090/v1/extension/pulse/channels/{login}` |
+| **Pulse live coverage / VOD backfill / Protect** | sibling [`live-coverage-requirements.md`](../streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md), [`docs/pulse-extension/roster-naming-truth-table.md`](docs/pulse-extension/roster-naming-truth-table.md) (top500 vs live admission vs corpus), [`docs/roadmapping.md`](docs/roadmapping.md), [`docs/tools.md`](docs/tools.md), [`docs/CODEX.md`](docs/CODEX.md) § Pulse review | Skill `pulse-live-coverage-review`, `get_blast_radius("SyncPulseMissedChat")`, `curl :8090/v1/extension/pulse/channels/{login}` |
 | **Scraper / Cloudflare / proxy** | `.kiro/steering/analytics.md`, `docs/scraper-cloudflare-and-proxy.md`, `docs/scraping-archive/requirements.md` | `scraper_probe`, `make scraper-preflight` |
 | **Emotes / 7TV / FFZ** | `.kiro/steering/emote-pipeline.md` | `emote_jobs`, `redis_channel_emotes` |
 | **Local Twitch auth** | `.kiro/steering/local-auth.md` | `twitch_auth_status`, `make twitch-debug` |
@@ -110,7 +110,7 @@ bash scripts/mcp-preflight.sh              # verify MCP stdio (Linux/WSL)
 | Clipper (legacy stub) | `.kiro/steering/clipper.md`, `clipper/README.md` | Deprecated in compose |
 | System health / optional services | `.kiro/steering/windows-dev.md` | `stack_health`, `get_ast_chunk("SystemHealthPanel")` |
 | Scraping archive / Azure blob backfill | `docs/scraping-archive/requirements.md` | `get_ast_chunk("SyncService")` |
-| **Hosted production (operator)** | [`docs/production-promotion-contract.md`](docs/production-promotion-contract.md), [`docs/production-artifact-contract.md`](docs/production-artifact-contract.md), sibling [image exit audit](../streamclone-pulse/docs/pulse-extension/evidence/streamclone-image-exit-audit-2026-07.md), private **streampulse-ops**, sibling [`improvements.md`](../streamclone-pulse/docs/pulse-extension/evidence/improvements.md) | `curl https://api.streampulse.stream/v1/extension/health`, `bash scripts/hosted-launch-probes.sh` |
+| **Hosted production (operator)** | [`docs/hosted-production-vps.md`](docs/hosted-production-vps.md) (**SSH:** `root` + `~/.ssh/id_ed25519` via Tailscale `hosted-production-vps`), [`docs/ops-migration-truth-table.md`](docs/ops-migration-truth-table.md) (tags vs private ops FAQ), [`docs/production-promotion-contract.md`](docs/production-promotion-contract.md), [`docs/production-artifact-contract.md`](docs/production-artifact-contract.md), sibling [image exit audit](../streamclone-pulse/docs/pulse-extension/evidence/streamclone-image-exit-audit-2026-07.md), private **streampulse-ops**, sibling [`improvements.md`](../streamclone-pulse/docs/pulse-extension/evidence/improvements.md) | `curl https://api.streampulse.stream/v1/extension/health`, `bash scripts/hosted-launch-probes.sh`, `bash scripts/ops/ssh-access-preflight.sh` |
 | **BearHost rollback (operator)** | private **streampulse-ops** `archive/bearhost/` | stub: [`docs/bearhost-production.md`](docs/bearhost-production.md) |
 | **Azure archive → R2 migration / storage SoT** | [`docs/storage/README.md`](docs/storage/README.md), [`docs/storage/azure-to-r2-migration.md`](docs/storage/azure-to-r2-migration.md) | Read-only inventory: `scripts/storage/azure-prefix-inventory.sh` |
 | Security / secrets | `SECURITY.md`, `docs/security.md` | `make security-scan` |
@@ -192,6 +192,7 @@ Load the matching skill from `.cursor/skills/streamclone/` when the task fits (r
 | Release | `VERSION`, `.github/workflows/release-images.yml` | Tag push triggers GHCR + Setup.exe |
 | Production promotion | `docs/production-promotion-contract.md`, sibling image exit audit | Pre-cutover: `streamclone/*`; target: promoted `streampulse/*` by digest |
 | Agent config | `.cursor/mcp.json` | Gitignored; use `*.example` only |
+| VPS SSH (hosted ops) | Operator WSL `~/.ssh/id_ed25519` → `operator-host` | Not in git; BearHost keys rejected; `aron-wsl` not authorized yet — see [`docs/hosted-production-vps.md`](docs/hosted-production-vps.md) |
 
 ---
 

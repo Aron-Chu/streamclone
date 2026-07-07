@@ -21,7 +21,8 @@ const (
 	extensionMetadataFreshnessMax = 15 * time.Minute
 
 	CoverageTierActiveLiveCoverage   = "active_live_coverage"
-	CoverageTierTop500MetadataOnly   = "top500_metadata_only"
+	CoverageTierRosterMetadataOnly   = "roster_metadata_only"
+	CoverageTierTop500MetadataOnly   = "top500_metadata_only" // Deprecated API alias; see coverageTierForAPI
 	CoverageTierHistoricalEnriched   = "historical_enriched"
 	CoverageTierOnDemandAvailable    = "on_demand_available"
 	CoverageTierBudgetLimited        = "budget_limited"
@@ -291,7 +292,7 @@ func assembleExtensionCoverageResponse(in extensionCoverageInputs) ExtensionCove
 		Login:            in.login,
 		ChannelID:        channelID,
 		DisplayName:      displayName,
-		CoverageTier:     tier,
+		CoverageTier:     coverageTierForAPI(tier),
 		HostedCap:        in.hostedCap,
 		LiveMetadata:     liveMetadata,
 		DataAvailability: availability,
@@ -317,7 +318,7 @@ func mapExtensionCoverageTier(in extensionCoverageInputs) (string, []string) {
 		if capFull {
 			reasons = append(reasons, reasonHostedCapFull)
 		}
-		return CoverageTierTop500MetadataOnly, reasons
+		return CoverageTierRosterMetadataOnly, reasons
 	}
 
 	if in.historicalChat || in.historicalGold {
@@ -351,7 +352,7 @@ func mapExtensionCoverageTier(in extensionCoverageInputs) (string, []string) {
 func buildExtensionCoverageActions(in extensionCoverageInputs, tier string) ExtensionCoverageActions {
 	capAvailable := in.hostedCap.ActiveAvailable || in.hostedCap.ActiveLimit <= 0
 	canStart := !in.tracking && capAvailable
-	canLoad := !in.tracking && capAvailable && (tier == CoverageTierTop500MetadataOnly ||
+	canLoad := !in.tracking && capAvailable && (isRosterMetadataCoverageTier(tier) ||
 		tier == CoverageTierOnDemandAvailable ||
 		tier == CoverageTierHistoricalEnriched)
 
@@ -619,6 +620,18 @@ func rollupAvailabilityFlags(rollups []MinuteRollup) (hasChat bool, hasViewer bo
 
 func intPtr(v int) *int {
 	return &v
+}
+
+func isRosterMetadataCoverageTier(tier string) bool {
+	return tier == CoverageTierRosterMetadataOnly || tier == CoverageTierTop500MetadataOnly
+}
+
+// coverageTierForAPI emits legacy top500_metadata_only while internal logic uses roster_metadata_only.
+func coverageTierForAPI(tier string) string {
+	if tier == CoverageTierRosterMetadataOnly {
+		return CoverageTierTop500MetadataOnly
+	}
+	return tier
 }
 
 func InvalidateExtensionCoverageCache(ctx context.Context, rdb *redis.Client, login string) {

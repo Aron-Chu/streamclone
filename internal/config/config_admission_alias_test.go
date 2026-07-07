@@ -6,6 +6,7 @@ import (
 )
 
 func TestLoadPulseTopRosterAdmissionAlias(t *testing.T) {
+	clearTop500Env(t)
 	t.Setenv("PULSE_TOP500_ADMISSION_ENABLED", "")
 	t.Setenv("PULSE_TOP500_ADMISSION_TOP_N", "")
 	t.Setenv("PULSE_TOP_ROSTER_ADMISSION_ENABLED", "true")
@@ -15,15 +16,16 @@ func TestLoadPulseTopRosterAdmissionAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.PulseTop500AdmissionEnabled {
+	if !cfg.PulseLiveAdmissionEnabled {
 		t.Fatal("expected admission enabled via roster alias")
 	}
-	if cfg.PulseTop500AdmissionTopN != 200 {
-		t.Fatalf("topN = %d", cfg.PulseTop500AdmissionTopN)
+	if cfg.PulseLiveAdmissionTopN != 200 {
+		t.Fatalf("topN = %d", cfg.PulseLiveAdmissionTopN)
 	}
 }
 
 func TestLoadPrefersCanonicalPulseTop500Env(t *testing.T) {
+	clearTop500Env(t)
 	t.Setenv("PULSE_TOP500_ADMISSION_ENABLED", "false")
 	t.Setenv("PULSE_TOP500_ADMISSION_TOP_N", "150")
 	t.Setenv("PULSE_TOP_ROSTER_ADMISSION_ENABLED", "true")
@@ -33,15 +35,16 @@ func TestLoadPrefersCanonicalPulseTop500Env(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.PulseTop500AdmissionEnabled {
+	if cfg.PulseLiveAdmissionEnabled {
 		t.Fatal("canonical env should win")
 	}
-	if cfg.PulseTop500AdmissionTopN != 150 {
-		t.Fatalf("topN = %d", cfg.PulseTop500AdmissionTopN)
+	if cfg.PulseLiveAdmissionTopN != 150 {
+		t.Fatalf("topN = %d", cfg.PulseLiveAdmissionTopN)
 	}
 }
 
-func TestLoadPrefersExplicitPulseTop500AdmissionTopNOverLiveAlias(t *testing.T) {
+func TestLoadPrefersExplicitPulseLiveAdmissionTopNOverLiveAlias(t *testing.T) {
+	clearTop500Env(t)
 	t.Setenv("PULSE_TOP500_ADMISSION_TOP_N", "500")
 	t.Setenv("LIVE_ADMISSION_TOP_N", "1000")
 	t.Setenv("CORPUS_TARGET_TOP_N", "1000")
@@ -50,8 +53,8 @@ func TestLoadPrefersExplicitPulseTop500AdmissionTopNOverLiveAlias(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.PulseTop500AdmissionTopN != 500 {
-		t.Fatalf("PulseTop500AdmissionTopN = %d, want explicit 500", cfg.PulseTop500AdmissionTopN)
+	if cfg.PulseLiveAdmissionTopN != 500 {
+		t.Fatalf("PulseLiveAdmissionTopN = %d, want explicit 500", cfg.PulseLiveAdmissionTopN)
 	}
 }
 
@@ -64,8 +67,8 @@ func TestLoadLiveAdmissionTopN5000NotResetTo100(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.PulseTop500AdmissionTopN != 5000 {
-		t.Fatalf("PulseTop500AdmissionTopN = %d, want 5000 (not corpus reset to 100)", cfg.PulseTop500AdmissionTopN)
+	if cfg.PulseLiveAdmissionTopN != 5000 {
+		t.Fatalf("PulseLiveAdmissionTopN = %d, want 5000 (not corpus reset to 100)", cfg.PulseLiveAdmissionTopN)
 	}
 	if cfg.PulseMaxActiveChannels != 5000 {
 		t.Fatalf("PulseMaxActiveChannels = %d, want 5000", cfg.PulseMaxActiveChannels)
@@ -79,8 +82,8 @@ func TestLoadLiveAdmissionTopNDefaultsWhenUnset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.PulseTop500AdmissionTopN != DefaultLiveAdmissionTopN {
-		t.Fatalf("PulseTop500AdmissionTopN = %d, want default %d", cfg.PulseTop500AdmissionTopN, DefaultLiveAdmissionTopN)
+	if cfg.PulseLiveAdmissionTopN != DefaultLiveAdmissionTopN {
+		t.Fatalf("PulseLiveAdmissionTopN = %d, want default %d", cfg.PulseLiveAdmissionTopN, DefaultLiveAdmissionTopN)
 	}
 }
 
@@ -93,8 +96,8 @@ func TestLoadLiveAdmissionTopNClampedToIRCMax(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.PulseTop500AdmissionTopN != 750 {
-		t.Fatalf("PulseTop500AdmissionTopN = %d, want clamped to IRC max 750", cfg.PulseTop500AdmissionTopN)
+	if cfg.PulseLiveAdmissionTopN != 750 {
+		t.Fatalf("PulseLiveAdmissionTopN = %d, want clamped to IRC max 750", cfg.PulseLiveAdmissionTopN)
 	}
 }
 

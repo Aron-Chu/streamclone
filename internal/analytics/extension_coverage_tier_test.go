@@ -50,8 +50,8 @@ func TestMapExtensionCoverageTierFreshTop500Current(t *testing.T) {
 		top500Current: top500CoverageFixture(now, true),
 		hostedCap:     ExtensionHostedCapStatus{ActiveLimit: 10, ActiveAvailable: true},
 	})
-	if tier != CoverageTierTop500MetadataOnly {
-		t.Fatalf("tier = %q, want %q", tier, CoverageTierTop500MetadataOnly)
+	if tier != CoverageTierRosterMetadataOnly {
+		t.Fatalf("tier = %q, want %q", tier, CoverageTierRosterMetadataOnly)
 	}
 	if !containsReason(reasons, reasonTop500MetadataAvailable) || !containsReason(reasons, reasonMetadataWithoutChat) {
 		t.Fatalf("reasons = %#v", reasons)
@@ -69,6 +69,9 @@ func TestMapExtensionCoverageTierFreshTop500Current(t *testing.T) {
 	}
 	if resp.LiveMetadata.FreshnessSeconds == nil || *resp.LiveMetadata.FreshnessSeconds < 0 || *resp.LiveMetadata.FreshnessSeconds > 5 {
 		t.Fatalf("freshnessSeconds = %v", resp.LiveMetadata.FreshnessSeconds)
+	}
+	if resp.CoverageTier != CoverageTierTop500MetadataOnly {
+		t.Fatalf("api coverageTier = %q, want legacy alias %q", resp.CoverageTier, CoverageTierTop500MetadataOnly)
 	}
 }
 
@@ -133,8 +136,8 @@ func TestMapExtensionCoverageTierCapFullDoesNotHideFreshTop500Current(t *testing
 			ActiveAvailable: false,
 		},
 	})
-	if tier != CoverageTierTop500MetadataOnly {
-		t.Fatalf("tier = %q, want %q", tier, CoverageTierTop500MetadataOnly)
+	if tier != CoverageTierRosterMetadataOnly {
+		t.Fatalf("tier = %q, want %q", tier, CoverageTierRosterMetadataOnly)
 	}
 	if !containsReason(reasons, reasonHostedCapFull) || !containsReason(reasons, reasonTop500MetadataAvailable) {
 		t.Fatalf("reasons = %#v", reasons)
@@ -194,8 +197,8 @@ func TestMapExtensionCoverageTierMetadataOnly(t *testing.T) {
 		isLive:    true,
 		hostedCap: ExtensionHostedCapStatus{ActiveLimit: 10, ActiveAvailable: true},
 	})
-	if tier != CoverageTierTop500MetadataOnly {
-		t.Fatalf("tier = %q, want %q", tier, CoverageTierTop500MetadataOnly)
+	if tier != CoverageTierRosterMetadataOnly {
+		t.Fatalf("tier = %q, want %q", tier, CoverageTierRosterMetadataOnly)
 	}
 	if reasons[0] != reasonMetadataWithoutChat {
 		t.Fatalf("reasons = %#v", reasons)

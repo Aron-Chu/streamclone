@@ -81,10 +81,10 @@ func TestTop500PriorityWatchPollerEvictsStaleRosterAfterGrace(t *testing.T) {
 		admissionMissCycles: 2,
 		refCounts:           map[string]int{},
 	}
-	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
-		PulseTop500AdmissionEnabled:         true,
-		PulseTop500AdmissionTopN:            10,
-		PulseTop500AdmissionMissGraceCycles: 3,
+	p := NewLiveAdmissionPoller(source, collector, config.Config{
+		PulseLiveAdmissionEnabled:         true,
+		PulseLiveAdmissionTopN:            10,
+		PulseLiveAdmissionMissGraceCycles: 3,
 	}, nil)
 	p.runOnce(context.Background())
 	if collector.IsTracking("stale") {

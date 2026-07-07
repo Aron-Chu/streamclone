@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	PulseTop500AdmissionSourceHelixTopLive = "helix_top_live"
-	PulseTop500AdmissionSourceRoster       = "roster"
+	PulseLiveAdmissionSourceHelixTopLive = "helix_top_live"
+	PulseLiveAdmissionSourceRoster       = "roster"
 )
 
 // LiveAdmissionSource returns live IRC admission candidates ordered by priority
@@ -111,8 +111,8 @@ func NewLiveAdmissionSource(cfg config.Config, store rosterTopLiveAdmissionStore
 	if log == nil {
 		log = slog.Default()
 	}
-	source := normalizePulseTop500AdmissionSource(cfg.PulseTop500AdmissionSource)
-	if source == PulseTop500AdmissionSourceRoster {
+	source := normalizeLiveAdmissionSource(cfg.PulseLiveAdmissionSource)
+	if source == PulseLiveAdmissionSourceRoster {
 		if store == nil {
 			return nil
 		}
@@ -130,11 +130,27 @@ func NewLiveAdmissionSource(cfg config.Config, store rosterTopLiveAdmissionStore
 	return &RosterTopLiveAdmissionSource{store: store}
 }
 
-func normalizePulseTop500AdmissionSource(raw string) string {
+func normalizeLiveAdmissionSource(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case PulseTop500AdmissionSourceRoster:
-		return PulseTop500AdmissionSourceRoster
+	case PulseLiveAdmissionSourceRoster:
+		return PulseLiveAdmissionSourceRoster
 	default:
-		return PulseTop500AdmissionSourceHelixTopLive
+		return PulseLiveAdmissionSourceHelixTopLive
 	}
+}
+
+// Deprecated: use PulseLiveAdmissionSourceHelixTopLive.
+const PulseTop500AdmissionSourceHelixTopLive = PulseLiveAdmissionSourceHelixTopLive
+
+// Deprecated: use PulseLiveAdmissionSourceRoster.
+const PulseTop500AdmissionSourceRoster = PulseLiveAdmissionSourceRoster
+
+// Deprecated: use normalizeLiveAdmissionSource.
+func normalizePulseTop500AdmissionSource(raw string) string {
+	return normalizeLiveAdmissionSource(raw)
+}
+
+// Deprecated alias retained for one release.
+func normalizePulseLiveAdmissionSource(raw string) string {
+	return normalizeLiveAdmissionSource(raw)
 }

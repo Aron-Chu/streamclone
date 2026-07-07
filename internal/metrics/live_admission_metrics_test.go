@@ -29,7 +29,7 @@ func TestTopRosterAdmissionMetricsRegisterAndUseAllowedLabels(t *testing.T) {
 
 func assertTopRosterAdmissionLabelsAllowed(t *testing.T) {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("top500_admission.go"))
+	raw, err := os.ReadFile(filepath.Join("live_admission_metrics.go"))
 	if err != nil {
 		t.Fatalf("read metrics file: %v", err)
 	}

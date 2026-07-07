@@ -21,7 +21,7 @@ func (f *fakeTop500PriorityStore) ListLiveCandidates(_ context.Context, _ int) (
 }
 
 func TestTop500PriorityWatchPollerDisabled(t *testing.T) {
-	p := NewTop500PriorityWatchPoller(nil, nil, config.Config{}, nil)
+	p := NewLiveAdmissionPoller(nil, nil, config.Config{}, nil)
 	if p.Enabled() {
 		t.Fatal("expected disabled by default")
 	}
@@ -36,9 +36,9 @@ func TestTop500PriorityWatchPollerAdmitsByViewerOrder(t *testing.T) {
 	}}
 	joiner := &fakeJoiner{}
 	collector := NewCollector(&fakeStore{}, fakeProvider{}, joiner, nil, nilLogger(), 2, time.Hour, time.Hour, 200)
-	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
-		PulseTop500AdmissionEnabled: true,
-		PulseTop500AdmissionTopN:    100,
+	p := NewLiveAdmissionPoller(source, collector, config.Config{
+		PulseLiveAdmissionEnabled: true,
+		PulseLiveAdmissionTopN:    100,
 	}, nil)
 	p.runOnce(context.Background())
 	if len(joiner.joined) != 2 || joiner.joined[0] != "big" || joiner.joined[1] != "small" {
@@ -57,9 +57,9 @@ func TestTop500PriorityWatchPollerStopsAtCapacity(t *testing.T) {
 	}}
 	joiner := &fakeJoiner{}
 	collector := NewCollector(&fakeStore{}, fakeProvider{}, joiner, nil, nilLogger(), 1, time.Hour, time.Hour, 200)
-	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
-		PulseTop500AdmissionEnabled: true,
-		PulseTop500AdmissionTopN:    100,
+	p := NewLiveAdmissionPoller(source, collector, config.Config{
+		PulseLiveAdmissionEnabled: true,
+		PulseLiveAdmissionTopN:    100,
 	}, nil)
 	p.runOnce(context.Background())
 	if len(joiner.joined) != 1 {

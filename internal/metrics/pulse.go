@@ -36,4 +36,8 @@ var (
 		Help:    "Coverage start offset in seconds recorded on first rollup for a stream.",
 		Buckets: []float64{0, 30, 60, 120, 300, 600, 1800, 3600, 7200},
 	})
+	PulseLateCapStartTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pulse_late_cap_start_total",
+		Help: "Cap-tier streams whose first rollup coverage start offset exceeds 120 seconds from stream start.",
+	}, []string{"source"})
 )

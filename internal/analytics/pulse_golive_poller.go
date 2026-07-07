@@ -24,7 +24,7 @@ func NewProtectedGoLivePoller(store *Store, helix *HelixClient, collector *Colle
 	runtime = runtime.withDefaults()
 	interval := runtime.ProtectedGoLiveInterval
 	if interval <= 0 {
-		interval = 60 * time.Second
+		interval = 30 * time.Second
 	}
 	batchSize := runtime.GoLiveBatchSize
 	if batchSize <= 0 {
@@ -167,7 +167,7 @@ func (p *ProtectedGoLivePoller) runOnce(ctx context.Context) {
 				p.log.Info("protected go-live detected", "login", login, "stream_id", currentStreamID, "priority", priority)
 				p.collector.WatchWithPriority(ctx, login, "", priority)
 			}
-			p.collector.NoteGoLiveDetected(currentStreamID, login, row.Source, priority, duplicate)
+			p.collector.NoteGoLiveDetected(currentStreamID, login, row.Source, priority, duplicate, streamStartedAtForGoLive(live, stream))
 		}
 
 		updateStreamID := lastStreamID
@@ -176,4 +176,11 @@ func (p *ProtectedGoLivePoller) runOnce(ctx context.Context) {
 		}
 		_ = p.store.UpdatePulseRosterPoll(ctx, login, broadcasterID, updateStreamID, "", seenAt, nextPoll)
 	}
+}
+
+func streamStartedAtForGoLive(live bool, stream LiveStream) time.Time {
+	if !live {
+		return time.Time{}
+	}
+	return stream.StartedAt
 }

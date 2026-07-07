@@ -237,9 +237,9 @@ func testContainsString(items []string, want string) bool {
 
 func TestCorpusRuntimeConfigFromAppPreservesLiveAdmissionTopN5000(t *testing.T) {
 	cfg := config.Config{
-		Top500MetadataTopN:       1000,
-		PulseTop500AdmissionTopN: 5000,
-		PulseMaxActiveChannels:   5000,
+		Top500MetadataTopN:     1000,
+		PulseLiveAdmissionTopN: 5000,
+		PulseMaxActiveChannels: 5000,
 	}
 	runtime := CorpusRuntimeConfigFromApp(cfg)
 	if runtime.TargetTopN != 1000 {

@@ -235,6 +235,7 @@ func TestSanitizeExtensionPulseForCollectorTruth(t *testing.T) {
 func TestSanitizeExtensionPulseForNonTop500(t *testing.T) {
 	t.Parallel()
 	payload := ExtensionPulseResponse{
+		RosterEligible: false,
 		Top500Eligible: false,
 		Tracking:       true,
 		IsLive:         true,
@@ -264,5 +265,32 @@ func TestSanitizeExtensionPulseSkipsWhenTracking(t *testing.T) {
 	sanitizeExtensionPulseForCollectorTruth(&payload)
 	if len(payload.Rollups) != 1 {
 		t.Fatal("tracked payload must not be sanitized")
+	}
+}
+
+func TestExtensionPulseRosterEligibleDualEmit(t *testing.T) {
+	t.Parallel()
+	for _, eligible := range []bool{true, false} {
+		payload := emptyExtensionPulse("testchan", false, eligible)
+		if payload.RosterEligible != eligible {
+			t.Fatalf("RosterEligible = %v, want %v", payload.RosterEligible, eligible)
+		}
+		if payload.Top500Eligible != eligible {
+			t.Fatalf("Top500Eligible = %v, want %v (dual-emit)", payload.Top500Eligible, eligible)
+		}
+		body, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if decoded["rosterEligible"] != eligible {
+			t.Fatalf("json rosterEligible = %#v", decoded["rosterEligible"])
+		}
+		if decoded["top500Eligible"] != eligible {
+			t.Fatalf("json top500Eligible = %#v", decoded["top500Eligible"])
+		}
 	}
 }

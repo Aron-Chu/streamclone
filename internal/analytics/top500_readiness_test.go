@@ -60,9 +60,9 @@ func TestTop500PriorityWatchPollerRecordsCapacityBlockedOutcome(t *testing.T) {
 	}}
 	joiner := &fakeJoiner{}
 	collector := NewCollector(&fakeStore{}, fakeProvider{}, joiner, nil, nilLogger(), 1, time.Hour, time.Hour, 200)
-	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
-		PulseTop500AdmissionEnabled: true,
-		PulseTop500AdmissionTopN:    100,
+	p := NewLiveAdmissionPoller(source, collector, config.Config{
+		PulseLiveAdmissionEnabled: true,
+		PulseLiveAdmissionTopN:    100,
 	}, nil)
 	p.runOnce(context.Background())
 	if len(joiner.joined) != 1 {
@@ -89,9 +89,9 @@ func TestTop500PriorityWatchPollerRecordsAlreadyTracking(t *testing.T) {
 	joiner := &fakeJoiner{}
 	collector := NewCollector(&fakeStore{}, fakeProvider{}, joiner, nil, nilLogger(), 2, time.Hour, time.Hour, 200)
 	collector.Watch(context.Background(), "live")
-	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
-		PulseTop500AdmissionEnabled: true,
-		PulseTop500AdmissionTopN:    100,
+	p := NewLiveAdmissionPoller(source, collector, config.Config{
+		PulseLiveAdmissionEnabled: true,
+		PulseLiveAdmissionTopN:    100,
 	}, nil)
 	p.runOnce(context.Background())
 	attempt, ok := getTopRosterAdmissionAttempt("live")

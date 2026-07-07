@@ -92,3 +92,36 @@ func (r *topRosterAdmissionRegistry) snapshot() []TopRosterAdmissionAttempt {
 	})
 	return out
 }
+
+type admissionCycleState struct {
+	trackedLogins map[string]struct{}
+	active        int
+	max           int
+}
+
+func newAdmissionCycleState(snap TrackingSnapshot) admissionCycleState {
+	tracked := make(map[string]struct{}, len(snap.TrackedChannels))
+	for _, login := range snap.TrackedChannels {
+		if login = normalizeLogin(login); login != "" {
+			tracked[login] = struct{}{}
+		}
+	}
+	return admissionCycleState{
+		trackedLogins: tracked,
+		active:        snap.Active,
+		max:           snap.Max,
+	}
+}
+
+func (s *admissionCycleState) noteAdmission(login string, active, max int) {
+	login = normalizeLogin(login)
+	if login == "" {
+		return
+	}
+	if s.trackedLogins == nil {
+		s.trackedLogins = map[string]struct{}{}
+	}
+	s.trackedLogins[login] = struct{}{}
+	s.active = active
+	s.max = max
+}

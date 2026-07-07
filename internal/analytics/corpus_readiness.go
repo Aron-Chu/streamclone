@@ -198,8 +198,8 @@ func CorpusRuntimeConfigFromApp(cfg config.Config) CorpusRuntimeConfig {
 	if cfg.PulseMaxActiveChannels > 0 {
 		admissionMaxIRC = cfg.PulseMaxActiveChannels
 	}
-	if cfg.PulseTop500AdmissionTopN > 0 {
-		admissionTopN = config.ClampLiveAdmissionTopN(cfg.PulseTop500AdmissionTopN, admissionMaxIRC)
+	if cfg.PulseLiveAdmissionTopN > 0 {
+		admissionTopN = config.ClampLiveAdmissionTopN(cfg.PulseLiveAdmissionTopN, admissionMaxIRC)
 	} else {
 		admissionTopN = targetTopN
 	}
@@ -208,7 +208,7 @@ func CorpusRuntimeConfigFromApp(cfg config.Config) CorpusRuntimeConfig {
 		MetadataEnabled:        cfg.Top500MetadataEnabled,
 		MetadataWriteEnabled:   cfg.Top500MetadataWriteEnabled,
 		MetadataDryRun:         cfg.Top500MetadataDryRun,
-		LiveAdmissionEnabled:   cfg.PulseTop500AdmissionEnabled,
+		LiveAdmissionEnabled:   cfg.PulseLiveAdmissionEnabled,
 		LiveAdmissionTopN:      admissionTopN,
 		MaxActiveIRCChannels:   maxActiveIRC,
 		CorpusWorkersEnabled:   cfg.CorpusWorkersEnabled,

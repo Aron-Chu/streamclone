@@ -253,13 +253,13 @@ type Config struct {
 	GoldLeaseTTLSeconds                 int           `env:"GOLD_LEASE_TTL_SECONDS" envDefault:"120"`
 	GoldVODSegmentsEnabled              bool          `env:"GOLD_VOD_SEGMENTS_ENABLED" envDefault:"false"`
 
-	PulseTop500AdmissionEnabled         bool          `env:"PULSE_TOP500_ADMISSION_ENABLED" envDefault:"false"`
-	PulseTop500AdmissionTopN            int           `env:"PULSE_TOP500_ADMISSION_TOP_N" envDefault:"100"`
-	PulseTop500AdmissionInterval        time.Duration `env:"PULSE_TOP500_ADMISSION_INTERVAL" envDefault:"60s"`
-	PulseTop500AdmissionSource          string        `env:"PULSE_TOP500_ADMISSION_SOURCE" envDefault:"helix_top_live"`
-	PulseTop500AdmissionMissGraceCycles int           `env:"PULSE_TOP500_ADMISSION_MISS_GRACE_CYCLES" envDefault:"3"`
-	LiveAdmissionTopN                   int           `env:"LIVE_ADMISSION_TOP_N" envDefault:"0"`
-	MaxActiveIRCChannels                int           `env:"MAX_ACTIVE_IRC_CHANNELS" envDefault:"0"`
+	PulseLiveAdmissionEnabled         bool          `env:"PULSE_LIVE_ADMISSION_ENABLED" envDefault:"false"`
+	PulseLiveAdmissionTopN            int           `env:"PULSE_LIVE_ADMISSION_TOP_N" envDefault:"100"`
+	PulseLiveAdmissionInterval        time.Duration `env:"PULSE_LIVE_ADMISSION_INTERVAL" envDefault:"30s"`
+	PulseLiveAdmissionSource          string        `env:"PULSE_LIVE_ADMISSION_SOURCE" envDefault:"helix_top_live"`
+	PulseLiveAdmissionMissGraceCycles int           `env:"PULSE_LIVE_ADMISSION_MISS_GRACE_CYCLES" envDefault:"3"`
+	LiveAdmissionTopN                 int           `env:"LIVE_ADMISSION_TOP_N" envDefault:"0"`
+	MaxActiveIRCChannels              int           `env:"MAX_ACTIVE_IRC_CHANNELS" envDefault:"0"`
 
 	PulseHostedMode                bool          `env:"PULSE_HOSTED_MODE" envDefault:"false"`
 	PulseBetaKeys                  string        `env:"PULSE_BETA_KEYS"`
@@ -395,13 +395,18 @@ func applyEnvAlias(canonical, legacy string) {
 }
 
 func Load() (Config, error) {
-	// Operator docs still reference PULSE_TOP_ROSTER_*; Go reads PULSE_TOP500_*.
-	applyEnvAlias("PULSE_TOP500_ADMISSION_ENABLED", "PULSE_TOP_ROSTER_ADMISSION_ENABLED")
-	applyEnvAlias("PULSE_TOP500_ADMISSION_TOP_N", "PULSE_TOP_ROSTER_ADMISSION_TOP_N")
-	applyEnvAlias("PULSE_TOP500_ADMISSION_INTERVAL", "PULSE_TOP_ROSTER_ADMISSION_INTERVAL")
-	applyEnvAlias("PULSE_TOP500_ADMISSION_MISS_GRACE_CYCLES", "PULSE_TOP_ROSTER_ADMISSION_MISS_GRACE_CYCLES")
-	if strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_ENABLED")) == "" {
-		applyEnvAlias("PULSE_TOP500_ADMISSION_ENABLED", "PULSE_TOP_ROSTER_POLL_ENABLED")
+	// Legacy env names map into canonical PULSE_LIVE_ADMISSION_* (see roster-naming-truth-table.md).
+	applyEnvAlias("PULSE_LIVE_ADMISSION_ENABLED", "PULSE_TOP500_ADMISSION_ENABLED")
+	applyEnvAlias("PULSE_LIVE_ADMISSION_ENABLED", "PULSE_TOP_ROSTER_ADMISSION_ENABLED")
+	applyEnvAlias("PULSE_LIVE_ADMISSION_TOP_N", "PULSE_TOP500_ADMISSION_TOP_N")
+	applyEnvAlias("PULSE_LIVE_ADMISSION_TOP_N", "PULSE_TOP_ROSTER_ADMISSION_TOP_N")
+	applyEnvAlias("PULSE_LIVE_ADMISSION_INTERVAL", "PULSE_TOP500_ADMISSION_INTERVAL")
+	applyEnvAlias("PULSE_LIVE_ADMISSION_INTERVAL", "PULSE_TOP_ROSTER_ADMISSION_INTERVAL")
+	applyEnvAlias("PULSE_LIVE_ADMISSION_SOURCE", "PULSE_TOP500_ADMISSION_SOURCE")
+	applyEnvAlias("PULSE_LIVE_ADMISSION_MISS_GRACE_CYCLES", "PULSE_TOP500_ADMISSION_MISS_GRACE_CYCLES")
+	applyEnvAlias("PULSE_LIVE_ADMISSION_MISS_GRACE_CYCLES", "PULSE_TOP_ROSTER_ADMISSION_MISS_GRACE_CYCLES")
+	if strings.TrimSpace(os.Getenv("PULSE_LIVE_ADMISSION_ENABLED")) == "" {
+		applyEnvAlias("PULSE_LIVE_ADMISSION_ENABLED", "PULSE_TOP_ROSTER_POLL_ENABLED")
 	}
 
 	var c Config
@@ -434,8 +439,8 @@ func Load() (Config, error) {
 		if strings.TrimSpace(os.Getenv("TOP500_METADATA_TOP_N")) == "" {
 			c.Top500MetadataTopN = c.CorpusTargetTopN
 		}
-		if strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_TOP_N")) == "" && c.LiveAdmissionTopN <= 0 {
-			c.PulseTop500AdmissionTopN = c.CorpusTargetTopN
+		if strings.TrimSpace(os.Getenv("PULSE_LIVE_ADMISSION_TOP_N")) == "" && strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_TOP_N")) == "" && c.LiveAdmissionTopN <= 0 {
+			c.PulseLiveAdmissionTopN = c.CorpusTargetTopN
 		}
 		if strings.TrimSpace(os.Getenv("TOP500_GOLD_VOD_TOP_N")) == "" {
 			c.Top500GoldVODInventoryTopN = c.CorpusTargetTopN
@@ -444,8 +449,8 @@ func Load() (Config, error) {
 			c.SilverEnqueueTopN = c.CorpusTargetTopN
 		}
 	}
-	if c.LiveAdmissionTopN > 0 && strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_TOP_N")) == "" {
-		c.PulseTop500AdmissionTopN = c.LiveAdmissionTopN
+	if c.LiveAdmissionTopN > 0 && strings.TrimSpace(os.Getenv("PULSE_LIVE_ADMISSION_TOP_N")) == "" && strings.TrimSpace(os.Getenv("PULSE_TOP500_ADMISSION_TOP_N")) == "" {
+		c.PulseLiveAdmissionTopN = c.LiveAdmissionTopN
 	}
 	if c.MaxActiveIRCChannels > 0 && strings.TrimSpace(os.Getenv("PULSE_MAX_ACTIVE_CHANNELS")) == "" {
 		c.PulseMaxActiveChannels = c.MaxActiveIRCChannels
@@ -460,9 +465,9 @@ func Load() (Config, error) {
 	if c.PulseMaxActiveChannels > 0 {
 		maxIRC = c.PulseMaxActiveChannels
 	}
-	c.PulseTop500AdmissionTopN = ClampLiveAdmissionTopN(c.PulseTop500AdmissionTopN, maxIRC)
-	if c.PulseTop500AdmissionInterval <= 0 {
-		c.PulseTop500AdmissionInterval = 60 * time.Second
+	c.PulseLiveAdmissionTopN = ClampLiveAdmissionTopN(c.PulseLiveAdmissionTopN, maxIRC)
+	if c.PulseLiveAdmissionInterval <= 0 {
+		c.PulseLiveAdmissionInterval = 30 * time.Second
 	}
 	if strings.TrimSpace(os.Getenv("ANALYTICS_OPEN_MINUTE_FLUSH_INTERVAL")) == "" && c.PulseHostedMode {
 		c.AnalyticsOpenMinuteFlushInterval = 30 * time.Second
@@ -473,11 +478,11 @@ func Load() (Config, error) {
 	if strings.TrimSpace(os.Getenv("EMOTE_RENDER_ON_CHAT_OBSERVED")) == "" && c.PulseHostedMode {
 		c.EmoteRenderOnChatObserved = false
 	}
-	switch strings.ToLower(strings.TrimSpace(c.PulseTop500AdmissionSource)) {
+	switch strings.ToLower(strings.TrimSpace(c.PulseLiveAdmissionSource)) {
 	case "roster":
-		c.PulseTop500AdmissionSource = "roster"
+		c.PulseLiveAdmissionSource = "roster"
 	default:
-		c.PulseTop500AdmissionSource = "helix_top_live"
+		c.PulseLiveAdmissionSource = "helix_top_live"
 	}
 	if c.Top500SilverGateMaxCandidates <= 0 || c.Top500SilverGateMaxCandidates > 100 {
 		c.Top500SilverGateMaxCandidates = 5

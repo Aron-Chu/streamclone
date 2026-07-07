@@ -168,7 +168,8 @@ type ExtensionPulseResponse struct {
 	HelixEnabled               bool                    `json:"helixEnabled,omitempty"`
 	Games                      []ExtensionGameSegment  `json:"games,omitempty"`
 	StoredArtifacts            *StoredArtifactsSummary `json:"storedArtifacts,omitempty"`
-	Top500Eligible             bool                    `json:"top500Eligible"`
+	Top500Eligible             bool                    `json:"top500Eligible"` // Deprecated: dual-emit with RosterEligible until 2026-Q4
+	RosterEligible             bool                    `json:"rosterEligible"`
 }
 
 func (h *Handler) WithRedis(rdb *redis.Client) *Handler {
@@ -290,7 +291,7 @@ func (h *Handler) extensionPulseChannel(w http.ResponseWriter, r *http.Request) 
 	payload, err := h.buildExtensionPulse(ctx, login, window == "full")
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			payload := emptyExtensionPulse(login, false, h.extensionTop500Eligible(ctx, login))
+			payload := emptyExtensionPulse(login, false, h.extensionRosterEligible(ctx, login))
 			sanitizeExtensionPulseForNonTop500(&payload)
 			writeJSON(w, http.StatusOK, payload)
 			return
@@ -462,7 +463,7 @@ func (h *Handler) isLoginTracked(login string) bool {
 	return h.collector.IsTracking(login)
 }
 
-func (h *Handler) extensionTop500Eligible(ctx context.Context, login string) bool {
+func (h *Handler) extensionRosterEligible(ctx context.Context, login string) bool {
 	if h.store == nil {
 		return !h.pulseHosted.Hosted
 	}
@@ -476,11 +477,17 @@ func (h *Handler) extensionTop500Eligible(ctx context.Context, login string) boo
 	return ok
 }
 
-func emptyExtensionPulse(login string, tracking bool, top500Eligible bool) ExtensionPulseResponse {
+// Deprecated: use extensionRosterEligible.
+func (h *Handler) extensionTop500Eligible(ctx context.Context, login string) bool {
+	return h.extensionRosterEligible(ctx, login)
+}
+
+func emptyExtensionPulse(login string, tracking bool, rosterEligible bool) ExtensionPulseResponse {
 	return ExtensionPulseResponse{
 		Login:                      login,
 		Tracking:                   tracking,
-		Top500Eligible:             top500Eligible,
+		RosterEligible:             rosterEligible,
+		Top500Eligible:             rosterEligible,
 		VodID:                      nil,
 		CoverageStartOffsetSeconds: 0,
 		Coverage: ExtensionCoverage{
@@ -660,6 +667,12 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 	}
 	fullWindowRollups, fullWindowPoints := trimExtensionFullWindow(heatmapRollups, alignedPoints, fullMax, isLive)
 	fullRollups, _ := buildExtensionRollupsAndLanes(fullWindowRollups, fullWindowPoints, streamStart)
+	// Default polls tail-trim to extPulseMaxFullRollups; omit partial fullRollups so clients
+	// fetch ?window=full instead of charting a misleading 480-minute tail slice.
+	fullRollupsOut := fullRollups
+	if !fullWindow && len(heatmapRollups) > len(fullWindowRollups) {
+		fullRollupsOut = nil
+	}
 	// Peaks ("Most Reacted So Far"): score across the full tracked stream history.
 	peaks := buildExtensionPeaks(heatmapRollups, alignedPoints, isLive, state, streamStart)
 	coverageStart := coverageStartOffsetSeconds(heatmapRollups, streamStart)
@@ -732,13 +745,14 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 		endedAtPtr = &t
 	}
 
-	top500Eligible := h.extensionTop500Eligible(ctx, login)
+	rosterEligible := h.extensionRosterEligible(ctx, login)
 
 	payload := ExtensionPulseResponse{
 		Login:                      login,
 		IsLive:                     isLive,
 		Tracking:                   tracking,
-		Top500Eligible:             top500Eligible,
+		RosterEligible:             rosterEligible,
+		Top500Eligible:             rosterEligible,
 		StreamID:                   stream.StreamID,
 		VodID:                      vodPtr,
 		StartedAt:                  startedAtPtr,
@@ -754,7 +768,7 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 		Coverage:                   coverage,
 		TopEmotes:                  streamTopEmotes,
 		Rollups:                    extRollups,
-		FullRollups:                fullRollups,
+		FullRollups:                fullRollupsOut,
 		Lanes:                      lanes,
 		Peaks:                      peaks,
 		Recap:                      recap,
@@ -772,7 +786,7 @@ func (h *Handler) buildExtensionPulse(ctx context.Context, login string, fullWin
 // sanitizeExtensionPulseForNonTop500 strips Pulse product surfaces for channels outside
 // the hosted top-500 roster so the extension can show a single unsupported state.
 func sanitizeExtensionPulseForNonTop500(payload *ExtensionPulseResponse) {
-	if payload == nil || payload.Top500Eligible {
+	if payload == nil || payload.RosterEligible || payload.Top500Eligible {
 		return
 	}
 	payload.Tracking = false

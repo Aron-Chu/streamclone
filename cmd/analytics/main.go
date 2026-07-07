@@ -590,12 +590,12 @@ func main() {
 	handler.WithRateLimiter(analytics.NewPulseRateLimiter(rdb, pulseHosted.WatchRatePerMin, pulseHosted.BackfillRatePerHour))
 	analytics.StartProtectedGoLivePoller(ctx, analytics.NewProtectedGoLivePoller(store, helix, collector, pulseRuntime, logger), logger)
 	admissionSource := analytics.NewLiveAdmissionSource(cfg, store, helix, logger)
-	analytics.StartTop500PriorityWatchPoller(ctx, analytics.NewTop500PriorityWatchPoller(admissionSource, collector, cfg, logger), logger)
-	if cfg.PulseTop500AdmissionEnabled {
+	analytics.StartLiveAdmissionPoller(ctx, analytics.NewLiveAdmissionPoller(admissionSource, collector, cfg, logger), logger)
+	if cfg.PulseLiveAdmissionEnabled {
 		logger.Info("top500 priority watch poller enabled",
-			"top_n", cfg.PulseTop500AdmissionTopN,
-			"interval", cfg.PulseTop500AdmissionInterval.String(),
-			"source", cfg.PulseTop500AdmissionSource,
+			"top_n", cfg.PulseLiveAdmissionTopN,
+			"interval", cfg.PulseLiveAdmissionInterval.String(),
+			"source", cfg.PulseLiveAdmissionSource,
 		)
 	}
 	logger.Info("pulse runtime config",

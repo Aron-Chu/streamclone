@@ -65,7 +65,7 @@ func PulseRuntimeConfigFromEnv() PulseRuntimeConfig {
 	cfg.ReadOnlyMode = envBoolDefault("PULSE_READ_ONLY_MODE", cfg.ReadOnlyMode)
 	cfg.RosterSize = envIntDefault("PULSE_ROSTER_SIZE", cfg.RosterSize)
 	cfg.ProtectedGlobalLimit = envIntDefault("PULSE_PROTECTED_CHANNEL_LIMIT_GLOBAL", cfg.ProtectedGlobalLimit)
-	cfg.ProtectedGoLiveInterval = envDurationDefault("PULSE_PROTECTED_GOLIVE_INTERVAL", 60*time.Second)
+	cfg.ProtectedGoLiveInterval = envDurationDefault("PULSE_PROTECTED_GOLIVE_INTERVAL", 30*time.Second)
 	cfg.TopRosterPollInterval = envDurationDefault("PULSE_TOP_ROSTER_INTERVAL", 180*time.Second)
 	cfg.GoLiveBatchSize = envIntDefault("PULSE_GOLIVE_BATCH_SIZE", 100)
 	return cfg

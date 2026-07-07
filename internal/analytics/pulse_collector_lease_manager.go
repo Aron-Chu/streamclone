@@ -33,7 +33,7 @@ type CollectorLeaseReconcileResult struct {
 // CollectorLeaseStore so the logic is unit-testable without Postgres.
 //
 // Runtime note (2026-07): not wired in cmd/analytics/main.go. Hosted production
-// admission uses Top500PriorityWatchPoller plus the in-process Collector cap.
+// admission uses LiveAdmissionPoller plus the in-process Collector cap.
 type CollectorLeaseManager struct {
 	store       CollectorLeaseStore
 	instanceID  string

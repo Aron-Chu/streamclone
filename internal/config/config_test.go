@@ -130,8 +130,8 @@ func TestCorpusTargetTopNAliasesLegacyTop500Config(t *testing.T) {
 	if cfg.Top500MetadataTopN != 1000 {
 		t.Fatalf("Top500MetadataTopN = %d, want 1000", cfg.Top500MetadataTopN)
 	}
-	if cfg.PulseTop500AdmissionTopN != 75 {
-		t.Fatalf("PulseTop500AdmissionTopN = %d, want 75 (clamped to IRC max)", cfg.PulseTop500AdmissionTopN)
+	if cfg.PulseLiveAdmissionTopN != 75 {
+		t.Fatalf("PulseLiveAdmissionTopN = %d, want 75 (clamped to IRC max)", cfg.PulseLiveAdmissionTopN)
 	}
 	if cfg.Top500GoldVODInventoryTopN != 1000 {
 		t.Fatalf("Top500GoldVODInventoryTopN = %d, want 1000", cfg.Top500GoldVODInventoryTopN)
@@ -180,8 +180,23 @@ func clearTop500Env(t *testing.T) {
 		"CORPUS_TARGET_TOP_N",
 		"LIVE_ADMISSION_TOP_N",
 		"MAX_ACTIVE_IRC_CHANNELS",
+		"PULSE_LIVE_ADMISSION_ENABLED",
+		"PULSE_LIVE_ADMISSION_TOP_N",
+		"PULSE_LIVE_ADMISSION_INTERVAL",
+		"PULSE_LIVE_ADMISSION_SOURCE",
+		"PULSE_LIVE_ADMISSION_MISS_GRACE_CYCLES",
 		"PULSE_MAX_ACTIVE_CHANNELS",
+		"PULSE_TOP500_ADMISSION_ENABLED",
 		"PULSE_TOP500_ADMISSION_TOP_N",
+		"PULSE_TOP500_ADMISSION_INTERVAL",
+		"PULSE_TOP500_ADMISSION_SOURCE",
+		"PULSE_TOP500_ADMISSION_MISS_GRACE_CYCLES",
+		"PULSE_TOP_ROSTER_ADMISSION_ENABLED",
+		"PULSE_TOP_ROSTER_ADMISSION_TOP_N",
+		"PULSE_TOP_ROSTER_ADMISSION_INTERVAL",
+		"PULSE_TOP_ROSTER_ADMISSION_SOURCE",
+		"PULSE_TOP_ROSTER_ADMISSION_MISS_GRACE_CYCLES",
+		"PULSE_TOP_ROSTER_POLL_ENABLED",
 		"SILVER_ENQUEUE_TOP_N",
 		"TOP500_GOLD_VOD_TOP_N",
 		"TOP500_METADATA_ENABLED",

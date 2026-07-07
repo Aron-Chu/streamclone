@@ -6,7 +6,7 @@
 | **Owner** | Aron-Chu |
 | **Scope** | BearHost analytics (`streamclone`); extension/portal read-only honesty for new roster signals |
 | **Batch ID** | **TOP-ROSTER-A** (awareness only — **not** top-500 IRC collection) |
-| **Related** | [`multi-user-infra-review.md`](multi-user-infra-review.md) · [`bearhost-tunnel.md`](bearhost-tunnel.md) · [`../scraping-archive/requirements.md`](../scraping-archive/requirements.md) · sibling [`live-coverage-requirements.md`](../../streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md) · [`roadmapping.md`](../roadmapping.md) |
+| **Related** | [`multi-user-infra-review.md`](multi-user-infra-review.md) · [`bearhost-tunnel.md`](bearhost-tunnel.md) · [`../scraping-archive/requirements.md`](../scraping-archive/requirements.md) · sibling [`live-coverage-requirements.md`](../../streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md) · [`roster-naming-truth-table.md`](roster-naming-truth-table.md) · [`roadmapping.md`](../roadmapping.md) |
 | **Verdict** | **GO** TOP-ROSTER-A Phases 1–3 · **HOLD** admission · **HOLD** cap raise · **HOLD** ARCHIVE-SCHEDULER-A · **NO** top-500 IRC |
 | **Repos** | Backend: **streamclone**. Extension parity: **streamclone-pulse** (coverage copy only; no new client logic required for Phase A). |
 
@@ -512,7 +512,7 @@ Backend primary coverage states remain in `pulse_coverage.go`. Top-roster awaren
 | **tracking** | `tracking: true` + rollups | Plane B active |
 | **not_tracking** | `tracking: false`, live in awareness | `rosterAwareness.live=true`, `collectorAdmission=admission_disabled` |
 | **capacity_full** | cap blocked admission | `reason_not_tracking=capacity_full` |
-| **partial_live** | rollups + `coverageStartOffsetSeconds > 60` | existing `partial_tracking` |
+| **partial_live** | rollups + `coverageStartOffsetSeconds > 120` | existing `partial_tracking` (aligns with `PULSE_STREAM_START_TOLERANCE_SEC`) |
 | **missed_start** | live + no rollups from T+0 | `partial_tracking` + copyKey alias or `missed_start` adjunct |
 
 **Do not** conflate awareness live with chat collection in UI badges.

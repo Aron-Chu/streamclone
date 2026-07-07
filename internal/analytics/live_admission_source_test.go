@@ -74,7 +74,7 @@ func TestNewReadinessLiveAdmissionSourceUsesRoster(t *testing.T) {
 
 func TestNewLiveAdmissionSourceSelectsRoster(t *testing.T) {
 	store := &fakeTop500PriorityStore{}
-	source := NewLiveAdmissionSource(config.Config{PulseTop500AdmissionSource: "roster"}, store, nil, nil)
+	source := NewLiveAdmissionSource(config.Config{PulseLiveAdmissionSource: "roster"}, store, nil, nil)
 	if source == nil {
 		t.Fatal("expected roster source")
 	}
@@ -85,7 +85,7 @@ func TestNewLiveAdmissionSourceSelectsRoster(t *testing.T) {
 
 func TestNewLiveAdmissionSourceFallsBackToRosterWithoutHelix(t *testing.T) {
 	store := &fakeTop500PriorityStore{}
-	source := NewLiveAdmissionSource(config.Config{PulseTop500AdmissionSource: "helix_top_live"}, store, NewHelixClient("", "", "", "", ""), nil)
+	source := NewLiveAdmissionSource(config.Config{PulseLiveAdmissionSource: "helix_top_live"}, store, NewHelixClient("", "", "", "", ""), nil)
 	if _, ok := source.(*RosterTopLiveAdmissionSource); !ok {
 		t.Fatalf("source = %T, want roster fallback", source)
 	}
@@ -98,10 +98,10 @@ func TestTop500PriorityWatchAdmitsNonRosterTopLive(t *testing.T) {
 	}}
 	joiner := &fakeJoiner{}
 	collector := NewCollector(&fakeStore{}, fakeProvider{}, joiner, nil, nilLogger(), 2, time.Hour, time.Hour, 200)
-	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
-		PulseTop500AdmissionEnabled: true,
-		PulseTop500AdmissionTopN:    100,
-		PulseTop500AdmissionSource:  PulseTop500AdmissionSourceHelixTopLive,
+	p := NewLiveAdmissionPoller(source, collector, config.Config{
+		PulseLiveAdmissionEnabled: true,
+		PulseLiveAdmissionTopN:    100,
+		PulseLiveAdmissionSource:  PulseLiveAdmissionSourceHelixTopLive,
 	}, nil)
 	p.runOnce(context.Background())
 	if len(joiner.joined) != 1 || joiner.joined[0] != "viral" {
@@ -128,9 +128,9 @@ func TestTop500PriorityWatchSkipsDuplicateStream(t *testing.T) {
 	}
 	collector.mu.Unlock()
 
-	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
-		PulseTop500AdmissionEnabled: true,
-		PulseTop500AdmissionTopN:    100,
+	p := NewLiveAdmissionPoller(source, collector, config.Config{
+		PulseLiveAdmissionEnabled: true,
+		PulseLiveAdmissionTopN:    100,
 	}, nil)
 	p.runOnce(context.Background())
 	if len(joiner.joined) != 0 {
@@ -165,9 +165,9 @@ func TestTop500PriorityWatchDuplicateStreamRefreshesIdleClock(t *testing.T) {
 	}
 	collector.mu.Unlock()
 
-	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
-		PulseTop500AdmissionEnabled: true,
-		PulseTop500AdmissionTopN:    100,
+	p := NewLiveAdmissionPoller(source, collector, config.Config{
+		PulseLiveAdmissionEnabled: true,
+		PulseLiveAdmissionTopN:    100,
 	}, nil)
 	p.runOnce(context.Background())
 
@@ -194,9 +194,9 @@ func TestTop500PriorityWatchProtectedPreemptsTopLive(t *testing.T) {
 	}}
 	joiner := &fakeJoiner{}
 	collector := NewCollector(&fakeStore{}, fakeProvider{}, joiner, nil, nilLogger(), 1, time.Hour, time.Hour, 200)
-	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
-		PulseTop500AdmissionEnabled: true,
-		PulseTop500AdmissionTopN:    100,
+	p := NewLiveAdmissionPoller(source, collector, config.Config{
+		PulseLiveAdmissionEnabled: true,
+		PulseLiveAdmissionTopN:    100,
 	}, nil)
 	p.runOnce(context.Background())
 	if len(joiner.joined) != 1 || joiner.joined[0] != "roster" {

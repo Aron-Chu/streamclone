@@ -2,6 +2,9 @@ package analytics
 
 import (
 	"strings"
+	"time"
+
+	"streamclone/internal/metrics"
 )
 
 const (
@@ -69,4 +72,70 @@ func topRosterAdmissionSkipReason(outcome, message string) string {
 	default:
 		return ""
 	}
+}
+
+func classifyTopRosterCandidate(c *Collector, tracked map[string]struct{}, row Top500Current) (outcome, message, streamID string) {
+	login := normalizeLogin(row.Login)
+	streamID = ""
+	if row.StreamID != nil {
+		streamID = strings.TrimSpace(*row.StreamID)
+	}
+	switch {
+	case login == "":
+		return TopRosterAdmissionEmptyLogin, "login required", streamID
+	case !row.IsLive:
+		return TopRosterAdmissionNotLive, "not live", streamID
+	case streamID == "":
+		return TopRosterAdmissionEmptyStreamID, "stream id required", streamID
+	case c != nil && c.TrackedStreamID(login) == streamID:
+		return TopRosterAdmissionDuplicateStream, "duplicate stream id", streamID
+	}
+	if tracked != nil {
+		if _, ok := tracked[login]; ok {
+			return TopRosterAdmissionAlreadyTracking, "already tracking", streamID
+		}
+	}
+	return "", "", streamID
+}
+
+func buildTopRosterAdmissionAttempt(row Top500Current, streamID string, attemptedAt time.Time, outcome, message string, state admissionCycleState) TopRosterAdmissionAttempt {
+	login := normalizeLogin(row.Login)
+	_, tracking := state.trackedLogins[login]
+	return TopRosterAdmissionAttempt{
+		Login:             login,
+		Rank:              row.Rank,
+		StreamID:          streamID,
+		SampledAt:         row.SampledAt,
+		AttemptedAt:       attemptedAt,
+		Outcome:           outcome,
+		Message:           message,
+		CollectorTracking: tracking,
+		ActiveCollectors:  state.active,
+		MaxCollectors:     state.max,
+	}
+}
+
+func recordTopRosterAdmissionMetrics(mode, outcome string) {
+	if outcome == "" {
+		return
+	}
+	metrics.TopRosterAdmissionAttemptsTotal.WithLabelValues(outcome, mode).Inc()
+}
+
+func recordTopRosterAdmissionSkipForOutcome(mode, outcome, message string, skippedByReason map[string]int) {
+	reason := topRosterAdmissionSkipReason(outcome, message)
+	if reason == "" {
+		return
+	}
+	recordTopRosterAdmissionSkip(mode, reason)
+	if skippedByReason != nil {
+		skippedByReason[reason]++
+	}
+}
+
+func recordTopRosterAdmissionSkip(mode, reason string) {
+	if reason == "" {
+		return
+	}
+	metrics.TopRosterAdmissionSkippedTotal.WithLabelValues(reason, mode).Inc()
 }

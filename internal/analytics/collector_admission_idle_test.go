@@ -111,9 +111,9 @@ func TestTop500PriorityWatchPollerRefreshesIdleForAlreadyTracking(t *testing.T) 
 	collector.tracked["live"].lastViewedAt = time.Now().UTC().Add(-time.Hour)
 	collector.mu.Unlock()
 
-	p := NewTop500PriorityWatchPoller(source, collector, config.Config{
-		PulseTop500AdmissionEnabled: true,
-		PulseTop500AdmissionTopN:    100,
+	p := NewLiveAdmissionPoller(source, collector, config.Config{
+		PulseLiveAdmissionEnabled: true,
+		PulseLiveAdmissionTopN:    100,
 	}, nil)
 	p.runOnce(context.Background())
 
