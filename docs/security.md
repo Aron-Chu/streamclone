@@ -32,6 +32,24 @@ make security-scan
 
 Operator secret files (webhooks, Azure connection strings) live outside the repo — see [`docs/operator-secrets.md`](operator-secrets.md). Initialize with `scripts/operator-secrets-init.ps1` or `scripts/operator-secrets-init.sh`.
 
+## Public repo boundary
+
+This public repository is **application source and contracts only**. Do not commit:
+
+- Production host IPs or resolvable infrastructure hostnames used as deploy targets
+- SSH key paths, fingerprints, or `root@…` shell accounts
+- Private ops checkout paths, production env file paths, or live env values
+- Operator runbooks, promotion manifests, soak evidence, or VPS deploy scripts
+
+Hosted production execution lives in **private streampulse-ops**. Safe public checks:
+
+```sh
+curl -fsS https://api.streampulse.stream/v1/extension/health
+bash scripts/hosted-launch-probes.sh
+```
+
+Pre-commit runs `scripts/pre-commit-public-ops-guard.sh` to block common topology leaks.
+
 ## Tunnels
 
 Forward only the Caddy proxy (`127.0.0.1:8090`).
