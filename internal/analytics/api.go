@@ -50,8 +50,6 @@ type Handler struct {
 	refreshOnce       sync.Once
 	hubRefreshMu      sync.Mutex
 	hubLastRefresh    map[string]time.Time
-	jobMirrorOnce     sync.Once
-	jobMirrorStore    *JobMirror
 }
 
 func NewHandler(store *Store, collector *Collector, helix *HelixClient, syncService *SyncService) *Handler {
