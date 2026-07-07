@@ -37,19 +37,15 @@ If Docker Desktop is not running during uninstall, Streamclone can defer Docker 
 
 ## Optional Features
 
-Core Watch is installed by default. Optional tiers can be started from the app or via setup profiles for scripted installs.
+Core Watch is installed by default (directory, playback, IRC chat, emotes). **Minute analytics and Pulse live coverage** live on [StreamPulse](https://streampulse.stream) — not bundled in the desktop install.
 
-| Tier | Adds | How to start |
-|------|------|--------------|
-| Analytics | minute-level TwitchTracker charts | **Start Analytics** or `scraper` profile |
+| Add-on | What it does | How to start |
+|--------|----------------|--------------|
 | ReplayForge (Clip Studio) | `/studio` clip workflow | Install [ReplayForge](../replayforge) separately — API `:8095`, UI `:8096` |
-| Pulse Wire | streamer news wire at `/pulse-wire` | Core when `PULSE_WIRE_ENABLED=true` (see [options.md](options.md)) |
-| Pulse (Grafana) | Grafana/Influx ops dashboards | **Start Pulse dashboards** from Stack status |
-| Full | Analytics scraper only | `full` profile = scraper; does not include ReplayForge or Pulse |
 
-Details: [options.md](options.md). Scraper details: [scraper-cloudflare-and-proxy.md](scraper-cloudflare-and-proxy.md).
+Details: [options.md](options.md).
 
-Optional **Analytics** and **Pulse dashboards** can wake the install helper when you click **Start Analytics** or **Start Pulse dashboards** — no need to run **Start Streamclone** first if Docker is already up. ReplayForge is started outside Streamclone. The browser may ask once to open the registered `streamclone://` link; choose allow/remember. If the prompt is blocked, run **Start Streamclone** once from the Desktop shortcut.
+ReplayForge runs outside Streamclone. The browser may ask once to open the registered `streamclone://` link when using in-app setup controls; choose allow/remember. If the prompt is blocked, run **Start Streamclone** once from the Desktop shortcut.
 
 ## Twitch Sign-In
 

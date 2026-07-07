@@ -141,9 +141,7 @@ jobs:
     name: Build and push scraper
     needs: release-gate
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_scraper == 'true') ||
-      startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_scraper == 'true'
     steps:
       - name: Checkout scraper repo
         uses: actions/checkout@v4
