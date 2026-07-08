@@ -11,25 +11,26 @@ import (
 
 // Config holds ingest-core tuning and feature flags.
 type Config struct {
-	CoreEnabled       bool
-	ShadowMode        bool
-	DualReadMode      bool
-	TieringEnabled    bool
-	HubRosterLimit    int
-	P1HotLimit        int
-	MaxActiveIRC      int
-	ShardCount        int
-	P0QueueReserve    int
-	IRCQueueSize      int
-	ShardQueueSize    int
-	FlushQueueSize    int
-	FlushInterval     time.Duration
-	FlushMaxBatch     int
-	OpenMinuteFlush   time.Duration
-	ShadowAllowlist   map[string]struct{}
+	CoreEnabled        bool
+	ShadowMode         bool
+	DualReadMode       bool
+	TieringEnabled     bool
+	HubRosterLimit     int
+	P1HotLimit         int
+	MaxActiveIRC       int
+	ShardCount         int
+	P0QueueReserve     int
+	IRCQueueSize       int
+	ShardQueueSize     int
+	FlushQueueSize     int
+	FlushInterval      time.Duration
+	FlushMaxBatch      int
+	OpenMinuteFlush    time.Duration
+	ShadowAllowlist    map[string]struct{}
 	ShadowTolerancePct float64
-	ShadowArtifactDir string
+	ShadowArtifactDir  string
 	TopEmotesPerMinute int
+	ShadowDebug        bool
 }
 
 const (
@@ -88,6 +89,8 @@ func ConfigFromApp(app config.Config) Config {
 		cfg.MaxActiveIRC = 50
 	}
 	cfg.ShadowAllowlist = parseAllowlist(os.Getenv("INGEST_SHADOW_CHANNEL_ALLOWLIST"))
+	cfg.ShadowDebug = envBool("INGEST_SHADOW_DEBUG", false)
+	setShadowDebugActive(cfg.ShadowDebug)
 	return cfg
 }
 

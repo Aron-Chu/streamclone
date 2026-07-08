@@ -2,6 +2,11 @@
 # Collect Phase C shadow validation gates. Run on VPS after shadow soak.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=scripts/lib/hosted-limits-guard-resolve.sh
+source "${SCRIPT_DIR}/lib/hosted-limits-guard-resolve.sh"
+
 ARTIFACT_DIR="${INGEST_SHADOW_ARTIFACT_DIR:-runtime/ingest-shadow}"
 TOLERANCE="${1:-2}"
 MIN_SAMPLES="${2:-1000}"
@@ -31,14 +36,32 @@ redis_stats() {
 
 echo "==> Phase C gates $(date -Is)" | tee "${OUT_DIR}/summary.txt"
 
+# Limits guard — hard fail if uncapped
+echo "==> hosted limits guard" | tee -a "${OUT_DIR}/summary.txt"
+if run_hosted_limits_guard | tee "${OUT_DIR}/hosted-limits-guard.txt"; then
+  note_pass "hosted limits guard"
+else
+  note_fail "hot container missing or uncapped"
+fi
+
 # Shadow compare
 if [[ -f "${ARTIFACT_DIR}/latest.jsonl" ]]; then
   du -sh "${ARTIFACT_DIR}" | tee "${OUT_DIR}/artifact-disk.txt"
   ls -lh "${ARTIFACT_DIR}" | tee "${OUT_DIR}/artifact-listing.txt"
-  if bash scripts/ingest-shadow-compare.sh "${TOLERANCE}" "${MIN_SAMPLES}" | tee "${OUT_DIR}/shadow-compare.txt"; then
-    note_pass "shadow compare within tolerance"
+  export INGEST_SHADOW_ARTIFACT_DIR="${ARTIFACT_DIR}"
+  bash "${SCRIPT_DIR}/ingest-shadow-inspect.sh" "${OUT_DIR}/shadow-inspect" | tee "${OUT_DIR}/shadow-inspect-summary.txt" || true
+  if bash "${SCRIPT_DIR}/ingest-shadow-compare.sh" --closed-only --diagnose "${TOLERANCE}" "${MIN_SAMPLES}" | tee "${OUT_DIR}/shadow-compare.txt"; then
+    note_pass "shadow compare (closed minutes) within tolerance"
   else
-    note_fail "shadow compare below tolerance or insufficient samples"
+    note_fail "shadow compare (closed minutes) below tolerance or insufficient samples"
+  fi
+  bash "${SCRIPT_DIR}/ingest-shadow-mismatch-report.sh" "${OUT_DIR}/shadow-mismatch" | tee "${OUT_DIR}/shadow-mismatch-summary.txt" || true
+  grep -E '^closed_chat_match_rate=|^closed_total_emote_match_rate=|^closed_both_chat_and_emote_match_rate=|^top_emote_key_mismatch_count=' \
+    "${OUT_DIR}/shadow-compare.txt" | tee "${OUT_DIR}/shadow-parity-metrics.txt" || true
+  # Open-minute skew is informational only — not a Phase C blocker
+  open_mismatch="$(grep -E '^open_mismatch_count=' "${OUT_DIR}/shadow-compare.txt" 2>/dev/null | cut -d= -f2 || echo 0)"
+  if [[ "${open_mismatch}" -gt 0 ]]; then
+    note_warn "open_minute_mismatch_count=${open_mismatch} (excluded from gate; see shadow-inspect/)"
   fi
   # Hard cap guard: abort if latest.jsonl alone exceeds 512MiB
   sz="$(wc -c < "${ARTIFACT_DIR}/latest.jsonl" 2>/dev/null || echo 0)"

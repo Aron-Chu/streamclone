@@ -120,7 +120,13 @@ func (e *Engine) HandleIRCLine(line string, login string, tier IngestTier) {
 		}
 	}
 	if !e.allowChannel(channel) {
+		if e.cfg.ShadowDebug {
+			shadowDebug.AllowlistRejected.Add(1)
+		}
 		return
+	}
+	if e.cfg.ShadowDebug {
+		shadowDebug.RawLines.Add(1)
 	}
 	item := ircQueued{line: line, tier: tier, login: channel, enqueued: time.Now().UTC()}
 	select {
@@ -166,7 +172,14 @@ func (e *Engine) processLine(item ircQueued) {
 	streamID := e.agg.StreamIDForLogin(login)
 	msg, ok := e.parser.ParseIRCLine(item.line, streamID, item.tier)
 	if !ok {
+		if e.cfg.ShadowDebug {
+			shadowDebug.NonPrivmsgIgnored.Add(1)
+			shadowDebug.ParseFailures.Add(1)
+		}
 		return
+	}
+	if e.cfg.ShadowDebug {
+		shadowDebug.ParsedPrivmsg.Add(1)
 	}
 	if login == "" {
 		login = msg.Channel
@@ -176,7 +189,16 @@ func (e *Engine) processLine(item ircQueued) {
 	p0Used := e.p0InFlight
 	e.mu.Unlock()
 	if !e.agg.Enqueue(msg, func(int) {}, p0Used, e.cfg.P0QueueReserve) {
+		if e.cfg.ShadowDebug {
+			if msg.StreamID == "" && e.agg.StreamIDForLogin(login) == "" {
+				shadowDebug.MissingStreamBind.Add(1)
+			}
+			shadowDebug.EnqueueDropped.Add(1)
+		}
 		return
+	}
+	if e.cfg.ShadowDebug {
+		shadowDebug.CountedMessages.Add(1)
 	}
 	if e.shadow != nil {
 		// Shadow path records in-memory snapshot after enqueue processing async; tick loop flushes compare.

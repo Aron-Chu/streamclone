@@ -71,13 +71,15 @@ func (t IngestTier) WantsFullIRC() bool {
 
 // DesiredChannel is one channel the scheduler wants on IRC.
 type DesiredChannel struct {
-	Login        string
-	StreamID     string
-	Tier         IngestTier
+	Login         string
+	StreamID      string
+	Tier          IngestTier
 	TrackPriority int
-	HelixRank    int
+	HelixRank     int
 }
 
 func normalizeLogin(login string) string {
-	return strings.ToLower(strings.TrimSpace(login))
+	login = strings.ToLower(strings.TrimSpace(login))
+	login = strings.TrimPrefix(login, "#")
+	return login
 }

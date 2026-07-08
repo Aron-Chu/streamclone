@@ -3,7 +3,6 @@ package ingestcore
 import (
 	"hash/fnv"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -179,18 +178,16 @@ func (sw *shardWorker) process(item queuedChat) {
 		ring = newMinuteRing(streamID, minute, sw.cfg.TopEmotesPerMinute)
 		sw.agg.streams.Store(streamID, ring)
 	}
-	for _, key := range item.emoteKeys {
-		is7 := false
-		for _, frag := range item.msg.Fragments {
-			if emoteKeyFromParts(frag.Provider, frag.ID, frag.C) == key && isSevenTVProvider(frag.Provider) {
-				is7 = true
-				break
-			}
+	ring.AddChatMessage(item.msg.Timestamp)
+	for _, frag := range item.msg.Fragments {
+		if frag.T != "emote" {
+			continue
 		}
-		ring.AddChat(item.msg.Timestamp, key, is7)
-	}
-	if len(item.emoteKeys) == 0 && strings.TrimSpace(item.msg.Text) != "" {
-		ring.AddChat(item.msg.Timestamp, "", false)
+		key := emoteKeyFromParts(frag.Provider, frag.ID, frag.C)
+		if key == "" || key == "unknown" {
+			continue
+		}
+		ring.AddEmote(item.msg.Timestamp, key, isSevenTVProvider(frag.Provider))
 	}
 }
 

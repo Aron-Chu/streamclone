@@ -47,10 +47,9 @@ func (r *MinuteRing) current() *MinuteCounters {
 	return r.slots[0]
 }
 
-// AddChat increments chat/emote counters for the current open minute.
-func (r *MinuteRing) AddChat(now time.Time, emoteKey string, isSevenTV bool) {
+func (r *MinuteRing) ensureMinute(now time.Time) *MinuteCounters {
 	if r == nil {
-		return
+		return nil
 	}
 	minute := now.UTC().Truncate(time.Minute)
 	cur := r.current()
@@ -58,17 +57,35 @@ func (r *MinuteRing) AddChat(now time.Time, emoteKey string, isSevenTV bool) {
 		r.rotate(minute)
 		cur = r.current()
 	}
+	return cur
+}
+
+// AddChatMessage increments ChatCount once per accepted PRIVMSG.
+func (r *MinuteRing) AddChatMessage(now time.Time) {
+	cur := r.ensureMinute(now)
+	if cur == nil {
+		return
+	}
 	cur.ChatCount++
+}
+
+// AddEmote increments emote counters for one emote occurrence (repeats preserved).
+func (r *MinuteRing) AddEmote(now time.Time, emoteKey string, isSevenTV bool) {
+	if emoteKey == "" {
+		return
+	}
+	cur := r.ensureMinute(now)
+	if cur == nil {
+		return
+	}
 	cur.TotalEmoteCount++
 	if isSevenTV {
 		cur.SevenTVEmoteCount++
 	}
-	if emoteKey != "" {
-		if cur.Emotes == nil {
-			cur.Emotes = map[string]int{}
-		}
-		cur.Emotes[emoteKey]++
+	if cur.Emotes == nil {
+		cur.Emotes = map[string]int{}
 	}
+	cur.Emotes[emoteKey]++
 }
 
 // AddViewerSample records a Helix viewer sample on the open minute.

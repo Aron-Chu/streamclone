@@ -65,6 +65,9 @@ func (p *Parser) ParseIRCLine(line string, streamID string, tier IngestTier) (Pa
 // EmoteKeysFromFragments returns normalized emote keys and sevenTV count delta.
 func EmoteKeysFromFragments(fragments []batch.Fragment) (keys []string, sevenTV int) {
 	for _, frag := range fragments {
+		if frag.T != "emote" {
+			continue
+		}
 		if strings.TrimSpace(frag.C) == "" {
 			continue
 		}

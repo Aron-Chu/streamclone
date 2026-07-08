@@ -14,10 +14,10 @@ import (
 
 // CompareKey normalizes shadow comparison dimensions.
 type CompareKey struct {
-	StreamID  string
-	Channel   string
-	Minute    time.Time
-	Closed    bool
+	StreamID string
+	Channel  string
+	Minute   time.Time
+	Closed   bool
 }
 
 func (k CompareKey) String() string {
@@ -131,6 +131,13 @@ func (c *ShadowComparer) tryCompare(key, channel string) {
 		RecordedAt:    time.Now().UTC(),
 	}
 	rec.Match, rec.Reason = withinTolerance(rec, c.tolerance)
+	if !rec.Key.Closed && !rec.Match {
+		if rec.Reason != "" {
+			rec.Reason = "open_minute_excluded:" + rec.Reason
+		} else {
+			rec.Reason = "open_minute_excluded"
+		}
+	}
 	if rec.Match {
 		metrics.IngestShadowCompareMatchTotal.Inc()
 	} else {
@@ -173,9 +180,9 @@ const defaultShadowArtifactMaxBytes = 128 << 20 // 128 MiB before rotate
 
 // ShadowArtifactWriter appends JSONL compare records.
 type ShadowArtifactWriter struct {
-	dir     string
+	dir      string
 	maxBytes int64
-	mu      sync.Mutex
+	mu       sync.Mutex
 }
 
 func NewShadowArtifactWriter(dir string) *ShadowArtifactWriter {
