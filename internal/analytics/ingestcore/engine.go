@@ -219,7 +219,8 @@ func (e *Engine) flush(completed, open bool, lastOpen map[string]time.Time) {
 	}
 	if e.shadow != nil {
 		for _, s := range snaps {
-			e.shadow.RecordShadow("", s)
+			login := e.agg.LoginForStreamID(s.StreamID)
+			e.shadow.RecordShadow(login, s)
 		}
 	}
 }

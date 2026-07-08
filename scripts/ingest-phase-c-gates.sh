@@ -88,10 +88,10 @@ fi
 # Phase C does not write PG — env proof on analytics container
 ANALYTICS="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E 'analytics' | grep -v workers | head -1 || true)"
 if [[ -n "${ANALYTICS}" ]]; then
+  enabled="$(docker_env "${ANALYTICS}" INGEST_CORE_ENABLED)"
+  dual="$(docker_env "${ANALYTICS}" INGEST_CORE_DUAL_READ_MODE)"
+  shadow="$(docker_env "${ANALYTICS}" INGEST_CORE_SHADOW_MODE)"
   {
-    enabled="$(docker_env "${ANALYTICS}" INGEST_CORE_ENABLED)"
-    dual="$(docker_env "${ANALYTICS}" INGEST_CORE_DUAL_READ_MODE)"
-    shadow="$(docker_env "${ANALYTICS}" INGEST_CORE_SHADOW_MODE)"
     echo "INGEST_CORE_ENABLED=${enabled}"
     echo "INGEST_CORE_DUAL_READ_MODE=${dual}"
     echo "INGEST_CORE_SHADOW_MODE=${shadow}"

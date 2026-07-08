@@ -81,6 +81,7 @@ type Collector struct {
 	alwaysTracked       map[string]bool
 	liveEmote           *LiveEmoteEnsurer
 	shadowLegacyHook    func(streamID, login string, rollup MinuteRollup, closed bool)
+	streamBindHook      func(login, streamID string)
 }
 
 type trackedChannel struct {
@@ -242,6 +243,14 @@ func (c *Collector) WithAlwaysTracked(logins []string) *Collector {
 func (c *Collector) WithLiveEmoteEnsurer(ensurer *LiveEmoteEnsurer) *Collector {
 	if c != nil {
 		c.liveEmote = ensurer
+	}
+	return c
+}
+
+// WithStreamBindHook notifies when legacy collector binds a login to a live stream (dual-read shadow).
+func (c *Collector) WithStreamBindHook(fn func(login, streamID string)) *Collector {
+	if c != nil {
+		c.streamBindHook = fn
 	}
 	return c
 }
@@ -846,6 +855,9 @@ func (c *Collector) bindStreamIDNow(ctx context.Context, login string) {
 	if tracked := c.tracked[login]; tracked != nil && tracked.currentStreamID == "" {
 		tracked.currentStreamID = stream.ID
 		tracked.lastPollAt = now
+		if c.streamBindHook != nil {
+			c.streamBindHook(login, stream.ID)
+		}
 	}
 	c.mu.Unlock()
 	c.addViewerSample(stream.ID, now, stream.ViewerCount)
@@ -988,6 +1000,9 @@ func (c *Collector) pollOnce(ctx context.Context) {
 			c.mu.Lock()
 			if tracked := c.tracked[login]; tracked != nil {
 				tracked.currentStreamID = helixStreamID
+				if wasOffline && c.streamBindHook != nil {
+					c.streamBindHook(login, helixStreamID)
+				}
 			}
 			c.mu.Unlock()
 			c.addViewerSample(helixStreamID, now, stream.ViewerCount)

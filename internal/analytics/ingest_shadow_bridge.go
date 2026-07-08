@@ -25,5 +25,8 @@ func RecordLegacyShadowMinute(engine *ingestcore.Engine, streamID, login string,
 	if engine == nil {
 		return
 	}
+	if streamID != "" && login != "" {
+		engine.BindStream(login, streamID)
+	}
 	engine.RecordLegacySnapshot(login, minuteRollupToIngestSnapshot(streamID, rollup, closed))
 }

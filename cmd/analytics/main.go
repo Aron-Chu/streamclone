@@ -282,6 +282,8 @@ func main() {
 		if ingestCfg.DualReadMode || ingestCfg.ShadowMode {
 			collector.WithShadowLegacyHook(func(streamID, login string, rollup analytics.MinuteRollup, closed bool) {
 				analytics.RecordLegacyShadowMinute(ingestEngine, streamID, login, rollup, closed)
+			}).WithStreamBindHook(func(login, streamID string) {
+				ingestEngine.BindStream(login, streamID)
 			})
 		}
 		logger.Info("ingest-core active",

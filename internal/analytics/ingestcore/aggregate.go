@@ -79,6 +79,22 @@ func (a *Aggregator) BindStream(login, streamID string) {
 	a.loginMap.Store(login, streamID)
 }
 
+// LoginForStreamID resolves channel login for a bound stream id.
+func (a *Aggregator) LoginForStreamID(streamID string) string {
+	if streamID == "" {
+		return ""
+	}
+	var login string
+	a.loginMap.Range(func(k, v any) bool {
+		if v.(string) == streamID {
+			login = k.(string)
+			return false
+		}
+		return true
+	})
+	return login
+}
+
 // StreamIDForLogin resolves stream id for a channel login.
 func (a *Aggregator) StreamIDForLogin(login string) string {
 	login = normalizeLogin(login)
