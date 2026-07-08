@@ -174,6 +174,16 @@ if gate_total == 0:
     print("FAIL: no gate samples")
     sys.exit(1)
 
+if closed_only:
+    gate_chat_match = sum(1 for r in gate_records if chat_match(r))
+    pct = 100.0 * gate_chat_match / gate_total
+    print(f"shadow_compare gate_total={gate_total} gate_match={gate_match} gate_mismatch={gate_mismatch} match_pct={pct:.2f} gate_metric=closed_chat_match_rate")
+    if pct < 100.0 - tol:
+        print(f"FAIL: closed_chat_match_rate {pct:.2f} below tolerance")
+        sys.exit(1)
+    print("PASS")
+    sys.exit(0)
+
 pct = 100.0 * gate_match / gate_total
 print(f"shadow_compare gate_total={gate_total} gate_match={gate_match} gate_mismatch={gate_mismatch} match_pct={pct:.2f}")
 if pct < 100.0 - tol:
