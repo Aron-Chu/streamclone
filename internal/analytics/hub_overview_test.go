@@ -364,8 +364,24 @@ func TestForwardFillTop500ViewerTrail(t *testing.T) {
 		{T: bucketT, Viewers: 450_000},
 		{T: nextT, Viewers: 43_000},
 	})
-	if activity[nextT].Viewers != 450_000 {
-		t.Fatalf("forward fill viewers = %d, want 450000", activity[nextT].Viewers)
+	if activity[nextT].Viewers != 43_000 {
+		t.Fatalf("forward fill viewers = %d, want 43000 (explicit top500 sample must not be forward-filled)", activity[nextT].Viewers)
+	}
+}
+
+func TestMergeTop500ViewerBucketsPrefersSnapshotOverIRCInflation(t *testing.T) {
+	bucketT := int64(1_719_000_000_000)
+	activity := map[int64]*HubActivityPoint{
+		bucketT: {T: bucketT, Viewers: 1_038_669, Chat: 28_675, HasChatRollup: true, HasViewerRollup: true},
+	}
+	mergeTop500ViewerBucketsIntoActivity(activity, []Top500ViewerBucket{
+		{T: bucketT, Viewers: 526_895},
+	})
+	if activity[bucketT].Viewers != 526_895 {
+		t.Fatalf("viewers = %d, want 526895 (top500 snapshot caps IRC inflation)", activity[bucketT].Viewers)
+	}
+	if activity[bucketT].Chat != 28_675 {
+		t.Fatalf("chat = %d, want unchanged IRC chat rollup", activity[bucketT].Chat)
 	}
 }
 

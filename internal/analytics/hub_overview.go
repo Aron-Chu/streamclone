@@ -1524,8 +1524,10 @@ func forwardFillTop500ViewerTrail(activity map[int64]*HubActivityPoint, top500Bu
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 	running := 0
 	for _, key := range keys {
-		if viewers, ok := top500ByT[key]; ok && viewers > running {
+		if viewers, ok := top500ByT[key]; ok {
+			// Explicit Top-500 sample at this bucket — do not forward-fill over it.
 			running = viewers
+			continue
 		}
 		pt := activity[key]
 		if pt == nil || running <= 0 {
@@ -1603,9 +1605,9 @@ func mergeTop500ViewerBucketsIntoActivity(activity map[int64]*HubActivityPoint, 
 			pt = &HubActivityPoint{T: bucket.T}
 			activity[bucket.T] = pt
 		}
-		if bucket.Viewers > pt.Viewers {
-			pt.Viewers = bucket.Viewers
-		}
+		// Top-500 Helix snapshots are deduped per channel; corpus IRC peaks can
+		// double-count stale stream_ids. When a snapshot exists, it wins.
+		pt.Viewers = bucket.Viewers
 		pt.HasViewerRollup = true
 	}
 }
