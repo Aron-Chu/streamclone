@@ -51,6 +51,7 @@ type PublicHubResponse struct {
 	Corpus                 HubCorpus            `json:"corpus"`
 	Coverage               HubCoverage          `json:"coverage"`
 	CorpusPipeline         HubCorpusPipeline    `json:"corpusPipeline"`
+	Ingest                 HubIngest            `json:"ingest,omitempty"`
 	Activity               HubActivity          `json:"activity"`
 	EmoteIntel             HubEmoteIntel        `json:"emoteIntel"`
 	TopEmotes              []HubEmote           `json:"topEmotes"`
@@ -571,10 +572,18 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 	if resp.CorpusPipeline.State == CorpusStatusCritical {
 		resp.Coverage.State = CorpusStatusCritical
 	} else if resp.CorpusPipeline.State == CorpusStatusDegraded && resp.Coverage.State == "operational" {
-		resp.Coverage.State = CorpusStatusDegraded
+		ingest := buildHubIngest(h.ingestEngine)
+		if h.ingestEngine != nil && h.ingestEngine.Config().TieringEnabled &&
+			ingest.State == "admit_lag" && resp.CorpusPipeline.Roster.LiveCollectorDeficitRows > 0 {
+			// Expected P2 deficit — coverage stays operational; ingest block shows admit lag.
+		} else {
+			resp.Coverage.State = CorpusStatusDegraded
+		}
 	}
 
-	// 3. Join the live pool with the latest stream records. The collector
+	resp.Ingest = buildHubIngest(h.ingestEngine)
+
+	// 3. Join the live pool
 	// snapshot is in-memory and can be empty immediately after an analytics
 	// restart, so seed the public chart pool from the persistent Top-500 live
 	// roster as well. The roster is still bounded by hubPoolCap before we join

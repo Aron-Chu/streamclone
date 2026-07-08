@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 
 	"streamclone/internal/analytics"
 	"streamclone/internal/analytics/chatreplay"
 	"streamclone/internal/analytics/heatmap"
+	"streamclone/internal/analytics/ingestcore"
 	"streamclone/internal/archive"
 	"streamclone/internal/chat/batch"
 	"streamclone/internal/chat/enrich"
@@ -24,6 +24,7 @@ import (
 	"streamclone/internal/httpx"
 	"streamclone/internal/log"
 	"streamclone/internal/metrics"
+	"streamclone/internal/redisutil"
 	"streamclone/internal/timeseries"
 )
 
@@ -95,12 +96,21 @@ func main() {
 	}
 	defer pool.Close()
 
-	opt, err := redis.ParseURL(cfg.RedisURL)
+	poolSize := envIntDefault("REDIS_POOL_SIZE", 32)
+	readTO := envDurationDefault("REDIS_READ_TIMEOUT", 3*time.Second)
+	writeTO := envDurationDefault("REDIS_WRITE_TIMEOUT", 3*time.Second)
+	rdb, err := redisutil.NewClient(redisutil.ClientOptions{
+		URL:          cfg.RedisURL,
+		PoolSize:     poolSize,
+		MinIdleConns: poolSize / 4,
+		PoolTimeout:  4 * time.Second,
+		ReadTimeout:  readTO,
+		WriteTimeout: writeTO,
+	})
 	if err != nil {
-		logger.Error("redis url parse failed", "err", err)
+		logger.Error("redis client init failed", "err", err)
 		os.Exit(1)
 	}
-	rdb := redis.NewClient(opt)
 	defer rdb.Close()
 
 	tsWriter := timeseries.NewAsyncWriter(timeseries.Config{
@@ -199,8 +209,18 @@ func main() {
 		)
 	}
 	var collector *analytics.Collector
+	ingestCfg := ingestcore.ConfigFromApp(cfg)
+	var ingestEngine *ingestcore.Engine
 	irc := ircconn.NewManager(cfg.Upstream.TwitchIRCURL, cfg.MaxChannelsPerSocket, func(line string) {
-		if collector != nil {
+		if ingestEngine != nil && ingestCfg.Active() {
+			// Channel login resolved from PRIVMSG parse inside engine/collector.
+			if ingestCfg.WritesProduction() {
+				ingestEngine.HandleIRCLine(line, "", ingestcore.TierP1Hot)
+			} else if ingestCfg.DualReadMode || ingestCfg.ShadowMode {
+				ingestEngine.HandleIRCLine(line, "", ingestcore.TierP1Hot)
+			}
+		}
+		if collector != nil && (!ingestCfg.WritesProduction()) {
 			collector.HandleIRCLine(line)
 		}
 	}, logger)
@@ -226,6 +246,56 @@ func main() {
 	)
 	collector.Start(ctx)
 	defer collector.Stop()
+
+	if ingestCfg.Active() {
+		ingestEngine = ingestcore.NewEngine(ingestcore.EngineDeps{
+			Config:   ingestCfg,
+			IRC:      irc,
+			Writer:   analytics.IngestStoreAdapter{Store: store},
+			Enricher: enricher,
+			Source: ingestcore.SchedulerAdapter{ListFn: func(ctx context.Context, topN int) ([]ingestcore.SchedulerCandidate, error) {
+				src := analytics.NewLiveAdmissionSource(cfg, store, helix, logger)
+				live, err := src.ListLiveCandidates(ctx, topN)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]ingestcore.SchedulerCandidate, 0, len(live))
+				for i, row := range live {
+					sid := ""
+					if row.StreamID != nil {
+						sid = *row.StreamID
+					}
+					out = append(out, ingestcore.SchedulerCandidate{
+						Login:     row.Login,
+						StreamID:  sid,
+						IsLive:    row.IsLive,
+						HelixRank: i + 1,
+						Priority:  analytics.TrackPriorityTopRoster,
+					})
+				}
+				return out, nil
+			}},
+			Log: logger,
+		})
+		ingestEngine.Start(ctx, cfg.PulseLiveAdmissionInterval)
+		defer ingestEngine.Stop(ctx)
+		if ingestCfg.DualReadMode || ingestCfg.ShadowMode {
+			collector.WithShadowLegacyHook(func(streamID, login string, rollup analytics.MinuteRollup, closed bool) {
+				analytics.RecordLegacyShadowMinute(ingestEngine, streamID, login, rollup, closed)
+			})
+		}
+		logger.Info("ingest-core active",
+			"core_enabled", ingestCfg.CoreEnabled,
+			"dual_read", ingestCfg.DualReadMode,
+			"shadow", ingestCfg.ShadowMode,
+			"tiering", ingestCfg.TieringEnabled,
+			"max_irc", ingestCfg.MaxActiveIRC,
+		)
+	}
+
+	if scraperDisabledOnAPINode() {
+		logger.Info("SCRAPER_ENABLED_ON_API_NODE=0 — scraper must not run on analytics API node")
+	}
 
 	var archiveExporter analytics.SyncArchiveExporter
 	var archiveSyncExporter *archive.SyncExporter
@@ -586,11 +656,11 @@ func main() {
 	if pulseHosted.IdleTTL == 0 {
 		pulseHosted.IdleTTL = 15 * time.Minute
 	}
-	handler.WithHeatmapCache(heatmapCache).WithTimeseries(tsWriter).WithRedis(rdb).WithPulseBackfill(pulseBackfill).WithPulseHosted(pulseHosted).WithPulseRuntime(pulseRuntime).WithCorpusRuntime(analytics.CorpusRuntimeConfigFromApp(cfg)).WithEmoteHistoryJobs(emoteHistoryJobConfig).WithCDNPublicBase(cfg.CDNPublicBase).WithAppConfig(cfg)
+	handler.WithHeatmapCache(heatmapCache).WithTimeseries(tsWriter).WithRedis(rdb).WithPulseBackfill(pulseBackfill).WithPulseHosted(pulseHosted).WithPulseRuntime(pulseRuntime).WithCorpusRuntime(analytics.CorpusRuntimeConfigFromApp(cfg)).WithEmoteHistoryJobs(emoteHistoryJobConfig).WithCDNPublicBase(cfg.CDNPublicBase).WithAppConfig(cfg).WithIngestEngine(ingestEngine)
 	handler.WithRateLimiter(analytics.NewPulseRateLimiter(rdb, pulseHosted.WatchRatePerMin, pulseHosted.BackfillRatePerHour))
-	analytics.StartProtectedGoLivePoller(ctx, analytics.NewProtectedGoLivePoller(store, helix, collector, pulseRuntime, logger), logger)
+	analytics.StartProtectedGoLivePoller(ctx, analytics.NewProtectedGoLivePoller(store, helix, collector, pulseRuntime, logger).WithIngestAdmission(ingestEngine), logger)
 	admissionSource := analytics.NewLiveAdmissionSource(cfg, store, helix, logger)
-	analytics.StartLiveAdmissionPoller(ctx, analytics.NewLiveAdmissionPoller(admissionSource, collector, cfg, logger), logger)
+	analytics.StartLiveAdmissionPoller(ctx, analytics.NewLiveAdmissionPoller(admissionSource, collector, cfg, logger).WithIngestAdmission(ingestEngine), logger)
 	if cfg.PulseLiveAdmissionEnabled {
 		logger.Info("top500 priority watch poller enabled",
 			"top_n", cfg.PulseLiveAdmissionTopN,
@@ -666,4 +736,37 @@ func corpusWorkersEnabledForThisProcess() bool {
 
 func shouldStartPublicCacheRefreshForThisProcess() bool {
 	return !corpusWorkersEnabledForThisProcess()
+}
+
+func scraperDisabledOnAPINode() bool {
+	v, ok := os.LookupEnv("SCRAPER_ENABLED_ON_API_NODE")
+	if !ok {
+		return true
+	}
+	v = strings.ToLower(strings.TrimSpace(v))
+	return v == "0" || v == "false"
+}
+
+func envIntDefault(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func envDurationDefault(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return fallback
+	}
+	return d
 }

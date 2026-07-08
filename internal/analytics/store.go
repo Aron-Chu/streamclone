@@ -364,6 +364,99 @@ func (s *Store) BulkUpsertLiveMinuteRollups(ctx context.Context, streamID string
 	return nil
 }
 
+// BulkUpsertLiveMinuteRollupsBatch writes rollups for multiple streams in one transaction.
+// Each rollup is an absolute minute snapshot upsert (idempotent last-write-wins for open minutes).
+func (s *Store) BulkUpsertLiveMinuteRollupsBatch(ctx context.Context, byStream map[string][]MinuteRollup, opts LiveRollupWriteOptions) error {
+	if s == nil || len(byStream) == 0 {
+		return nil
+	}
+	options := normalizeLiveRollupWriteOptions(opts)
+	writeKind := "ingest_batch_completed"
+	if options.Mode == LiveRollupWriteOpenMinute {
+		writeKind = "ingest_batch_open"
+	}
+	started := time.Now()
+	result := "success"
+	defer func() {
+		metrics.AnalyticsRollupWriteDuration.WithLabelValues(writeKind, result).Observe(time.Since(started).Seconds())
+	}()
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		result = "error"
+		return err
+	}
+	defer tx.Rollback(ctx)
+	queued := 0
+	for streamID, rollups := range byStream {
+		resolved, err := s.ResolveStreamIDForWrite(ctx, streamID)
+		if err != nil {
+			result = "error"
+			return err
+		}
+		streamID = resolved
+		batch := &pgx.Batch{}
+		for _, rollup := range rollups {
+			if rollup.MinuteTS.IsZero() {
+				continue
+			}
+			if rollup.Emotes == nil {
+				rollup.Emotes = map[string]int{}
+			}
+			emotes, err := json.Marshal(rollup.Emotes)
+			if err != nil {
+				result = "error"
+				return err
+			}
+			batch.Queue(`
+				INSERT INTO analytics_minute_rollups (
+					stream_id, minute_ts, viewer_avg, viewer_max, viewer_latest, viewer_samples,
+					chat_count, total_emote_count, seventv_emote_count, emotes_json,
+					chat_source, source_confidence
+				)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
+				ON CONFLICT (stream_id, minute_ts) DO UPDATE SET
+					viewer_avg=EXCLUDED.viewer_avg,
+					viewer_max=GREATEST(analytics_minute_rollups.viewer_max, EXCLUDED.viewer_max),
+					viewer_latest=EXCLUDED.viewer_latest,
+					viewer_samples=GREATEST(analytics_minute_rollups.viewer_samples, EXCLUDED.viewer_samples),
+					chat_count=GREATEST(analytics_minute_rollups.chat_count, EXCLUDED.chat_count),
+					total_emote_count=GREATEST(analytics_minute_rollups.total_emote_count, EXCLUDED.total_emote_count),
+					seventv_emote_count=GREATEST(analytics_minute_rollups.seventv_emote_count, EXCLUDED.seventv_emote_count),
+					emotes_json=EXCLUDED.emotes_json,
+					chat_source=EXCLUDED.chat_source,
+					source_confidence=EXCLUDED.source_confidence`,
+				streamID, rollup.MinuteTS, rollup.ViewerAvg, rollup.ViewerMax, rollup.ViewerLatest,
+				rollup.ViewerSamples, rollup.ChatCount, rollup.TotalEmoteCount, rollup.SevenTVEmoteCount,
+				emotes, rollup.ChatSource, rollup.SourceConfidence)
+			queued++
+		}
+		br := tx.SendBatch(ctx, batch)
+		for i := 0; i < batch.Len(); i++ {
+			if _, err := br.Exec(); err != nil {
+				br.Close()
+				result = "error"
+				return err
+			}
+		}
+		br.Close()
+		if options.Mode != LiveRollupWriteOpenMinute {
+			for _, rollup := range rollups {
+				if err := upsertMinutePeaksTx(ctx, tx, streamID, []MinuteRollup{rollup}, RollupChatSourceLive, SourceConfidenceVerified); err != nil {
+					result = "error"
+					return err
+				}
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		result = "error"
+		return err
+	}
+	metrics.AnalyticsRollupRowsWrittenTotal.WithLabelValues(writeKind).Add(float64(queued))
+	metrics.AnalyticsRollupWriteBatchSize.WithLabelValues(writeKind).Observe(float64(queued))
+	return nil
+}
+
 // RollupChatSignal is the latest minute rollup chat/emote counts for readiness probes.
 type RollupChatSignal struct {
 	ChatCount         int

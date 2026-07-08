@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"streamclone/internal/analytics/heatmap"
+	"streamclone/internal/analytics/ingestcore"
 	"streamclone/internal/config"
 	"streamclone/internal/timeseries"
 )
@@ -42,6 +43,9 @@ type Handler struct {
 	appConfig         config.Config
 	replayForge       ReplayForgeClient
 	clipCandidateOpts ClipCandidateBuildOptions
+	ingestEngine      *ingestcore.Engine
+	jobMirrorOnce     sync.Once
+	jobMirrorStore    *JobMirror
 	statsGroup        singleflight.Group
 	statusGroup       singleflight.Group
 	hubGroup          singleflight.Group
@@ -94,6 +98,11 @@ func (h *Handler) WithAppConfig(cfg config.Config) *Handler {
 	if strings.TrimSpace(cfg.ClipperServiceURL) != "" {
 		h.replayForge = NewReplayForgeHTTPClient(cfg.ClipperServiceURL, cfg.ClipperWebhookToken)
 	}
+	return h
+}
+
+func (h *Handler) WithIngestEngine(engine *ingestcore.Engine) *Handler {
+	h.ingestEngine = engine
 	return h
 }
 

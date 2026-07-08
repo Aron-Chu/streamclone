@@ -114,6 +114,7 @@ func TestContractPublicHubResponseJSONKeys(t *testing.T) {
 		"emoteIntel",
 		"featuredSession",
 		"generatedAt",
+		"ingest",
 		"liveChannels",
 		"livePulseMoments",
 		"livePulseMomentsReason",

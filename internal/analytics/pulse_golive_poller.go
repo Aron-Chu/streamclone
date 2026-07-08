@@ -8,13 +8,14 @@ import (
 )
 
 type ProtectedGoLivePoller struct {
-	store     *Store
-	helix     *HelixClient
-	collector *Collector
-	runtime   PulseRuntimeConfig
-	log       *slog.Logger
-	interval  time.Duration
-	batchSize int
+	store           *Store
+	helix           *HelixClient
+	collector       *Collector
+	runtime         PulseRuntimeConfig
+	log             *slog.Logger
+	interval        time.Duration
+	batchSize       int
+	ingestAdmission IngestCoreAdmission
 }
 
 func NewProtectedGoLivePoller(store *Store, helix *HelixClient, collector *Collector, runtime PulseRuntimeConfig, log *slog.Logger) *ProtectedGoLivePoller {
@@ -39,6 +40,14 @@ func NewProtectedGoLivePoller(store *Store, helix *HelixClient, collector *Colle
 		interval:  interval,
 		batchSize: batchSize,
 	}
+}
+
+// WithIngestAdmission routes protected go-live IRC joins through ingest-core.
+func (p *ProtectedGoLivePoller) WithIngestAdmission(owner IngestCoreAdmission) *ProtectedGoLivePoller {
+	if p != nil {
+		p.ingestAdmission = owner
+	}
+	return p
 }
 
 func (p *ProtectedGoLivePoller) Enabled() bool {
@@ -161,7 +170,14 @@ func (p *ProtectedGoLivePoller) runOnce(ctx context.Context) {
 				priority = TrackPriorityPrincipalAlwaysTrack
 			}
 			duplicate := p.collector.TrackedStreamID(login) == currentStreamID
-			if duplicate {
+			if p.ingestAdmission != nil && p.ingestAdmission.OwnsIRCAdmission() {
+				if duplicate {
+					p.ingestAdmission.TouchAdmission(login)
+				} else {
+					p.log.Info("protected go-live delegated to ingest-core", "login", login, "stream_id", currentStreamID, "priority", priority)
+					p.ingestAdmission.RegisterProtectedGoLive(login, currentStreamID, priority)
+				}
+			} else if duplicate {
 				p.log.Debug("protected go-live duplicate stream observation", "login", login, "stream_id", currentStreamID)
 			} else {
 				p.log.Info("protected go-live detected", "login", login, "stream_id", currentStreamID, "priority", priority)

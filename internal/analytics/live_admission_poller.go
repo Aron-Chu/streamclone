@@ -13,11 +13,12 @@ import (
 // TrackPriorityTopRoster when explicitly enabled. Candidates come from a
 // LiveAdmissionSource (Helix top-live by default, roster metadata as legacy).
 type LiveAdmissionPoller struct {
-	source    LiveAdmissionSource
-	collector *Collector
-	cfg       config.Config
-	log       *slog.Logger
-	interval  time.Duration
+	source          LiveAdmissionSource
+	collector       *Collector
+	cfg             config.Config
+	log             *slog.Logger
+	interval        time.Duration
+	ingestAdmission IngestCoreAdmission
 }
 
 func NewLiveAdmissionPoller(source LiveAdmissionSource, collector *Collector, cfg config.Config, log *slog.Logger) *LiveAdmissionPoller {
@@ -35,6 +36,14 @@ func NewLiveAdmissionPoller(source LiveAdmissionSource, collector *Collector, cf
 		log:       log,
 		interval:  interval,
 	}
+}
+
+// WithIngestAdmission delegates IRC admission to ingest-core when cutover is active.
+func (p *LiveAdmissionPoller) WithIngestAdmission(owner IngestCoreAdmission) *LiveAdmissionPoller {
+	if p != nil {
+		p.ingestAdmission = owner
+	}
+	return p
 }
 
 func (p *LiveAdmissionPoller) Enabled() bool {
@@ -75,6 +84,10 @@ func StartLiveAdmissionPoller(ctx context.Context, poller *LiveAdmissionPoller, 
 
 func (p *LiveAdmissionPoller) runOnce(ctx context.Context) {
 	if p == nil || p.source == nil || p.collector == nil {
+		return
+	}
+	if p.ingestAdmission != nil && p.ingestAdmission.OwnsIRCAdmission() {
+		p.log.Debug("live admission delegated to ingest-core scheduler")
 		return
 	}
 	mode := TopRosterAdmissionModeDefault

@@ -80,6 +80,7 @@ type Collector struct {
 	stopOnce            sync.Once
 	alwaysTracked       map[string]bool
 	liveEmote           *LiveEmoteEnsurer
+	shadowLegacyHook    func(streamID, login string, rollup MinuteRollup, closed bool)
 }
 
 type trackedChannel struct {
@@ -243,6 +244,28 @@ func (c *Collector) WithLiveEmoteEnsurer(ensurer *LiveEmoteEnsurer) *Collector {
 		c.liveEmote = ensurer
 	}
 	return c
+}
+
+// WithShadowLegacyHook records legacy rollup snapshots during dual-read shadow validation.
+func (c *Collector) WithShadowLegacyHook(fn func(streamID, login string, rollup MinuteRollup, closed bool)) *Collector {
+	if c != nil {
+		c.shadowLegacyHook = fn
+	}
+	return c
+}
+
+func (c *Collector) loginForStreamID(streamID string) string {
+	if c == nil || streamID == "" {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for login, ch := range c.tracked {
+		if ch != nil && ch.currentStreamID == streamID {
+			return login
+		}
+	}
+	return ""
 }
 
 func (c *Collector) EmoteSyncSnapshot(ctx context.Context, login string) EmoteSyncSnapshot {
@@ -866,6 +889,9 @@ func (c *Collector) flushOpenMinuteToStore(ctx context.Context, streamID string)
 	if rollup.ViewerSamples == 0 && rollup.ChatCount == 0 && rollup.TotalEmoteCount == 0 && rollup.SevenTVEmoteCount == 0 {
 		return
 	}
+	if c.shadowLegacyHook != nil {
+		c.shadowLegacyHook(streamID, c.loginForStreamID(streamID), rollup, false)
+	}
 	if err := c.store.BulkUpsertLiveMinuteRollups(ctx, streamID, []MinuteRollup{rollup}, LiveRollupWriteOptions{Mode: LiveRollupWriteOpenMinute}); err != nil && c.log != nil {
 		c.log.Warn("analytics flush open minute failed", "stream_id", streamID, "err", err)
 	}
@@ -1120,6 +1146,12 @@ func (c *Collector) flushWhere(ctx context.Context, shouldFlush func(*minuteAccu
 		minutesByStream[item.streamID] = append(minutesByStream[item.streamID], item.minute)
 	}
 	for streamID, rollups := range byStream {
+		if c.shadowLegacyHook != nil {
+			login := c.loginForStreamID(streamID)
+			for _, rollup := range rollups {
+				c.shadowLegacyHook(streamID, login, rollup, true)
+			}
+		}
 		if err := c.store.BulkUpsertLiveMinuteRollups(ctx, streamID, rollups, LiveRollupWriteOptions{Mode: LiveRollupWriteCompletedMinute}); err != nil {
 			c.log.Warn("analytics flush rollup failed", "stream_id", streamID, "count", len(rollups), "err", err)
 			continue
