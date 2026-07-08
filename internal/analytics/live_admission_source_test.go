@@ -91,6 +91,94 @@ func TestNewLiveAdmissionSourceFallsBackToRosterWithoutHelix(t *testing.T) {
 	}
 }
 
+func TestNewLiveAdmissionSourceSelectsBlendedRosterThenHelix(t *testing.T) {
+	store := &fakeTop500PriorityStore{}
+	source := NewLiveAdmissionSource(config.Config{PulseLiveAdmissionSource: "roster_then_helix"}, store, nil, nil)
+	if source == nil {
+		t.Fatal("expected blended source")
+	}
+	if _, ok := source.(*BlendedRosterFirstAdmissionSource); !ok {
+		t.Fatalf("source = %T, want *BlendedRosterFirstAdmissionSource", source)
+	}
+}
+
+func TestMergeLiveAdmissionRosterFirstOrdersAndDedupes(t *testing.T) {
+	t.Parallel()
+	streamA := "a"
+	streamB := "b"
+	streamC := "c"
+	roster := []Top500Current{
+		{Login: "roster1", Rank: 1, IsLive: true, StreamID: &streamA, CoverageSource: Top500CoverageSourceMetadata},
+		{Login: "shared", Rank: 2, IsLive: true, StreamID: &streamB, CoverageSource: Top500CoverageSourceMetadata},
+	}
+	helix := []Top500Current{
+		{Login: "shared", Rank: 1, IsLive: true, StreamID: &streamB, CoverageSource: Top500CoverageSourceHelix},
+		{Login: "helix1", Rank: 2, IsLive: true, StreamID: &streamC, CoverageSource: Top500CoverageSourceHelix},
+	}
+	out := mergeLiveAdmissionRosterFirst(roster, helix, 3)
+	if len(out) != 3 {
+		t.Fatalf("len(out) = %d, want 3", len(out))
+	}
+	if out[0].Login != "roster1" || out[1].Login != "shared" || out[2].Login != "helix1" {
+		t.Fatalf("order = %#v", []string{out[0].Login, out[1].Login, out[2].Login})
+	}
+	if out[1].CoverageSource != Top500CoverageSourceMetadata {
+		t.Fatalf("shared source = %q, want metadata", out[1].CoverageSource)
+	}
+}
+
+func TestMergeLiveAdmissionRosterFirstReturnsAllRosterWhenOverCap(t *testing.T) {
+	t.Parallel()
+	streamA := "a"
+	streamB := "b"
+	streamC := "c"
+	roster := []Top500Current{
+		{Login: "r1", IsLive: true, StreamID: &streamA, CoverageSource: Top500CoverageSourceMetadata},
+		{Login: "r2", IsLive: true, StreamID: &streamB, CoverageSource: Top500CoverageSourceMetadata},
+		{Login: "r3", IsLive: true, StreamID: &streamC, CoverageSource: Top500CoverageSourceMetadata},
+	}
+	helix := []Top500Current{
+		{Login: "h1", IsLive: true, StreamID: &streamA, CoverageSource: Top500CoverageSourceHelix},
+	}
+	out := mergeLiveAdmissionRosterFirst(roster, helix, 2)
+	if len(out) != 3 {
+		t.Fatalf("len(out) = %d, want all roster rows when roster exceeds cap", len(out))
+	}
+}
+
+func TestMergeLiveAdmissionRosterFirstHelixFillRespectsTopN(t *testing.T) {
+	t.Parallel()
+	streamA := "a"
+	streamB := "b"
+	streamC := "c"
+	streamD := "d"
+	roster := []Top500Current{
+		{Login: "r1", IsLive: true, StreamID: &streamA, CoverageSource: Top500CoverageSourceMetadata},
+	}
+	helix := []Top500Current{
+		{Login: "h1", IsLive: true, StreamID: &streamB, CoverageSource: Top500CoverageSourceHelix},
+		{Login: "h2", IsLive: true, StreamID: &streamC, CoverageSource: Top500CoverageSourceHelix},
+		{Login: "h3", IsLive: true, StreamID: &streamD, CoverageSource: Top500CoverageSourceHelix},
+	}
+	out := mergeLiveAdmissionRosterFirst(roster, helix, 3)
+	if len(out) != 3 {
+		t.Fatalf("len(out) = %d, want 3", len(out))
+	}
+	if out[0].Login != "r1" || out[1].Login != "h1" || out[2].Login != "h2" {
+		t.Fatalf("order = %#v", []string{out[0].Login, out[1].Login, out[2].Login})
+	}
+}
+
+func TestTrackPriorityForAdmissionCoverageSource(t *testing.T) {
+	t.Parallel()
+	if got := TrackPriorityForAdmissionCoverageSource(Top500CoverageSourceMetadata); got != TrackPriorityCorpusRosterLive {
+		t.Fatalf("metadata priority = %d, want %d", got, TrackPriorityCorpusRosterLive)
+	}
+	if got := TrackPriorityForAdmissionCoverageSource(Top500CoverageSourceHelix); got != TrackPriorityHelixTopLiveFill {
+		t.Fatalf("helix priority = %d, want %d", got, TrackPriorityHelixTopLiveFill)
+	}
+}
+
 func TestTop500PriorityWatchAdmitsNonRosterTopLive(t *testing.T) {
 	streamID := "999"
 	source := &fakeLiveAdmissionSource{live: []Top500Current{

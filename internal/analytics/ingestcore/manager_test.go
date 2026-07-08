@@ -67,3 +67,34 @@ func TestConfigFromAppDefaultsDisabled(t *testing.T) {
 		t.Fatalf("shard count = %d", cfg.ShardCount)
 	}
 }
+
+func TestCollectorManagerReconcileCorpusRosterPreemptsHelixFill(t *testing.T) {
+	cfg := Config{MaxActiveIRC: 1, TieringEnabled: false}
+	irc := &fakeIRC{}
+	m := NewCollectorManager(cfg, irc, nil)
+	m.SetRunContext(context.Background())
+
+	m.Reconcile([]DesiredChannel{
+		{Login: "helixfill", StreamID: "s1", Tier: TierP1Hot, TrackPriority: 9, HelixRank: 1},
+	})
+	if !m.IsActiveLogin("helixfill") {
+		t.Fatal("expected helix fill admitted first")
+	}
+
+	res := m.Reconcile([]DesiredChannel{
+		{Login: "helixfill", StreamID: "s1", Tier: TierP1Hot, TrackPriority: 9, HelixRank: 1},
+		{Login: "corpus", StreamID: "s2", Tier: TierP1Hot, TrackPriority: 11, HelixRank: 2},
+	})
+	if res.Active != 1 {
+		t.Fatalf("active = %d, want 1", res.Active)
+	}
+	if !m.IsActiveLogin("corpus") {
+		t.Fatal("expected corpus roster to preempt helix fill")
+	}
+	if m.IsActiveLogin("helixfill") {
+		t.Fatal("expected helix fill evicted")
+	}
+	if len(irc.parted) != 1 || irc.parted[0] != "helixfill" {
+		t.Fatalf("parted = %v, want [helixfill]", irc.parted)
+	}
+}

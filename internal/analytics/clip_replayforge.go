@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"streamclone/internal/redact"
 	"strings"
 	"time"
 )
@@ -94,6 +95,14 @@ func sanitizeReplayForgeStatusText(value string) string {
 	if value == "" {
 		return ""
 	}
+	// Route every stored/displayed error surface through the shared redaction
+	// chokepoint first (spec auto-clipper-replayforge-productization,
+	// RF-P0-004 / RF-P5-006, Requirement 1.7): this strips bearer / oauth /
+	// access / refresh / auth / standalone token shapes that the coarse
+	// URL/path heuristics below do not recognize. The heuristics then collapse
+	// any leftover URL, object key, or filesystem path (which are topology, not
+	// token shapes) to a flat "redacted" marker.
+	value = redact.Redact(value)
 	lower := strings.ToLower(value)
 	for _, marker := range []string{"://", "token=", "access_token", "signed_url", "storage_key", "/tmp/", "\\tmp\\", ":\\"} {
 		if strings.Contains(lower, marker) {

@@ -128,16 +128,24 @@ Evidence files: [`ops-001-evidence.txt`](./ops-001-evidence.txt), [`load-001-dry
 
 ## 7. Hosted admission poll intervals (stream-start SLA)
 
-For IRC cap-tier live admission, set both pollers to **30s** in the hosted analytics overlay (private **streampulse-ops** env):
+For IRC cap-tier live admission, use **15s** polls in the hosted analytics overlay (private **streampulse-ops** env) when hub coverage deficit is visible:
 
 ```bash
-PULSE_TOP500_ADMISSION_INTERVAL=30s
-PULSE_PROTECTED_GOLIVE_INTERVAL=30s
+PULSE_LIVE_ADMISSION_SOURCE=roster_then_helix
+PULSE_LIVE_ADMISSION_INTERVAL=15s
+PULSE_TOP500_ADMISSION_INTERVAL=15s
+PULSE_PROTECTED_GOLIVE_INTERVAL=15s
+INGEST_FLUSH_INTERVAL=3s
+INGEST_OPEN_MINUTE_FLUSH_INTERVAL=5s
 ```
+
+**`roster_then_helix`** (recommended for StreamPulse hub): admit all metadata-roster live channels first, then fill remaining IRC slots with Helix global top-live. Aligns hub `liveCollectorDeficitRows` with ingest-core. Pure `helix_top_live` can leave roster-live channels metadata-only while the 250-cap pool is full of outsiders.
 
 Reference overlay: [`deploy/env/profile-hosted-pulse-live-250.env.example`](../../deploy/env/profile-hosted-pulse-live-250.env.example).
 
-Both pollers run an immediate tick on startup; shorter intervals reduce go-live → IRC join latency. Watch Helix rate limits if tightening below 30s.
+Both pollers run an immediate tick on startup; shorter intervals reduce go-live → IRC join latency. Watch Helix rate limits if tightening below 15s.
+
+After deploy + analytics restart, verify hub JSON: `corpusPipeline.roster.liveCollectorDeficitRows` should trend toward **0**; `warming` may persist ~1 minute until first rollups land.
 
 ---
 

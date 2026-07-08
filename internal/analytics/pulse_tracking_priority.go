@@ -3,7 +3,9 @@ package analytics
 // Tracking priority tiers for the analytics collector pool (higher = more important).
 const (
 	TrackPriorityIdleNoRef            = 0
+	TrackPriorityHelixTopLiveFill     = 9
 	TrackPriorityTopRoster            = 10
+	TrackPriorityCorpusRosterLive     = 11
 	TrackPriorityManualWatch          = 30
 	TrackPriorityPrincipalAlwaysTrack = 60
 	TrackPriorityGlobalProtected      = 80

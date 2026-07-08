@@ -481,6 +481,8 @@ func Load() (Config, error) {
 	switch strings.ToLower(strings.TrimSpace(c.PulseLiveAdmissionSource)) {
 	case "roster":
 		c.PulseLiveAdmissionSource = "roster"
+	case "roster_then_helix":
+		c.PulseLiveAdmissionSource = "roster_then_helix"
 	default:
 		c.PulseLiveAdmissionSource = "helix_top_live"
 	}

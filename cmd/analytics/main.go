@@ -270,7 +270,7 @@ func main() {
 						StreamID:  sid,
 						IsLive:    row.IsLive,
 						HelixRank: i + 1,
-						Priority:  analytics.TrackPriorityTopRoster,
+						Priority:  analytics.TrackPriorityForAdmissionCoverageSource(row.CoverageSource),
 					})
 				}
 				return out, nil
