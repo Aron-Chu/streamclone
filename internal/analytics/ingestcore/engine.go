@@ -255,6 +255,14 @@ func (e *Engine) ManagerSnapshot() ManagerSnapshot {
 	return e.manager.Snapshot()
 }
 
+// IsActiveLogin reports whether login has an active ingest-core IRC collector.
+func (e *Engine) IsActiveLogin(login string) bool {
+	if e == nil || e.manager == nil {
+		return false
+	}
+	return e.manager.IsActiveLogin(login)
+}
+
 // Config returns engine config.
 func (e *Engine) Config() Config {
 	if e == nil {

@@ -570,7 +570,14 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 		resp.Coverage.LiveChannels = resp.CorpusPipeline.Roster.Live
 	}
 	if resp.CorpusPipeline.State == CorpusStatusCritical {
-		resp.Coverage.State = CorpusStatusCritical
+		if corpusCriticalFromStaleLegacyCollector(h, resp.CorpusPipeline) {
+			// Ingest-core is live; do not mark public coverage critical from legacy collector drift.
+			if resp.Coverage.State == CorpusStatusCritical {
+				resp.Coverage.State = CorpusStatusDegraded
+			}
+		} else {
+			resp.Coverage.State = CorpusStatusCritical
+		}
 	} else if resp.CorpusPipeline.State == CorpusStatusDegraded && resp.Coverage.State == "operational" {
 		ingest := buildHubIngest(h.ingestEngine)
 		if h.ingestEngine != nil && h.ingestEngine.Config().TieringEnabled &&

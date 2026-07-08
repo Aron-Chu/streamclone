@@ -42,6 +42,22 @@ func TestAssignTierP0Protected(t *testing.T) {
 	}
 }
 
+func TestEngineIsActiveLogin(t *testing.T) {
+	cfg := Config{CoreEnabled: true, MaxActiveIRC: 10}
+	m := NewCollectorManager(cfg, &fakeIRC{}, nil)
+	m.SetRunContext(context.Background())
+	m.Reconcile([]DesiredChannel{
+		{Login: "xqc", StreamID: "s1", Tier: TierP1Hot, TrackPriority: 10, HelixRank: 1},
+	})
+	e := &Engine{cfg: cfg, manager: m}
+	if !e.IsActiveLogin("xqc") {
+		t.Fatal("expected xqc active")
+	}
+	if e.IsActiveLogin("missing") {
+		t.Fatal("expected missing login inactive")
+	}
+}
+
 func TestConfigFromAppDefaultsDisabled(t *testing.T) {
 	cfg := ConfigFromApp(config.Config{})
 	if cfg.CoreEnabled {

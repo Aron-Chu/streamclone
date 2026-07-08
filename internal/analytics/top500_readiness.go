@@ -83,11 +83,7 @@ func (h *Handler) buildTop100ReadinessReport(ctx context.Context, topN int, admi
 	if report.TopN <= 0 {
 		report.TopN = DefaultTop500MetadataTopN
 	}
-	if h.collector != nil {
-		snap := h.collector.TrackingSnapshot()
-		report.CollectorActive = snap.Active
-		report.CollectorMax = snap.Max
-	}
+	report.CollectorActive, report.CollectorMax = h.ircCollectorSnapshot()
 	if h.store == nil {
 		return report, nil
 	}
@@ -158,9 +154,7 @@ func buildTop100ReadinessRow(ctx context.Context, h *Handler, current Top500Curr
 		}
 		row.MetadataFreshnessSeconds = &seconds
 	}
-	if h.collector != nil {
-		row.CollectorTracking = h.collector.IsTracking(login)
-	}
+	row.CollectorTracking = h.isIRCActiveLogin(login)
 	if attempt, ok := getTopRosterAdmissionAttempt(login); ok {
 		row.AdmissionOutcome = attempt.Outcome
 		row.AdmissionMessage = attempt.Message
