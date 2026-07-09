@@ -41,12 +41,12 @@
       "routes": ["/v1/analytics", "/v1/extension", "/v1/pulse"]
     },
     {
-      "id": "service:storygraph",
-      "name": "storygraph",
-      "description": "Pulse Wire news ingest and social spread",
-      "keywords": ["pulse-wire", "storygraph", "news", "spread", "reddit", "lsf"],
-      "path_patterns": ["cmd/storygraph", "internal/storygraph", "internal/social"],
-      "routes": ["/v1/pulse-wire", "/v1/channels"]
+      "id": "service:social",
+      "name": "social",
+      "description": "Reddit/YouTube metadata helpers for channel insights",
+      "keywords": ["social", "reddit", "lsf", "youtube"],
+      "path_patterns": ["internal/social"],
+      "routes": []
     },
     {
       "id": "service:frontend",

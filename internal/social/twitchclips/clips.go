@@ -13,7 +13,7 @@ import (
 
 	"streamclone/internal/config"
 	"streamclone/internal/social"
-	"streamclone/internal/storygraph/reliability"
+	"streamclone/internal/social/reliability"
 )
 
 func init() {

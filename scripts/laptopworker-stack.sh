@@ -44,7 +44,6 @@ case "$cmd" in
     ;;
   stop)
     laptopworker_compose "$ROOT" stop
-    laptopworker_stop_storygraph
     ;;
   restart)
     laptopworker_compose "$ROOT" stop

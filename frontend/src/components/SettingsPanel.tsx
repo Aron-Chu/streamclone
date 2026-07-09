@@ -232,13 +232,6 @@ export default function SettingsButton() {
               <div className="mb-2 text-[11px] font-black uppercase text-zinc-500">System status</div>
               <div className="rounded border border-white/10 bg-white/[0.035] p-3 space-y-3">
                 <SystemHealthPanel variant="compact" />
-                <Link
-                  to="/network"
-                  onClick={() => setOpen(false)}
-                  className="block w-full rounded border border-white/10 bg-white/[0.04] px-3 py-2 text-center text-xs font-black text-zinc-200 transition hover:bg-white/10"
-                >
-                  Network monitor
-                </Link>
                 <button
                   type="button"
                   onClick={() => {

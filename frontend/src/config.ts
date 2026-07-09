@@ -13,7 +13,6 @@ type RuntimeConfig = {
   setupControlUrl?: string
   setupControlWakeEnabled?: string | boolean
   devTokenImportEnabled?: string | boolean
-  pulseWireEnabled?: string | boolean
   hlsLowLatencyEnabled?: string | boolean
   adaptiveLiveLatencyEnabled?: string | boolean
   hlsCdnBearer?: string
@@ -119,9 +118,6 @@ function resolveSetupControlBase() {
 
 export const SETUP_CONTROL_BASE = resolveSetupControlBase()
 export const STREAMCLONE_INSTALL_ID = String(runtime.installId ?? viteEnv.VITE_STREAMCLONE_INSTALL_ID ?? '').trim()
-export const PULSE_WIRE_ENABLED = ['true', '1'].includes(
-  String(runtime.pulseWireEnabled ?? viteEnv.VITE_PULSE_WIRE_ENABLED ?? 'false').toLowerCase(),
-)
 export const HLS_LOW_LATENCY_ENABLED = ['true', '1'].includes(
   String(runtime.hlsLowLatencyEnabled ?? viteEnv.VITE_HLS_LOW_LATENCY_ENABLED ?? 'false').toLowerCase(),
 )

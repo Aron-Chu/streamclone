@@ -37,10 +37,7 @@ interface DirectoryLayoutProps {
   onSearchChange?: (value: string) => void
   headerSubtitle?: string
   showBrowseLink?: boolean
-  showNetworkLink?: boolean
-  showPulseWireLink?: boolean
   browseActive?: boolean
-  pulseWireActive?: boolean
 }
 
 export function DirectoryLayout({
@@ -49,10 +46,7 @@ export function DirectoryLayout({
   onSearchChange,
   headerSubtitle = 'Live directory',
   showBrowseLink = false,
-  showNetworkLink = false,
-  showPulseWireLink = false,
   browseActive = false,
-  pulseWireActive = false,
 }: DirectoryLayoutProps) {
   const [mobileRailOpen, setMobileRailOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
@@ -87,24 +81,6 @@ export function DirectoryLayout({
                         }`}
                       >
                         Browse
-                      </Link>
-                    ) : null}
-                    {showNetworkLink ? (
-                      <Link
-                        to="/network"
-                        className="hidden text-sm font-bold text-zinc-400 transition hover:text-white sm:inline"
-                      >
-                        Network
-                      </Link>
-                    ) : null}
-                    {showPulseWireLink ? (
-                      <Link
-                        to="/pulse-wire"
-                        className={`hidden text-sm font-bold transition sm:inline ${
-                          pulseWireActive ? 'text-[#A970FF]' : 'text-zinc-400 hover:text-white'
-                        }`}
-                      >
-                        Pulse Wire
                       </Link>
                     ) : null}
                   </div>

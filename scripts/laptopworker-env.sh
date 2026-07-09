@@ -101,11 +101,6 @@ laptopworker_synth_env() {
   printf '%s' core >"$root/.streamclone-profile"
 }
 
-laptopworker_stop_storygraph() {
-  docker stop streamclone-storygraph-1 2>/dev/null || true
-  docker rm streamclone-storygraph-1 2>/dev/null || true
-}
-
 laptopworker_ensure_scripts_executable() {
   local root="$1"
   local rel
@@ -236,5 +231,4 @@ laptopworker_compose_up() {
   local root="$1"
   shift
   laptopworker_compose "$root" up -d --remove-orphans "$@"
-  laptopworker_stop_storygraph
 }

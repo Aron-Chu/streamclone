@@ -199,7 +199,6 @@ export default function Directory() {
       searchValue={q}
       onSearchChange={handleSearchChange}
       showBrowseLink
-      showNetworkLink
     >
       {homeMode ? (
         <>

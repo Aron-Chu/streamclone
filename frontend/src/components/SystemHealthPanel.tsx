@@ -115,12 +115,6 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
         ) : null}
 
         <div className="flex flex-wrap gap-2">
-          <Link
-            to="/network"
-            className="rounded border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs font-black text-violet-100 transition hover:bg-violet-500/20"
-          >
-            Open network monitor
-          </Link>
           <button
             type="button"
             onClick={() => void copyDiagnostics()}

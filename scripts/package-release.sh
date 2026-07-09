@@ -96,11 +96,7 @@ IMAGE_TAG=$VERSION
 STREAMCLONE_USE_IMAGES=1
 # Loopback token-import/device-code endpoints are dev-only (docs/security.md).
 TWITCH_DEV_TOKEN_IMPORT_ENABLED=false
-# Pulse Wire removed from desktop install bundle (hosted prod + extension cover Pulse).
-PULSE_WIRE_ENABLED=false
-PULSE_WIRE_SEMANTIC=false
 REDDIT_COMMERCIAL_OK=true
-STORYGRAPH_YT_KEYWORDS=kai cenat,xqc,caseoh,streamer drama
 # ReplayForge runs outside compose; host.docker.internal reaches the host from containers
 CLIPPER_SERVICE_URL=http://host.docker.internal:8095
 VITE_REPLAYFORGE_UI_URL=http://localhost:8096
@@ -113,7 +109,7 @@ TWITCH_OAUTH_CLIENT_SECRET=$TWITCH_OAUTH_CLIENT_SECRET
 EOF
   echo "Included oauth-bundle.env from release secrets"
 else
-  echo "WARN: TWITCH_OAUTH secrets empty — bundle ships without oauth-bundle.env (Reddit-only Pulse Wire still works)" >&2
+  echo "WARN: TWITCH_OAUTH secrets empty — bundle ships without oauth-bundle.env" >&2
 fi
 cp "$ROOT/deploy/env/oauth-bundle.env.example" "$STAGE/deploy/env/oauth-bundle.env.example"
 mkdir -p "$STAGE/runtime"

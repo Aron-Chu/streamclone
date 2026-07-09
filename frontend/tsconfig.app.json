@@ -16,27 +16,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
-  "exclude": [
-    "src/components/Analytics.tsx",
-    "src/components/pulsewire/**",
-    "src/pulseWireApi.ts",
-    "src/utils/pulseWireOriginLink.ts",
-    "src/components/channel/StreamPulsePanel.tsx",
-    "src/components/channel/VodStreamPulsePanel.tsx",
-    "src/components/channel/VodMomentsPanel.tsx",
-    "src/components/analytics/AnalyticsChart.tsx",
-    "src/components/analytics/chartRollupUtils.ts",
-    "src/components/analytics/rightRailTabs.ts",
-    "src/components/analytics/chartTheme.ts",
-    "src/components/analytics/TierIndicator.tsx",
-    "src/components/analytics/RightRail.tsx",
-    "src/components/analytics/MostReactedLive.tsx",
-    "src/components/analytics/MomentDrawer.tsx",
-    "src/components/analytics/LiveStatsBand.tsx",
-    "src/components/analytics/LiveCollectionWarmup.tsx",
-    "src/components/analytics/HeatmapLane.tsx",
-    "src/components/analytics/HeatmapAccessibility.tsx",
-    "src/components/analytics/ClipsTabEmptyState.tsx"
-  ]
+  "include": ["src"]
 }

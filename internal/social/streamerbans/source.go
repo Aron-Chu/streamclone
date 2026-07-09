@@ -14,8 +14,8 @@ import (
 
 	"streamclone/internal/config"
 	"streamclone/internal/social"
+	"streamclone/internal/social/reliability"
 	"streamclone/internal/social/scraper"
-	"streamclone/internal/storygraph/reliability"
 )
 
 const (

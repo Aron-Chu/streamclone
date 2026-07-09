@@ -17,7 +17,6 @@ window.__STREAMCLONE_CONFIG__ = {
   setupControlWakeEnabled: "${SETUP_CONTROL_WAKE_ENABLED:-false}",
   devTokenImportEnabled: "${TWITCH_DEV_TOKEN_IMPORT_ENABLED:-false}",
   installId: "${STREAMCLONE_INSTALL_ID:-}",
-  pulseWireEnabled: "${VITE_PULSE_WIRE_ENABLED:-false}",
   hlsLowLatencyEnabled: "${VITE_HLS_LOW_LATENCY_ENABLED:-false}",
   adaptiveLiveLatencyEnabled: "${VITE_ADAPTIVE_LIVE_LATENCY_ENABLED:-false}"
 };

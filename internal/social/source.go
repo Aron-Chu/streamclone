@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"streamclone/internal/storygraph/reliability"
+	"streamclone/internal/social/reliability"
 )
 
 // Provenance records bounded fetch metadata (raw-data minimization).
