@@ -26,14 +26,14 @@ import {
   STAT_PLACEHOLDER_MUTED_CLASS,
   type StreamCollectionState,
 } from '../utils/statCards.ts'
-import { isActiveLiveCollectorStream, isSyncPrefetchPlaceholder } from '../utils/analyticsStreamRow.ts'
-import { analyticsStreamPathSlug, pickSyncedLiveStreamTarget } from '../utils/syncedLiveStream.ts'
+import { isActiveLiveCollectorStream, isSyncPrefetchPlaceholder, resolveChannelActuallyLive } from '../utils/analyticsStreamRow.ts'
+import { analyticsStreamPathSlug, resolveCanonicalLiveSessionTarget } from '../utils/syncedLiveStream.ts'
 import {
   isDateSlugUnresolved,
   resolveMatchedStream,
   resolveTargetQueryStreamId,
 } from '../utils/streamRouteResolution.ts'
-import { buildTwitchVodUrl, resolveAnalyticsVodId, resolveVodLinkState } from '../utils/twitchVodUrl.ts'
+import { buildTwitchVodUrl, resolveAnalyticsVodId, resolveSessionFallbackVodId, resolveVodLinkState } from '../utils/twitchVodUrl.ts'
 import {
   computeRollupChatStats,
   computeRollupViewerStats,
@@ -51,7 +51,10 @@ import { ChatCoverageBadge, StatCard, ViewerSourceBadge, AnalyticsQualityChip, C
 import { StreamSidebar } from './analytics/StreamSidebar.tsx'
 import { TopEmoteTable } from './analytics/TopEmoteTable.tsx'
 import { MomentReviewPanel } from './analytics/MomentReviewPanel.tsx'
+import { PastBroadcastBanner } from './analytics/PastBroadcastBanner.tsx'
+import { SessionRecapMomentsStrip } from './analytics/SessionRecapMomentsStrip.tsx'
 import { StreamRecapPanel } from './analytics/StreamRecapPanel.tsx'
+import { hasRecapMomentsAvailable } from '../utils/recapMomentsAvailable.ts'
 import { SyncStatusPanel } from './analytics/SyncStatusPanel.tsx'
 import { StreamQualityBanner } from './analytics/StreamQualityBanner.tsx'
 import { diagnoseStreamQuality } from '../utils/streamQuality.ts'
@@ -125,6 +128,15 @@ export function AnalyticsConsole({
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
   const appliedDeepLinkKey = useRef<string | null>(null)
 
+  const handleSelectRollup = useCallback((rollup: AnalyticsMinuteRollup | null) => {
+    if (rollup && selectedRollup?.minuteTs === rollup.minuteTs) {
+      setSelectedRollup(null)
+      setPreviewRollup(null)
+      return
+    }
+    setSelectedRollup(rollup)
+  }, [selectedRollup])
+
   useEffect(() => {
     setSelectedRollup(null)
     setPreviewRollup(null)
@@ -195,6 +207,7 @@ export function AnalyticsConsole({
         peakViewers: (item.peakViewers ?? 0) > 0 ? item.peakViewers : history.peakViewers,
         viewerSamples: Math.max(item.viewerSamples ?? 0, history.viewerSamples ?? 0),
         chatMessages: Math.max(item.chatMessages ?? 0, history.chatMessages ?? 0),
+        vodId: item.vodId?.trim() || history.vodId,
       }
     })
     const localIds = new Set(merged.map((s) => s.streamId))
@@ -249,6 +262,12 @@ export function AnalyticsConsole({
     },
     enabled: Boolean(channelLogin && targetQueryStreamId && isHistoricalRoute && !sessionNotFound),
     staleTime: 15_000,
+    refetchInterval: (query) => {
+      const data = query.state.data as AnalyticsStreamDetail | null | undefined
+      if (resolveChannelActuallyLive(data ?? undefined)) return 15_000
+      if (data?.state === 'live') return 15_000
+      return false
+    },
   })
 
   const detailQuery = isLiveRoute ? liveQuery : historicalDetailQuery
@@ -490,24 +509,42 @@ export function AnalyticsConsole({
   }, [enableSyncActions, layer2Enabled, targetQueryStreamId, refetchChartDuringSync])
 
   const stream = detail?.stream
-  const streamVodId = resolveAnalyticsVodId(detail, recapForStream?.vodId)
+  const fallbackVodId = useMemo(
+    () =>
+      resolveSessionFallbackVodId({
+        sidebarStreams,
+        targetQueryStreamId,
+        detail,
+      }),
+    [sidebarStreams, targetQueryStreamId, detail],
+  )
+  const recapMomentsAvailable = useMemo(
+    () => Boolean(layer2Enabled && recapForStream && hasRecapMomentsAvailable(recapForStream)),
+    [layer2Enabled, recapForStream],
+  )
+  const channelIsLive = useMemo(() => resolveChannelActuallyLive(detail), [detail])
+  const streamVodId = resolveAnalyticsVodId(detail, recapForStream?.vodId) ?? fallbackVodId
   const vodLinkState = useMemo(
     () =>
       resolveVodLinkState({
         detail,
         recapVodId: recapForStream?.vodId,
+        fallbackVodId,
         isLiveCollector: isActiveLiveCollector,
+        channelIsLive,
       }),
-    [detail, recapForStream?.vodId, isActiveLiveCollector],
+    [detail, recapForStream?.vodId, fallbackVodId, isActiveLiveCollector, channelIsLive],
   )
   const rollupCount = detail?.rollups?.length ?? 0
   const isLongStreamChart = rollupCount >= 360
 
-  const headerState = isHistoricalRoute
-    ? detail?.state && detail.state !== 'live'
-      ? detail.state
-      : 'historical'
-    : detail?.state || (detailQuery.isLoading ? 'loading' : 'not_collected')
+  const headerState = channelIsLive || isActiveLiveCollector
+    ? 'live'
+    : isHistoricalRoute
+      ? detail?.state && detail.state !== 'live'
+        ? detail.state
+        : 'historical'
+      : detail?.state || (detailQuery.isLoading ? 'loading' : 'not_collected')
 
   const headerStats = useMemo(() => {
     const rollups = detail?.rollups ?? []
@@ -548,54 +585,66 @@ export function AnalyticsConsole({
     })
   }, [layer2Enabled, showGameSegments, mode, targetQueryStreamId, detail, gamesQuery.data])
 
-  const needsLiveCollectorRedirect = useMemo(() => {
-    if (detailQuery.isLoading || streamsQuery.isLoading) return false
-    if (isHistoricalRoute) return false
-    if (!isLiveRoute) return false
-    const rollups = detail?.rollups ?? []
-    if (rollups.some(rollupHasMinuteData) || rollupsHaveViewerData(rollups)) return false
-    if (isActiveLiveCollectorStream(detail?.stream, detail?.state)) return false
-    if ((detail?.stream?.currentViewers ?? 0) > 0) return false
-    return sidebarStreams.some((s) => (s.viewerSamples ?? 0) > 0 || (s.chatMessages ?? 0) > 0)
+  const liveRouteSessionTarget = useMemo(() => {
+    if (!isLiveRoute) return undefined
+    return resolveCanonicalLiveSessionTarget(sidebarStreams, {
+      liveStreamId: detail?.stream?.streamId || liveQuery.data?.stream?.streamId || liveActiveStreamId,
+      channelLive: channelIsLive || isActiveLiveCollector,
+      channelLogin,
+      startedAt: detail?.stream?.startedAt ?? liveQuery.data?.stream?.startedAt,
+    })
   }, [
-    detail?.rollups,
-    detail?.stream,
-    detail?.state,
-    detailQuery.isLoading,
-    isHistoricalRoute,
     isLiveRoute,
     sidebarStreams,
-    streamsQuery.isLoading,
+    detail?.stream?.streamId,
+    detail?.stream?.startedAt,
+    liveQuery.data?.stream?.streamId,
+    liveQuery.data?.stream?.startedAt,
+    liveActiveStreamId,
+    channelIsLive,
+    isActiveLiveCollector,
+    channelLogin,
   ])
 
-  const syncedLiveStreamTarget = useMemo(() => {
-    if (!needsLiveCollectorRedirect) return undefined
-    return pickSyncedLiveStreamTarget(sidebarStreams, {
-      liveStreamId: detail?.stream?.streamId,
-      channelLive: true,
-    })
-  }, [sidebarStreams, detail?.stream?.streamId, needsLiveCollectorRedirect])
+  const liveRouteSessionSlug = useMemo(() => {
+    if (!liveRouteSessionTarget) return undefined
+    return analyticsStreamPathSlug(liveRouteSessionTarget, sidebarStreams)
+  }, [liveRouteSessionTarget, sidebarStreams])
 
-  const syncedLiveStreamSlug = useMemo(() => {
-    if (!syncedLiveStreamTarget) return undefined
-    return analyticsStreamPathSlug(syncedLiveStreamTarget, sidebarStreams)
-  }, [syncedLiveStreamTarget, sidebarStreams])
+  const shouldRedirectLiveRouteToSession = Boolean(
+    isLiveRoute
+    && !detailQuery.isLoading
+    && !streamsQuery.isLoading
+    && liveRouteSessionSlug,
+  )
 
   useEffect(() => {
-    if (!channelLogin || !syncedLiveStreamSlug || !needsLiveCollectorRedirect) return
-    if (detailQuery.isLoading || streamsQuery.isLoading) return
-    if (syncedLiveStreamTarget?.streamId === targetQueryStreamId) return
-    navigate(buildSessionPath(channelLogin, syncedLiveStreamSlug), { replace: true })
+    if (!shouldRedirectLiveRouteToSession || !channelLogin || !liveRouteSessionSlug) return
+    navigate(buildSessionPath(channelLogin, liveRouteSessionSlug), { replace: true })
   }, [
     buildSessionPath,
     channelLogin,
-    detailQuery.isLoading,
+    liveRouteSessionSlug,
     navigate,
-    needsLiveCollectorRedirect,
-    streamsQuery.isLoading,
-    syncedLiveStreamSlug,
-    syncedLiveStreamTarget?.streamId,
-    targetQueryStreamId,
+    shouldRedirectLiveRouteToSession,
+  ])
+
+  const canonicalLiveSessionSlug = useMemo(() => {
+    const target = resolveCanonicalLiveSessionTarget(sidebarStreams, {
+      liveStreamId: detail?.stream?.streamId || liveActiveStreamId,
+      channelLive: channelIsLive || isActiveLiveCollector,
+      channelLogin,
+      startedAt: detail?.stream?.startedAt,
+    })
+    return target ? analyticsStreamPathSlug(target, sidebarStreams) : undefined
+  }, [
+    sidebarStreams,
+    detail?.stream?.streamId,
+    detail?.stream?.startedAt,
+    liveActiveStreamId,
+    channelIsLive,
+    isActiveLiveCollector,
+    channelLogin,
   ])
 
   const activeMinutesUnavailable = Boolean(
@@ -709,15 +758,6 @@ export function AnalyticsConsole({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            {liveActiveStreamId && isLiveRoute ? (
-              <button
-                type="button"
-                onClick={() => navigate(buildSessionPath(channelLogin, liveActiveStreamId))}
-                className="rounded border border-white/10 bg-white/[0.05] px-3 py-1.5 text-[11px] font-black uppercase text-zinc-300 transition hover:bg-white/10 hover:text-white"
-              >
-                Open session page
-              </button>
-            ) : null}
             <button
               type="button"
               onClick={() => void handleRefresh()}
@@ -771,8 +811,13 @@ export function AnalyticsConsole({
               login={channelLogin}
               streams={sidebarStreams}
               activeID={isHistoricalRoute ? streamId : undefined}
-              isLiveView={isLiveRoute || isActiveLiveCollector}
-              liveState={isActiveLiveCollector ? 'live' : isLiveRoute ? detail?.state : undefined}
+              isLiveView={isLiveRoute}
+              liveState={channelIsLive || isActiveLiveCollector ? 'live' : isLiveRoute ? detail?.state : undefined}
+              liveSessionPath={
+                canonicalLiveSessionSlug
+                  ? buildSessionPath(channelLogin, canonicalLiveSessionSlug)
+                  : buildChannelPath(channelLogin)
+              }
               syncedOnly={syncedOnlyFilter}
               onSyncedOnlyChange={setSyncedOnlyFilter}
               buildSessionPath={buildSessionPath}
@@ -808,6 +853,20 @@ export function AnalyticsConsole({
               {syncNotice && !syncError ? (
                 <p className="text-[11px] font-semibold text-violet-300">{syncNotice}</p>
               ) : null}
+              <PastBroadcastBanner
+                isLiveRoute={isLiveRoute}
+                isActiveLiveCollector={isActiveLiveCollector}
+                stream={stream}
+                syncing={syncing}
+                hasChartData={
+                  (detail?.rollups ?? []).some(rollupHasMinuteData)
+                  || rollupsHaveViewerData(detail?.rollups ?? [])
+                }
+                vodLinkState={vodLinkState}
+                sessionStreamId={targetQueryStreamId}
+                channelLogin={channelLogin}
+                buildSessionPath={buildSessionPath}
+              />
               <AnalyticsChart
                 detail={detail}
                 selectedEmotes={chartEmoteKeys}
@@ -816,7 +875,7 @@ export function AnalyticsConsole({
                 onResetEmotePlots={resetEmotePlots}
                 selectedRollup={selectedRollup}
                 previewRollup={previewRollup}
-                onSelectRollup={setSelectedRollup}
+                onSelectRollup={handleSelectRollup}
                 onRefresh={() => void handleRefresh()}
                 refreshing={refreshing}
                 loading={detailQuery.isLoading && !detail}
@@ -859,6 +918,8 @@ export function AnalyticsConsole({
               <StreamRecapPanel
                 recap={recapForStream}
                 topEmotesCatalog={detail?.topEmotes}
+                rollups={detail?.momentRollups ?? detail?.rollups ?? []}
+                streamStartedAt={stream?.startedAt}
                 onJumpToOffset={handleJumpToRecapOffset}
                 onPreviewOffset={handlePreviewRecapOffset}
               />
@@ -880,17 +941,30 @@ export function AnalyticsConsole({
               </div>
               <div className="p-0">
                 {rightPanelTab === 'moments' ? (
-                  <MomentReviewPanel
-                    rollups={detail?.momentRollups ?? detail?.rollups ?? []}
-                    selectedRollup={selectedRollup}
-                    previewRollup={previewRollup}
-                    onSelectRollup={setSelectedRollup}
-                    onPreviewRollup={setPreviewRollup}
-                    topEmotesCatalog={detail?.topEmotes}
-                    heatmapPoints={layer2Enabled ? heatmapPoints : undefined}
-                    streamStartedAt={stream?.startedAt}
-                    embedded
-                  />
+                  recapMomentsAvailable && recapForStream ? (
+                    <SessionRecapMomentsStrip
+                      recap={recapForStream}
+                      streamStartedAt={stream?.startedAt}
+                      onSelectOffset={handleJumpToRecapOffset}
+                      onPreviewOffset={handlePreviewRecapOffset}
+                      layout="rightRail"
+                      rollups={detail?.momentRollups ?? detail?.rollups ?? []}
+                      heatmapPoints={heatmapPoints}
+                      topEmotesCatalog={detail?.topEmotes}
+                    />
+                  ) : (
+                    <MomentReviewPanel
+                      rollups={detail?.momentRollups ?? detail?.rollups ?? []}
+                      selectedRollup={selectedRollup}
+                      previewRollup={previewRollup}
+                      onSelectRollup={handleSelectRollup}
+                      onPreviewRollup={setPreviewRollup}
+                      topEmotesCatalog={detail?.topEmotes}
+                      heatmapPoints={layer2Enabled ? heatmapPoints : undefined}
+                      streamStartedAt={stream?.startedAt}
+                      embedded
+                    />
+                  )
                 ) : null}
                 {rightPanelTab === 'emotes' ? (
                   <TopEmoteTable

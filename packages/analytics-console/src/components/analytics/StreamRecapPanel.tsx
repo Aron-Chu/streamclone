@@ -1,7 +1,11 @@
 import { useMemo } from 'react'
 import { formatHeatOffset } from '@streamclone/pulse-core'
-import type { AnalyticsTopEmote, PulseRecapEmote, PulseStreamRecap } from '../../apiTypes.ts'
-import { enrichRecapEmotesFromCatalog } from '../../utils/recapEmoteEnrich.ts'
+import type { AnalyticsMinuteRollup, AnalyticsTopEmote, PulseRecapEmote, PulseStreamRecap } from '../../apiTypes.ts'
+import {
+  enrichRecapEmotesFromCatalog,
+  resolveRecapBurstHighlight,
+  resolveRecapDisplayEmotes,
+} from '../../utils/recapEmoteEnrich.ts'
 import { count, getEmoteImageUrl } from '../../utils/consoleFormat.ts'
 import { ConsoleEmoteImg } from './ConsoleEmoteImg.tsx'
 import { EmoteProviderBadge } from './ConsoleBits.tsx'
@@ -9,30 +13,37 @@ import { EmoteProviderBadge } from './ConsoleBits.tsx'
 export function StreamRecapPanel({
   recap,
   topEmotesCatalog,
+  rollups,
+  streamStartedAt,
   onJumpToOffset,
   onPreviewOffset,
 }: {
   recap: PulseStreamRecap
   topEmotesCatalog?: AnalyticsTopEmote[]
+  rollups?: AnalyticsMinuteRollup[]
+  streamStartedAt?: string
   onJumpToOffset?: (offsetSeconds: number) => void
   onPreviewOffset?: (offsetSeconds: number | null) => void
 }) {
   const topMoments = recap.topMoments ?? []
   const topEmotes = useMemo(
-    () => enrichRecapEmotesFromCatalog(recap.topEmotes ?? [], topEmotesCatalog),
+    () => resolveRecapDisplayEmotes(recap.topEmotes ?? [], topEmotesCatalog, 10),
     [recap.topEmotes, topEmotesCatalog],
   )
   const clipCandidates = recap.clipCandidates ?? []
   const topMoment = topMoments[0]
   const hasHeadlineMetric =
     (recap.totalMessages ?? 0) > 0 || (recap.peakChatPerMin ?? 0) > 0
-  const burstEmote = useMemo(() => {
-    const code = recap.funniestEmoteBurst?.code?.trim()
-    if (!code) return undefined
-    const match = topEmotes.find((emote) => emote.code.toLowerCase() === code.toLowerCase())
-    const base = match ?? { code, count: recap.funniestEmoteBurst?.count ?? 0, provider: 'seventv' }
-    return enrichRecapEmotesFromCatalog([base], topEmotesCatalog)[0]
-  }, [recap.funniestEmoteBurst, topEmotes, topEmotesCatalog])
+  const burstHighlight = useMemo(() => {
+    if (!recap.funniestEmoteBurst) return null
+    return resolveRecapBurstHighlight({
+      burst: recap.funniestEmoteBurst,
+      rollups,
+      streamStartedAt,
+      topEmotesCatalog,
+    })
+  }, [recap.funniestEmoteBurst, rollups, streamStartedAt, topEmotesCatalog])
+  const burstEmote = burstHighlight?.emote
 
   if (
     !hasHeadlineMetric
@@ -87,7 +98,7 @@ export function StreamRecapPanel({
               <span className="min-w-0">
                 Emote burst at{' '}
                 <strong className="text-cyan-200">
-                  {formatHeatOffset(recap.funniestEmoteBurst.offsetSeconds)}
+                  {formatHeatOffset(burstHighlight?.offsetSeconds ?? recap.funniestEmoteBurst.offsetSeconds)}
                 </strong>
                 {recap.funniestEmoteBurst.code ? ` · ${recap.funniestEmoteBurst.code}` : ''} (
                 {count(recap.funniestEmoteBurst.count)})

@@ -12,6 +12,8 @@ export type {
   AnalyticsStreamsResponse,
   AnalyticsTopEmote,
   GameSegment,
+  PulseRecapEmote,
+  PulseRecapMoment,
   PulseStreamRecap,
   SyncStatus,
 } from './apiTypes.ts'

@@ -21,6 +21,32 @@ export function isBrokenLocalEmotePath(url: string): boolean {
   return !isLocalEmoteUuid(match[1])
 }
 
+/** True when URL points at the Streamclone emote proxy (often 403 for unsynced UUIDs). */
+export function isBackendEmoteProxyUrl(url: string | undefined, assetBase = ''): boolean {
+  if (!url?.trim()) return false
+  const trimmed = url.trim()
+  if (trimmed.startsWith('/emotes/')) return true
+  try {
+    const parsed = new URL(trimmed, assetBase || 'https://api.streampulse.stream')
+    return parsed.pathname.startsWith('/emotes/')
+  } catch {
+    return false
+  }
+}
+
+/** Prefer a direct CDN URL; fall back when bucket rows only have proxy paths. */
+export function preferResolvableEmoteUrl(
+  direct: string | undefined,
+  fallback: string | undefined,
+  assetBase = '',
+): string | undefined {
+  const absDirect = direct?.trim() || undefined
+  if (absDirect && !isBackendEmoteProxyUrl(absDirect, assetBase)) return absDirect
+  const absFallback = fallback?.trim() || undefined
+  if (absFallback && !isBackendEmoteProxyUrl(absFallback, assetBase)) return absFallback
+  return absDirect ?? absFallback
+}
+
 export interface ResolveEmoteImageUrlOptions {
   provider?: string
   id?: string
@@ -33,7 +59,7 @@ export function resolveEmoteImageUrl(opts: ResolveEmoteImageUrlOptions): string 
   const id = opts.id?.trim() ?? ''
   const imageUrl = opts.imageUrl?.trim()
 
-  if (imageUrl && !isBrokenLocalEmotePath(imageUrl)) {
+  if (imageUrl && !isBrokenLocalEmotePath(imageUrl) && !isBackendEmoteProxyUrl(imageUrl)) {
     return imageUrl
   }
   if (!id) {

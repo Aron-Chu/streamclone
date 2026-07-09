@@ -2,7 +2,7 @@ import type { AnalyticsMinuteRollup, AnalyticsStream, AnalyticsStreamDetail } fr
 import { resolveEmoteAssetUrl } from '../configureApi.ts'
 import { parseEmoteKey } from '../emoteUtils.ts'
 import { isPlaceholderStreamTitle } from './analyticsStreamRow.ts'
-import { resolveEmoteImageUrl } from './emoteImageUrl.ts'
+import { resolveEmoteImageUrl, preferResolvableEmoteUrl } from './emoteImageUrl.ts'
 
 export function count(value: number | null | undefined): string {
   if (value === null || value === undefined) return '-'
@@ -92,8 +92,8 @@ export function streamStateLabel(
   isHistoricalRoute = false,
 ): string {
   if (state === 'not found') return 'not found'
-  if (isHistoricalRoute && (state === 'live' || state === 'loading' || !state)) return 'historical'
   if (state === 'live') return 'live'
+  if (isHistoricalRoute && (state === 'loading' || !state)) return 'historical'
   if (state === 'syncing') return 'syncing'
   if (state === 'historical') return 'historical'
   if (state === 'not_collected') return 'stats only'
@@ -119,13 +119,21 @@ export function getEmoteImageUrl(emote: {
   const provider = emote.provider ?? (parsed && parsed.provider !== 'unknown' ? parsed.provider : undefined)
   const id = emote.id?.trim() || parsed?.id || undefined
   const imageUrl = emote.imageUrl ?? emote.image_url
-  const url = resolveEmoteImageUrl({
+  const directUrl = resolveEmoteImageUrl({
     provider,
     id,
     imageUrl,
     scale: '1x',
   })
-  if (!url) return undefined
-  const absolute = resolveEmoteAssetUrl(url)
-  return absolute || undefined
+  const synthesizedUrl = id
+    ? resolveEmoteImageUrl({
+        provider,
+        id,
+        scale: '1x',
+      })
+    : undefined
+  const absDirect = directUrl ? resolveEmoteAssetUrl(directUrl) : undefined
+  const absSynth = synthesizedUrl ? resolveEmoteAssetUrl(synthesizedUrl) : undefined
+  const preferred = preferResolvableEmoteUrl(absDirect, absSynth)
+  return preferred || undefined
 }
