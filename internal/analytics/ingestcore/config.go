@@ -16,6 +16,7 @@ type Config struct {
 	DualReadMode       bool
 	TieringEnabled     bool
 	HubRosterLimit     int
+	CandidateScanTopN  int
 	P1HotLimit         int
 	MaxActiveIRC       int
 	ShardCount         int
@@ -62,6 +63,7 @@ func ConfigFromApp(app config.Config) Config {
 		DualReadMode:       envBool("INGEST_CORE_DUAL_READ_MODE", false),
 		TieringEnabled:     envBool("INGEST_TIERING_ENABLED", false),
 		HubRosterLimit:     envInt("HUB_ROSTER_LIMIT", defaultHubRosterLimit),
+		CandidateScanTopN:  envInt("INGEST_CANDIDATE_SCAN_TOP_N", 0),
 		P1HotLimit:         envInt("INGEST_P1_HOT_LIMIT", defaultP1HotLimit),
 		MaxActiveIRC:       maxIRC,
 		ShardCount:         envInt("INGEST_SHARD_COUNT", defaultShardCount),
@@ -88,6 +90,7 @@ func ConfigFromApp(app config.Config) Config {
 	if cfg.MaxActiveIRC <= 0 {
 		cfg.MaxActiveIRC = 50
 	}
+	cfg.CandidateScanTopN = normalizeCandidateScanTopN(cfg.CandidateScanTopN, cfg.HubRosterLimit)
 	cfg.ShadowAllowlist = parseAllowlist(os.Getenv("INGEST_SHADOW_CHANNEL_ALLOWLIST"))
 	cfg.ShadowDebug = envBool("INGEST_SHADOW_DEBUG", false)
 	setShadowDebugActive(cfg.ShadowDebug)
@@ -150,6 +153,19 @@ func envFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	return n
+}
+
+// normalizeCandidateScanTopN resolves how many live rows the scheduler asks the
+// candidate source for. When unset, scan width follows HUB_ROSTER_LIMIT so flat
+// tiering-off profiles can scan 500 and admit up to MaxActiveIRC.
+func normalizeCandidateScanTopN(scanTopN, hubRosterLimit int) int {
+	if scanTopN > 0 {
+		return scanTopN
+	}
+	if hubRosterLimit > 0 {
+		return hubRosterLimit
+	}
+	return defaultHubRosterLimit
 }
 
 func envDuration(key string, fallback time.Duration) time.Duration {

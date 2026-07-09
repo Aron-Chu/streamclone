@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"streamclone/internal/config"
 )
 
 func sampleHubResponse() PublicHubResponse {
@@ -333,8 +335,14 @@ func TestGetPublicHubCacheControlHeaders(t *testing.T) {
 
 func TestPublicHubPayloadListCaps(t *testing.T) {
 	// Guardrails for hosted-safe fanout payload size — keep in sync with portal UI expectations.
-	if hubLiveCap != 96 {
-		t.Fatalf("hubLiveCap = %d, want 96", hubLiveCap)
+	if config.DefaultPublicHubLiveCap != 250 {
+		t.Fatalf("DefaultPublicHubLiveCap = %d, want 250", config.DefaultPublicHubLiveCap)
+	}
+	if config.ClampPublicHubLiveCap(600) != 500 {
+		t.Fatalf("ClampPublicHubLiveCap(600) = %d, want 500", config.ClampPublicHubLiveCap(600))
+	}
+	if (&Handler{}).publicHubLiveCap() != 250 {
+		t.Fatalf("default publicHubLiveCap = %d, want 250", (&Handler{}).publicHubLiveCap())
 	}
 	if hubMoversCap != 12 {
 		t.Fatalf("hubMoversCap = %d, want 12", hubMoversCap)
@@ -350,6 +358,45 @@ func TestPublicHubPayloadListCaps(t *testing.T) {
 	}
 	if hubActivityBucketTopEmotesCap != 10 {
 		t.Fatalf("hubActivityBucketTopEmotesCap = %d, want 10", hubActivityBucketTopEmotesCap)
+	}
+}
+
+func TestSortLiveRecordsForHubCapPrefersIRC(t *testing.T) {
+	h := &Handler{
+		collector: NewCollector(nil, nil, nil, nil, nil, 10, time.Second, time.Hour, 100),
+	}
+	h.collector.mu.Lock()
+	h.collector.tracked["synced"] = &trackedChannel{login: "synced", currentStreamID: "s1"}
+	h.collector.mu.Unlock()
+
+	live := []*StreamRecord{
+		{Login: "big", CurrentViewers: 50000},
+		{Login: "synced", CurrentViewers: 1000},
+	}
+	sortLiveRecordsForHubCap(h, live)
+	if live[0].Login != "synced" {
+		t.Fatalf("first live row = %q, want synced (IRC-active)", live[0].Login)
+	}
+}
+
+func TestSortTop500LiveForHubPrefersIRCAndRollups(t *testing.T) {
+	h := &Handler{
+		collector: NewCollector(nil, nil, nil, nil, nil, 10, time.Second, time.Hour, 100),
+	}
+	h.collector.mu.Lock()
+	h.collector.tracked["tracked"] = &trackedChannel{login: "tracked", currentStreamID: "s1"}
+	h.collector.mu.Unlock()
+
+	roster := []Top500Current{
+		{Login: "meta", ViewerCount: intPtr(90000)},
+		{Login: "tracked", ViewerCount: intPtr(5000)},
+	}
+	rich := map[string]channelWindow{
+		"tracked": {coverageState: "synced", viewers: 5000},
+	}
+	sortTop500LiveForHub(h, roster, rich)
+	if roster[0].Login != "tracked" {
+		t.Fatalf("first roster row = %q, want tracked", roster[0].Login)
 	}
 }
 

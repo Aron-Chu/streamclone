@@ -14,6 +14,8 @@ const defaultScraperAPIURL = "http://scraper:8000/v2/scrape"
 const maxCorpusTopN = 1000
 const MaxLiveAdmissionTopN = 5000
 const DefaultLiveAdmissionTopN = 100
+const DefaultPublicHubLiveCap = 250
+const MaxPublicHubLiveCap = 500
 
 type Config struct {
 	HTTPAddr    string `env:"HTTP_ADDR" envDefault:":8080"`
@@ -260,6 +262,7 @@ type Config struct {
 	PulseLiveAdmissionMissGraceCycles int           `env:"PULSE_LIVE_ADMISSION_MISS_GRACE_CYCLES" envDefault:"3"`
 	LiveAdmissionTopN                 int           `env:"LIVE_ADMISSION_TOP_N" envDefault:"0"`
 	MaxActiveIRCChannels              int           `env:"MAX_ACTIVE_IRC_CHANNELS" envDefault:"0"`
+	PublicHubLiveCap                  int           `env:"PUBLIC_HUB_LIVE_CAP" envDefault:"250"`
 
 	PulseHostedMode                bool          `env:"PULSE_HOSTED_MODE" envDefault:"false"`
 	PulseBetaKeys                  string        `env:"PULSE_BETA_KEYS"`
@@ -466,6 +469,7 @@ func Load() (Config, error) {
 		maxIRC = c.PulseMaxActiveChannels
 	}
 	c.PulseLiveAdmissionTopN = ClampLiveAdmissionTopN(c.PulseLiveAdmissionTopN, maxIRC)
+	c.PublicHubLiveCap = ClampPublicHubLiveCap(c.PublicHubLiveCap)
 	if c.PulseLiveAdmissionInterval <= 0 {
 		c.PulseLiveAdmissionInterval = 30 * time.Second
 	}
@@ -622,6 +626,17 @@ func ClampLiveAdmissionTopN(n, maxIRC int) int {
 	}
 	if n > ceiling {
 		return ceiling
+	}
+	return n
+}
+
+// ClampPublicHubLiveCap bounds the public /v1/public/hub live pool and table rows.
+func ClampPublicHubLiveCap(n int) int {
+	if n <= 0 {
+		return DefaultPublicHubLiveCap
+	}
+	if n > MaxPublicHubLiveCap {
+		return MaxPublicHubLiveCap
 	}
 	return n
 }

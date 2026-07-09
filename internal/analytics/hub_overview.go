@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"streamclone/internal/config"
 )
 
 // The public hub endpoint powers the StreamPulse portal landing + analytics hub.
@@ -31,8 +33,6 @@ const (
 
 	hubActivityWindowMinutes      = 30 // default minutes of aggregated activity returned
 	hubActivityMaxPoints          = 240
-	hubPoolCap                    = 96 // channels we join rollups for (bounded cost; aligns with IRC pool expand)
-	hubLiveCap                    = 96 // live channel rows returned (portal table expand)
 	hubMoversCap                  = 12 // portal Top movers rail; pairs with hubEmotesCap / economy panel height
 	hubEmotesCap                  = 12
 	hubActivityBucketTopEmotesCap = 10 // per-bucket inspector + chart tooltip (tooltip slices to 3)
@@ -399,6 +399,88 @@ type channelWindow struct {
 	trendPct      float64
 }
 
+func (h *Handler) publicHubLiveCap() int {
+	if h == nil {
+		return config.DefaultPublicHubLiveCap
+	}
+	return config.ClampPublicHubLiveCap(h.appConfig.PublicHubLiveCap)
+}
+
+func hubCoverageStatePriority(state string) int {
+	switch strings.TrimSpace(strings.ToLower(state)) {
+	case "synced":
+		return 3
+	case "chat_only", "chat", "partial", "collecting":
+		return 2
+	case "viewer_only", "warming":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func hubRosterRowPriority(h *Handler, login string, win channelWindow, hasWindow bool) int {
+	irc := h != nil && h.isIRCActiveLogin(login)
+	if !hasWindow {
+		if irc {
+			return 2
+		}
+		return 0
+	}
+	statePri := hubCoverageStatePriority(win.coverageState)
+	if irc {
+		return 10 + statePri
+	}
+	return statePri
+}
+
+func sortLiveRecordsForHubCap(h *Handler, live []*StreamRecord) {
+	sort.SliceStable(live, func(i, j int) bool {
+		li := normalizeLogin(live[i].Login)
+		lj := normalizeLogin(live[j].Login)
+		pi := 0
+		pj := 0
+		if h != nil && h.isIRCActiveLogin(li) {
+			pi = 1
+		}
+		if h != nil && h.isIRCActiveLogin(lj) {
+			pj = 1
+		}
+		if pi != pj {
+			return pi > pj
+		}
+		if live[i].CurrentViewers != live[j].CurrentViewers {
+			return live[i].CurrentViewers > live[j].CurrentViewers
+		}
+		return li < lj
+	})
+}
+
+func sortTop500LiveForHub(h *Handler, roster []Top500Current, rich map[string]channelWindow) {
+	sort.SliceStable(roster, func(i, j int) bool {
+		li := normalizeLogin(roster[i].Login)
+		lj := normalizeLogin(roster[j].Login)
+		wi, okI := rich[li]
+		wj, okJ := rich[lj]
+		pi := hubRosterRowPriority(h, li, wi, okI)
+		pj := hubRosterRowPriority(h, lj, wj, okJ)
+		if pi != pj {
+			return pi > pj
+		}
+		vi, vj := 0, 0
+		if roster[i].ViewerCount != nil {
+			vi = *roster[i].ViewerCount
+		}
+		if roster[j].ViewerCount != nil {
+			vj = *roster[j].ViewerCount
+		}
+		if vi != vj {
+			return vi > vj
+		}
+		return li < lj
+	})
+}
+
 func rollupsSince(rollups []MinuteRollup, since time.Time) []MinuteRollup {
 	if len(rollups) == 0 || since.IsZero() {
 		return rollups
@@ -434,12 +516,13 @@ func (h *Handler) buildHubPoolWindows(ctx context.Context) []channelWindow {
 	if h == nil {
 		return nil
 	}
+	poolCap := h.publicHubLiveCap()
 	var snapshot TrackingSnapshot
 	if h.collector != nil {
 		snapshot = h.collector.TrackingSnapshot()
 	}
-	logins := make([]string, 0, len(snapshot.TrackedChannels)+hubPoolCap)
-	seenLogins := make(map[string]bool, len(snapshot.TrackedChannels)+hubPoolCap)
+	logins := make([]string, 0, len(snapshot.TrackedChannels)+poolCap)
+	seenLogins := make(map[string]bool, len(snapshot.TrackedChannels)+poolCap)
 	for _, login := range snapshot.TrackedChannels {
 		login = normalizeLogin(login)
 		if login == "" || seenLogins[login] {
@@ -449,7 +532,7 @@ func (h *Handler) buildHubPoolWindows(ctx context.Context) []channelWindow {
 		logins = append(logins, login)
 	}
 	if h.store != nil {
-		if roster, err := h.store.ListTop500LiveForPriorityWatch(ctx, hubTrackerTopN, hubPoolCap); err == nil {
+		if roster, err := h.store.ListTop500LiveForPriorityWatch(ctx, hubTrackerTopN, poolCap); err == nil {
 			for _, row := range roster {
 				login := normalizeLogin(row.Login)
 				if login == "" || seenLogins[login] {
@@ -457,7 +540,7 @@ func (h *Handler) buildHubPoolWindows(ctx context.Context) []channelWindow {
 				}
 				seenLogins[login] = true
 				logins = append(logins, login)
-				if len(logins) >= hubPoolCap {
+				if len(logins) >= poolCap {
 					break
 				}
 			}
@@ -476,14 +559,9 @@ func (h *Handler) buildHubPoolWindows(ctx context.Context) []channelWindow {
 		}
 		live = append(live, rec)
 	}
-	sort.SliceStable(live, func(i, j int) bool {
-		if live[i].CurrentViewers != live[j].CurrentViewers {
-			return live[i].CurrentViewers > live[j].CurrentViewers
-		}
-		return live[i].Login < live[j].Login
-	})
-	if len(live) > hubPoolCap {
-		live = live[:hubPoolCap]
+	sortLiveRecordsForHubCap(h, live)
+	if len(live) > poolCap {
+		live = live[:poolCap]
 	}
 	recentSince := time.Now().UTC().Add(-time.Duration(hubActivityWindowMinutes+5) * time.Minute)
 	windows := make([]channelWindow, 0, len(live))
@@ -590,13 +668,15 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 
 	resp.Ingest = buildHubIngest(h.ingestEngine)
 
+	poolCap := h.publicHubLiveCap()
+
 	// 3. Join the live pool
 	// snapshot is in-memory and can be empty immediately after an analytics
 	// restart, so seed the public chart pool from the persistent Top-500 live
-	// roster as well. The roster is still bounded by hubPoolCap before we join
+	// roster as well. The roster is still bounded by poolCap before we join
 	// rollups, so long-range chart queries stay cheap.
-	logins := make([]string, 0, len(snapshot.TrackedChannels)+hubPoolCap)
-	seenLogins := make(map[string]bool, len(snapshot.TrackedChannels)+hubPoolCap)
+	logins := make([]string, 0, len(snapshot.TrackedChannels)+poolCap)
+	seenLogins := make(map[string]bool, len(snapshot.TrackedChannels)+poolCap)
 	for _, login := range snapshot.TrackedChannels {
 		login = normalizeLogin(login)
 		if login == "" || seenLogins[login] {
@@ -606,7 +686,7 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 		logins = append(logins, login)
 	}
 	if h.store != nil {
-		if roster, err := h.store.ListTop500LiveForPriorityWatch(ctx, hubTrackerTopN, hubPoolCap); err == nil {
+		if roster, err := h.store.ListTop500LiveForPriorityWatch(ctx, hubTrackerTopN, poolCap); err == nil {
 			for _, row := range roster {
 				login := normalizeLogin(row.Login)
 				if login == "" || seenLogins[login] {
@@ -614,7 +694,7 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 				}
 				seenLogins[login] = true
 				logins = append(logins, login)
-				if len(logins) >= hubPoolCap {
+				if len(logins) >= poolCap {
 					break
 				}
 			}
@@ -634,16 +714,11 @@ func (h *Handler) buildPublicHub(ctx context.Context, opts publicHubOptions) Pub
 		}
 		live = append(live, rec)
 	}
-	sort.SliceStable(live, func(i, j int) bool {
-		if live[i].CurrentViewers != live[j].CurrentViewers {
-			return live[i].CurrentViewers > live[j].CurrentViewers
-		}
-		return live[i].Login < live[j].Login
-	})
+	sortLiveRecordsForHubCap(h, live)
 	resp.PoolSize = len(live)
 	resp.Activity.ChannelCount = len(live)
-	if len(live) > hubPoolCap {
-		live = live[:hubPoolCap]
+	if len(live) > poolCap {
+		live = live[:poolCap]
 	}
 
 	// 4. Aggregate pool-scoped rollups for live-channel windows and emote KPIs.
@@ -884,10 +959,13 @@ func (h *Handler) buildHubLiveChannels(ctx context.Context, windows []channelWin
 		}
 	}
 
+	liveCap := h.publicHubLiveCap()
+
 	var roster []Top500Current
 	if h.store != nil {
-		roster, _ = h.store.ListTop500LiveForPriorityWatch(ctx, hubTrackerTopN, hubLiveCap)
+		roster, _ = h.store.ListTop500LiveForPriorityWatch(ctx, hubTrackerTopN, liveCap)
 	}
+	sortTop500LiveForHub(h, roster, rich)
 	rosterByLogin := make(map[string]Top500Current, len(roster))
 	for _, row := range roster {
 		if login := normalizeLogin(row.Login); login != "" {
@@ -895,8 +973,8 @@ func (h *Handler) buildHubLiveChannels(ctx context.Context, windows []channelWin
 		}
 	}
 
-	out := make([]HubLiveChannel, 0, hubLiveCap)
-	seen := make(map[string]bool, hubLiveCap)
+	out := make([]HubLiveChannel, 0, liveCap)
+	seen := make(map[string]bool, liveCap)
 	for _, row := range roster {
 		login := normalizeLogin(row.Login)
 		if login == "" || seen[login] {
@@ -938,12 +1016,12 @@ func (h *Handler) buildHubLiveChannels(ctx context.Context, windows []channelWin
 			ch.DisplayName = login
 		}
 		out = append(out, ch)
-		if len(out) >= hubLiveCap {
+		if len(out) >= liveCap {
 			break
 		}
 	}
 
-	if len(out) < hubLiveCap {
+	if len(out) < liveCap {
 		extra := make([]channelWindow, 0, len(windows))
 		for _, win := range windows {
 			if win.record == nil || seen[normalizeLogin(win.record.Login)] {
@@ -951,7 +1029,16 @@ func (h *Handler) buildHubLiveChannels(ctx context.Context, windows []channelWin
 			}
 			extra = append(extra, win)
 		}
-		sort.SliceStable(extra, func(i, j int) bool { return extra[i].viewers > extra[j].viewers })
+		sort.SliceStable(extra, func(i, j int) bool {
+			li := normalizeLogin(extra[i].record.Login)
+			lj := normalizeLogin(extra[j].record.Login)
+			pi := hubRosterRowPriority(h, li, extra[i], true)
+			pj := hubRosterRowPriority(h, lj, extra[j], true)
+			if pi != pj {
+				return pi > pj
+			}
+			return extra[i].viewers > extra[j].viewers
+		})
 		for _, win := range extra {
 			rec := win.record
 			out = append(out, HubLiveChannel{
@@ -966,7 +1053,7 @@ func (h *Handler) buildHubLiveChannels(ctx context.Context, windows []channelWin
 				CoverageState:   win.coverageState,
 				TrendPct:        win.trendPct,
 			})
-			if len(out) >= hubLiveCap {
+			if len(out) >= liveCap {
 				break
 			}
 		}

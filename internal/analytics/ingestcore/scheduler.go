@@ -42,11 +42,9 @@ func (s *TierScheduler) RunOnce(ctx context.Context) ReconcileResult {
 	if s == nil || s.manager == nil || s.source == nil {
 		return ReconcileResult{}
 	}
-	topN := s.cfg.HubRosterLimit
-	if !s.cfg.TieringEnabled {
-		if s.cfg.MaxActiveIRC > 0 {
-			topN = s.cfg.MaxActiveIRC
-		}
+	topN := s.cfg.CandidateScanTopN
+	if topN <= 0 {
+		topN = s.cfg.HubRosterLimit
 	}
 	rows, err := s.source.ListLiveCandidates(ctx, topN)
 	if err != nil {
