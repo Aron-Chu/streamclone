@@ -44,13 +44,14 @@ var ClipperResponsibilityAllowList = []ClipperResponsibility{
 	{
 		Name:        "moment_context",
 		Requirement: "1.6",
-		Description: "Build the moment_context payload (channel, vod_id, start/end, reason) from Streamclone Analytics moments; no source download or render.",
+		// Legacy allowlist entry during boundary split — moment context lives in
+		// private streampulse-backend after hosted cutover.
+		Description: "Build the moment_context payload (channel, vod_id, start/end, reason) from legacy analytics moments; no source download or render.",
 		RoutePatterns: []string{
 			"/v1/triggers/manual",
 		},
 		PackageHints: []string{
 			"internal/analytics/",
-			"internal/storygraph/clip/",
 		},
 	},
 	{

@@ -1534,7 +1534,7 @@ function ChannelPage() {
   const [relayStartOffset, setRelayStartOffset] = useState(vodOffsetSeconds)
   const prevVodPlaybackIdRef = useRef('')
   const vodAnalyticsContext = parseVodAnalyticsContext(searchParams, channelLogin, isVodPlayback)
-  const { fromAnalytics: vodFromAnalytics, streamId: vodAnalyticsStreamId, analyticsHref: vodAnalyticsHref } = vodAnalyticsContext
+  const { fromAnalytics: vodFromAnalytics, streamId: vodAnalyticsStreamId } = vodAnalyticsContext
   const vodEmbedPrimary = preferTwitchEmbedReview(isVodPlayback, vodFromAnalytics, vodAnalyticsStreamId)
   const relaySessionKey = isVodPlayback ? vodSessionKey(vodPlaybackId) : channelLogin
   const twitchEmbedRef = useRef<TwitchVodPlayerHandle | null>(null)
@@ -2417,7 +2417,7 @@ function ChannelPage() {
                           currentTimeSec={vodBannerCurrentSec}
                           totalDurationSec={vodBannerTotalSec}
                           seekPending={vodSeekPending}
-                          analyticsHref={vodAnalyticsHref}
+                          analyticsHref={null}
                           chatLogHref={
                             vodAnalyticsStreamId
                               ? `/logs/${encodeURIComponent(channelLogin)}/${encodeURIComponent(vodAnalyticsStreamId)}`
@@ -2500,8 +2500,6 @@ function ChannelPage() {
                               channelLogin={channelLogin}
                               vodId={vodPlaybackId}
                               fromAnalytics={vodFromAnalytics}
-                              analyticsHref={vodAnalyticsHref}
-                              analyticsStreamId={vodAnalyticsStreamId || null}
                               onRetry={retry}
                             />
                           ) : (

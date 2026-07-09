@@ -1,53 +1,21 @@
 import { normalizeVodId } from './vodId.ts'
 
-export const STREAMPULSE_ANALYTICS_ORIGIN = 'https://streampulse.stream/analytics'
-
-export function buildHostedAnalyticsMomentLink(
-  login: string,
-  offsetSeconds: number,
-  analyticsStreamId?: string,
-): string {
-  const safeOffset = Number.isFinite(offsetSeconds)
-    ? Math.max(0, Math.trunc(offsetSeconds))
-    : 0
-  const params = new URLSearchParams()
-  if (safeOffset > 0) params.set('offset', String(safeOffset))
-  const suffix = params.toString()
-  const query = suffix ? `?${suffix}` : ''
-  const streamId = analyticsStreamId?.trim()
-  const base = `${STREAMPULSE_ANALYTICS_ORIGIN}/${encodeURIComponent(login)}`
-  if (streamId) {
-    return `${base}/${encodeURIComponent(streamId)}${query}`
-  }
-  return `${base}${query}`
-}
-
-/** @deprecated Local /analytics routes removed — use buildHostedAnalyticsMomentLink. */
-export function buildAnalyticsMomentLink(
-  login: string,
-  offsetSeconds: number,
-  analyticsStreamId?: string,
-): string {
-  return buildHostedAnalyticsMomentLink(login, offsetSeconds, analyticsStreamId)
-}
-
 export function buildMomentJumpLink(
   login: string,
   offsetSeconds: number,
-  options?: { vodId?: string; analyticsStreamId?: string },
+  options?: { vodId?: string },
 ): string {
   const vodId = options?.vodId?.trim()
   if (vodId) {
-    return buildVodDeepLink(login, vodId, offsetSeconds, options?.analyticsStreamId)
+    return buildVodDeepLink(login, vodId, offsetSeconds)
   }
-  return buildHostedAnalyticsMomentLink(login, offsetSeconds, options?.analyticsStreamId)
+  return `/c/${encodeURIComponent(login)}`
 }
 
 export function buildVodDeepLink(
   login: string,
   vodId: string,
   offsetSeconds: number,
-  analyticsStreamId?: string,
 ): string {
   const safeOffset = Number.isFinite(offsetSeconds)
     ? Math.max(0, Math.trunc(offsetSeconds))
@@ -56,11 +24,6 @@ export function buildVodDeepLink(
     vod: vodId,
     offset: String(safeOffset),
   })
-  const streamId = analyticsStreamId?.trim()
-  if (streamId) {
-    params.set('from', 'analytics')
-    params.set('sid', streamId)
-  }
   return `/c/${encodeURIComponent(login)}?${params.toString()}`
 }
 
@@ -110,7 +73,6 @@ export function buildVodStartRequestBody(
 export interface VodAnalyticsContext {
   fromAnalytics: boolean
   streamId: string
-  analyticsHref: string | null
 }
 
 export function preferTwitchEmbedReview(
@@ -129,14 +91,10 @@ export function parseVodAnalyticsContext(
   const streamId = (searchParams.get('sid') ?? '').trim()
   const fromMarker = (searchParams.get('from') ?? '').trim().toLowerCase() === 'analytics'
   if (!isVodPlayback || !channelLogin) {
-    return { fromAnalytics: false, streamId: '', analyticsHref: null }
+    return { fromAnalytics: false, streamId: '' }
   }
   const fromAnalytics = fromMarker || streamId.length > 0
-  const offsetSeconds = Math.max(0, Number.parseInt(searchParams.get('offset') || '0', 10) || 0)
-  const analyticsHref = fromAnalytics
-    ? buildHostedAnalyticsMomentLink(channelLogin, offsetSeconds, streamId || undefined)
-    : null
-  return { fromAnalytics, streamId, analyticsHref }
+  return { fromAnalytics, streamId }
 }
 
 export { normalizeVodId }

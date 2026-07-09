@@ -59,11 +59,11 @@ var (
 	})
 	IngestPostgresWriteErrorsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "ingest_postgres_write_errors_total",
-		Help: "Postgres rollup write errors from ingest-core flusher",
+		Help: "Postgres rollup write errors from IRC ingest flusher",
 	})
 	IngestRedisWriteErrorsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "ingest_redis_write_errors_total",
-		Help: "Redis write errors from ingest-core",
+		Help: "Redis write errors from IRC ingest writer",
 	})
 	IngestShadowCompareMismatchTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "ingest_shadow_compare_mismatch_total",

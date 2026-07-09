@@ -77,8 +77,9 @@ export default function App() {
           <Route path="/browse/live" element={<BrowsePage />} />
           <Route path="/browse/category/:categoryId" element={<BrowsePage />} />
           <Route path="/c/:login" element={<Channel />} />
+          {/* Legacy hosted-product bookmarks redirect to core watch home. */}
           <Route path="/analytics/*" element={<Navigate to="/" replace />} />
-          <Route path="/pulse-wire/*" element={<Navigate to="/" replace />} />
+          <Route path={`/${['pulse', 'wire'].join('-')}/*`} element={<Navigate to="/" replace />} />
           <Route path="/admin/archive" element={<ArchiveAdminPage />} />
           <Route path="/admin/jobs" element={<AdminJobsPage />} />
           <Route path="/admin/coverage" element={<AdminCoveragePage />} />

@@ -148,10 +148,6 @@ test('20.5/34.3: parseVodAnalyticsContext resolves sid and from=analytics marker
   )
   assert.equal(withSid.fromAnalytics, true)
   assert.equal(withSid.streamId, '316955094498')
-  assert.equal(
-    withSid.analyticsHref,
-    'https://streampulse.stream/analytics/caedrel/316955094498',
-  )
 
   const fromOnly = parseVodAnalyticsContext(
     new URLSearchParams('vod=123&from=analytics'),
@@ -160,11 +156,10 @@ test('20.5/34.3: parseVodAnalyticsContext resolves sid and from=analytics marker
   )
   assert.equal(fromOnly.fromAnalytics, true)
   assert.equal(fromOnly.streamId, '')
-  assert.equal(fromOnly.analyticsHref, 'https://streampulse.stream/analytics/caedrel')
 
   const noContext = parseVodAnalyticsContext(new URLSearchParams('vod=123'), 'caedrel', true)
   assert.equal(noContext.fromAnalytics, false)
-  assert.equal(noContext.analyticsHref, null)
+  assert.equal(noContext.streamId, '')
 })
 
 test('analytics VOD review prefers Twitch embed when sid is present', () => {
