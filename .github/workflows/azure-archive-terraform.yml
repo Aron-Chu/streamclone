@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.9.8
 
@@ -51,18 +51,15 @@ jobs:
         run: terraform validate
 
       - name: Terraform plan
-        if: github.event_name == 'pull_request' || github.event.inputs.action == 'plan' || github.event.inputs.action == ''
+        if: vars.STREAMCLONE_AZURE_RG != '' && (github.event_name == 'pull_request' || github.event.inputs.action == 'plan' || github.event.inputs.action == '')
         env:
           TF_VAR_resource_group_name: ${{ vars.STREAMCLONE_AZURE_RG }}
           TF_VAR_location: ${{ vars.STREAMCLONE_AZURE_LOCATION }}
-        run: |
-          if [ -z "$TF_VAR_resource_group_name" ]; then
-            export TF_VAR_resource_group_name=rg-streamclone-archive-ci
-          fi
-          if [ -z "$TF_VAR_location" ]; then
-            export TF_VAR_location=eastus
-          fi
-          terraform plan -input=false
+        run: terraform plan -input=false
+
+      - name: Terraform plan skipped (Azure OIDC not configured)
+        if: vars.STREAMCLONE_AZURE_RG == '' && (github.event_name == 'pull_request' || github.event.inputs.action == 'plan' || github.event.inputs.action == '')
+        run: echo "::notice::Skipping terraform plan — configure STREAMCLONE_AZURE_RG and OIDC (docs/azure-archive-cicd.md)."
 
       - name: Terraform apply (manual only)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
