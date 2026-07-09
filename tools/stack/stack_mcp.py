@@ -27,13 +27,12 @@ SERVICE_PORTS = {
     "video": 8082,
     "chat": 8083,
     "emote": 8084,
-    "analytics": 8086,
     "clipper": 8095,
     "scraper": 8000,
     "proxy": 8090,
     "mediamtx_hls": 8888,
 }
-WATCH_PORTS = [8090, 8081, 8082, 8083, 8084, 8086, 8095, 1935, 8888, 5432, 6379, 9000, 8000]
+WATCH_PORTS = [8090, 8081, 8082, 8083, 8084, 8095, 1935, 8888, 5432, 6379, 9000, 8000]
 
 
 def parse_args() -> argparse.Namespace:
@@ -321,14 +320,11 @@ def compose_logs(service: str, tail: int = 80) -> dict[str, Any]:
         "metadata",
         "video",
         "chat",
-        "analytics",
         "emote",
         "frontend",
         "clipper",
         "scraper",
-        "storygraph",
         "local-proxy",
-        "influxdb",
         "redis",
         "postgres",
         "mediamtx",

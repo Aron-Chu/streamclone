@@ -1,10 +1,8 @@
 #Requires -Version 5.1
-# Capture README showcase screenshots, WebM source clips, and trimmed GIFs at 1920x1080.
+# Capture README showcase screenshots, WebM source clips, and trimmed GIFs at 1920x1080 (core watch UI only).
 param(
     [string]$BaseUrl = 'http://localhost:8090',
-    [string]$PulseUrl = 'http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-24h&to=now&orgId=1&timezone=browser&refresh=30s',
     [string]$ChannelPath = '/c/xqc',
-    [string]$AnalyticsPath = '/analytics/xqc/2026-06-14',
     [int]$ClipSeconds = 7,
     [int]$GifFps = 30,
     [int]$GifSeconds = 6,
@@ -67,9 +65,7 @@ try {
 
 $env:DOCS_PLAYWRIGHT_REQUIRE = Join-Path $repoRoot 'frontend\node_modules\playwright\package.json'
 $env:DOCS_BASE_URL = $BaseUrl
-$env:DOCS_PULSE_URL = $PulseUrl
 $env:DOCS_CHANNEL_PATH = $ChannelPath
-$env:DOCS_ANALYTICS_PATH = $AnalyticsPath
 $env:DOCS_CLIP_SECONDS = [string]$ClipSeconds
 $env:DOCS_VIEWPORT_WIDTH = '1920'
 $env:DOCS_VIEWPORT_HEIGHT = '1080'
@@ -89,14 +85,10 @@ if (-not $SkipGifs) {
     $gifStarts = @{
         directory = 5
         channel = 12
-        analytics = 6
-        pulse = 10
     }
     $gifDurations = @{
         directory = $GifSeconds
         channel = [Math]::Min($GifSeconds, 3)
-        analytics = $GifSeconds
-        pulse = $GifSeconds
     }
     $videos = Get-ChildItem -Path $mediaDir -Filter '*.webm' -ErrorAction SilentlyContinue
     if ($Scenes.Count -gt 0) {
@@ -114,6 +106,6 @@ if (-not $SkipGifs) {
 
 Write-Host ''
 Write-Host 'Saved showcase media:'
-Write-Host '  docs/images/directory.png, channel.png, analytics.png, pulse.png'
-Write-Host '  docs/images/directory.gif, channel.gif, analytics.gif, pulse.gif'
+Write-Host '  docs/images/directory.png, channel.png'
+Write-Host '  docs/images/directory.gif, channel.gif'
 Write-Host '  docs/media/*.webm source clips and capture-summary.json'
