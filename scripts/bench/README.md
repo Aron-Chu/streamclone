@@ -87,15 +87,9 @@ python -m unittest scripts/bench/tests/test_ivr_chat_benchmark.py
 
 Fixture docs live in **streamclone-pulse** — see [`docs/pulse-extension/evidence/bench-ivr-001.md`](../../streamclone-pulse/docs/pulse-extension/evidence/bench-ivr-001.md).
 
-### PROD_SHADOW_CANARY_ONLY runtime proof
+### IVR shadow reconcile proof (operator)
 
-End-to-end shadow → GQL → reconcile against local Docker stack (no Azure archive):
-
-```bash
-bash scripts/bench/ivr-shadow-reconcile-proof.sh
-```
-
-Checks migration 000050, writes artifacts under `runtime/ivr-shadow/`, confirms `gql/canonical` DB rows and zero `ivr` rollup rows. BearHost overlay: `deploy/env/profile-bearhost-corpus-ivr-shadow.env`.
+Hosted ingest shadow reconcile scripts and env overlays moved to **private streampulse-ops**. Local bench scripts here stay read-only planning scaffolds only.
 
 ## Fixture format
 

@@ -59,7 +59,4 @@ PY
 sync_agent "$ROOT/.cursor/agents/backend-safety-reviewer.md" "backend-safety-reviewer.agent.md"
 sync_agent "$ROOT/.cursor/agents/ops-diagnostics-reviewer.md" "ops-diagnostics-reviewer.agent.md"
 
-PULSE_AGENT="$ROOT/../streamclone-pulse/.cursor/agents/frontend-ux-reviewer.md"
-sync_agent "$PULSE_AGENT" "frontend-ux-reviewer.agent.md"
-
-echo "VS Code Copilot agents synced to $OUT"
+echo "VS Code Copilot agents synced to $OUT (core reviewers only; portal UX agent lives in streamclone-pulse)"
