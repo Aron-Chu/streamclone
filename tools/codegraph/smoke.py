@@ -13,8 +13,9 @@ CORE_NODE_TABLES = ("File", "Function", "Class", "Interface", "ImportModule")
 CORE_REL_TABLES = ("DEFINES", "IMPORTS", "CALLS")
 DOMAIN_NODE_TABLES = ("Route", "Test", "Service")
 
-MIN_FILES = 900
-MIN_SYMBOLS = 5000
+# Step 7 core-only public tree (~530 files on CI after analytics deletion).
+MIN_FILES = 450
+MIN_SYMBOLS = 2500
 
 MERGE_SYMBOL = "GetFresh"
 MERGE_FILE = "internal/metadata/cache/cache.go"
