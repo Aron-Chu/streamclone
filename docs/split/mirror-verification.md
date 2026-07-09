@@ -57,11 +57,13 @@ All of the above are included in the backend mirror hash match **after sync**. T
 | 1 | Mirror verification (this doc) | **Done** |
 | 2 | `scripts/check-product-boundary.sh` + pre-commit hook | **Done** |
 | 3 | Track `docs/streampulse-product-boundary.md`, `deploy/smoke/test-core-routes-only.sh` | Commit in preflight PR |
-| 4 | Trim install/release/load scripts (core-only surfaces) | **Batch 3 done** — strict hits **152** (was 171) |
+| 4 | Trim install/release/load scripts (core-only surfaces) | **Batch 9 done** — setup-control scraper-only; strict hits **91** (config + migrations only) |
 | 5 | Move ops probes/load scripts → **streampulse-ops** | Copied; delete from public |
 | 6 | Delete `docs/split/**` | **After** strict grep green (not in this PR) |
 | 7 | `git rm` legacy analytics trees | **After** ops confirms backend image/digest on prod |
 | 8 | Hosted health + digest evidence | Ops — `ok: true` alone is insufficient |
+
+**Status (Batch 9):** Autonomous public-surface cleanup **complete**. Strict boundary **91 hits** — all in `internal/config/*` (89) + paused migrations (2). Non-config public surfaces report clean. **Ready for cutover pending ops digest**; final deletion PR blocked on hosted image/digest evidence below.
 
 ---
 
