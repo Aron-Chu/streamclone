@@ -101,11 +101,6 @@ laptopworker_synth_env() {
   printf '%s' core >"$root/.streamclone-profile"
 }
 
-laptopworker_stop_storygraph() {
-  docker stop streamclone-storygraph-1 2>/dev/null || true
-  docker rm streamclone-storygraph-1 2>/dev/null || true
-}
-
 laptopworker_ensure_scripts_executable() {
   local root="$1"
   local rel
@@ -170,7 +165,7 @@ laptopworker_plan_update() {
         build_pick[analytics]=1
         build_pick[emote]=1
         ;;
-      frontend/*|packages/pulse-core/*)
+      frontend/*|packages/analytics-console/*)
         build_pick[frontend]=1
         ;;
       cmd/*|internal/*|deploy/Dockerfile*)
@@ -236,5 +231,4 @@ laptopworker_compose_up() {
   local root="$1"
   shift
   laptopworker_compose "$root" up -d --remove-orphans "$@"
-  laptopworker_stop_storygraph
 }

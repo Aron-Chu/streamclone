@@ -222,7 +222,7 @@ function Invoke-StreamcloneComposeDown {
 
     $profile = Get-StreamcloneProfileFromRoot -Root $Root -Default 'core'
 
-    if ($profile -notin @('core', 'scraper', 'clipper', 'full', 'pulse')) {
+    if ($profile -notin @('core', 'scraper', 'clipper', 'full')) {
         # Unknown/legacy profile marker: tear down everything to be safe.
         $profile = 'full'
     }

@@ -1,1 +1,0 @@
-DROP TABLE IF EXISTS public_emote_provider_hourly_rollups;

@@ -13,11 +13,12 @@ CORE_NODE_TABLES = ("File", "Function", "Class", "Interface", "ImportModule")
 CORE_REL_TABLES = ("DEFINES", "IMPORTS", "CALLS")
 DOMAIN_NODE_TABLES = ("Route", "Test", "Service")
 
-MIN_FILES = 900
-MIN_SYMBOLS = 5000
+# Step 7 core-only public tree (~530 files on CI after analytics deletion).
+MIN_FILES = 450
+MIN_SYMBOLS = 2500
 
-MERGE_SYMBOL = "mergeMinuteRollups"
-MERGE_FILE = "internal/analytics/api.go"
+MERGE_SYMBOL = "GetFresh"
+MERGE_FILE = "internal/metadata/cache/cache.go"
 
 LEGACY_TOOLS = {
     "get_call_chain",
@@ -137,11 +138,11 @@ def main() -> int:
     route_count = query_count(conn, "Route")
     if route_count < 1:
         fail(f"routes={route_count} < 1")
-    ext = conn.execute(
-        "MATCH (r:Route) WHERE r.path CONTAINS '/v1/extension' RETURN count(r) AS count"
+    core_routes = conn.execute(
+        "MATCH (r:Route) WHERE r.path CONTAINS '/v1/streams' RETURN count(r) AS count"
     )
-    if int(ext.get_next()[0]) < 1:
-        fail("no /v1/extension routes indexed")
+    if int(core_routes.get_next()[0]) < 1:
+        fail("no core /v1/streams routes indexed")
     ok(f"domain tables present; routes={route_count}")
 
     tool_manager = getattr(codegraph_mcp.mcp, "_tool_manager", None)

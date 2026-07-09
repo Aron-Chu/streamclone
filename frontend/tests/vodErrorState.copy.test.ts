@@ -17,15 +17,14 @@ function actionKinds(actions: { kind: VodErrorActionKind }[]): VodErrorActionKin
   return actions.map(a => a.kind)
 }
 
-test('2.1 invalid_vod_id: stale/invalid copy + back-to-analytics, no retry', () => {
+test('2.1 invalid_vod_id: stale/invalid copy + open-on-Twitch, no retry', () => {
   const d = describeVodError({ code: 'invalid_vod_id' }, ctx)
   assert.equal(d.code, 'invalid_vod_id')
   assert.match(d.title, /invalid/i)
   assert.match(d.description, /invalid/i)
-  assert.match(d.description, /stale/i)
   assert.equal(d.retryable, false)
   const kinds = actionKinds(d.actions)
-  assert.ok(kinds.includes('analytics'), 'offers back-to-analytics')
+  assert.ok(kinds.includes('twitch'), 'offers open-on-Twitch')
   assert.ok(!kinds.includes('retry'), 'non-retryable: no retry action')
 })
 
@@ -38,19 +37,16 @@ test('2.2 vod_unavailable: deleted/sub-only copy + open-on-Twitch, no retry', ()
   assert.equal(d.retryable, false)
   const kinds = actionKinds(d.actions)
   assert.ok(kinds.includes('twitch'), 'offers open-on-Twitch')
-  assert.ok(kinds.includes('analytics'), 'offers back-to-analytics')
   assert.ok(!kinds.includes('retry'), 'non-retryable: no retry action')
   const twitch = d.actions.find(a => a.kind === 'twitch')
   assert.ok(twitch?.href?.includes('twitch.tv'), 'twitch action links to Twitch')
   assert.equal(twitch?.external, true)
 })
 
-test('34.3 vod_unavailable from analytics: honest copy + open/back/resync, no deletion-only blame', () => {
+test('34.3 vod_unavailable from analytics deep link: honest copy + open-on-Twitch only', () => {
   const analyticsCtx = {
     ...ctx,
     fromAnalytics: true,
-    analyticsHref: '/analytics/caedrel/316955094498',
-    analyticsStreamId: '316955094498',
   }
   const d = describeVodError({ code: 'vod_unavailable' }, analyticsCtx)
   assert.match(d.title, /won.t play in Streamclone/i)
@@ -58,11 +54,7 @@ test('34.3 vod_unavailable from analytics: honest copy + open/back/resync, no de
   assert.doesNotMatch(d.description, /^this vod is deleted from twitch/i)
   const kinds = actionKinds(d.actions)
   assert.ok(kinds.includes('twitch'))
-  assert.ok(kinds.includes('analytics'))
-  assert.ok(kinds.includes('resync'))
   assert.ok(!kinds.includes('retry'))
-  const analytics = d.actions.find(a => a.kind === 'analytics')
-  assert.equal(analytics?.href, '/analytics/caedrel/316955094498')
 })
 
 test('2.3 upstream_token_failed: auth-issue copy, retry follows flag', () => {
@@ -78,7 +70,6 @@ test('2.3 upstream_token_failed: auth-issue copy, retry follows flag', () => {
   const retryable = describeVodError({ code: 'upstream_token_failed', retryable: true }, ctx)
   assert.equal(retryable.retryable, true)
   assert.ok(actionKinds(retryable.actions).includes('retry'))
-  assert.ok(actionKinds(retryable.actions).includes('analytics'))
 })
 
 test('2.4 capacity_reached: retry copy + retry action, always retryable', () => {

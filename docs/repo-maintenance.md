@@ -15,14 +15,14 @@ Small index for docs, cleanup, and install bug-fix notes.
 | [docs/MCP.md](MCP.md) | Local MCP setup and usage |
 | [docs/CODEX.md](CODEX.md) | Codex MCP, skills mirror, config |
 | [docs/workspace.md](workspace.md) | Two-repo layout, doc ownership, dev workflow |
-| [docs/pulse-extension/](pulse-extension/) | Redirect stubs → [streamclone-pulse extension spec](https://github.com/Aron-Chu/streamclone-pulse/tree/master/docs/pulse-extension) |
-| [packages/pulse-core/](../packages/pulse-core/) | Shared scoring/types for frontend + extension |
+| [docs/streampulse-product-boundary.md](streampulse-product-boundary.md) | What is *not* in public Streamclone (StreamPulse backend/ops) |
+| Extension spec | [streamclone-pulse `docs/pulse-extension/`](https://github.com/Aron-Chu/streamclone-pulse/tree/master/docs/pulse-extension) |
 | [SECURITY.md](../SECURITY.md) | Vulnerability reporting |
 | [docs/security.md](security.md) | Operator hardening |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow |
 | [docs/scraper-cloudflare-and-proxy.md](scraper-cloudflare-and-proxy.md) | Scraper notes |
 | [docs/tiers-scraper-and-social-spread.md](tiers-scraper-and-social-spread.md) | Tier detachment, scraper coupling, proxies, Social spread |
-| [docs/scraping-archive/requirements.md](scraping-archive/requirements.md) | Bulk scrape + Azure blob archive requirements |
+| [docs/archive/scraping-archive/requirements.md](archive/scraping-archive/requirements.md) | Bulk scrape + Azure blob archive requirements (archived) |
 | [docs/storage/README.md](storage/README.md) | Storage SoT index — Azure authoritative, R2 planned, VOD Library direction |
 | [docs/storage/azure-to-r2-migration.md](storage/azure-to-r2-migration.md) | Azure → R2 migration audit (Phase 0.6 inventory, Phase 1 prep) |
 | [docs/agents-streamclone-and-replayforge.md](agents-streamclone-and-replayforge.md) | Clip Studio / ReplayForge boundary |
@@ -101,7 +101,7 @@ Bug fixes ship from this repo. Copying source into the release install only upda
 | 2026-06-15 | `fc6406c` (assessed 2026-06-21) | Repair localhost relays for IPv4 and IPv6 — `ensure-localhost-relays.ps1` |
 | 2026-06-15 | assessed 2026-06-21 | Repo hygiene (Phase 1): doc/router alignment (`AGENTS.md`, `SERVICE_MAP.md`, `docs/workspace.md`), `.gitignore` grafana PNG pattern, dead frontend shims removed, clipper profile refs cleaned — remaining: `make check`, CodeQL, CODEOWNERS, issue templates |
 | 2026-06-17 | assessed 2026-06-21 | Install automation (partial): ReplayForge vs clipper cleanup done in Makefile/skills; Pulse Wire release defaults, release env merge on upgrade, warming UI — verify and close per item |
-| 2026-06-19 | `fc6406c` (assessed 2026-06-21) | Uninstall uses same compose profiles as start/stop (`pulse-wire`, feature flags from `.env`) on Windows and bash |
+| 2026-06-19 | `fc6406c` (assessed 2026-06-21) | Uninstall uses same compose profiles as start/stop (feature flags from `.env`) on Windows and bash |
 
 ## Legacy Config Aliases
 

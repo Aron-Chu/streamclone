@@ -28,15 +28,11 @@ export interface VodErrorInput {
 export interface VodErrorContext {
   channelLogin?: string | null
   vodId?: string | null
-  /** Deep link included `from=analytics` and/or `sid=` (Req 34.3). */
+  /** Deep link included `from=analytics` and/or `sid=` for embed fallback. */
   fromAnalytics?: boolean
-  /** Resolved analytics page href when analytics context is present. */
-  analyticsHref?: string | null
-  /** Analytics stream id from the `sid` query param (enables Re-sync). */
-  analyticsStreamId?: string | null
 }
 
-export type VodErrorActionKind = 'retry' | 'analytics' | 'twitch' | 'hard-refresh' | 'resync'
+export type VodErrorActionKind = 'retry' | 'twitch' | 'hard-refresh'
 
 export interface VodErrorAction {
   kind: VodErrorActionKind
@@ -105,20 +101,14 @@ function twitchUrl(ctx: VodErrorContext): string {
   return 'https://www.twitch.tv'
 }
 
-function analyticsAction(ctx: VodErrorContext, primary = false): VodErrorAction {
-  const href =
-    ctx.analyticsHref ??
-    (ctx.channelLogin ? `/analytics/${encodeURIComponent(ctx.channelLogin)}` : '/analytics')
+function twitchAction(ctx: VodErrorContext, primary = false): VodErrorAction {
   return {
-    kind: 'analytics',
-    label: 'Back to Analytics',
-    href,
+    kind: 'twitch',
+    label: 'Open on Twitch',
+    href: twitchUrl(ctx),
+    external: true,
     primary,
   }
-}
-
-function resyncAction(): VodErrorAction {
-  return { kind: 'resync', label: 'Re-sync' }
 }
 
 function retryAction(label = 'Retry'): VodErrorAction {
@@ -141,48 +131,32 @@ export function describeVodError(error: VodErrorInput, ctx: VodErrorContext = {}
         code,
         title: 'VOD link is invalid',
         description:
-          'This VOD link is invalid or the analytics data is stale. Head back to analytics and pick a fresh moment.',
+          'This VOD link is invalid or outdated. Open the video on Twitch or return to the live channel.',
         retryable: false,
-        actions: [analyticsAction(ctx, true)],
+        actions: [twitchAction(ctx, true)],
       }
     case 'vod_unavailable': {
+      const reason = (error.reason ?? '').trim().toLowerCase()
+      const usherBlocked = reason === 'usher_404'
       if (ctx.fromAnalytics) {
-        const actions: VodErrorAction[] = [
-          { kind: 'twitch', label: 'Open on Twitch', href: twitchUrl(ctx), external: true, primary: true },
-        ]
-        if (ctx.analyticsHref) {
-          actions.push(analyticsAction(ctx))
-        }
-        if (ctx.analyticsStreamId) {
-          actions.push(resyncAction())
-        }
-        const reason = (error.reason ?? '').trim().toLowerCase()
-        const usherBlocked = reason === 'usher_404'
         return {
           code,
           title: "VOD won't play in Streamclone",
           description: usherBlocked
             ? 'This VOD plays on Twitch in your browser, but Streamclone could not relay it with an anonymous token. Sign in with Twitch (top bar), then retry — or open the video on Twitch at this moment.'
-            : 'This VOD may be deleted, subscriber-only, or restricted on Twitch — or the VOD id from analytics is stale. Re-sync stream metadata, open the video on Twitch to verify, or return to analytics.',
+            : 'This VOD may be deleted, subscriber-only, or restricted on Twitch — or the VOD id in the link is stale. Open the video on Twitch to verify.',
           retryable: false,
-          actions,
+          actions: [twitchAction(ctx, true)],
         }
       }
-      {
-        const reason = (error.reason ?? '').trim().toLowerCase()
-        const usherBlocked = reason === 'usher_404'
-        return {
-          code,
-          title: usherBlocked ? "VOD won't play in Streamclone relay" : 'VOD unavailable',
-          description: usherBlocked
-            ? 'This VOD may play on Twitch in your browser, but Streamclone could not relay it. Use the embedded Twitch player when available, or open the video on Twitch.'
-            : 'This VOD is deleted, subscriber-only, or not yet published. You can open the stream on Twitch instead.',
-          retryable: false,
-          actions: [
-            { kind: 'twitch', label: 'Open on Twitch', href: twitchUrl(ctx), external: true, primary: true },
-            analyticsAction(ctx),
-          ],
-        }
+      return {
+        code,
+        title: usherBlocked ? "VOD won't play in Streamclone relay" : 'VOD unavailable',
+        description: usherBlocked
+          ? 'This VOD may play on Twitch in your browser, but Streamclone could not relay it. Use the embedded Twitch player when available, or open the video on Twitch.'
+          : 'This VOD is deleted, subscriber-only, or not yet published. You can open the stream on Twitch instead.',
+        retryable: false,
+        actions: [twitchAction(ctx, true)],
       }
     }
     case 'upstream_token_failed':
@@ -192,7 +166,7 @@ export function describeVodError(error: VodErrorInput, ctx: VodErrorContext = {}
         description:
           'Streamclone could not authenticate with Twitch upstream. Check your token configuration, then try again.',
         retryable,
-        actions: [...(retryable ? [retryAction()] : []), analyticsAction(ctx)],
+        actions: retryable ? [retryAction()] : [],
       }
     case 'capacity_reached':
       return {
@@ -226,9 +200,12 @@ export function describeVodError(error: VodErrorInput, ctx: VodErrorContext = {}
         title: 'VOD playback failed',
         description: detail
           ? `VOD playback failed: ${detail}`
-          : 'VOD playback failed for an unexpected reason. You can retry or head back to analytics.',
+          : 'VOD playback failed for an unexpected reason. You can retry or open the video on Twitch.',
         retryable,
-        actions: [...(retryable ? [retryAction()] : []), analyticsAction(ctx)],
+        actions: [
+          ...(retryable ? [retryAction()] : []),
+          ...(retryable ? [] : [twitchAction(ctx)]),
+        ],
       }
     default:
       return {
@@ -236,7 +213,10 @@ export function describeVodError(error: VodErrorInput, ctx: VodErrorContext = {}
         title: 'VOD playback failed',
         description: detail || 'VOD playback failed for an unexpected reason.',
         retryable,
-        actions: [...(retryable ? [retryAction()] : []), analyticsAction(ctx)],
+        actions: [
+          ...(retryable ? [retryAction()] : []),
+          ...(retryable ? [] : [twitchAction(ctx)]),
+        ],
       }
   }
 }

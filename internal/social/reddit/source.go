@@ -11,7 +11,7 @@ import (
 	"streamclone/internal/config"
 	"streamclone/internal/metadata/model"
 	"streamclone/internal/social"
-	"streamclone/internal/storygraph/reliability"
+	"streamclone/internal/social/reliability"
 )
 
 func init() {
@@ -34,21 +34,21 @@ func NewSource(cfg config.Config) *Source {
 	return &Source{
 		cfg: cfg,
 		client: New(Options{
-			Provider:       cfg.RedditProvider,
-			BaseURL:        cfg.RedditAPIURL,
-			OAuthAPIURL:    cfg.RedditOAuthAPIURL,
-			TokenURL:       cfg.RedditTokenURL,
-			ClientID:       cfg.RedditClientID,
-			ClientSecret:   cfg.RedditClientSecret,
-			AccessToken:    cfg.RedditAccessToken,
-			HTMLFallback:   cfg.RedditHTMLFallback,
-			ThirdPartyURL:  cfg.RedditThirdPartyURL,
-			ThirdPartyKey:  cfg.RedditThirdPartyKey,
-			ScraperURL:     cfg.ScraperAPIURL,
-			ScraperKey:     cfg.ScraperAPIKey,
+			Provider:             cfg.RedditProvider,
+			BaseURL:              cfg.RedditAPIURL,
+			OAuthAPIURL:          cfg.RedditOAuthAPIURL,
+			TokenURL:             cfg.RedditTokenURL,
+			ClientID:             cfg.RedditClientID,
+			ClientSecret:         cfg.RedditClientSecret,
+			AccessToken:          cfg.RedditAccessToken,
+			HTMLFallback:         cfg.RedditHTMLFallback,
+			ThirdPartyURL:        cfg.RedditThirdPartyURL,
+			ThirdPartyKey:        cfg.RedditThirdPartyKey,
+			ScraperURL:           cfg.ScraperAPIURL,
+			ScraperKey:           cfg.ScraperAPIKey,
 			SocialScrapeUseProxy: cfg.SocialScrapeUseProxy,
-			LSFLowPriority: cfg.RedditLSFLowPriority,
-			UserAgent:      "streamclone/1.0",
+			LSFLowPriority:       cfg.RedditLSFLowPriority,
+			UserAgent:            "streamclone/1.0",
 		}),
 	}
 }
@@ -62,9 +62,6 @@ func (s *Source) Capabilities() social.Caps {
 }
 
 func (s *Source) Healthy(ctx context.Context) error {
-	if !s.cfg.RedditCommercialOK && s.cfg.PulseWireEnabled {
-		return fmt.Errorf("reddit commercial gate: set REDDIT_COMMERCIAL_OK=true")
-	}
 	if s.client == nil || s.client.baseURL == "" {
 		return fmt.Errorf("reddit not configured")
 	}

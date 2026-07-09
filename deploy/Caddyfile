@@ -25,37 +25,6 @@
 	}
 	reverse_proxy @emote_assets emote:8080
 
-	@analytics {
-		path_regexp analytics ^/v1/(analytics|extension|pulse|public|portal)(/|$)
-	}
-	reverse_proxy @analytics analytics:8080 {
-		transport http {
-			read_timeout 15m
-			write_timeout 15m
-		}
-	}
-
-	@internal_replayforge_jobs {
-		method POST
-		path /v1/internal/replayforge/jobs/*
-	}
-	reverse_proxy @internal_replayforge_jobs analytics:8080 {
-		transport http {
-			read_timeout 15m
-			write_timeout 15m
-		}
-	}
-
-	@admin_archive {
-		path /v1/admin/archive /v1/admin/archive/* /v1/admin/system /v1/admin/system/*
-	}
-	reverse_proxy @admin_archive analytics:8080 {
-		transport http {
-			read_timeout 15m
-			write_timeout 15m
-		}
-	}
-
 	@hls {
 		path /live/*
 	}
@@ -82,7 +51,12 @@
 	}
 	route @clipper {
 		uri replace /v1/clipper /v1
-		reverse_proxy host.docker.internal:8095
+		reverse_proxy host.docker.internal:8095 {
+			# RF-P5-013: inject clipper mutation Auth_Token server-side from env
+			# so the browser never carries it. Empty when unset (ReplayForge then
+			# disables its token gate).
+			header_up Authorization "Bearer {$CLIPPER_WEBHOOK_TOKEN}"
+		}
 	}
 
 	@metadata {

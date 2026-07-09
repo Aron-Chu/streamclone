@@ -1,12 +1,10 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./frontend/
-COPY packages/pulse-core ./packages/pulse-core
 WORKDIR /app/frontend
 # devDependencies (tailwindcss, postcss) must be present for vite build CSS.
 RUN npm ci --include=dev || npm install --include=dev
 COPY frontend/ ./
-COPY packages/pulse-core ../packages/pulse-core
 RUN npm run build
 
 FROM nginx:1.27-alpine

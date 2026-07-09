@@ -11,7 +11,7 @@ CADDY="${ROOT}/deploy/Caddyfile"
   echo "# Source: deploy/Caddyfile (+ local-tunnel overlay may extend)"
   echo
   if [[ -f "$CADDY" ]]; then
-    grep -E '^\s*@(chat|video|emote|analytics|storygraph|hls|metadata|clipper|admin)' "$CADDY" 2>/dev/null || true
+    grep -E '^\s*@(chat|video|emote|hls|metadata|clipper|admin)' "$CADDY" 2>/dev/null || true
     grep -E 'reverse_proxy|path_regexp|path ' "$CADDY" | head -40
   else
     echo "(Caddyfile missing)"

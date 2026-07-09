@@ -5,9 +5,6 @@
 #     -f deploy/docker-compose.yml \
 #     -f deploy/docker-compose.local-tunnel.yml \
 #     -f deploy/docker-compose.release.yml up -d --pull always
-#
-# Scraper is not bundled in desktop release installs (StreamPulse hosts minute analytics).
-# Dev/operators: --profile scraper with streamclone-scraper sibling or SCRAPER_USE_IMAGES=1.
 
 services:
   migrate:
@@ -26,10 +23,6 @@ services:
     image: ghcr.io/aron-chu/streamclone/chat:${IMAGE_TAG:-latest}
     build: !reset null
 
-  analytics:
-    image: ghcr.io/aron-chu/streamclone/analytics:${IMAGE_TAG:-latest}
-    build: !reset null
-
   emote:
     image: ghcr.io/aron-chu/streamclone/emote:${IMAGE_TAG:-latest}
     build: !reset null
@@ -39,8 +32,3 @@ services:
     build: !reset null
     # Pre-built image already includes nginx config — no host bind mounts in release bundles.
     volumes: !reset []
-
-  analytics-workers:
-    image: ghcr.io/aron-chu/streamclone/analytics:${IMAGE_TAG:-latest}
-    build: !reset null
-    profiles: []

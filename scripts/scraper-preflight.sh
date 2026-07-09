@@ -22,7 +22,7 @@ Usage: scripts/scraper-preflight.sh [options]
   -h, --help       Show this help
 
 Env:
-  SCRAPER_SKIP_PREFLIGHT=1   make up-scraper / up-full skip this script
+  SCRAPER_SKIP_PREFLIGHT=1   compose --profile scraper up -d scraper skips this script
   SCRAPE_TIMEOUT_MS          Scrape timeout (default 120000)
 EOF
 }
@@ -126,7 +126,7 @@ EOF
 }
 
 if ! docker_cmd ps --format '{{.Names}}' | grep -qx streamclone-scraper; then
-  fail "streamclone-scraper is not running — start with: make up-scraper"
+  fail "streamclone-scraper is not running — start with: docker compose --profile scraper up -d scraper"
 fi
 
 wait_scraper_health

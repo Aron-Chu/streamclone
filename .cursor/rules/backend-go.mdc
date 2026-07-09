@@ -16,4 +16,4 @@ Read `.kiro/steering/tech.md` first.
 - **Runtime truth:** `make context-snapshots` or MCP `stack_health` / `postgres_query` (SELECT only).
 - Tests: `go test ./internal/<pkg>/...` before `make check-quick`.
 
-Pulse BFF: also read sibling `streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md` when touching `internal/analytics/pulse*` or `extension_api.go`.
+Legacy analytics code may remain during boundary split. For StreamPulse BFF work, use private **streampulse-backend** — see [docs/streampulse-product-boundary.md](../../docs/streampulse-product-boundary.md).

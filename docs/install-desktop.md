@@ -55,7 +55,7 @@ Not required for watching. Sign in only for chat send, follows, or Clip Studio e
 2. Click **Sign in (optional)**.
 3. Approve on Twitch.
 
-Official releases may include bundled OAuth (`oauth-bundle.env`) for Sign in and optional Twitch clip ingest on Pulse Wire. Without it, **Pulse Wire still works on Reddit** (public/scraper paths when `REDDIT_COMMERCIAL_OK=true`). Self-builders: copy `deploy/env/oauth-bundle.env.example` or run `twitch configure` then setup.
+Official releases may include bundled OAuth (`oauth-bundle.env`) for Sign in. Self-builders: copy `deploy/env/oauth-bundle.env.example` or run `twitch configure` then setup. StreamPulse extension and hosted analytics are separate — see [streampulse-product-boundary.md](streampulse-product-boundary.md).
 
 ## macOS / Linux
 
@@ -82,18 +82,18 @@ Always pass the repo `.env` when running Compose from a checkout so service env 
 ```powershell
 docker compose --env-file .env -f deploy/docker-compose.yml up -d
 docker compose --env-file .env -f deploy/docker-compose.yml ps
-docker compose --env-file .env -f deploy/docker-compose.yml logs storygraph
+docker compose --env-file .env -f deploy/docker-compose.yml logs metadata
 ```
 
 ```sh
 docker compose --env-file .env -f deploy/docker-compose.yml up -d
 ```
 
-`make up` / `make down` wrap the same flags. Without `--env-file .env`, interpolated values like `PULSE_WIRE_ENABLED`, `REDDIT_PROVIDER`, and `SCRAPER_API_URL` may fall back to compose defaults.
+`make up` / `make down` wrap the same flags. Without `--env-file .env`, interpolated values like `REDDIT_PROVIDER` and `SCRAPER_API_URL` may fall back to compose defaults.
 
 ## Troubleshooting
 
-- App up but charts empty: start Analytics.
+- App up but directory empty: wait for metadata sync or run **Check Streamclone**.
 - Clip Studio auth errors: sign in on localhost (chat OAuth syncs clipper tokens), then restart ReplayForge.
 - `localhost:8090` down: run **Check Streamclone** or `make ps`.
 - Install stale after a release: use manager **Update**.

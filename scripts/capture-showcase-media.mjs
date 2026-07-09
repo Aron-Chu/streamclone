@@ -11,9 +11,7 @@ const root = process.cwd()
 const width = Number(process.env.DOCS_VIEWPORT_WIDTH || 1920)
 const height = Number(process.env.DOCS_VIEWPORT_HEIGHT || 1080)
 const baseUrl = trimTrailingSlash(process.env.DOCS_BASE_URL || 'http://localhost:8090')
-const pulseUrl = process.env.DOCS_PULSE_URL || 'http://localhost:3000/d/streamclone-emote-pulse/emote-pulse?from=now-24h&to=now&orgId=1&timezone=browser&refresh=30s'
 const channelPath = process.env.DOCS_CHANNEL_PATH || '/c/xqc'
-const analyticsPath = process.env.DOCS_ANALYTICS_PATH || '/analytics/xqc/2026-06-14'
 const clipMs = Number(process.env.DOCS_CLIP_SECONDS || 7) * 1000
 const imagesDir = path.join(root, 'docs', 'images')
 const mediaDir = path.join(root, 'docs', 'media')
@@ -45,29 +43,6 @@ const scenes = [
       await page.keyboard.press('PageDown').catch(() => undefined)
       await sleep(900)
       await page.keyboard.press('PageUp').catch(() => undefined)
-    },
-  },
-  {
-    name: 'analytics',
-    url: `${baseUrl}${analyticsPath}`,
-    settleMs: 6000,
-    action: async (page) => {
-      await page.mouse.move(520, 520, { steps: 30 })
-      await page.mouse.move(1120, 520, { steps: 30 })
-      await gentleScroll(page)
-    },
-  },
-  {
-    name: 'pulse',
-    url: pulseUrl,
-    settleMs: 6000,
-    beforeShot: loginGrafanaIfNeeded,
-    action: async (page) => {
-      await page.mouse.move(480, 360, { steps: 24 })
-      await page.mouse.move(1320, 620, { steps: 24 })
-      await page.keyboard.press('PageDown').catch(() => undefined)
-      await sleep(1000)
-      await page.keyboard.press('Home').catch(() => undefined)
     },
   },
 ]
@@ -158,32 +133,6 @@ async function captureScene(browser, scene) {
   } catch (error) {
     await context.close().catch(() => undefined)
     return { ok: false, scene: scene.name, message: error?.message || String(error) }
-  }
-}
-
-async function loginGrafanaIfNeeded(page, scene) {
-  const user = process.env.DOCS_GRAFANA_USER || 'admin'
-  const passwords = (process.env.DOCS_GRAFANA_PASSWORDS || process.env.DOCS_GRAFANA_PASSWORD || process.env.GRAFANA_ADMIN_PASSWORD || 'streampulse,devpulse,admin')
-    .split(',')
-    .map((password) => password.trim())
-    .filter(Boolean)
-  const userInput = page.locator('input[name="user"], input[aria-label="Username"], input[placeholder="email or username"]').first()
-  if (await userInput.count().catch(() => 0)) {
-    for (const password of passwords) {
-      await userInput.fill(user)
-      await page.locator('input[name="password"], input[type="password"]').first().fill(password)
-      await page.locator('button[type="submit"], button:has-text("Log in")').first().click()
-      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined)
-      await sleep(1500)
-      if (!(await page.locator('input[name="user"], input[placeholder="email or username"]').count().catch(() => 0))) {
-        const skipButton = page.locator('button:has-text("Skip"), a:has-text("Skip")').first()
-        if (await skipButton.count().catch(() => 0)) {
-          await skipButton.click().catch(() => undefined)
-        }
-        await page.goto(scene.url, { waitUntil: 'domcontentloaded', timeout: 45000 })
-        return
-      }
-    }
   }
 }
 

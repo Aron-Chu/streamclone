@@ -43,7 +43,7 @@ Runtime code is clean — no stale `console.log`, `debugger`, or agent debug ing
 | `docs/repo-maintenance.md` | Index updated; pending install log rows closed or split |
 | `.kiro/steering/{clipper,analytics,tech}.md` | Fixed broken relative links |
 | `.codex/AGENTS.md` | Fixed links to root AGENTS and CODEX docs |
-| `docs/pulse-extension/*` | Redirect stubs use GitHub URLs to streamclone-pulse; Figma mirror policy documented |
+| `docs/pulse-extension/*` | **Removed** (2026-07 boundary split) — canonical in **streamclone-pulse** |
 
 ### Spec (streamclone-pulse)
 

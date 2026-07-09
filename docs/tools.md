@@ -57,18 +57,15 @@ Split every external input into **core** (product depends on it), **enrichment**
 | **streamclone-stack** MCP | Health, ports, compose logs |
 | **streamclone-data** MCP | SELECT-only Postgres/Redis |
 | **make context-snapshots** | Offline runtime summaries |
-| **Pulse review skills** | `.agents/skills/pulse/pulse-live-coverage-review` |
+| **StreamPulse backend/ops skills** | private **streampulse-backend** / **streampulse-ops** / **streamclone-pulse** — not this repo |
 
-See [`CODEX.md`](CODEX.md) for the full Pulse architecture review prompt.
+See [streampulse-product-boundary.md](streampulse-product-boundary.md) and [`CODEX.md`](CODEX.md).
 
 ---
 
-## 5. Two backfill pipelines (do not confuse)
+## 5. Legacy backfill pipelines (archived)
 
-| Pipeline | Code | BearHost Pulse profile |
-|----------|------|------------------------|
-| **Pulse extension backfill** | `pulse_backfill.go`, `sync_pulse_missed.go` | User-triggered; `PULSE_MAX_BACKFILLS=1` |
-| **Archive gold/silver** | `backfill_worker.go`, `gold_enqueuer.go` | **Disabled** (`BACKFILL_ENABLED=false`) |
+Hosted extension backfill and corpus Silver/Gold workers are **not** public Streamclone scope. See [streampulse-product-boundary.md](streampulse-product-boundary.md) and private **streampulse-backend** for backfill code paths.
 
 ---
 

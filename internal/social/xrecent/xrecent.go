@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"streamclone/internal/social"
-	"streamclone/internal/storygraph/reliability"
+	"streamclone/internal/social/reliability"
 )
 
 func init() {
@@ -17,7 +17,7 @@ func init() {
 // Source is a Phase 2 X recent-search adapter (budgeted).
 type Source struct{}
 
-func (s *Source) Name() string { return "xrecent" }
+func (s *Source) Name() string           { return "xrecent" }
 func (s *Source) Risk() reliability.Risk { return reliability.RiskPublicAPI }
 func (s *Source) Capabilities() social.Caps {
 	return social.Caps{RefreshMetrics: true} // no RealtimeFirehose

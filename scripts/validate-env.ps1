@@ -114,10 +114,8 @@ if ([string]::IsNullOrWhiteSpace($oauthId) -or [string]::IsNullOrWhiteSpace($oau
     }
 }
 
-if ($envValues['PULSE_WIRE_ENABLED'] -eq 'true') {
-    if ($envValues['REDDIT_COMMERCIAL_OK'] -ne 'true') {
-        Add-ValidateWarning -Message 'PULSE_WIRE_ENABLED=true but REDDIT_COMMERCIAL_OK is not true' -Hint 'Reddit ingest stays disabled until you accept commercial API terms (set REDDIT_COMMERCIAL_OK=true in .env.local)'
-    }
+if ($envValues['REDDIT_PROVIDER'] -eq 'oauth' -and $envValues['REDDIT_COMMERCIAL_OK'] -ne 'true') {
+    Add-ValidateWarning -Message 'REDDIT_PROVIDER=oauth but REDDIT_COMMERCIAL_OK is not true' -Hint 'Set REDDIT_COMMERCIAL_OK=true in .env.local when using Reddit OAuth for LSF metadata'
 }
 
 $streamerbansEnabled = ($envValues['STREAMERBANS_INGEST_ENABLED'] -eq 'true')

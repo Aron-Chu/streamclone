@@ -10,7 +10,6 @@ window.__STREAMCLONE_CONFIG__ = {
   chatWs: "${VITE_CHAT_WS:-auto}",
   chatHttp: "${VITE_CHAT_HTTP:-auto}",
   clipperUrl: "${VITE_CLIPPER_URL:-auto}",
-  clipperToken: "${VITE_CLIPPER_TOKEN:-}",
   replayforgeUiUrl: "${VITE_REPLAYFORGE_UI_URL:-http://localhost:8096}",
   maxRetainedMessages: "${VITE_MAX_RETAINED_MESSAGES:-250}",
   streamcloneProfile: "${STREAMCLONE_PROFILE:-core}",
@@ -18,7 +17,6 @@ window.__STREAMCLONE_CONFIG__ = {
   setupControlWakeEnabled: "${SETUP_CONTROL_WAKE_ENABLED:-false}",
   devTokenImportEnabled: "${TWITCH_DEV_TOKEN_IMPORT_ENABLED:-false}",
   installId: "${STREAMCLONE_INSTALL_ID:-}",
-  pulseWireEnabled: "${VITE_PULSE_WIRE_ENABLED:-false}",
   hlsLowLatencyEnabled: "${VITE_HLS_LOW_LATENCY_ENABLED:-false}",
   adaptiveLiveLatencyEnabled: "${VITE_ADAPTIVE_LIVE_LATENCY_ENABLED:-false}"
 };

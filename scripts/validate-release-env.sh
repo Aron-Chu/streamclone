@@ -49,7 +49,6 @@ assert_eq() {
   fi
 }
 
-assert_eq PULSE_WIRE_ENABLED false
 assert_eq REDDIT_COMMERCIAL_OK true
 assert_eq TWITCH_DEV_TOKEN_IMPORT_ENABLED false
 

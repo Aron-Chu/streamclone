@@ -52,10 +52,10 @@ $compose = @(
 & @compose run --rm migrate
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-& @compose build frontend chat analytics
+& @compose build frontend chat
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-& @compose up -d --no-deps --force-recreate frontend chat analytics local-proxy
+& @compose up -d --no-deps --force-recreate frontend chat local-proxy
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 & (Join-Path $PSScriptRoot 'ensure-setup-control.ps1')

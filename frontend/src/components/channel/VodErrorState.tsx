@@ -34,11 +34,7 @@ export interface VodErrorStateProps {
   channelLogin?: string | null
   vodId?: string | null
   fromAnalytics?: boolean
-  analyticsHref?: string | null
-  analyticsStreamId?: string | null
   onRetry?: () => void
-  onBackToAnalytics?: () => void
-  onResync?: () => void
   className?: string
 }
 
@@ -53,19 +49,13 @@ export function VodErrorState({
   channelLogin,
   vodId,
   fromAnalytics,
-  analyticsHref,
-  analyticsStreamId,
   onRetry,
-  onBackToAnalytics,
-  onResync,
   className,
 }: VodErrorStateProps) {
   const descriptor = describeVodError(error, {
     channelLogin,
     vodId,
     fromAnalytics,
-    analyticsHref,
-    analyticsStreamId,
   })
   const autoRetryKey = `${descriptor.code}:${vodId ?? ''}`
   const autoRetryStateRef = useRef<{ key: string; count: number }>({ key: autoRetryKey, count: 0 })
@@ -94,13 +84,6 @@ export function VodErrorState({
     switch (action.kind) {
       case 'retry':
         onRetry?.()
-        break
-      case 'analytics':
-        if (onBackToAnalytics) onBackToAnalytics()
-        else if (action.href) window.location.assign(action.href)
-        break
-      case 'resync':
-        onResync?.()
         break
       case 'hard-refresh':
         window.location.reload()
@@ -146,13 +129,6 @@ export function VodErrorState({
                 rel="noreferrer noopener"
                 className={`${base} ${tone}`}
               >
-                {action.label}
-              </a>
-            )
-          }
-          if (action.kind === 'analytics' && action.href && !onBackToAnalytics) {
-            return (
-              <a key={action.kind} href={action.href} className={`${base} ${tone}`}>
                 {action.label}
               </a>
             )

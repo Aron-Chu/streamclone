@@ -4,8 +4,6 @@ VERSION ?= $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo latest)
 ENV_FILE ?= .env
 COMPOSE_FEATURE_PROFILES ?= $(shell bash -c 'source scripts/lib/env.sh 2>/dev/null; env_feature_compose_profiles "$(ENV_FILE)"' | awk '{for (i=1;i<=NF;i++) printf " --profile %s", $$i}')
 COMPOSE_CORE ?= docker compose --env-file $(ENV_FILE) -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml$(COMPOSE_FEATURE_PROFILES)
-COMPOSE_SCRAPER ?= $(COMPOSE_CORE) --profile scraper
-COMPOSE_FULL ?= $(COMPOSE_CORE) --profile scraper
 POWERSHELL ?= powershell.exe
 TWITCH_SCOPES ?= chat:read chat:edit user:read:follows clips:edit
 TWITCH_LOCAL_AUTH_URL ?= http://localhost:8090
@@ -18,54 +16,43 @@ PORTS ?= 8090
 CODEGRAPH_VENV ?= .codegraph/.venv
 CODEGRAPH_PY ?= $(CODEGRAPH_VENV)/bin/python
 CODEGRAPH_DB ?= .codegraph/streamclone.kuzu
-CODEGRAPH_PULSE_REPO ?= ../streamclone-pulse
-CODEGRAPH_PULSE_DB ?= $(CODEGRAPH_PULSE_REPO)/.codegraph/streamclone-pulse.kuzu
 
-ENV_RELOAD_SERVICES ?= chat metadata analytics emote frontend
+ENV_RELOAD_SERVICES ?= chat metadata emote frontend
 
-.PHONY: help env up app stop down down-clean nuke restart rebuild up-scraper up-full \
+.PHONY: help env up app stop down down-clean nuke restart rebuild \
 	refresh-auth reload-env reload-env-if-stale ensure-oauth ensure-frontend-config \
-	scraper-reload scraper-check scraper-preflight scraper-warm scraper-proxy-benchmark scraper-turnstile-benchmark flame-proxy-preflight flame-proxy-benchmark social-probe hybrid-preflight ps ports migrate logs \
+	ps ports migrate logs \
 	test vet build tidy integration-up integration-down integration-test \
-	test-video test-analytics test-analytics-gold-segments test-emote test-metadata \
-	test-pulse-emote rebuild-analytics-emote restart-analytics \
-	smoke-pulse-emote pulse-emote-pick-stream smoke-pulse-emote-gold smoke-pulse-emote-gold-fail \
+	test-video test-emote test-metadata \
 	go-test-docker go-vet-docker go-build-docker \
 	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
-	clipper-test codegraph-install codegraph codegraph-full codegraph-smoke codegraph-incremental codegraph-mcp codegraph-pulse mcp-setup codex-setup codex-sync-skills claude-setup claude-sync-skills claude-sync-agents \
+	clipper-test codegraph-install codegraph codegraph-full codegraph-smoke codegraph-incremental codegraph-mcp mcp-setup codex-setup codex-sync-skills claude-setup claude-sync-skills claude-sync-agents \
 	context-snapshots context-verify \
 	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
-	frontend-restart frontend-refresh frontend-logs compose-config-check azure-scraper-config-check azure-archive-plane-config-check bearhost-config-check bearhost-config-check-local bearhost-config-check-release bearhost-rsync bearhost bearhost-help bearhost-bronze-status bearhost-corpus-only grafana grafana-up grafana-stop grafana-setup grafana-sync grafana-watch grafana-archive-status grafana-watch-install grafana-watch-install-cron grafana-watch-uninstall grafana-watch-uninstall-cron bearhost-grafana bearhost-grafana-up bearhost-grafana-stop bearhost-grafana-setup bearhost-grafana-tunnel bearhost-grafana-tunnel-start bearhost-grafana-tunnel-stop bearhost-grafana-sync bearhost-observability-enable bearhost-observability-status bearhost-observability-up bearhost-observability-down local-vps-only check check-quick \
+	frontend-restart frontend-refresh frontend-logs compose-config-check \
+	check check-quick product-boundary-preflight product-boundary-strict \
 	bootstrap setup validate-env security-scan smoke smoke-ui install-hooks \
 	preflight-deps start stop-user ensure-localhost agent-smoke coverage-report \
-	rebuild-analytics-emote restart-analytics test-pulse-emote \
-	smoke-pulse-emote pulse-emote-pick-stream smoke-pulse-emote-gold smoke-pulse-emote-gold-fail \
 	laptopworker-status laptopworker-smoke laptopworker-update laptopworker-boot-check laptopworker-setup laptopworker-setup-verify
 
 help:
 	@printf 'Streamclone — common targets\n\n'
 	@printf 'Stack:\n'
 	@printf '  make up / app        Start core stack\n'
-	@printf '  make up-scraper      Core + TwitchTracker scraper\n'
-	@printf '  make up-full         Core + Analytics scraper\n'
 	@printf '  make stop / down     Stop compose (keep data)\n'
-	@printf '  make local-vps-only  Stop local scraper; disable Tier-0/Bronze (VPS owns scrape)\n'
 	@printf '  make down-clean      Stop + remove pg/minio volumes\n'
 	@printf '  make nuke            Full teardown: compose (all profiles), setup-control, orphans\n'
 	@printf '  make restart         stop + up\n'
-	@printf '  make rebuild         stop + up-full\n'
 	@printf '  make ps / ports / logs / migrate\n\n'
 	@printf 'Auth:\n'
 	@printf '  make refresh-auth        OAuth sync + reload stale services\n'
 	@printf '  make twitch-local-auth   Device-code login for localhost:8090\n'
 	@printf '  make twitch-sync         Sync Twitch CLI creds into .env\n\n'
 	@printf 'Quality: make check-quick | make check | test | vet | build | clipper-test | smoke | agent-smoke\n'
-	@printf 'Pulse emote (A+ path): make rebuild-analytics-emote | test-pulse-emote | smoke-pulse-emote\n'
-	@printf '  make pulse-emote-pick-stream | smoke-pulse-emote-gold LOGIN=... STREAM_ID=...\n'
 	@printf 'Agent MCP: make mcp-setup | make mcp-verify | make codex-setup | make claude-setup | codegraph | bash scripts/mcp-preflight.sh\n'
-	@printf '          make test-video | test-analytics | test-emote | test-metadata\n'
+	@printf '          make test-video | test-emote | test-metadata\n'
 	@printf '          make frontend-test | frontend-audit | compose-config-check\n'
-	@printf '          make frontend-refresh  Build + migrate + restart frontend/chat/analytics\n'
+	@printf '          make frontend-refresh  Build + migrate + restart frontend/chat\n'
 	@printf '          make frontend-restart  Rebuild frontend image + restart frontend/proxy only\n\n'
 	@printf 'Laptopworker (tailnet dev host — run from repo root):\n'
 	@printf '  make laptopworker-status   ssh stack ps on laptopworker\n'
@@ -77,8 +64,6 @@ help:
 	@printf '  Without make: scripts\\laptopworker-remote.cmd status|smoke|update\n\n'
 	@printf 'Hosted production ops (private streampulse-ops):\n'
 	@printf '  Deploy uses pinned IMAGE_TAG from GHCR — not make targets here.\n'
-	@printf '  Local hybrid scrape handoff:\n'
-	@printf '  make local-vps-only             Stop local scraper; remote VPS owns scrape\n'
 
 env:
 	@test -f .env || bash scripts/env-synthesize.sh core .env
@@ -87,18 +72,6 @@ up app: env ensure-oauth
 	$(COMPOSE_CORE) up -d --build --remove-orphans
 	@$(MAKE) reload-env-if-stale
 	@$(MAKE) ensure-localhost PORTS=8090
-
-up-scraper: env ensure-oauth
-	$(COMPOSE_SCRAPER) up -d --build --remove-orphans
-	@$(MAKE) reload-env-if-stale
-	@$(MAKE) ensure-localhost PORTS=8090
-	@if [ -z "$$SCRAPER_SKIP_PREFLIGHT" ]; then $(MAKE) scraper-preflight; fi
-
-up-full: env ensure-oauth
-	$(COMPOSE_FULL) up -d --build --remove-orphans
-	@$(MAKE) reload-env-if-stale
-	@$(MAKE) ensure-localhost PORTS=8090
-	@if [ -z "$$SCRAPER_SKIP_PREFLIGHT" ]; then $(MAKE) scraper-preflight; fi
 
 stop down:
 	@command -v bash >/dev/null 2>&1 && ENV_FILE=$(ENV_FILE) bash scripts/compose-down.sh || \
@@ -113,7 +86,7 @@ nuke:
 		wsl bash -lc "cd '$$(wslpath -a '$(CURDIR)')' && ENV_FILE='$(ENV_FILE)' bash scripts/nuke.sh"
 
 restart: stop up
-rebuild: stop up-full
+rebuild: stop up
 
 reload-env: env
 	@echo "Recreating env-sensitive services ($(ENV_RELOAD_SERVICES))..."
@@ -132,37 +105,6 @@ ensure-frontend-config: env
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-frontend-config.ps1 -EnvFile $(ENV_FILE) || true
 
 refresh-auth: env ensure-oauth reload-env-if-stale
-
-scraper-reload: env
-	$(COMPOSE_SCRAPER) up -d --no-deps --force-recreate scraper
-
-scraper-check: env
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/scraper-preflight.ps1 -CheckOnly
-
-scraper-preflight: env
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/scraper-preflight.ps1
-
-hybrid-preflight: env
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/azure-hybrid-smoke.ps1 -PreflightOnly
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/scraper-preflight.ps1 -ScraperURL http://azure-streamclone:8000 -CheckOnly
-
-scraper-warm:
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/warm-camoufox-profile.ps1
-
-scraper-proxy-benchmark:
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/scraper-proxy-benchmark.ps1
-
-scraper-turnstile-benchmark:
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/scraper-turnstile-benchmark.ps1
-
-flame-proxy-preflight:
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/flame-proxy-preflight.ps1
-
-flame-proxy-benchmark:
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/run-flame-proxy-benchmark.ps1 -UseFlameApi -RotateSessionOnFail -RecreateScraperOnRetry
-
-social-probe:
-	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/social-probe.ps1
 
 ps: env
 	@docker ps -a --filter "name=streamclone" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
@@ -190,42 +132,6 @@ test:
 
 test-video:
 	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/video/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/video/...
-
-test-analytics:
-	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/analytics/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/analytics/...
-
-test-analytics-gold-segments: integration-up
-	INTEGRATION=1 $(GO) test ./internal/analytics/... -run 'GoldVODSegmentStore|GoldVODSegmentKey|PlanGoldVOD' -count=1 -timeout 120s
-
-test-pulse-emote:
-	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/analytics/... -run 'TestRequireReadyForGold|TestCollectorStartKicks|TestWatchReturns|TestLiveEmote|TestEmoteSync' -count=1 || \
-		docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/analytics/... -run 'TestRequireReadyForGold|TestCollectorStartKicks|TestWatchReturns|TestLiveEmote|TestEmoteSync' -count=1
-
-rebuild-analytics-emote: env
-	$(COMPOSE_CORE) build analytics emote
-	$(COMPOSE_CORE) up -d --no-deps analytics emote
-	@$(MAKE) ensure-localhost PORTS=8090
-
-restart-analytics: env
-	$(COMPOSE_CORE) restart analytics
-	@$(MAKE) ensure-localhost PORTS=8090
-
-smoke-pulse-emote: env
-	@bash scripts/pulse-emote-smoke.sh
-
-pulse-emote-pick-stream: env
-	@bash scripts/pulse-emote-smoke.sh --pick-stream
-
-smoke-pulse-emote-gold: env
-	@test -n "$(STREAM_ID)" || (echo "smoke-pulse-emote-gold: set STREAM_ID= (see make pulse-emote-pick-stream)" >&2; exit 1)
-	@bash scripts/pulse-emote-smoke.sh --gold
-
-smoke-pulse-emote-gold-fail: env
-	@test -n "$(STREAM_ID)" || (echo "smoke-pulse-emote-gold-fail: set STREAM_ID= (see make pulse-emote-pick-stream)" >&2; exit 1)
-	@bash scripts/pulse-emote-smoke.sh --gold-fail
-
-coverage-report:
-	@command -v $(GO) >/dev/null 2>&1 && $(GO) run ./cmd/backfill coverage report || docker run --rm -v "$(CURDIR):/src" -w /src --env-file .env $(GO_DOCKER_IMAGE) go run ./cmd/backfill coverage report
 
 test-emote:
 	@command -v $(GO) >/dev/null 2>&1 && $(GO) test ./internal/emote/... || docker run --rm -v "$(CURDIR):/src" -w /src $(GO_DOCKER_IMAGE) go test ./internal/emote/...
@@ -280,12 +186,6 @@ codegraph-incremental:
 codegraph-mcp:
 	PYTHONPATH=. $(CODEGRAPH_PY) tools/codegraph/codegraph_mcp.py --repo "$(CURDIR)" --db "$(CURDIR)/$(CODEGRAPH_DB)"
 
-codegraph-pulse:
-	@test -x $(CODEGRAPH_PY) || $(MAKE) codegraph-install
-	@test -d "$(CODEGRAPH_PULSE_REPO)" || (echo "streamclone-pulse not found at $(CODEGRAPH_PULSE_REPO)" && exit 1)
-	@mkdir -p "$(dir $(CODEGRAPH_PULSE_DB))"
-	PYTHONPATH=. $(CODEGRAPH_PY) tools/codegraph/codegraph_ingest.py --repo "$(CODEGRAPH_PULSE_REPO)" --db "$(CODEGRAPH_PULSE_DB)"
-
 mcp-setup: codegraph-install codegraph
 	@bash scripts/mcp-preflight.sh
 	@printf '\nNext: copy .cursor/mcp.recommended.json.example → .cursor/mcp.json (gitignored)\n'
@@ -328,7 +228,7 @@ twitch: env
 		$(MAKE) reload-env; \
 	elif [ "$(TWITCH_ACTION)" = "local-auth" ]; then \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action sync-env -EnvFile $(ENV_FILE); \
-		$(COMPOSE_FULL) up -d --no-deps --force-recreate chat metadata analytics emote local-proxy; \
+		$(COMPOSE_CORE) up -d --no-deps --force-recreate chat metadata emote local-proxy; \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action local-auth -Scopes "$(TWITCH_SCOPES)" -ChatHttp "$(TWITCH_LOCAL_AUTH_URL)"; \
 	elif [ "$(TWITCH_ACTION)" = "refresh-clipper-token" ]; then \
 		$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/twitch-auth.ps1 -Action refresh-clipper-token -EnvFile $(ENV_FILE); \
@@ -365,9 +265,6 @@ frontend-build:
 frontend-test:
 	cd frontend && npm test
 
-packages-pulse-core-test:
-	cd packages/pulse-core && npm test
-
 frontend-audit:
 	cd frontend && npm audit --audit-level=high
 
@@ -381,43 +278,13 @@ compose-config-check: env
 		-f deploy/docker-compose.yml \
 		-f deploy/docker-compose.prod.yml config --quiet
 
-azure-scraper-config-check: env
-	IMAGE_TAG=$(VERSION) docker compose --env-file $(ENV_FILE) \
-		--env-file deploy/env/profile-azure-scraper.env \
-		-f deploy/docker-compose.azure-scraper.yml \
-		-f deploy/docker-compose.release.yml config --quiet
+check-quick: test vet frontend-test compose-config-check product-boundary-preflight
 
-azure-archive-plane-config-check: env
-	IMAGE_TAG=$(VERSION) docker compose --env-file $(ENV_FILE) \
-		--env-file deploy/env/profile-archive.env \
-		--env-file deploy/env/profile-azure-workers.env \
-		-f deploy/docker-compose.azure-archive-plane.yml \
-		-f deploy/docker-compose.release.yml config --quiet
+product-boundary-preflight:
+	@bash scripts/check-product-boundary.sh --preflight
 
-bearhost-config-check-release bearhost-config-check-local bearhost-config-check \
-bearhost-corpus-smoke bearhost-help bearhost \
-bearhost-observability-up bearhost-observability-down \
-grafana grafana-up bearhost-grafana bearhost-grafana-up bearhost-grafana-tunnel-start \
-grafana-stop bearhost-grafana-stop bearhost-grafana-tunnel-stop \
-grafana-setup bearhost-grafana-setup bearhost-observability-enable \
-grafana-sync bearhost-grafana-sync grafana-watch grafana-archive-status \
-grafana-watch-install grafana-watch-uninstall grafana-watch-install-cron grafana-watch-uninstall-cron \
-bearhost-observability-status bearhost-grafana-tunnel bearhost-bronze-status bearhost-corpus-only \
-bearhost-rsync bearhost-analytics-predeploy-gate bearhost-cron-install:
-	@bash scripts/ops-stub.sh
-
-ifeq ($(OS),Windows_NT)
-local-vps-only:
-	@wsl bash -lc "cd '$$(wslpath -a '$(CURDIR)')' && bash scripts/local-vps-only.sh"
-else
-local-vps-only:
-	@bash scripts/local-vps-only.sh
-endif
-
-archive-restore-drill:
-	@bash scripts/archive-restore-drill.sh
-
-check-quick: test vet frontend-test packages-pulse-core-test compose-config-check
+product-boundary-strict:
+	@STREAMCLONE_BOUNDARY_STRICT=1 bash scripts/check-product-boundary.sh --strict
 
 check: security-scan frontend-build frontend-audit frontend-test clipper-test test vet build compose-config-check
 
@@ -427,14 +294,13 @@ frontend-restart: env
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-setup-control.ps1
 	@$(MAKE) ensure-localhost PORTS=8090
 
-# Rebuild frontend assets, apply DB migrations, and recreate frontend + chat + analytics
-# (chat logs, mod events, linkify). Use after pulling chat/logs UI changes.
+# Rebuild frontend assets, apply DB migrations, and recreate frontend + chat.
 frontend-refresh: env frontend-build
 	@echo "Applying migrations..."
 	$(COMPOSE_CORE) run --rm migrate
-	@echo "Rebuilding frontend, chat, and analytics..."
-	$(COMPOSE_CORE) build frontend chat analytics
-	$(COMPOSE_CORE) up -d --no-deps --force-recreate frontend chat analytics local-proxy
+	@echo "Rebuilding frontend and chat..."
+	$(COMPOSE_CORE) build frontend chat
+	$(COMPOSE_CORE) up -d --no-deps --force-recreate frontend chat local-proxy
 	@$(POWERSHELL) -ExecutionPolicy Bypass -File scripts/ensure-setup-control.ps1
 	@$(MAKE) ensure-localhost PORTS=8090
 

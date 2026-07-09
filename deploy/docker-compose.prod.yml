@@ -35,8 +35,6 @@ services:
         condition: service_healthy
       chat:
         condition: service_healthy
-      analytics:
-        condition: service_healthy
       emote:
         condition: service_healthy
 
@@ -54,9 +52,6 @@ services:
       FRONTEND_ORIGIN: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
       AUTH_COOKIE_SAMESITE: lax
 
-  analytics:
-    ports: !reset []
-
   emote:
     ports: !reset []
     environment:
@@ -68,13 +63,9 @@ services:
       VITE_METADATA_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
       VITE_VIDEO_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
       VITE_EMOTE_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
-      VITE_ANALYTICS_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
       VITE_CHAT_HTTP: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
       VITE_CHAT_WS: wss://${APP_DOMAIN:?Set APP_DOMAIN in .env}/v1/ws
       VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}
-
-  scraper:
-    ports: !reset []
 
 volumes:
   caddy-data:

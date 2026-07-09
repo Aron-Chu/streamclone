@@ -42,7 +42,6 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
       <div className="space-y-3">
         <div className="flex flex-wrap gap-1.5">
           <StatusChip label="Core" good={health.coreReady} loading={health.statusLoading} />
-          <StatusChip label="Analytics" good={health.analyticsReady} loading={health.statusLoading} />
           <StatusChip label="ReplayForge" good={health.clipperReady} loading={health.statusLoading} />
         </div>
       </div>
@@ -66,7 +65,6 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
         </div>
         <div className="mb-4 flex flex-wrap gap-1.5">
           <StatusChip label="Core" good={health.coreReady} loading={health.metadata.isLoading && !health.metadata.data} />
-          <StatusChip label="Analytics" good={health.analyticsReady} loading={health.statusLoading} />
           <StatusChip label="ReplayForge" good={health.clipperReady} loading={health.statusLoading} />
           <StatusChip label="Install helper" good={health.installHelperReady} loading={health.control.isLoading} />
           <StatusChip label="Docker" good={health.dockerReady} loading={health.host.isLoading} />
@@ -117,12 +115,6 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
         ) : null}
 
         <div className="flex flex-wrap gap-2">
-          <Link
-            to="/network"
-            className="rounded border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs font-black text-violet-100 transition hover:bg-violet-500/20"
-          >
-            Open network monitor
-          </Link>
           <button
             type="button"
             onClick={() => void copyDiagnostics()}

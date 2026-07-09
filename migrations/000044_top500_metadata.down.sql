@@ -1,3 +1,0 @@
-DROP TABLE IF EXISTS top500_current;
-DROP TABLE IF EXISTS top500_live_snapshots CASCADE;
-DROP TABLE IF EXISTS top500_channels;

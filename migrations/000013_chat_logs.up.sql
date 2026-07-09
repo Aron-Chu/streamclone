@@ -1,12 +1,3 @@
-ALTER TABLE analytics_vod_chat_messages
-    ADD COLUMN IF NOT EXISTS commenter_login TEXT;
-
-CREATE INDEX IF NOT EXISTS idx_vod_chat_stream_display_name
-    ON analytics_vod_chat_messages (stream_id, display_name);
-
-CREATE INDEX IF NOT EXISTS idx_vod_chat_stream_sender_hash
-    ON analytics_vod_chat_messages (stream_id, sender_hash);
-
 CREATE TABLE IF NOT EXISTS live_chat_messages (
     id              BIGSERIAL PRIMARY KEY,
     channel         TEXT NOT NULL,

@@ -4,4 +4,4 @@ Hosted production runbooks, promotion manifests, soak evidence, and VPS operator
 
 This public repository keeps application source, local dev compose, CI, and contract docs only.
 
-See [hosted-production-ops.md](../hosted-production-ops.md).
+See [streampulse-product-boundary.md](../streampulse-product-boundary.md).

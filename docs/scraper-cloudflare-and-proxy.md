@@ -1,13 +1,13 @@
 # Scraper, Cloudflare, And Proxy Notes
 
-The scraper powers Analytics minute-level TwitchTracker charts. Core Watch works without it.
+The scraper powers optional TwitchTracker viewer charts for legacy analytics sync. **Core Watch** (directory, playback, chat, emotes) works without it.
 
 ## What It Does
 
 - Fetches TwitchTracker history/detail pages.
 - Uses Camoufox/Chromium to satisfy Cloudflare.
 - Extracts Highcharts data from rendered pages.
-- Feeds Analytics sync with viewer rollups.
+- Feeds legacy analytics sync with viewer rollups when that tier is running locally.
 
 ## Why Plain HTTP Fails
 
@@ -18,13 +18,13 @@ TwitchTracker commonly blocks direct HTTP clients. The working path is a browser
 1. Use Camoufox as the default browser engine.
 2. Keep a persistent scraper profile.
 3. Warm the profile before heavy syncs when possible.
-4. Let Analytics request direct TwitchTracker egress.
+4. Let legacy analytics request direct TwitchTracker egress when enabled.
 5. Optional: enable `CHALLENGE_FALLBACK_ENABLED=true` so Pydoll handles Turnstile after passive waits fail. Run `make scraper-turnstile-benchmark` to compare handlers.
 
 Useful commands:
 
 ```sh
-make up-scraper
+docker compose --profile scraper --env-file .env -f deploy/docker-compose.yml up -d
 make scraper-check
 make scraper-preflight
 make scraper-turnstile-benchmark
@@ -40,34 +40,25 @@ Then set `CDP_URL=http://host.docker.internal:9222` and `SCRAPER_BROWSER=cdp`, o
 
 ## Proxy Findings
 
-Datacenter proxies made TwitchTracker Cloudflare behavior worse in local tests. Analytics currently sends `useProxy: false` for TwitchTracker detail work, and scraper routing may bypass proxies for Tracker URLs.
+Datacenter proxies made TwitchTracker Cloudflare behavior worse in local tests. Legacy analytics currently sends `useProxy: false` for TwitchTracker detail work, and scraper routing may bypass proxies for Tracker URLs.
 
 Use `PROXY_*` only for experiments or other scrape targets. Keep proxy credentials in `.env.local`; never commit them.
 
 Validate Flame API key and GB balance before proxy benchmarks: `make flame-proxy-preflight`.
 
-Reddit/X social paths: `make social-probe`.
-
-Social browser fallbacks are bounded separately from item counts. `social.Budget.MaxBrowserFetches`
-caps scraper-backed YouTube, Reddit fallback, and StreamerBans fallback calls so a small
-`MaxItems` budget cannot fan out into many browser fetches across expanded keywords. Storygraph
-sets those caps with `STORYGRAPH_SOCIAL_BROWSER_FETCH_BUDGET` and
-`STORYGRAPH_YOUTUBE_BROWSER_FETCH_BUDGET`. Both default to `0` on the shared local
-scraper, which disables social browser fallback unless explicitly opted in.
+Reddit/X social scrape paths are **not** part of public Streamclone scope — see [streampulse-product-boundary.md](streampulse-product-boundary.md).
 
 ## Operational Tips
 
-- Empty charts in Core Watch usually mean the scraper tier is not running.
+- Empty optional charts usually mean the scraper tier is not running.
 - Warm profile plus direct Camoufox is the expected local setup.
-- Re-run `make scraper-preflight` after scraper, proxy, or Analytics sync changes.
+- Re-run `make scraper-preflight` after scraper, proxy, or sync changes.
 - Keep scraper logs free of cookies, proxy credentials, and API keys.
 
 ## Related Files
 
-- [docs/tiers-scraper-and-social-spread.md](tiers-scraper-and-social-spread.md) — tier detachment, shared scraper, proxies, Social spread
-- [docs/scraping-archive/requirements.md](scraping-archive/requirements.md) — bulk scrape tiers, Azure blob archive, backfill phases, benchmark procedures
-- `.kiro/steering/analytics.md`
-- `internal/analytics/sync.go`
+- [docs/archive/tiers-scraper-and-social-spread.md](archive/tiers-scraper-and-social-spread.md) — historical tier detachment notes (archived)
+- [docs/archive/scraping-archive/requirements.md](archive/scraping-archive/requirements.md) — bulk scrape tiers (archived)
 - `internal/metadata/api/api.go`
 - `scripts/scraper-preflight.*`
 - `scripts/scraper-proxy-benchmark.ps1`

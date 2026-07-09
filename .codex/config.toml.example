@@ -30,7 +30,7 @@ args = ["-y", "@playwright/mcp@latest"]
 startup_timeout_sec = 60
 enabled = false
 
-# Optional — PNGs in docs/pulse-extension/figma/ work without MCP.
+# Optional — extension Figma PNGs live in streamclone-pulse/docs/pulse-extension/figma/.
 # If enabled globally in ~/.codex/config.toml, leave false here to avoid duplicate servers.
 [mcp_servers.figma-bridge]
 command = "node"

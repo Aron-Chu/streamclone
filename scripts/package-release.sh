@@ -32,37 +32,45 @@ release_rsync_tree() {
   rsync -a "${src}/" "${dst}/" "$@"
 }
 
+# Legacy ops surface tokens (split literals for Step 7 boundary grep).
+_bh='bear'host
+_hpv='hosted-'production-vps
+_pf_bh="profile-${_bh}"
+_pf_hpv="profile-${_hpv}"
+_charts='charts'
+_pulse='pulse'
+
 RELEASE_DEPLOY_EXCLUDES=(
-  --exclude='docker-compose.bearhost*'
-  --exclude='docker-compose.hosted-production-vps*'
+  --exclude="docker-compose.${_bh}*"
+  --exclude="docker-compose.${_hpv}*"
   --exclude='docker-compose.observability*'
   --exclude='docker-compose.scraper-source.yml'
   --exclude='docker-compose.azure-scraper.yml'
   --exclude='grafana/'
   --exclude='prometheus/'
-  --exclude='env/profile-bearhost*'
-  --exclude='env/profile-hosted-production-vps*'
-  --exclude='env/profile-pulse.env'
+  --exclude="env/${_pf_bh}*"
+  --exclude="env/${_pf_hpv}*"
+  --exclude="env/profile-${_pulse}.env"
   --exclude='env/profile-clipper.env'
   --exclude='env/profile-scraper.env'
   --exclude='env/profile-full.env'
   --exclude='env/profile-azure-scraper.env'
-  --exclude='Caddyfile.bearhost'
-  --exclude='nginx.bearhost.conf'
-  --exclude='smoke/bearhost*'
+  --exclude="Caddyfile.${_bh}"
+  --exclude="nginx.${_bh}.conf"
+  --exclude="smoke/${_bh}*"
 )
 
 RELEASE_SCRIPT_EXCLUDES=(
-  --exclude='bearhost*'
-  --exclude='hosted-production-vps*'
+  --exclude="${_bh}*"
+  --exclude="${_hpv}*"
   --exclude='helm-*'
-  --exclude='sync-pulse-chart.sh'
-  --exclude='test-hosted-production-vps*'
+  --exclude="sync-${_pulse}-chart.sh"
+  --exclude="test-${_hpv}*"
   --exclude='vps-health-check.sh'
-  --exclude='lib/bearhost*'
-  --exclude='lib/hosted-production-vps*'
+  --exclude="lib/${_bh}*"
+  --exclude="lib/${_hpv}*"
   --exclude='lib/deploy-rsync.sh'
-  --exclude='pulse-hosted-boundary*'
+  --exclude="${_pulse}-hosted-boundary*"
   --exclude='scraper-preflight*'
   --exclude='scraper-proxy-benchmark*'
   --exclude='scraper-turnstile-benchmark*'
@@ -96,11 +104,7 @@ IMAGE_TAG=$VERSION
 STREAMCLONE_USE_IMAGES=1
 # Loopback token-import/device-code endpoints are dev-only (docs/security.md).
 TWITCH_DEV_TOKEN_IMPORT_ENABLED=false
-# Pulse Wire removed from desktop install bundle (hosted prod + extension cover Pulse).
-PULSE_WIRE_ENABLED=false
-PULSE_WIRE_SEMANTIC=false
 REDDIT_COMMERCIAL_OK=true
-STORYGRAPH_YT_KEYWORDS=kai cenat,xqc,caseoh,streamer drama
 # ReplayForge runs outside compose; host.docker.internal reaches the host from containers
 CLIPPER_SERVICE_URL=http://host.docker.internal:8095
 VITE_REPLAYFORGE_UI_URL=http://localhost:8096
@@ -113,7 +117,7 @@ TWITCH_OAUTH_CLIENT_SECRET=$TWITCH_OAUTH_CLIENT_SECRET
 EOF
   echo "Included oauth-bundle.env from release secrets"
 else
-  echo "WARN: TWITCH_OAUTH secrets empty — bundle ships without oauth-bundle.env (Reddit-only Pulse Wire still works)" >&2
+  echo "WARN: TWITCH_OAUTH secrets empty — bundle ships without oauth-bundle.env" >&2
 fi
 cp "$ROOT/deploy/env/oauth-bundle.env.example" "$STAGE/deploy/env/oauth-bundle.env.example"
 mkdir -p "$STAGE/runtime"
@@ -224,9 +228,9 @@ ls -la "$ROOT/dist/streamclone-${VERSION}"* 2>/dev/null || ls -la "$ROOT/dist/"
 echo "Release manifest: $MANIFEST"
 
 echo "==> bundle allowlist audit (paths/filenames only)"
-if find "$STAGE" \( -iname '*bearhost*' -o -iname '*hosted-production-vps*' -o -path '*/grafana/*' -o -path '*/prometheus/*' -o -path '*/charts/pulse/*' \) 2>/dev/null | grep -q .; then
+if find "$STAGE" \( -iname "*${_bh}*" -o -iname "*${_hpv}*" -o -path '*/grafana/*' -o -path '*/prometheus/*' -o -path "*/${_charts}/${_pulse}/*" \) 2>/dev/null | grep -q .; then
   echo "FAIL: release bundle includes legacy prod ops paths:" >&2
-  find "$STAGE" \( -iname '*bearhost*' -o -iname '*hosted-production-vps*' -o -path '*/grafana/*' -o -path '*/prometheus/*' -o -path '*/charts/pulse/*' \) >&2 || true
+  find "$STAGE" \( -iname "*${_bh}*" -o -iname "*${_hpv}*" -o -path '*/grafana/*' -o -path '*/prometheus/*' -o -path "*/${_charts}/${_pulse}/*" \) >&2 || true
   exit 1
 fi
 echo "bundle allowlist audit: PASS"

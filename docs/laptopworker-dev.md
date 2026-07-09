@@ -48,13 +48,13 @@ Browse UI on tailnet: **http://laptopworker:8090**
 
 | Host | Runs | Does not run |
 |------|------|--------------|
-| **legacy-rollback-host** | `scraper`, `analytics-workers`, corpus/silver/gold, TwitchTracker/Camoufox | — |
-| **laptopworker** | Caddy `:8090`, frontend, metadata, video, chat, emote, analytics API, postgres, redis, minio, mediamtx | Local scraper profile, storygraph ingest, corpus workers |
+| **legacy-rollback-host** | Optional scraper / corpus workers (private ops) | — |
+| **laptopworker** | Caddy `:8090`, frontend, metadata, video, chat, emote, postgres, redis, minio, mediamtx | Local scraper profile, corpus workers |
 | **Windows PC** | Cursor, `laptopworker-remote.*` | — |
 
 Env: `deploy/env/profile-laptopworker-dev.env` merged into `.env.local` (**user keys win**; bootstrap/update never clobber custom overrides).
 
-Compose overlay: `deploy/docker-compose.laptopworker-dev.yml` (disables `storygraph`)
+Compose overlay: `deploy/docker-compose.laptopworker-dev.yml` (core-only stack)
 
 Shared helpers: `scripts/laptopworker-env.sh`
 
@@ -105,7 +105,7 @@ Add Twitch OAuth redirect: `http://laptopworker:8090` (and exact callback path i
 | Product | Auto-deploy? | How it updates |
 |---------|--------------|----------------|
 | **laptopworker stack** | **No** — manual after `git push` to streamclone `master` | Windows: `scripts\laptopworker-remote.cmd update` (git pull + smart rebuild + smoke) |
-| **legacy-rollback-host** | **No** — separate deploy scripts | `make bearhost-*`, `scripts/bearhost-pulse-redeploy-remote.sh`, etc. |
+| **legacy-rollback-host** | **No** — separate deploy scripts | Private **streampulse-ops** deploy scripts |
 | **StreamPulse website** | **Yes** (when CI wired) | `streamclone-pulse/streampulse-web` → Cloudflare Pages on push |
 | **Chrome extension** | **No** | Build `streamclone-pulse` → Load unpacked / store release |
 | **Windows local stack** | **No** | `git pull` + `make up` / `make restart` yourself |
@@ -130,7 +130,7 @@ Future (P3): optional webhook/auto-deploy on push — not implemented yet.
 | Changed paths | Action |
 |---------------|--------|
 | `go.mod`, `go.sum` | Rebuild all Go services |
-| `frontend/**`, `packages/pulse-core/**` | Rebuild `frontend` |
+| `frontend/**` | Rebuild `frontend` |
 | `cmd/**`, `internal/**`, `deploy/Dockerfile*` | Rebuild Go services |
 | `deploy/docker-compose*`, `profile-laptopworker*` | Full `compose up --build` |
 | `deploy/Caddyfile*` | Rebuild `frontend`; recreate `local-proxy` |
@@ -150,7 +150,7 @@ Future (P3): optional webhook/auto-deploy on push — not implemented yet.
 | SSH | `ssh aron@laptopworker` (Tailscale SSH) |
 | Subnet routes / exit node | **Off by default** — laptop is a private dev host, not a router |
 | Key expiry | Consider disabling for this trusted always-on node in Tailscale admin |
-| Production-like API | Use **BearHost** `https://api.streampulse.stream` for public ingress tests |
+| Production-like API | Use hosted StreamPulse API from **streamclone-pulse** / private ops — not the laptopworker `:8090` stack |
 | VPS-only services | BearHost must appear in `tailscale status` only if laptop needs direct tailnet access to VPS |
 
 ---
@@ -175,7 +175,7 @@ scripts\laptopworker-remote.cmd ufw-tailnet
 LAN block test from Windows (should **fail**):
 
 ```powershell
-Invoke-WebRequest http://192.168.4.27:8090/v1/extension/health -TimeoutSec 5
+Invoke-WebRequest http://192.168.4.27:8090/ -TimeoutSec 5
 ```
 
 ```bash
@@ -260,7 +260,6 @@ Secrets dir: `~/.streamclone/secrets/` (mode 700)
 | `video` | HLS relay, streamlink | `127.0.0.1:8082` |
 | `chat` | IRC bridge, Twitch OAuth | `127.0.0.1:8083` |
 | `emote` | 7TV/FFZ pipeline | `127.0.0.1:8084` |
-| `analytics` | Pulse BFF, extension routes | `127.0.0.1:8086` |
 | `postgres` | Local dev DB | `127.0.0.1:5432` |
 | `redis` | Cache | `127.0.0.1:6379` |
 | `minio` | Emote storage | `127.0.0.1:9000` |
@@ -294,7 +293,7 @@ bash scripts/laptopworker-stack.sh ufw-tailnet
 
 ```bash
 bash scripts/laptopworker-stack.sh smoke
-curl -fsS http://127.0.0.1:8090/v1/extension/health
+curl -fsS http://127.0.0.1:8090/v1/metadata/health
 ```
 
 Compose config sanity:
@@ -309,64 +308,9 @@ docker compose --env-file .env --env-file .env.local \
 
 ---
 
-## Dev workflows (extension, portal, Remote SSH)
+## StreamPulse extension / portal (sibling repo)
 
-### Backend targets
-
-| Mode | Backend URL | When to use |
-|------|-------------|-------------|
-| Windows local stack | `http://localhost:8090` | Daily dev on PC with `make up` |
-| Laptop dev hub | `http://laptopworker:8090` | Shared tailnet stack; lighter on PC RAM |
-| Production / hosted API | `https://api.streampulse.stream` | Public ingress (hosted-production-vps + Cloudflare Tunnel); BearHost rollback until soak |
-
-Health check (all modes):
-
-```bash
-curl -fsS http://laptopworker:8090/v1/extension/health
-# Windows local: curl -fsS http://localhost:8090/v1/extension/health
-```
-
-### StreamPulse extension (sibling `streamclone-pulse`)
-
-Config lives in **Chrome extension storage**, not committed env files:
-
-| Item | Location |
-|------|----------|
-| Backend URL key | `backendUrl` in `chrome.storage.sync` |
-| Default | `http://localhost:8090` (`src/shared/storage.ts`) |
-| UI to change | Extension **Options** page (`src/options/options.tsx` → Backend URL) |
-| Popup readout | `src/popup/popup.tsx` |
-
-Switch to laptop hub:
-
-1. Confirm smoke: `scripts\laptopworker-remote.cmd smoke`
-2. Open extension **Options** → set Backend URL to `http://laptopworker:8090` → Save
-3. Reload a Twitch channel tab
-
-Do **not** commit OAuth tokens or machine-specific URLs into the repo. For production API tests, use `https://api.streampulse.stream` in Options when you intend to hit the **hosted** API (hosted-production-vps via Cloudflare, not BearHost rollback).
-
-**CORS / origins:** laptop profile sets `PUBLIC_ORIGIN`, `FRONTEND_ORIGIN`, and `HLS_PUBLIC_BASE` to `http://laptopworker:8090` (`deploy/env/profile-laptopworker-dev.env`). Twitch pages load from `https://www.twitch.tv`; the BFF must allow extension origins — same as localhost dev when origins are merged into `.env.local`.
-
-**OAuth caveat:** Sign-in on the laptop UI requires a Twitch redirect for `http://laptopworker:8090` in the Twitch dev console (optional; see [OAuth / Sign-in](#oauth--sign-in-optional)).
-
-### StreamPulse web portal (sibling `streampulse-web`)
-
-From **streamclone** repo root (after laptop smoke passes):
-
-```powershell
-scripts\laptopworker-remote.cmd smoke
-cd ..\streamclone-pulse\streampulse-web
-$env:VITE_BACKEND_URL = 'http://laptopworker:8090'
-npm run dev
-```
-
-Or from streamclone (if sibling checkout exists):
-
-```bash
-VITE_BACKEND_URL=http://laptopworker:8090 bash scripts/pulse-web-dev.sh
-```
-
-Portal reads `VITE_BACKEND_URL` at dev/build time (`streampulse-web/src/lib/apiClient.ts`). Default local dev remains `http://localhost:8090` (`streampulse-web/README.md`).
+Laptopworker runs the **core watch stack only** (`:8090`). StreamPulse extension and portal dev use **streamclone-pulse** with the hosted API by default — see sibling [`streamclone-pulse/docs/website-portal/local-dev-runbook.md`](../../streamclone-pulse/docs/website-portal/local-dev-runbook.md) and [`docs/streampulse-product-boundary.md`](streampulse-product-boundary.md).
 
 ### Cursor / VS Code Remote SSH
 
@@ -376,7 +320,7 @@ Use when you want the editor on the laptop filesystem for long stack work:
 2. Open folder: `~/streamclone`
 3. Terminal on laptop for stack commands (`bash scripts/laptopworker-stack.sh …`)
 
-Keep **Windows + multi-root workspace** as the default for cross-repo Pulse work (`streamclone-pulse-extension.code-workspace`). Remote SSH is optional for laptop-only ops.
+Keep **Windows + multi-root workspace** as the default for cross-repo work (`streamclone-pulse-extension.code-workspace`). Remote SSH is optional for laptop-only ops.
 
 **Recover unhealthy stack:**
 
@@ -404,8 +348,8 @@ journalctl --user -u streamclone-dev.service -n 50 --no-pager
 
 Document only — not implemented by default:
 
-- Public users continue to hit **BearHost HTTPS** (`https://api.streampulse.stream`)
-- BearHost *may* reverse-proxy selected routes to `http://laptopworker:PORT` over Tailscale for private demos
+- Public StreamPulse users hit the **hosted API** (private ops) — not laptopworker `:8090`
+- Legacy rollback host *may* reverse-proxy selected routes to `http://laptopworker:PORT` over Tailscale for private demos
 - Laptop must **not** receive home-router port forwards
 - Never expose Postgres, Redis, or Minio on `0.0.0.0`
 
@@ -424,7 +368,7 @@ No Portainer or node exporter unless explicitly requested.
 
 ## Related
 
-- Hosting topology (BearHost / laptop / PC): [`.kiro/steering/laptopworker-hosting.md`](../.kiro/steering/laptopworker-hosting.md)
-- BearHost production: `docs/bearhost-production.md`
+- Hosting topology (laptop / PC): [`.kiro/steering/laptopworker-hosting.md`](../.kiro/steering/laptopworker-hosting.md)
+- Product boundary: [streampulse-product-boundary.md](streampulse-product-boundary.md)
 - Azure hybrid (VPS scraper pattern): `docs/azure-archive-plane.md`
 - Workspace layout: `docs/workspace.md`

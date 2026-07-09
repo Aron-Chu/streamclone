@@ -1,14 +1,15 @@
-# Cloudflare Tunnel — example config (install via Zero Trust dashboard token).
+# Cloudflare Tunnel — local Streamclone dev example (install via Zero Trust dashboard token).
 # After `cloudflared service install <TOKEN>`, optional local config reference:
 #
 #   /etc/cloudflared/config.yml
 #
-# Prefer dashboard-managed ingress for most setups; this file documents the route only.
+# Prefer dashboard-managed ingress for most setups. Hosted production tunnels live in
+# private streampulse-ops — not this public repo.
 
-tunnel: streampulse-bearhost
-credentials-file: /etc/cloudflared/streampulse-bearhost.json
+tunnel: streamclone-local
+credentials-file: /etc/cloudflared/streamclone-local.json
 
 ingress:
-  - hostname: api.streampulse.stream
+  - hostname: streamclone.example.com
     service: http://127.0.0.1:8090
   - service: http_status:404

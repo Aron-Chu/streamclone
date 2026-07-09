@@ -33,20 +33,12 @@
       "routes": ["/v1/emotes", "/emotes"]
     },
     {
-      "id": "service:analytics",
-      "name": "analytics",
-      "description": "VOD sync, rollups, Pulse extension BFF",
-      "keywords": ["analytics", "vod", "sync", "rollup", "pulse", "extension"],
-      "path_patterns": ["cmd/analytics", "internal/analytics"],
-      "routes": ["/v1/analytics", "/v1/extension", "/v1/pulse"]
-    },
-    {
-      "id": "service:storygraph",
-      "name": "storygraph",
-      "description": "Pulse Wire news ingest and social spread",
-      "keywords": ["pulse-wire", "storygraph", "news", "spread", "reddit", "lsf"],
-      "path_patterns": ["cmd/storygraph", "internal/storygraph", "internal/social"],
-      "routes": ["/v1/pulse-wire", "/v1/channels"]
+      "id": "service:social",
+      "name": "social",
+      "description": "Reddit/YouTube metadata helpers for channel insights",
+      "keywords": ["social", "reddit", "lsf", "youtube"],
+      "path_patterns": ["internal/social"],
+      "routes": []
     },
     {
       "id": "service:frontend",
@@ -54,14 +46,6 @@
       "description": "React SPA and browser clients",
       "keywords": ["frontend", "react", "spa"],
       "path_patterns": ["frontend/src"],
-      "routes": []
-    },
-    {
-      "id": "service:pulse-core",
-      "name": "pulse-core",
-      "description": "Shared Pulse scoring and extension adapters",
-      "keywords": ["pulse-core", "scoring", "extension-adapters"],
-      "path_patterns": ["packages/pulse-core"],
       "routes": []
     }
   ]

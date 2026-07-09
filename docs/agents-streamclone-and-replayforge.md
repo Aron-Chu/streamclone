@@ -172,7 +172,7 @@ Data: **PostgreSQL** (durable), **Redis** (cache/pubsub), **MinIO** (emote image
 | Clip API client | `frontend/src/api.ts` | `triggerClipperManual`, `getClipperJobs`, etc. |
 | Studio routes | `frontend/src/components/StudioRedirect.tsx` | Redirect only — not an editor |
 | Moment helpers | `frontend/src/utils/momentClip.ts` | `buildClipRequest`, `clipStudioUrl` |
-| Config | `frontend/src/config.ts` | `CLIPPER`, `REPLAYFORGE_UI`, tokens |
+| Config | `frontend/src/config.ts` | `CLIPPER`, `REPLAYFORGE_UI` (no clipper token — injected server-side, RF-P5-013) |
 
 ### What Streamclone still owns for clips
 
@@ -305,17 +305,23 @@ If ReplayForge IRC monitor is enabled and channel watched, jobs are created **in
 |----------|---------|---------|
 | `VITE_CLIPPER_URL` | `http://localhost:8095` | ReplayForge **API** for all clipper fetch calls |
 | `VITE_REPLAYFORGE_UI_URL` | `http://localhost:8096` | Redirect target for `/studio/*` |
-| `VITE_CLIPPER_TOKEN` | empty | Bearer for mutating clipper routes when webhook auth on |
 | `STREAMCLONE_PROFILE` | `core` | No longer starts embedded clipper |
 
 Injected at container start: [`frontend/docker-entrypoint.d/40-streamclone-config.sh`](../frontend/docker-entrypoint.d/40-streamclone-config.sh) → `window.__STREAMCLONE_CONFIG__`.
+
+> **RF-P5-013 — no browser-visible clipper token.** `VITE_CLIPPER_TOKEN` is
+> retired: the mutation `Auth_Token` is **never** shipped to the browser. Clipper
+> calls go same-origin through the `/v1/clipper/*` proxy, and the Caddy `@clipper`
+> route injects `Authorization: Bearer {$CLIPPER_WEBHOOK_TOKEN}` **server-side**
+> from the proxy container's environment. Configure `CLIPPER_WEBHOOK_TOKEN` in
+> `.env` only — the frontend bundle and `frontend/src/config.ts` carry no token.
 
 ### ReplayForge (`.env`)
 
 | Variable | Purpose |
 |----------|---------|
 | `CLIPPER_*` | Same names as legacy clipper (host, port, Twitch tokens, Whisper, paths) |
-| `CLIPPER_WEBHOOK_TOKEN` | Must match `VITE_CLIPPER_TOKEN` on Streamclone when auth enabled |
+| `CLIPPER_WEBHOOK_TOKEN` | Mutation gate. The Streamclone `/v1/clipper/*` proxy injects this server-side as the `Bearer` on clipper calls (RF-P5-013) — set it in Streamclone `.env` too, not in the browser |
 | `VITE_STREAMCLONE_ORIGIN` | `http://localhost:8090` for emote/metadata from editor |
 | `VITE_CLIPPER_URL` | API base for ReplayForge frontend (often `/v1` via proxy on 8096) |
 
@@ -383,7 +389,12 @@ Legacy path: Go chat service writes `CLIPPER_AUTH_SYNC_PATH`; setup-control `POS
 
 ### Webhook token
 
-When `CLIPPER_WEBHOOK_TOKEN` is set on ReplayForge, Streamclone must set matching **`VITE_CLIPPER_TOKEN`** and rebuild frontend container.
+When `CLIPPER_WEBHOOK_TOKEN` is set on ReplayForge, set the same value in the
+Streamclone `.env`. The `/v1/clipper/*` proxy (Caddy `@clipper` route) reads it
+from the proxy container environment and attaches
+`Authorization: Bearer {$CLIPPER_WEBHOOK_TOKEN}` server-side, so recreate the
+`local-proxy`/`caddy` container after changing it. The token is **never** shipped
+to the browser (RF-P5-013); there is no `VITE_CLIPPER_TOKEN` in the bundle.
 
 ---
 

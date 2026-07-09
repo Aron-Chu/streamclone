@@ -99,7 +99,7 @@ function Format-StreamcloneStartDetail {
 
 function Start-StreamcloneComposeLockWatcher {
     param(
-        [ValidateSet('scraper', 'pulse')]
+        [ValidateSet('scraper')]
         [string]$Service,
         [int]$ProcessId
     )
@@ -200,24 +200,18 @@ function Get-SetupControlUseImages {
 
 function Get-StreamcloneOptionalServiceLabel {
     param([string]$Service)
-    switch ($Service) {
-        'scraper' { return 'Analytics' }
-        'pulse' { return 'Pulse Dashboards' }
-        default { return $Service }
-    }
+    if ($Service -eq 'scraper') { return 'Analytics' }
+    return $Service
 }
 
 function Get-StreamcloneOptionalComposeTargets {
     param([string]$Service)
-    if ($Service -eq 'pulse' -and $phase -ne 'Docker reported an error') {
-        return @('influxdb', 'grafana', 'analytics')
-    }
     return @($Service)
 }
 
 function Invoke-ProfileServiceStop {
     param(
-        [ValidateSet('scraper', 'pulse')]
+        [ValidateSet('scraper')]
         [string]$Service
     )
 
@@ -227,8 +221,7 @@ function Invoke-ProfileServiceStop {
     }
 
     $useWslDocker = Test-StreamcloneUseWslDockerCli -Root $Root
-    $profileForCompose = if ($Service -eq 'pulse' -and (Test-StreamcloneHostPulseReady)) { 'core' } else { $Service }
-    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profileForCompose -UseImages:(Get-SetupControlUseImages) -RelativePaths:$useWslDocker
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $Service -UseImages:(Get-SetupControlUseImages) -RelativePaths:$useWslDocker
     $targets = Get-StreamcloneOptionalComposeTargets -Service $Service
     $stopArgs = $composeArgs + @('stop') + $targets
     $result = Invoke-EnvDockerCaptured -Arguments $stopArgs -Root $Root
@@ -236,15 +229,12 @@ function Invoke-ProfileServiceStop {
     if ($result.ExitCode -ne 0) {
         throw "docker compose stop failed: $output"
     }
-    if ($Service -eq 'pulse') {
-        try { [void](Stop-StreamcloneHelmPulsePortForward -Root $Root) } catch { }
-    }
     return $output
 }
 
 function Invoke-ProfileServiceUp {
     param(
-        [ValidateSet('scraper', 'pulse')]
+        [ValidateSet('scraper')]
         [string]$Service
     )
 
@@ -253,43 +243,26 @@ function Invoke-ProfileServiceUp {
         throw 'Missing .env - run scripts/setup.ps1 first.'
     }
 
-    $profile = $Service
-    if ($Service -eq 'scraper') {
-        Ensure-ScraperSiblingRepo
-    } elseif ($Service -eq 'pulse') {
-        Enable-StreamclonePulseEnv -Root $Root
-        $script:envValues = Read-EnvKeyValueFile -Path $envPath
-        if (Test-StreamcloneHostPulseReady) {
-            [void](Start-StreamcloneHelmPulsePortForward -Root $Root)
-        }
-    }
+    Ensure-ScraperSiblingRepo
 
     $useImages = Get-SetupControlUseImages
     $pullImages = $useImages -or (Test-StreamcloneUseImagesFromRoot -Root $Root)
     $useWslDocker = Test-StreamcloneUseWslDockerCli -Root $Root
-    $profileForCompose = if ($Service -eq 'pulse' -and (Test-StreamcloneHostPulseReady)) { 'core' } else { $Service }
-    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profileForCompose -UseImages:$useImages -RelativePaths:$useWslDocker
-    if ($Service -eq 'pulse') {
-        $upArgs = Get-StreamclonePulseComposeUpArgs -ComposeArgs $composeArgs -PullImages:$pullImages -ScraperSourceBuild:$false
-    } else {
-        $upArgs = $composeArgs + @('up', '-d', '--remove-orphans')
-        if ($useImages) { $upArgs += '--pull', 'missing' }
-        $upArgs += Get-StreamcloneOptionalComposeTargets -Service $Service
-    }
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $Service -UseImages:$useImages -RelativePaths:$useWslDocker
+    $upArgs = $composeArgs + @('up', '-d', '--remove-orphans')
+    if ($useImages) { $upArgs += '--pull', 'missing' }
+    $upArgs += Get-StreamcloneOptionalComposeTargets -Service $Service
     $result = Invoke-EnvDockerCaptured -Arguments $upArgs -Root $Root
     $output = ($result.Output -join [Environment]::NewLine).Trim()
     if ($result.ExitCode -ne 0) {
         throw "docker compose failed: $output"
-    }
-    if ($Service -eq 'pulse' -and (Test-StreamcloneHostPulseReady)) {
-        [void](Start-StreamcloneHelmPulsePortForward -Root $Root)
     }
     return $output
 }
 
 function Start-ProfileServiceUpAsync {
     param(
-        [ValidateSet('scraper', 'pulse')]
+        [ValidateSet('scraper')]
         [string]$Service
     )
 
@@ -313,23 +286,13 @@ function Start-ProfileServiceUpAsync {
         }
     }
 
-    $scraperSourceBuild = $false
-    if ($Service -eq 'scraper') {
-        Ensure-ScraperSiblingRepo
-        $scraperSourceBuild = Test-ScraperBuildFromSource -Root $Root
-    } elseif ($Service -eq 'pulse') {
-        Enable-StreamclonePulseEnv -Root $Root
-        $script:envValues = Read-EnvKeyValueFile -Path $envPath
-        if (Test-StreamcloneHostPulseReady) {
-            [void](Start-StreamcloneHelmPulsePortForward -Root $Root)
-        }
-    }
+    Ensure-ScraperSiblingRepo
+    $scraperSourceBuild = Test-ScraperBuildFromSource -Root $Root
 
     $useImages = Get-SetupControlUseImages
     $pullImages = $useImages -or (Test-StreamcloneUseImagesFromRoot -Root $Root)
     $useWslDocker = Test-StreamcloneUseWslDockerCli -Root $Root
-    $profileForCompose = if ($Service -eq 'pulse' -and (Test-StreamcloneHostPulseReady)) { 'core' } else { $Service }
-    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $profileForCompose -UseImages:$useImages -RelativePaths:$useWslDocker -ScraperSourceBuild:$scraperSourceBuild
+    $composeArgs = Get-StreamcloneComposeArgs -Root $Root -Profile $Service -UseImages:$useImages -RelativePaths:$useWslDocker -ScraperSourceBuild:$scraperSourceBuild
     $docker = Get-EnvDockerExe
     if (-not $docker) {
         throw "Docker is required. Install Docker Desktop and ensure 'docker.exe' is on PATH."
@@ -340,15 +303,10 @@ function Start-ProfileServiceUpAsync {
     foreach ($path in @($logFile, $errLog)) {
         if (Test-Path $path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
     }
-    $args = if ($Service -eq 'pulse') {
-        Get-StreamclonePulseComposeUpArgs -ComposeArgs $composeArgs -PullImages:$pullImages -ScraperSourceBuild:$scraperSourceBuild
-    } else {
-        $serviceArgs = $composeArgs + @('up', '-d', '--remove-orphans')
-        if ($pullImages -and -not $scraperSourceBuild) { $serviceArgs += '--pull', 'missing' }
-        if ($scraperSourceBuild) { $serviceArgs += '--build' }
-        $serviceArgs += Get-StreamcloneOptionalComposeTargets -Service $Service
-        $serviceArgs
-    }
+    $args = $composeArgs + @('up', '-d', '--remove-orphans')
+    if ($pullImages -and -not $scraperSourceBuild) { $args += '--pull', 'missing' }
+    if ($scraperSourceBuild) { $args += '--build' }
+    $args += Get-StreamcloneOptionalComposeTargets -Service $Service
 
     $proc = if ($useWslDocker) {
         $wslRoot = Get-StreamcloneWslRootPath -Root $Root
@@ -413,7 +371,7 @@ function Start-ScraperCamoufoxWarmupAsync {
 
 function Get-StreamcloneProfileStartStatus {
     param(
-        [ValidateSet('scraper', 'pulse')]
+        [ValidateSet('scraper')]
         [string]$Service
     )
 
@@ -475,7 +433,7 @@ function Get-StreamcloneProfileStartStatus {
         $detail = Format-StreamcloneStartDetail -Service $Service -Detail $detail -Blob $blob
     }
 
-    $nameFilter = if ($Service -eq 'scraper') { 'streamclone-scraper' } else { 'streamclone-grafana' }
+    $nameFilter = 'streamclone-scraper'
     $ps = Invoke-EnvDockerCaptured -Arguments @('ps', '--filter', "name=$nameFilter", '--format', '{{.Status}}')
     if ($ps.ExitCode -eq 0 -and $ps.Output) {
         $status = ($ps.Output | Select-Object -First 1).Trim()
@@ -483,9 +441,7 @@ function Get-StreamcloneProfileStartStatus {
             $percent = [math]::Max($percent, 82)
             $phase = 'Container is up'
             $detail = $status
-            if ($Service -eq 'scraper') {
-                Start-ScraperCamoufoxWarmupAsync | Out-Null
-            }
+            Start-ScraperCamoufoxWarmupAsync | Out-Null
         }
         if ($status -match 'healthy') {
             $percent = 92
@@ -493,96 +449,40 @@ function Get-StreamcloneProfileStartStatus {
         }
     }
 
-    if ($Service -eq 'pulse') {
-        if (-not (Test-StreamcloneHostPulseReady)) {
-            $percent = [math]::Max($percent, 86)
-            $phase = 'Waiting for Grafana and InfluxDB'
-            $detail = 'Waiting for Grafana on localhost:3000 and InfluxDB on localhost:18086...'
-        } else {
-            $ts = Get-StreamclonePulseTimeseriesStatus
-            if ($null -eq $ts) {
-                $percent = [math]::Max($percent, 88)
-                $phase = 'Waiting for analytics export'
-                $detail = 'Grafana and InfluxDB are up - waiting for Analytics to report Pulse export status.'
-            } elseif (($ts.enabled -ne $true) -or ($ts.configured -ne $true)) {
-                $percent = [math]::Max($percent, 90)
-                $phase = 'Enabling analytics export'
-                $detail = 'Analytics is restarting with InfluxDB export enabled.'
-            } else {
-                $backfillState = [string]$ts.backfillState
-                $rollupCount = 0L
-                $exportedCount = 0L
-                if ($null -ne $ts.backfillRollups) { $rollupCount = [int64]$ts.backfillRollups }
-                if ($null -ne $ts.backfillExported) { $exportedCount = [int64]$ts.backfillExported }
-                if ($backfillState -eq 'running') {
-                    $ratio = if ($rollupCount -gt 0) { [math]::Min(1.0, $exportedCount / [double]$rollupCount) } else { 0.5 }
-                    $percent = [math]::Max($percent, [int](90 + (8 * $ratio)))
-                    $phase = 'Backfilling analytics'
-                    $detail = if ($rollupCount -gt 0) {
-                        "Exported $exportedCount / $rollupCount local rollups to InfluxDB."
-                    } else {
-                        'Scanning local analytics history for Pulse backfill...'
-                    }
-                } elseif ($backfillState -eq 'failed') {
-                    $percent = 5
-                    $phase = 'Analytics export failed'
-                    $detail = [string]$ts.backfillLastError
-                    if ([string]::IsNullOrWhiteSpace($detail)) { $detail = [string]$ts.lastError }
-                    if ([string]::IsNullOrWhiteSpace($detail)) { $detail = 'Pulse backfill failed; check analytics container logs.' }
-                } elseif (([string]$ts.state -eq 'ready') -and ([string]::IsNullOrWhiteSpace($backfillState) -or $backfillState -eq 'completed')) {
-                    $percent = 100
-                    $phase = 'Ready'
-                    $detail = 'Pulse dashboards are ready - Grafana, InfluxDB, analytics export, and backfill are online.'
-                } elseif ([string]$ts.state -eq 'degraded') {
-                    $percent = 5
-                    $phase = 'Analytics export degraded'
-                    $detail = [string]$ts.lastError
-                    if ([string]::IsNullOrWhiteSpace($detail)) { $detail = 'InfluxDB export is degraded; check analytics container logs.' }
-                } else {
-                    $percent = [math]::Max($percent, 92)
-                    $phase = 'Waiting for analytics export'
-                    $detail = "Timeseries state: $($ts.state); backfill: $backfillState"
-                }
-            }
+    $warmup = $null
+    $warmupLog = Join-Path $Root '.streamclone-scraper-warmup.log'
+    $warmupErr = "${warmupLog}.err"
+    $warmupLines = [System.Collections.Generic.List[string]]::new()
+    foreach ($path in @($warmupLog, $warmupErr)) {
+        if (-not (Test-Path $path)) { continue }
+        foreach ($line in (Get-Content -LiteralPath $path -Tail 6 -ErrorAction SilentlyContinue)) {
+            $trimmed = "$line".Trim()
+            if ($trimmed) { [void]$warmupLines.Add($trimmed) }
         }
     }
-
-    $warmup = $null
-    if ($Service -eq 'scraper') {
-        $warmupLog = Join-Path $Root '.streamclone-scraper-warmup.log'
-        $warmupErr = "${warmupLog}.err"
-        $warmupLines = [System.Collections.Generic.List[string]]::new()
-        foreach ($path in @($warmupLog, $warmupErr)) {
-            if (-not (Test-Path $path)) { continue }
-            foreach ($line in (Get-Content -LiteralPath $path -Tail 6 -ErrorAction SilentlyContinue)) {
-                $trimmed = "$line".Trim()
-                if ($trimmed) { [void]$warmupLines.Add($trimmed) }
+    if ($warmupLines.Count -gt 0) {
+        $warmupBlob = ($warmupLines -join ' ').ToLowerInvariant()
+        if ($warmupBlob -match 'camoufox (sequential )?scrape ok|meta#ecs|chart true') {
+            $warmup = 'Camoufox profile warm — TwitchTracker probe ok'
+            if ($percent -lt 96) { $percent = 96 }
+            if ($phase -eq 'Container is up' -or $phase -eq 'Waiting for API health') {
+                $phase = 'Warming Camoufox profile'
             }
-        }
-        if ($warmupLines.Count -gt 0) {
-            $warmupBlob = ($warmupLines -join ' ').ToLowerInvariant()
-            if ($warmupBlob -match 'camoufox (sequential )?scrape ok|meta#ecs|chart true') {
-                $warmup = 'Camoufox profile warm — TwitchTracker probe ok'
-                if ($percent -lt 96) { $percent = 96 }
-                if ($phase -eq 'Container is up' -or $phase -eq 'Waiting for API health') {
-                    $phase = 'Warming Camoufox profile'
-                }
-            } elseif ($warmupBlob -match 'cloudflare|warm the camoufox profile') {
-                $warmup = 'Cloudflare blocked — run scripts/warm-camoufox-profile.ps1 once, then retry sync'
-            } elseif ($warmupBlob -match 'not running|waiting for scraper|scraper healthy') {
-                $warmup = 'Waiting for Analytics container, then probing Camoufox / TwitchTracker…'
-                if ($percent -ge 82 -and $percent -lt 94) {
-                    $percent = 94
-                    $phase = 'Warming Camoufox profile'
-                }
-            } elseif ($warmupBlob -match 'writeerror|fullyqualifiederrorid') {
-                $warmup = Format-StreamcloneStartDetail -Service 'scraper' -Detail ($warmupLines[$warmupLines.Count - 1]) -Blob $warmupBlob
-            } else {
-                $warmup = Format-StreamcloneStartDetail -Service 'scraper' -Detail ($warmupLines[$warmupLines.Count - 1]) -Blob $warmupBlob
+        } elseif ($warmupBlob -match 'cloudflare|warm the camoufox profile') {
+            $warmup = 'Cloudflare blocked — run scripts/warm-camoufox-profile.ps1 once, then retry sync'
+        } elseif ($warmupBlob -match 'not running|waiting for scraper|scraper healthy') {
+            $warmup = 'Waiting for Analytics container, then probing Camoufox / TwitchTracker…'
+            if ($percent -ge 82 -and $percent -lt 94) {
+                $percent = 94
+                $phase = 'Warming Camoufox profile'
             }
-        } elseif ($percent -ge 82) {
-            $warmup = 'Camoufox warmup queued after container start'
+        } elseif ($warmupBlob -match 'writeerror|fullyqualifiederrorid') {
+            $warmup = Format-StreamcloneStartDetail -Service 'scraper' -Detail ($warmupLines[$warmupLines.Count - 1]) -Blob $warmupBlob
+        } else {
+            $warmup = Format-StreamcloneStartDetail -Service 'scraper' -Detail ($warmupLines[$warmupLines.Count - 1]) -Blob $warmupBlob
         }
+    } elseif ($percent -ge 82) {
+        $warmup = 'Camoufox warmup queued after container start'
     }
 
     return @{
@@ -678,11 +578,8 @@ try {
                         @{ method = 'GET'; path = '/diagnostics/network'; auth = $false; description = 'Docker network I/O stats for Streamclone containers' }
                         @{ method = 'GET'; path = '/endpoints'; auth = $false; description = 'This route list' }
                         @{ method = 'GET'; path = '/start/scraper/status'; auth = $false; description = 'Async scraper profile start progress' }
-                        @{ method = 'GET'; path = '/start/pulse/status'; auth = $false; description = 'Async Pulse service start progress' }
                         @{ method = 'POST'; path = '/start/scraper'; auth = $true; description = 'Start analytics scraper compose profile' }
-                        @{ method = 'POST'; path = '/start/pulse'; auth = $true; description = 'Start Pulse dashboards (Grafana/Influx services)' }
                         @{ method = 'POST'; path = '/stop/scraper'; auth = $true; description = 'Stop analytics scraper compose profile' }
-                        @{ method = 'POST'; path = '/stop/pulse'; auth = $true; description = 'Stop Pulse Grafana/Influx services' }
                     )
                     scripts = @(
                         @{ name = 'backup-streamclone.ps1'; path = 'scripts/backup-streamclone.ps1'; description = 'Dump Postgres + MinIO backup instructions' }
@@ -703,9 +600,8 @@ try {
                 continue
             }
 
-            if ($request.HttpMethod -eq 'GET' -and $path -match '^/start/(scraper|pulse)/status$') {
-                $service = $Matches[1]
-                $status = Get-StreamcloneProfileStartStatus -Service $service
+            if ($request.HttpMethod -eq 'GET' -and $path -eq '/start/scraper/status') {
+                $status = Get-StreamcloneProfileStartStatus -Service 'scraper'
                 Write-JsonResponse -Response $response -StatusCode 200 -Body @{
                     ok      = $true
                     service = $status.service
@@ -718,19 +614,16 @@ try {
                 continue
             }
 
-            if ($request.HttpMethod -eq 'POST' -and $path -match '^/start/(scraper|pulse)$') {
+            if ($request.HttpMethod -eq 'POST' -and $path -eq '/start/scraper') {
                 if (-not (Test-SetupControlAuthorized -Request $request)) {
                     Write-JsonResponse -Response $response -StatusCode 401 -Body @{ ok = $false; error = 'unauthorized' }
                     continue
                 }
-                $service = $Matches[1]
-                $log = Start-ProfileServiceUpAsync -Service $service
-                $warmup = if ($service -eq 'scraper') {
-                    'Camoufox warmup probe started in background (scraper-preflight). Manual CF pass: scripts/warm-camoufox-profile.ps1'
-                } else { $null }
+                $log = Start-ProfileServiceUpAsync -Service 'scraper'
+                $warmup = 'Camoufox warmup probe started in background (scraper-preflight). Manual CF pass: scripts/warm-camoufox-profile.ps1'
                 Write-JsonResponse -Response $response -StatusCode 200 -Body @{
                     ok      = $true
-                    service = $service
+                    service = 'scraper'
                     message = 'starting'
                     log     = $log
                     warmup  = $warmup
@@ -738,17 +631,16 @@ try {
                 continue
             }
 
-            if ($request.HttpMethod -eq 'POST' -and $path -match '^/stop/(scraper|pulse)$') {
+            if ($request.HttpMethod -eq 'POST' -and $path -eq '/stop/scraper') {
                 if (-not (Test-SetupControlAuthorized -Request $request)) {
                     Write-JsonResponse -Response $response -StatusCode 401 -Body @{ ok = $false; error = 'unauthorized' }
                     continue
                 }
-                $service = $Matches[1]
                 try {
-                    $log = Invoke-ProfileServiceStop -Service $service
+                    $log = Invoke-ProfileServiceStop -Service 'scraper'
                     Write-JsonResponse -Response $response -StatusCode 200 -Body @{
                         ok      = $true
-                        service = $service
+                        service = 'scraper'
                         message = 'stopped'
                         log     = $log
                     }

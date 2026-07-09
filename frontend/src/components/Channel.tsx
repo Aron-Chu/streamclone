@@ -11,25 +11,17 @@ import {
   getChannelDetails,
   getChannelEmotes,
   getChannelInsights,
-  getAlwaysTracked,
-  getAnalyticsStream,
-  getAnalyticsStreams,
   getFollowedChannels,
   getLocalFollowedChannels,
   getStreamDiagnostics,
-  getSyncStatus,
   keepaliveStream,
   startStream,
-  setAlwaysTracked,
-  startHistoricalSync,
   startVodPlayback,
   stopStream,
   unfollowChannel,
   vodSessionKey,
-  watchAnalyticsChannel,
 } from '../api'
-import { useAnalyticsLive, analyticsLiveQueryKey } from '../hooks/useAnalyticsLive'
-import type { AnalyticsStream, AnalyticsTopEmote, AboutPanel, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat, VodStartResponse } from '../api'
+import type { AboutPanel, ChannelDetails, ChannelEmote, ChannelInsights, ClipCard, EmoteProvider, SourceStatus, StartResponse, StartupBreakdown, StreamDiagnostics, StatsTimelinePoint, StreamStat, VodStartResponse } from '../api'
 import { useAuth } from '../auth'
 import { useChatStore } from '../chatStore'
 import { normalizeBrowserOriginUrl } from '../config'
@@ -39,16 +31,20 @@ import { useThemeEffect, useUiSettings, type BottomDensityMode, type ClipPeriod,
 import { autoHighStableQuality, defaultQualityOptions, requestQuality } from '../streamQuality'
 import { emoteLoadPercent, formatEmoteProviderProgress, sortChannelEmotesByUsage } from '../emoteUtils'
 import { normalizeVodId } from '../utils/vodId'
-import { buildVodDeepLink, buildVodSeekTarget, estimateVodPlayerSeekTarget, parseVodAnalyticsContext, preferTwitchEmbedReview } from '@streamclone/pulse-core'
+import {
+  buildVodDeepLink,
+  buildVodSeekTarget,
+  estimateVodPlayerSeekTarget,
+  parseVodAnalyticsContext,
+  preferTwitchEmbedReview,
+} from '../utils/vodLink.ts'
 import {
   isEmbedAnalyticsVodReview,
-  resolveVodDetailDurationSec,
   resolveVodTotalDurationSec,
 } from '../utils/vodReviewLayout'
 import { shouldUseTwitchEmbedFallback } from '../utils/vodEmbedFallback'
 import { needsVodRelayRestart, readVideoSeekableRanges, vodRelativeSeekSeconds } from '../utils/vodSeek'
 import { buildTwitchVodUrl } from '../utils/twitchVodUrl'
-import VodChatReplayPanel from './analytics/VodChatReplayPanel'
 import ChannelTabShell from './channel/ChannelTabShell'
 import ChannelVodsPanel from './channel/ChannelVodsPanel'
 import TwitchVodEmbed, { type TwitchVodPlayerHandle } from './channel/TwitchVodEmbed'
@@ -64,11 +60,8 @@ import VodModeControls, { formatVodTimestamp } from './channel/VodModeControls'
 import VodErrorState from './channel/VodErrorState'
 import type { VodErrorInput } from './channel/vodError'
 import { HLS_NOT_READY_MAX_AUTO_RETRIES } from './channel/vodError'
-import PlayerHeatmap from './channel/PlayerHeatmap'
-import VodActivityGraphPanel from './channel/VodActivityGraphPanel'
 import ChannelPlayerSurface, { ChannelPlayerChrome, ChannelStartupClock, ChannelVodPlayheadPublisher } from './channel/ChannelPlayerSurface'
 import { ChannelPlaybackProvider, playbackActionsRef, useChannelPlayback } from './channel/channelPlaybackContext'
-import TrackAnalyticsToggle from './channel/TrackAnalyticsToggle'
 import SocialLinkChip from './channel/SocialLinkChip'
 import { usePlayheadStore } from '../stores/playheadStore'
 
@@ -402,7 +395,6 @@ function EmoteProviderPanel({
   emotesLoading,
   channelLabel,
   channelCategory,
-  topEmotes,
   onToggle,
   onLoad,
   onAutoLoad,
@@ -415,7 +407,6 @@ function EmoteProviderPanel({
   emotesLoading: boolean
   channelLabel?: string
   channelCategory?: string
-  topEmotes?: AnalyticsTopEmote[]
   onToggle: (provider: EmoteProvider) => void
   onLoad: () => void
   onAutoLoad: (value: boolean) => void
@@ -427,7 +418,7 @@ function EmoteProviderPanel({
     const row = status.providers?.find(provider => provider.provider === option.id)
     const emotes = sortChannelEmotesByUsage(
       loadedEmotes.filter(emote => emote.provider === option.id),
-      topEmotes,
+      undefined,
     )
     const active = selected.includes(option.id)
     const count = row?.count ?? 0
@@ -1043,19 +1034,6 @@ function ChannelMetaSkeleton({ dense }: { dense: boolean }) {
   )
 }
 
-function OpenFullAnalyticsLink({ channel, prominent = false }: { channel: string; prominent?: boolean }) {
-  return (
-    <a
-      href={`/analytics/${encodeURIComponent(channel)}`}
-      className={`rounded bg-violet-600 font-black text-white transition hover:bg-violet-500 ${
-        prominent ? 'px-4 py-2 text-xs' : 'px-3 py-1 text-xs uppercase tracking-wide'
-      }`}
-    >
-      Open Full Analytics →
-    </a>
-  )
-}
-
 function ChannelMeta({
   login,
   details,
@@ -1109,7 +1087,6 @@ function ChannelMeta({
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <FollowButton login={login} />
-          <OpenFullAnalyticsLink channel={login} />
         </div>
       </div>
       {listeners != null && listeners > 0 ? (
@@ -1201,12 +1178,6 @@ function StreamHistoryTable({ rows, sources, channel }: { rows: StreamStat[] | u
           <span>{fullCount(row.peakViewers)}</span>
           <span>{count(row.hoursWatched)}</span>
           <div className="flex flex-wrap items-center gap-2">
-            <Link
-              to={`/analytics/${encodeURIComponent(channel)}/${encodeURIComponent(row.id)}`}
-              className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-black uppercase text-cyan-300 hover:border-cyan-400/40"
-            >
-              Analytics
-            </Link>
             {row.videoId ? (
               <Link
                 to={buildVodDeepLink(channel, row.videoId, 0, row.id)}
@@ -1370,11 +1341,6 @@ function ChannelTabs({
   onClipPeriod,
   dense,
   isVod = false,
-  analyticsStreams,
-  liveStreamId,
-  trackLiveAnalytics,
-  trackAnalyticsPending,
-  onTrackAnalytics,
 }: {
   activeTab: ChannelTab
   onTab: (tab: ChannelTab) => void
@@ -1390,11 +1356,6 @@ function ChannelTabs({
   onClipPeriod: (period: ClipPeriod) => void
   dense: boolean
   isVod?: boolean
-  analyticsStreams?: AnalyticsStream[]
-  liveStreamId?: string | null
-  trackLiveAnalytics?: boolean
-  trackAnalyticsPending?: boolean
-  onTrackAnalytics?: (track: boolean) => void
 }) {
   const statsSources = (insights?.sources ?? []).filter(source => sourceMatchesGroup(source, 'stats'))
   const clipSources = (insights?.sources ?? []).filter(source => sourceMatchesGroup(source, 'clips'))
@@ -1435,19 +1396,9 @@ function ChannelTabs({
         <div className={dense ? 'space-y-3' : 'space-y-4'}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-white">Stream History & VODs</h3>
-            {details?.isLive && onTrackAnalytics ? (
-              <TrackAnalyticsToggle
-                tracked={Boolean(trackLiveAnalytics)}
-                pending={Boolean(trackAnalyticsPending)}
-                onToggle={onTrackAnalytics}
-                prominent
-              />
-            ) : null}
           </div>
           <ChannelVodsPanel
             rows={insights?.streamHistory}
-            analyticsStreams={analyticsStreams}
-            liveStreamId={liveStreamId}
             sources={statsSources}
             channel={channel}
           />
@@ -1573,7 +1524,6 @@ export default function Channel() {
 function ChannelPage() {
   const { login } = useParams<{ login: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
-  const queryClient = useQueryClient()
   const channelLogin = login ?? ''
   const rawVodParam = searchParams.get('vod')
   const vodParamPresent = (rawVodParam?.trim().length ?? 0) > 0
@@ -1584,9 +1534,8 @@ function ChannelPage() {
   const [relayStartOffset, setRelayStartOffset] = useState(vodOffsetSeconds)
   const prevVodPlaybackIdRef = useRef('')
   const vodAnalyticsContext = parseVodAnalyticsContext(searchParams, channelLogin, isVodPlayback)
-  const { fromAnalytics: vodFromAnalytics, streamId: vodAnalyticsStreamId, analyticsHref: vodAnalyticsHref } = vodAnalyticsContext
+  const { fromAnalytics: vodFromAnalytics, streamId: vodAnalyticsStreamId } = vodAnalyticsContext
   const vodEmbedPrimary = preferTwitchEmbedReview(isVodPlayback, vodFromAnalytics, vodAnalyticsStreamId)
-  const showAnalyticsActivityWaveform = isVodPlayback && vodFromAnalytics && Boolean(vodAnalyticsStreamId)
   const relaySessionKey = isVodPlayback ? vodSessionKey(vodPlaybackId) : channelLogin
   const twitchEmbedRef = useRef<TwitchVodPlayerHandle | null>(null)
   const [vodUseTwitchEmbed, setVodUseTwitchEmbed] = useState(vodEmbedPrimary)
@@ -1880,58 +1829,6 @@ function ChannelPage() {
     staleTime: 5000,
     refetchInterval: emoteStatus.state === 'loading' || emoteStatus.state === 'processing' || emoteStatus.state === 'partial' ? 5000 : false,
   })
-  const isLiveStream = Boolean(details.data?.isLive && !isVodPlayback)
-
-  const liveAnalytics = useAnalyticsLive(channelLogin, {
-    enabled: Boolean(channelLogin) && isLiveStream,
-  })
-
-  const alwaysTracked = useQuery({
-    queryKey: ['analytics-always-tracked'],
-    queryFn: getAlwaysTracked,
-    staleTime: 60_000,
-  })
-  const trackLiveAnalytics = useMemo(() => {
-    const channels = alwaysTracked.data?.channels ?? []
-    return channels.some(entry => entry.toLowerCase() === channelLogin.toLowerCase())
-  }, [alwaysTracked.data?.channels, channelLogin])
-
-  const trackAnalyticsMutation = useMutation({
-    mutationFn: (track: boolean) => setAlwaysTracked(channelLogin, track),
-    onSuccess: (_data, track) => {
-      void queryClient.invalidateQueries({ queryKey: ['analytics-always-tracked'] })
-      void queryClient.invalidateQueries({ queryKey: analyticsLiveQueryKey(channelLogin) })
-      if (track) {
-        watchAnalyticsChannel(channelLogin).catch(() => undefined)
-      }
-    },
-  })
-
-  const analyticsStreamsQuery = useQuery({
-    queryKey: ['channel-analytics-streams', channelLogin],
-    queryFn: () => getAnalyticsStreams(channelLogin, 50),
-    enabled: Boolean(channelLogin),
-    staleTime: 60_000,
-  })
-
-  const vodRollupsQuery = useQuery({
-    queryKey: ['vod-activity-rollups', vodAnalyticsStreamId, channelLogin],
-    queryFn: () => getAnalyticsStream(vodAnalyticsStreamId, { channel: channelLogin }),
-    enabled: Boolean(isVodPlayback && vodFromAnalytics && vodAnalyticsStreamId),
-    staleTime: 120_000,
-    retry: 1,
-  })
-  const activityRollups = vodRollupsQuery.data?.rollups ?? null
-  const hasActivityRollups = (activityRollups?.length ?? 0) > 0
-  const vodDetailDurationSec = useMemo(
-    () => resolveVodDetailDurationSec(vodRollupsQuery.data),
-    [vodRollupsQuery.data],
-  )
-
-  useEffect(() => {
-    if (!channelLogin || !trackLiveAnalytics) return
-    watchAnalyticsChannel(channelLogin).catch(() => undefined)
-  }, [channelLogin, trackLiveAnalytics])
 
   useEffect(() => {
     if (!channelLogin) return
@@ -2209,44 +2106,6 @@ function ChannelPage() {
 
   const retry = retryStream
 
-  const handleBackToAnalytics = useCallback(() => {
-    if (vodAnalyticsHref) window.location.assign(vodAnalyticsHref)
-  }, [vodAnalyticsHref])
-
-  const handleVodStreamLinked = useCallback((streamId: string) => {
-    setSearchParams(prev => {
-      const params = new URLSearchParams(prev)
-      params.set('from', 'analytics')
-      params.set('sid', streamId)
-      return params
-    }, { replace: true })
-  }, [setSearchParams])
-
-  const [vodResyncPending, setVodResyncPending] = useState(false)
-
-  const handleVodResync = useCallback(async () => {
-    if (!channelLogin || !vodAnalyticsStreamId) return
-    setVodResyncPending(true)
-    try {
-      await startHistoricalSync(vodAnalyticsStreamId, channelLogin, {
-        vodId: vodPlaybackId,
-        forceChat: true,
-      })
-      for (let attempt = 0; attempt < 180; attempt += 1) {
-        await new Promise(resolve => window.setTimeout(resolve, 2000))
-        const status = await getSyncStatus(vodAnalyticsStreamId).catch(() => null)
-        if (!status) break
-        if (status.phase === 'completed' || status.phase === 'failed') break
-      }
-      await queryClient.invalidateQueries({ queryKey: ['vod-chat-replay', vodAnalyticsStreamId] })
-      await queryClient.invalidateQueries({ queryKey: ['analytics-stream', vodAnalyticsStreamId] })
-    } catch {
-      // Keep the panel open; user can retry or open Analytics.
-    } finally {
-      setVodResyncPending(false)
-    }
-  }, [channelLogin, queryClient, vodAnalyticsStreamId, vodPlaybackId])
-
   const [embedMetrics, setEmbedMetrics] = useState<{ current: number | null; duration: number | null }>({
     current: null,
     duration: null,
@@ -2277,10 +2136,6 @@ function ChannelPage() {
     return () => window.clearInterval(intervalId)
   }, [relayState, showTwitchEmbed])
 
-  const vodAnalyticsDurationSec = useMemo(() => {
-    if (!activityRollups?.length) return null
-    return activityRollups.length * 60
-  }, [activityRollups])
   const vodPlayheadOffset = usePlayheadStore(s => (
     isVodPlayback && s.streamId === vodPlayheadStreamId ? s.offsetSeconds : null
   ))
@@ -2356,8 +2211,8 @@ function ChannelPage() {
   }, [error, hlsUrl, isVodPlayback, coarsePlaybackState, retry])
 
   const sortedLoadedEmotes = useMemo(
-    () => sortChannelEmotesByUsage(emotePreview.data ?? [], liveAnalytics.data?.topEmotes),
-    [emotePreview.data, liveAnalytics.data?.topEmotes],
+    () => sortChannelEmotesByUsage(emotePreview.data ?? [], undefined),
+    [emotePreview.data],
   )
   const headerTitle = useMemo(() => details.data?.displayName || channelLogin || 'Channel', [channelLogin, details.data?.displayName])
   const railViewerOverrides = useMemo(() => {
@@ -2391,7 +2246,6 @@ function ChannelPage() {
       emotesLoading={emotePreview.isLoading || emotePreview.isFetching}
       channelLabel={details.data?.displayName || channelLogin}
       channelCategory={details.data?.category}
-      topEmotes={liveAnalytics.data?.topEmotes}
       onToggle={toggleEmoteProvider}
       onLoad={loadSelectedEmotes}
       onAutoLoad={setAutoLoadPreference}
@@ -2527,9 +2381,9 @@ function ChannelPage() {
                           ? vodOffsetSeconds
                           : vodRelayBaseSeconds + Math.max(0, pb.metrics.currentTimeSec)))
                       const vodBannerTotalSec = resolveVodTotalDurationSec({
-                        rollupDurationSec: vodAnalyticsDurationSec,
+                        rollupDurationSec: null,
                         embedDurationSec: embedMetrics.duration,
-                        vodDetailDurationSec,
+                        vodDetailDurationSec: null,
                         relaySeekableEndSec: showTwitchEmbed ? null : pb.metrics.seekableEndSec,
                       })
                       const hasVodStructuredError = isVodPlayback && vodRelayError !== null && !showTwitchEmbed
@@ -2563,7 +2417,7 @@ function ChannelPage() {
                           currentTimeSec={vodBannerCurrentSec}
                           totalDurationSec={vodBannerTotalSec}
                           seekPending={vodSeekPending}
-                          analyticsHref={vodAnalyticsHref}
+                          analyticsHref={null}
                           chatLogHref={
                             vodAnalyticsStreamId
                               ? `/logs/${encodeURIComponent(channelLogin)}/${encodeURIComponent(vodAnalyticsStreamId)}`
@@ -2646,11 +2500,7 @@ function ChannelPage() {
                               channelLogin={channelLogin}
                               vodId={vodPlaybackId}
                               fromAnalytics={vodFromAnalytics}
-                              analyticsHref={vodAnalyticsHref}
-                              analyticsStreamId={vodAnalyticsStreamId || null}
                               onRetry={retry}
-                              onBackToAnalytics={vodAnalyticsHref ? handleBackToAnalytics : undefined}
-                              onResync={vodAnalyticsStreamId ? handleVodResync : undefined}
                             />
                           ) : (
                           <div className="rounded-xl border border-white/10 bg-zinc-950/90 px-4 py-3 shadow-2xl shadow-black/60 backdrop-blur-xl">
@@ -2729,7 +2579,6 @@ function ChannelPage() {
                         ) : (
                           <>
                             <span>{vodEmbedFallbackMode ? 'Twitch embed fallback' : 'Twitch embed'}</span>
-                            {vodFromAnalytics && vodAnalyticsStreamId ? <span className="text-zinc-500">+ activity graph</span> : null}
                           </>
                         )}
                       </div>
@@ -2753,33 +2602,6 @@ function ChannelPage() {
                       ) : null
                     ) : (
                     <div className={`absolute inset-x-0 bottom-0 z-50 transition-opacity duration-200 ${playerControlsVisible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'} ${showTwitchEmbed ? 'pb-2' : ''}`}>
-                      {showAnalyticsActivityWaveform && hasActivityRollups && !isEmbedAnalyticsReview ? (
-                        <div className="pointer-events-none px-3 pb-1 lg:px-5 group-hover:pointer-events-auto focus-within:pointer-events-auto">
-                          <PlayerHeatmap
-                            rollups={activityRollups}
-                            totalDurationSec={vodBannerTotalSec ?? ((activityRollups?.length ?? 0) * 60)}
-                            isLoading={vodRollupsQuery.isLoading}
-                            isError={vodRollupsQuery.isError}
-                            currentOffsetSec={vodBannerCurrentSec ?? vodOffsetSeconds}
-                            highlightOffsetSec={vodOffsetSeconds}
-                            onSeek={seekVodAbsoluteOffset}
-                          />
-                        </div>
-                      ) : isVodPlayback && vodFromAnalytics && !hasActivityRollups && !vodRollupsQuery.isLoading && !isEmbedAnalyticsReview ? (
-                        <div className="px-3 pb-1 lg:px-5">
-                          <VodActivityGraphPanel
-                            channelLogin={channelLogin}
-                            vodId={vodPlaybackId}
-                            streamId={vodAnalyticsStreamId || null}
-                            streams={analyticsStreamsQuery.data?.items ?? []}
-                            onStreamLinked={handleVodStreamLinked}
-                            onSyncComplete={() => {
-                              void queryClient.invalidateQueries({ queryKey: ['vod-activity-rollups'] })
-                              void queryClient.invalidateQueries({ queryKey: ['vod-chat-replay'] })
-                            }}
-                          />
-                        </div>
-                      ) : null}
                       {isVodPlayback && vodBannerTotalSec ? (
                         <VodSeekBar
                           currentSec={vodBannerCurrentSec ?? 0}
@@ -2858,56 +2680,19 @@ function ChannelPage() {
                   onClipPeriod={setClipPeriod}
                   dense={isDenseBottom}
                   isVod={isVodPlayback}
-                  analyticsStreams={analyticsStreamsQuery.data?.items}
-                  liveStreamId={liveAnalytics.data?.stream?.streamId ?? null}
-                  trackLiveAnalytics={trackLiveAnalytics}
-                  trackAnalyticsPending={trackAnalyticsMutation.isPending}
-                  onTrackAnalytics={track => trackAnalyticsMutation.mutate(track)}
                 />
                 </div>
             </div>
             <aside className={`${mobilePane === 'chat' ? 'flex' : 'hidden'} min-h-0 shrink-0 flex-col overflow-hidden border-t border-white/10 bg-[#111117] lg:flex lg:w-[var(--chat-column-width)] lg:border-l lg:border-t-0`}>
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                {isVodPlayback && vodAnalyticsStreamId ? (
-                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                    <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2.5">
-                      <div className="text-[11px] font-semibold text-zinc-500">
-                        Synced replay follows playback
-                      </div>
-                      <Link
-                        to={`/logs/${encodeURIComponent(channelLogin)}/${encodeURIComponent(vodAnalyticsStreamId)}`}
-                        className="rounded border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-black uppercase text-cyan-200 transition hover:bg-cyan-500/20"
-                      >
-                        Chat log
-                      </Link>
-                    </div>
-                    <VodChatReplayPanel
-                      streamId={vodAnalyticsStreamId}
-                      currentOffsetSeconds={sidebarCurrentOffsetSec}
-                      isSyncing={vodResyncPending}
-                      onSync={handleVodResync}
-                      needsChatReplayResync={hasActivityRollups}
-                      className="flex min-h-0 flex-1 flex-col overflow-hidden border-0 bg-transparent"
-                    />
-                  </div>
-                ) : isVodPlayback ? (
-                  <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-                    <p className="text-sm font-semibold text-zinc-300">VOD chat replay</p>
-                    <p className="text-xs leading-relaxed text-zinc-500">
-                      Sync chat and emotes for this VOD in Analytics first so the URL includes <code className="text-violet-200">sid=</code>.
-                      Streams synced before chat replay was enabled need one <strong className="font-bold text-zinc-400">Sync chat</strong> in Analytics or from the chat column after you open a synced VOD.
-                    </p>
-                  </div>
-                ) : (
-                  <Chat
-                    channel={channelLogin}
-                    user={auth.user}
-                    isAuthenticated={auth.isAuthenticated}
-                    emotes={emoteStatus}
-                    badgeCatalog={badgeCatalog.data?.badges ?? {}}
-                    loadedEmotes={sortedLoadedEmotes}
-                  />
-                )}
+                <Chat
+                  channel={channelLogin}
+                  user={auth.user}
+                  isAuthenticated={auth.isAuthenticated}
+                  emotes={emoteStatus}
+                  badgeCatalog={badgeCatalog.data?.badges ?? {}}
+                  loadedEmotes={sortedLoadedEmotes}
+                />
               </div>
             </aside>
           </div>

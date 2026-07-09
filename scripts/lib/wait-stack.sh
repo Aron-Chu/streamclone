@@ -51,16 +51,12 @@ declare -a APP_LABELS=(
   video
   chat
   emote
-  analytics
-  storygraph
 )
 declare -a APP_URLS=(
   http://localhost:8081/healthz
   http://localhost:8082/healthz
   http://localhost:8083/healthz
   http://localhost:8084/healthz
-  http://localhost:8086/healthz
-  http://localhost:8087/healthz
 )
 
 echo "Tier 2/3: application services"
@@ -113,14 +109,6 @@ while [ "$SECONDS" -lt "$deadline" ]; do
   attempt=$((attempt + 1))
   if check_url "$URL"; then
     echo "  Caddy proxy ready (attempt $attempt)"
-    if [ -f .env ] && grep -q '^PULSE_WIRE_ENABLED=true' .env 2>/dev/null; then
-      feed_code="$(curl --connect-timeout 2 --max-time 5 -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8090/v1/pulse-wire/feed" 2>/dev/null || echo 000)"
-      if [ "$feed_code" = "200" ]; then
-        echo "  Pulse Wire feed proxy ready"
-      else
-        echo "  Pulse Wire feed not reachable through proxy (optional, http $feed_code)" >&2
-      fi
-    fi
     echo "Streamclone tiered readiness: all required tiers passed"
     exit 0
   fi

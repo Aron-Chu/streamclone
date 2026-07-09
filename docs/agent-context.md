@@ -75,7 +75,7 @@ Agent should read `runtime/context/backfill_status.txt` (short), not query inven
 ### 5. Hooks (Cursor)
 
 Edit a `.go` file → gofmt runs (backend repo).
-Run `git commit` with `PULSE_BETA_KEYS=realvalue` staged → hook should deny.
+Run `git commit` with a real extension beta secret staged → hook should deny.
 
 Check **Cursor → Output → Hooks** if a hook does not fire.
 
@@ -107,8 +107,8 @@ Automations are **not** a substitute for rules/hooks. Useful cases:
 
 | Automation | Trigger | Why |
 |------------|---------|-----|
-| Hosted health | Cron daily | `curl https://api.streampulse.stream/v1/extension/health` → notify if fail |
-| PR hygiene | PR opened on pulse/backend | Run tests summary + `backend-safety-reviewer` subagent |
+| Hosted health | Cron daily | Hosted extension health probe (private **streampulse-ops**) → notify if fail |
+| PR hygiene | PR opened on pulse/backend | Run tests summary; reviewers live in **streampulse-backend** / **streamclone-pulse** |
 | tasks.md drift | Weekly | Remind if `docs/website-portal/tasks.md` checkboxes without linked commits |
 
 Skip automations for: every save lint, codegraph rebuild, or normal feature work — hooks + MCP cover that locally.
@@ -139,7 +139,7 @@ Verify: `make context-verify` (includes MCP preflight). In Cursor: **Settings �
 | Plugin | MCP / skills | Use for Streamclone | Leave off / defer | Token risk |
 |--------|--------------|---------------------|-------------------|------------|
 | **Cloudflare** | 4 MCP servers + Workers skills | StreamPulse Pages, Tunnel, D1, Workers | Go analytics, extension overlay | Bindings MCP needs auth — don't load unless doing CF infra |
-| **Figma** | figma MCP + skills | Pulse extension UI from `docs/pulse-extension/figma/` | Backend, scraper | Only open when implementing UI |
+| **Figma** | figma MCP + skills | Extension UI from `streamclone-pulse/docs/pulse-extension/figma/` | Core backend | Only open when implementing UI |
 | **Grafana Assistant** | rules + skills | `pulse` profile dashboards | Default dev on core stack | **Always-on rule** — keep plugin disabled unless doing Grafana work |
 | **SonarQube** | MCP (needs setup) + skills | Pre-PR / release quality gate | Daily iteration | Full analysis is expensive — use intentionally |
 | **Modern Web Guidance** | Chrome extension skill | MV3 extension APIs | Go services | Skill triggers on extension HTML/CSS only |

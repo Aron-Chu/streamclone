@@ -6,7 +6,6 @@ type RuntimeConfig = {
   chatWs?: string
   chatHttp?: string
   clipperUrl?: string
-  clipperToken?: string
   replayforgeUiUrl?: string
   maxRetainedMessages?: string | number
   streamcloneProfile?: string
@@ -14,7 +13,6 @@ type RuntimeConfig = {
   setupControlUrl?: string
   setupControlWakeEnabled?: string | boolean
   devTokenImportEnabled?: string | boolean
-  pulseWireEnabled?: string | boolean
   hlsLowLatencyEnabled?: string | boolean
   adaptiveLiveLatencyEnabled?: string | boolean
   hlsCdnBearer?: string
@@ -85,7 +83,9 @@ export const ANALYTICS = resolveHttp(runtime.analyticsUrl || viteEnv.VITE_ANALYT
 export const CHAT_WS = resolveWs(runtime.chatWs || viteEnv.VITE_CHAT_WS, browserWsOrigin ? `${browserWsOrigin}/v1/ws` : 'ws://localhost:8083/v1/ws')
 export const CHAT_HTTP = resolveHttp(runtime.chatHttp || viteEnv.VITE_CHAT_HTTP, browserOrigin || 'http://localhost:8083')
 export const CLIPPER = resolveHttp(runtime.clipperUrl || viteEnv.VITE_CLIPPER_URL, 'http://localhost:8095')
-export const CLIPPER_TOKEN = String(runtime.clipperToken ?? viteEnv.VITE_CLIPPER_TOKEN ?? '')
+// RF-P5-013: the clipper mutation Auth_Token is injected server-side by the
+// same-origin /v1/clipper/* proxy (Caddy header_up from CLIPPER_WEBHOOK_TOKEN).
+// It is deliberately never read into the browser bundle/config.
 export const REPLAYFORGE_UI = resolveHttp(
   runtime.replayforgeUiUrl || viteEnv.VITE_REPLAYFORGE_UI_URL,
   'http://localhost:8096',
@@ -118,9 +118,6 @@ function resolveSetupControlBase() {
 
 export const SETUP_CONTROL_BASE = resolveSetupControlBase()
 export const STREAMCLONE_INSTALL_ID = String(runtime.installId ?? viteEnv.VITE_STREAMCLONE_INSTALL_ID ?? '').trim()
-export const PULSE_WIRE_ENABLED = ['true', '1'].includes(
-  String(runtime.pulseWireEnabled ?? viteEnv.VITE_PULSE_WIRE_ENABLED ?? 'false').toLowerCase(),
-)
 export const HLS_LOW_LATENCY_ENABLED = ['true', '1'].includes(
   String(runtime.hlsLowLatencyEnabled ?? viteEnv.VITE_HLS_LOW_LATENCY_ENABLED ?? 'false').toLowerCase(),
 )

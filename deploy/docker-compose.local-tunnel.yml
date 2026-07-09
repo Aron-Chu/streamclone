@@ -4,6 +4,11 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # RF-P5-013: the clipper mutation Auth_Token is injected server-side by the
+    # @clipper route (header_up), never shipped to the browser. Empty is fine —
+    # ReplayForge disables the token gate when CLIPPER_WEBHOOK_TOKEN is unset.
+    environment:
+      CLIPPER_WEBHOOK_TOKEN: ${CLIPPER_WEBHOOK_TOKEN:-}
     ports:
       - "8090:80"
     volumes:
@@ -16,8 +21,6 @@ services:
       video:
         condition: service_healthy
       chat:
-        condition: service_healthy
-      analytics:
         condition: service_healthy
       emote:
         condition: service_healthy
@@ -40,9 +43,7 @@ services:
       VITE_METADATA_URL: auto
       VITE_VIDEO_URL: auto
       VITE_EMOTE_URL: auto
-      VITE_ANALYTICS_URL: auto
       VITE_CHAT_HTTP: auto
       VITE_CHAT_WS: auto
       VITE_CLIPPER_URL: auto
-      VITE_CLIPPER_TOKEN: ${VITE_CLIPPER_TOKEN:-${CLIPPER_WEBHOOK_TOKEN:-}}
       VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}

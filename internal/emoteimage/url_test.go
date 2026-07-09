@@ -79,7 +79,7 @@ func TestExtensionBrowserURLSevenTVUUIDUsesLocalPath(t *testing.T) {
 }
 
 func TestAbsolutizeHostedCDN(t *testing.T) {
-	base := "https://api.streampulse.stream/emotes"
+	base := "https://cdn.example.test/emotes"
 	localPath := "/emotes/75f49395-d5fc-41da-998c-880c6d8fddcb/1x.webp"
 	want := base + "/75f49395-d5fc-41da-998c-880c6d8fddcb/1x.webp"
 	if got := AbsolutizeHostedCDN(base, localPath); got != want {
@@ -95,7 +95,7 @@ func TestAbsolutizeHostedCDN(t *testing.T) {
 }
 
 func TestHostedBrowserURLUsesPublicBase(t *testing.T) {
-	base := "https://api.streampulse.stream/emotes"
+	base := "https://cdn.example.test/emotes"
 	localID := "75f49395-d5fc-41da-998c-880c6d8fddcb"
 	got := HostedBrowserURL(base, "ffz", localID, "")
 	want := base + "/" + localID + "/1x.webp"

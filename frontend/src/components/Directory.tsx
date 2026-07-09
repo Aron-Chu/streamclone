@@ -10,7 +10,6 @@ import {
   search,
 } from '../api'
 import { useAuth } from '../auth'
-import { PULSE_WIRE_ENABLED } from '../config'
 import { useThemeEffect, useUiSettings } from '../settings'
 import {
   getStoredDirectorySort,
@@ -200,8 +199,6 @@ export default function Directory() {
       searchValue={q}
       onSearchChange={handleSearchChange}
       showBrowseLink
-      showNetworkLink
-      showPulseWireLink={PULSE_WIRE_ENABLED}
     >
       {homeMode ? (
         <>

@@ -50,20 +50,12 @@ function useDebouncedValue<T>(value: T, delayMs: number) {
   return debounced
 }
 
-function StreamSegmentHeader({ entry, login }: { entry: UnifiedLogEntry; login: string }) {
+function StreamSegmentHeader({ entry }: { entry: UnifiedLogEntry }) {
   const label = formatSegmentHeader(entry)
   return (
     <div className="sticky top-0 z-[5] border-b border-violet-400/20 bg-[#12121a]/95 px-4 py-2 backdrop-blur-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs font-black uppercase tracking-wide text-violet-200">{label}</div>
-        {entry.streamId ? (
-          <Link
-            to={`/analytics/${encodeURIComponent(login)}?stream=${encodeURIComponent(entry.streamId)}`}
-            className="text-[11px] font-bold text-violet-300/90 transition hover:text-violet-100"
-          >
-            Open in Analytics
-          </Link>
-        ) : null}
       </div>
     </div>
   )
@@ -225,9 +217,6 @@ export default function ChatLogsPage() {
             <Link to={`/c/${encodeURIComponent(login)}`} className="rounded border border-white/10 px-3 py-2 text-xs font-black text-zinc-300 transition hover:bg-white/10">
               Open channel
             </Link>
-            <Link to={`/analytics/${encodeURIComponent(login)}`} className="rounded border border-white/10 px-3 py-2 text-xs font-black text-zinc-300 transition hover:bg-white/10">
-              Analytics
-            </Link>
           </div>
         </div>
 
@@ -331,7 +320,7 @@ export default function ChatLogsPage() {
                       style={{ transform: `translateY(${virtualRow.start}px)` }}
                     >
                       {row.kind === 'segment' ? (
-                        <StreamSegmentHeader entry={row.entry} login={login} />
+                        <StreamSegmentHeader entry={row.entry} />
                       ) : (
                         <LogRow entry={row.entry} onFilterUser={onFilterUser} />
                       )}

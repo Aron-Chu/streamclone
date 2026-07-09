@@ -548,18 +548,12 @@ export default function ClipStudio() {
   }
 
   if (error || !job) {
-    const analyticsBack = job?.channel
-      ? `/analytics/${encodeURIComponent(job.channel)}`
-      : '/'
     return (
       <div className="mx-auto flex min-h-[calc(100vh-56px)] max-w-2xl flex-col items-center justify-center bg-[#0d0d12] px-6 py-12 text-center">
         <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
           <StackStatusButton />
           <Link to="/studio" className="text-xs text-zinc-400 hover:text-zinc-200">Clip archive</Link>
           <Link to="/" className="text-xs text-zinc-400 hover:text-zinc-200">Live directory</Link>
-          {job?.channel ? (
-            <Link to={analyticsBack} className="text-xs text-cyan-400 hover:text-cyan-300">&larr; Analytics</Link>
-          ) : null}
         </div>
         <h2 className="text-lg font-bold text-rose-400">Could not open this clip</h2>
         <p className="mt-2 text-sm text-zinc-400">{error || 'Job not found or clipper is offline.'}</p>

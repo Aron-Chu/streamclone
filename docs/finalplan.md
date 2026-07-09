@@ -33,7 +33,7 @@ This plan does not claim full TwitchTracker independence for old streams that we
 
 ## Core principles
 
-1. Core Watch must work without scraper, Pulse Wire, ReplayForge, or Grafana.
+1. Core Watch must work without scraper, StreamPulse extension surfaces, ReplayForge, or Grafana.
 2. Postgres is hot/queryable state, not the only durable archive.
 3. Azure Blob Storage is the durable source for raw archived data and restore paths.
 4. Live Helix samples become the primary viewer timeline for future streams.
@@ -488,18 +488,16 @@ Redis
 
 ```text
 streamclone-scraper
-Pulse Wire / storygraph
-x-ingest
-media-matcher
+StreamPulse extension + portal (streamclone-pulse)
 ReplayForge
-Grafana / observability
+Grafana / observability (optional)
 ```
 
 ## Rules
 
 * Core Watch must work if scraper is down.
 * Analytics chat/GQL sync must work if TT scrape fails.
-* Pulse Wire failure must not break channel pages.
+* StreamPulse extension failure must not break channel pages.
 * ReplayForge failure must not break playback or analytics.
 * Scraper must have queue priority and concurrency caps.
 
@@ -508,7 +506,7 @@ Grafana / observability
 ```text
 1. user-requested TT sync
 2. recent P0/P1 stream TT gap-fill
-3. Pulse Wire Reddit fallback
+3. Optional social scrape fallback (hosted product)
 4. YouTube fallback
 5. old bulk TT backfill
 ```
@@ -516,7 +514,7 @@ Grafana / observability
 ## Acceptance criteria
 
 * Scraper outage produces honest degraded UI, not hanging sync.
-* Pulse Wire can be disabled without breaking Core Watch.
+* StreamPulse extension can be disabled without breaking Core Watch.
 * Browser jobs have concurrency caps and cache.
 * Shared scraper is not proxy-by-default.
 
@@ -532,7 +530,7 @@ run full GQL chat for every top-200 stream
 store actual VOD video files
 make proxies mandatory
 merge scraper back into the monolith
-move Core Watch into Pulse Wire
+move Core Watch into StreamPulse extension stack
 replace LSF panel before Social spread reaches parity
 build embeddings/multi-entity story graph in this phase
 ```
@@ -572,7 +570,7 @@ historical tokenization confidence
 ## P3
 
 ```text
-full Pulse Wire detachment
+full StreamPulse extension detachment
 scraper queue priority
 ReplayForge worker isolation
 Grafana/observability stack

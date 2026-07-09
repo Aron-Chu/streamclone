@@ -1,6 +1,6 @@
-import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, CLIPPER_TOKEN, SETUP_CONTROL_BASE, SETUP_CONTROL_TOKEN } from './config'
+import { ANALYTICS, CHAT_HTTP, EMOTE, METADATA, VIDEO, CLIPPER, SETUP_CONTROL_BASE, SETUP_CONTROL_TOKEN } from './config'
 import type { ClipPeriod, PlaybackLatencyMode, StatsPeriod } from './settings'
-import { buildVodStartRequestBody } from '@streamclone/pulse-core'
+import { buildVodStartRequestBody } from './utils/vodLink.ts'
 import type { HeatmapDetailResponse, HeatmapResponse } from './types/heatmap'
 
 export class ApiError extends Error {
@@ -740,9 +740,7 @@ async function json<T>(res: Response): Promise<T> {
       const body = await res.json() as Record<string, unknown>
       let message = apiErrorMessage(body, fallback)
       if (res.status === 401 && message.toLowerCase().includes('unauthorized')) {
-        message = CLIPPER_TOKEN
-          ? 'Clipper rejected the webhook token. Ensure VITE_CLIPPER_TOKEN matches CLIPPER_WEBHOOK_TOKEN in .env, then recreate the frontend container.'
-          : 'Clipper webhook auth is not configured in the browser. Ensure VITE_CLIPPER_TOKEN matches CLIPPER_WEBHOOK_TOKEN in .env, then recreate the frontend container.'
+        message = 'Clip Studio rejected the request. The clipper Auth_Token is injected server-side by the /v1/clipper proxy — ensure CLIPPER_WEBHOOK_TOKEN in .env matches ReplayForge, then recreate the proxy container.'
       }
       throw new ApiError(
         message,
@@ -1528,11 +1526,10 @@ export interface ClipperTemplatesResponse {
 }
 
 function clipperHeaders(extra?: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = { ...extra }
-  if (CLIPPER_TOKEN) {
-    headers.Authorization = `Bearer ${CLIPPER_TOKEN}`
-  }
-  return headers
+  // RF-P5-013: no browser-visible Authorization bearer. The clipper mutation
+  // Auth_Token is attached server-side by the same-origin /v1/clipper/* proxy
+  // (Caddy header_up from CLIPPER_WEBHOOK_TOKEN), never shipped to the browser.
+  return { ...extra }
 }
 
 export interface ClipperCaptionsResponse {

@@ -145,7 +145,7 @@ jobs:
       - run: bash scripts/ci-bootstrap-env.sh
       - name: Build core service images
         run: |
-          ${{ env.COMPOSE_CI }} build metadata video chat emote analytics frontend
+          ${{ env.COMPOSE_CI }} build metadata video chat emote frontend
       - name: Start core stack
         run: ${{ env.COMPOSE_CI }} up -d --no-build
       - name: Install frontend deps and Playwright browsers
