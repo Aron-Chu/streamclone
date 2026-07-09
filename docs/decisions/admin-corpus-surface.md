@@ -2,7 +2,7 @@
 
 **Status:** Proposed — decision pending
 **Date:** 2026-07-01
-**Context:** [`docs/requirements/corpus-scaling-observability.md`](../requirements/corpus-scaling-observability.md) PR 4 mentions internal corpus detail APIs and Grafana; admin UI ADR required before implementation.
+**Context:** [`docs/archive/requirements/corpus-scaling-observability.md`](../archive/requirements/corpus-scaling-observability.md) (archived) mentions internal corpus detail APIs and Grafana; admin UI ADR required before any hosted implementation.
 
 ---
 

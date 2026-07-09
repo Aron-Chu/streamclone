@@ -9,7 +9,7 @@ Hosted production secrets are **not** stored in this public repository. They liv
 | `AUTH_COOKIE_SECRET` | Session signing |
 | `CURATOR_API_TOKEN` | Internal API auth |
 | `SCRAPER_API_KEY` | Scraper ↔ analytics |
-| `PULSE_BETA_KEYS` | Extension beta gate |
+| Extension beta gate keys | Hosted extension beta gate |
 | Twitch OAuth client id/secret | API access |
 | Archive/R2 credentials | Corpus blob storage |
 | Postgres password | Database |

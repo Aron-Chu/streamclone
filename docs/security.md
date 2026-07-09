@@ -41,13 +41,7 @@ This public repository is **application source and contracts only**. Do not comm
 - Private ops checkout paths, production env file paths, or live env values
 - Operator runbooks, promotion manifests, soak evidence, or VPS deploy scripts
 
-Hosted production execution lives in **private streampulse-ops**. Safe public checks:
-
-```sh
-curl -fsS https://api.streampulse.stream/v1/extension/health
-```
-
-Extended hosted launch probes: **private streampulse-ops** only.
+Hosted production execution lives in **private streampulse-ops**. Public contract stubs: [hosted-ops-stub.md](hosted-ops-stub.md) and [streampulse-product-boundary.md](streampulse-product-boundary.md). Extended hosted launch probes and health URLs are documented in private ops — not in this repo.
 
 Pre-commit runs `scripts/pre-commit-public-ops-guard.sh` and `scripts/pre-commit-product-boundary-guard.sh` (strict on `master`).
 

@@ -46,8 +46,8 @@ Streamclone/StreamPulse cold archive is **implemented in production against Azur
 | `ARCHIVE_ENABLED` | Master switch for export workers |
 | `.env.example` | Documents Azure archive vars |
 | `deploy/env/profile-archive.env` | Enables archive on workers |
-| `deploy/env/profile-bearhost-prod.env` | Secret file path for BearHost |
-| `deploy/docker-compose.bearhost-prod.yml` | Mounts secrets into analytics-workers |
+| Hosted production env overlay | Secret file paths (private **streampulse-ops**) |
+| `deploy/docker-compose.bearhost-prod.yml` | Legacy hosted compose reference (private ops) |
 | `deploy/docker-compose.azure-archive-plane.yml` | Mode B Azure archive plane |
 
 **Terraform / IaC**
@@ -67,9 +67,9 @@ Streamclone/StreamPulse cold archive is **implemented in production against Azur
 | `docs/azure-archive-setup.md` | Operator setup |
 | `docs/azure-archive-plane.md` | Hybrid plane |
 | `docs/azure-archive-cicd.md` | CI/CD |
-| `docs/scraping-archive/requirements.md` | Archive requirements, env table |
-| `docs/scraping-archive/corpus-requirements.md` | Corpus blob layout |
-| `docs/scraping-archive/artifact-natural-keys.md` | Manifest natural keys ↔ blob paths |
+| `docs/archive/scraping-archive/requirements.md` | Archive requirements, env table |
+| `docs/archive/scraping-archive/corpus-requirements.md` | Corpus blob layout |
+| `docs/archive/scraping-archive/artifact-natural-keys.md` | Manifest natural keys ↔ blob paths |
 | `docs/finalplan.md` | Example blob URLs (`ststreamclone3lf6tt`) |
 
 **Scripts (read / list / upload — no migration yet)**

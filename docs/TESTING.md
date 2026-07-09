@@ -4,7 +4,7 @@ Streamclone checks range from sub-minute unit tests to multi-minute benchmarks. 
 
 Skill shortcut: `.cursor/skills/streamclone/test-by-domain/SKILL.md`.
 
-**Scope:** core watch stack (metadata, video, chat, emote, frontend). Legacy `make test-analytics` targets may still exist during the boundary split — do not use them for Streamclone product work. See [streampulse-product-boundary.md](streampulse-product-boundary.md).
+**Scope:** core watch stack (metadata, video, chat, emote, frontend). Legacy analytics Makefile targets may still exist during the boundary split — do not use them for Streamclone product work. See [streampulse-product-boundary.md](streampulse-product-boundary.md).
 
 ---
 

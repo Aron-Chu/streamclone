@@ -2,7 +2,7 @@
 
 Ledger for long-term artifact storage. **BearHost Postgres** remains source of truth for `archive_exports`, queues, saved moments, VOD Library rows, and hot indexes.
 
-> **Production remains Azure-only.** BearHost production (`profile-bearhost-prod.env`) must keep `ARCHIVE_READ_THROUGH=false`, `ARCHIVE_DUAL_WRITE=false`, and `ARCHIVE_PRIMARY_PROVIDER=azure`. STOR-R2-004 passed locally; that does **not** authorize a production read-path flip without explicit operator approval.
+> **Production remains Azure-only.** Hosted production env overlays must keep `ARCHIVE_READ_THROUGH=false`, `ARCHIVE_DUAL_WRITE=false`, and `ARCHIVE_PRIMARY_PROVIDER=azure`. STOR-R2-004 passed locally; that does **not** authorize a production read-path flip without explicit operator approval.
 
 Plan: [azure-to-r2-migration.md](./azure-to-r2-migration.md) · Index: [README.md](./README.md)
 

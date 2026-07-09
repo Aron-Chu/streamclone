@@ -13,4 +13,4 @@
 
 Do not add hosted URLs, image tags, SSH paths, or operator topology to this public tree. Legacy analytics code may remain temporarily during the boundary split; agent routing and docs here describe **core product scope only**.
 
-**Step 7 preflight:** mirror verification → `docs/split/mirror-verification.md`; boundary grep → `make product-boundary-preflight`. Do **not** delete legacy analytics trees until private **streampulse-backend** image/digest is confirmed on production via **streampulse-ops**.
+**Step 7 preflight (2026-07-08):** strict boundary **119 hits** (was 152). Remaining hits: legacy analytics trees, `internal/config/config.go` PULSE fields, scripts/tooling (Batch 6), frontend deep links (needs-decision). Mirror verification → `docs/split/mirror-verification.md`; boundary grep → `make product-boundary-preflight`. Do **not** delete legacy analytics trees until private **streampulse-backend** image/digest is confirmed on production via **streampulse-ops**.

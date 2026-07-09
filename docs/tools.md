@@ -63,12 +63,9 @@ See [streampulse-product-boundary.md](streampulse-product-boundary.md) and [`COD
 
 ---
 
-## 5. Two backfill pipelines (do not confuse)
+## 5. Legacy backfill pipelines (archived)
 
-| Pipeline | Code | BearHost Pulse profile |
-|----------|------|------------------------|
-| **Pulse extension backfill** | `pulse_backfill.go`, `sync_pulse_missed.go` | User-triggered; `PULSE_MAX_BACKFILLS=1` |
-| **Archive gold/silver** | `backfill_worker.go`, `gold_enqueuer.go` | **Disabled** (`BACKFILL_ENABLED=false`) |
+Hosted extension backfill and corpus Silver/Gold workers are **not** public Streamclone scope. See [streampulse-product-boundary.md](streampulse-product-boundary.md) and private **streampulse-backend** for backfill code paths.
 
 ---
 

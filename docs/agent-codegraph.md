@@ -54,7 +54,7 @@ search_symbols("mergeMinuteRollups")
 get_ast_chunk("mergeMinuteRollups")
 get_ast_chunk(file_path="internal/analytics/api.go", start_line=560, end_line=610)
 
-find_routes(path="/v1/extension")
+find_routes(path="/v1/metadata")
 impact_analysis("mergeMinuteRollups")
 explain_subsystem("vod sync")
 ```

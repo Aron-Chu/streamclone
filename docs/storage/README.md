@@ -31,10 +31,10 @@ StreamPulse long-term **artifact bytes** vs **queryable app state**. Read this b
 
 | Surface | Account / host |
 |---------|----------------|
-| Production Pages | Personal Cloudflare → `https://streampulse.stream` |
-| Staging Pages | ASU Cloudflare → `https://app.streampulse.stream` (when configured) |
-| API | BearHost → `https://api.streampulse.stream` (tunnel; do not move) |
-| Artifact API | **BearHost** analytics/archive — Workers are not the main blob API |
+| Production Pages | Personal Cloudflare → public StreamPulse site |
+| Staging Pages | ASU Cloudflare → staging app host (when configured) |
+| API | Hosted production tunnel (private **streampulse-ops** contract) |
+| Artifact API | Hosted analytics/archive service — Workers are not the main blob API |
 
 ## VOD Library direction
 

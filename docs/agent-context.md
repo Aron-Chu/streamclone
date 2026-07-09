@@ -75,7 +75,7 @@ Agent should read `runtime/context/backfill_status.txt` (short), not query inven
 ### 5. Hooks (Cursor)
 
 Edit a `.go` file → gofmt runs (backend repo).
-Run `git commit` with `PULSE_BETA_KEYS=realvalue` staged → hook should deny.
+Run `git commit` with a real extension beta secret staged → hook should deny.
 
 Check **Cursor → Output → Hooks** if a hook does not fire.
 
@@ -107,7 +107,7 @@ Automations are **not** a substitute for rules/hooks. Useful cases:
 
 | Automation | Trigger | Why |
 |------------|---------|-----|
-| Hosted health | Cron daily | `curl https://api.streampulse.stream/v1/extension/health` → notify if fail |
+| Hosted health | Cron daily | Hosted extension health probe (private **streampulse-ops**) → notify if fail |
 | PR hygiene | PR opened on pulse/backend | Run tests summary; reviewers live in **streampulse-backend** / **streamclone-pulse** |
 | tasks.md drift | Weekly | Remind if `docs/website-portal/tasks.md` checkboxes without linked commits |
 

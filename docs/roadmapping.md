@@ -61,7 +61,7 @@ Raise cap: MAX_CONCURRENT_TRACKED_CHANNELS 10 → 25–50 (after metrics)
 
 **Not built yet:** dedicated go-live worker in analytics (EventSub today is emote/7TV only).
 
-Env reference: `deploy/env/profile-bearhost-pulse.env`
+Env reference: private hosted env overlays in **streampulse-ops** (not this repo).
 
 ---
 
@@ -108,11 +108,11 @@ Kick **not** in MVP: deleted VOD recovery, full historical chat, unofficial Push
 | # | Question | Default recommendation |
 |---|----------|------------------------|
 | OQ-1 | Helix poll vs EventSub for R1? | Poll first; EventSub when webhook route ready |
-| OQ-2 | Beta live cap 25 vs 50? | 25 on BearHost Pulse, raise after metrics |
+| OQ-2 | Beta live cap 25 vs 50? | 25 on hosted beta, raise after metrics |
 | OQ-3 | VOD retry after stream end? | 30s / 2m / 5m / 15m; evaluate +1h |
-| OQ-4 | Protected channels per principal? | `PULSE_MAX_CHANNELS_PER_PRINCIPAL=10` |
+| OQ-4 | Protected channels per principal? | Extension channel cap per user (hosted config) |
 | OQ-5 | Extension VOD discovery? | Hint-only |
-| OQ-6 | Shared CoverageCard in pulse-core? | Yes, reduces portal/extension drift |
+| OQ-6 | Shared CoverageCard in shared UI package? | Yes, reduces portal/extension drift |
 | OQ-7 | Finalize `vod_unavailable` when? | After N failed Helix checks + post-end window |
 | OQ-8 | Provider abstraction before Kick? | Sketch at R4, implement after R1 |
 
