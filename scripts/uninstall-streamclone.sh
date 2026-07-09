@@ -73,7 +73,7 @@ compose_down() {
     profile="$(env_read_value "$env_file" STREAMCLONE_PROFILE 2>/dev/null || true)"
   fi
   case "$profile" in
-    core|scraper|clipper|full|pulse) ;;
+    core|scraper|clipper|full) ;;
     *) profile=full ;;
   esac
 
@@ -107,7 +107,7 @@ echo "Install folder: $ROOT"
 echo ""
 echo "This will:"
 echo "  - Stop all Streamclone Docker containers"
-echo "  - Delete Docker volumes (database, MinIO, analytics data)"
+echo "  - Delete Docker volumes (database, MinIO, app data)"
 echo "  - Remove .env and local secrets"
 echo "  - Remove Desktop / macOS shortcuts"
 [ "$PRUNE_IMAGES" = "1" ] && echo "  - Remove downloaded ghcr.io/aron-chu/streamclone images"
@@ -141,7 +141,7 @@ if [ "$PRUNE_IMAGES" = "1" ]; then
     [ -n "$maybe" ] && tag="$maybe"
   fi
   echo "Pruning GHCR images (tag: $tag)..."
-  for repo in metadata video chat analytics emote storygraph frontend; do
+  for repo in metadata video chat emote frontend; do
     docker image rm -f "ghcr.io/aron-chu/streamclone/${repo}:${tag}" 2>/dev/null || true
   done
 fi

@@ -57,7 +57,7 @@ All of the above are included in the backend mirror hash match **after sync**. T
 | 1 | Mirror verification (this doc) | **Done** |
 | 2 | `scripts/check-product-boundary.sh` + pre-commit hook | **Done** |
 | 3 | Track `docs/streampulse-product-boundary.md`, `deploy/smoke/test-core-routes-only.sh` | Commit in preflight PR |
-| 4 | Trim install/release/load scripts (core-only surfaces) | In progress |
+| 4 | Trim install/release/load scripts (core-only surfaces) | **Batch 3 done** — strict hits **152** (was 171) |
 | 5 | Move ops probes/load scripts → **streampulse-ops** | Copied; delete from public |
 | 6 | Delete `docs/split/**` | **After** strict grep green (not in this PR) |
 | 7 | `git rm` legacy analytics trees | **After** ops confirms backend image/digest on prod |

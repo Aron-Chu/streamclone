@@ -1,5 +1,3 @@
-# Laptopworker overlay — storygraph off; :8090 stays on 8090:80 (local-tunnel).
+# Laptopworker overlay — core-only; :8090 stays on 8090:80 (local-tunnel).
 # Tailnet-only access: run scripts/laptopworker-ufw-tailnet.sh (DOCKER-USER + UFW).
-services:
-  storygraph:
-    profiles: [laptopworker-pulse-wire]
+services: {}

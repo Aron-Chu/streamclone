@@ -93,9 +93,7 @@ function Wait-StreamcloneAppsReady {
         @{ Url = 'http://localhost:8081/healthz'; Label = 'metadata' },
         @{ Url = 'http://localhost:8082/healthz'; Label = 'video' },
         @{ Url = 'http://localhost:8083/healthz'; Label = 'chat' },
-        @{ Url = 'http://localhost:8084/healthz'; Label = 'emote' },
-        @{ Url = 'http://localhost:8086/healthz'; Label = 'analytics' },
-        @{ Url = 'http://localhost:8087/healthz'; Label = 'storygraph' }
+        @{ Url = 'http://localhost:8084/healthz'; Label = 'emote' }
     )
     Write-Host 'Tier 2/3: application services' -ForegroundColor Cyan
     $ready = @{}
@@ -139,23 +137,6 @@ function Wait-StreamcloneProxyReady {
     }
     if (-not $proxyOk) { return $false }
     $resolvedRoot = Get-WaitStackRoot -Requested $Root
-    $envPath = Join-Path $resolvedRoot '.env'
-    if (Test-Path $envPath) {
-        $vals = Read-EnvKeyValueFile -Path $envPath
-        if ($vals['PULSE_WIRE_ENABLED'] -eq 'true') {
-            $feedOk = Wait-StreamclonePollUntil -Label 'Pulse Wire feed proxy' -TimeoutSec 30 -IntervalSec 2 -Test {
-                try {
-                    $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:8090/v1/pulse-wire/feed' -UseBasicParsing -TimeoutSec 5
-                    return ($resp.StatusCode -eq 200)
-                } catch {
-                    return $false
-                }
-            }
-            if (-not $feedOk) {
-                Write-Host '  Pulse Wire feed not reachable through proxy (optional)' -ForegroundColor Yellow
-            }
-        }
-    }
     if (-not (Test-StreamcloneLocalTunnelHlsCaddyConfig -Root $resolvedRoot)) {
         Write-Host '  HLS proxy config outdated — playback may 401 on main_stream.m3u8. Run Manage Streamclone -> Update.' -ForegroundColor Yellow
     }

@@ -2,8 +2,7 @@
 # smoke-e2e-clipper.sh — end-to-end Auto Clipper validation
 #
 # Runs when both Streamclone (localhost:8090) and ReplayForge (localhost:8095)
-# are up. Exercises the full flow:
-#   Analytics moment → Export Moment → ReplayForge job creation → mirrored state.
+# are up. Exercises proxy reachability for the ReplayForge clip flow.
 #
 # Prerequisites:
 #   make up  (streamclone stack)
@@ -25,7 +24,7 @@ echo ""
 
 # Step 1: Check Streamclone is alive
 echo "[1/4] Checking Streamclone health..."
-sc_health=$(curl -s -o /dev/null -w "%{http_code}" "$STREAMCLONE_URL/v1/extension/health" 2>/dev/null || echo "000")
+sc_health=$(curl -s -o /dev/null -w "%{http_code}" "$STREAMCLONE_URL/v1/metadata/health" 2>/dev/null || echo "000")
 if [ "$sc_health" != "200" ]; then
   echo "  FAIL: Streamclone health returned $sc_health (want 200)"
   echo "  Ensure 'make up' has been run."
@@ -61,13 +60,13 @@ echo "  ReplayForge:    UP ($rf_health)"
 echo "  Clipper Proxy:  $([ "$proxy_health" = "200" ] && echo "UP" || echo "WARN ($proxy_health)")"
 echo ""
 echo "=== E2E Validation ==="
-echo "To trigger a full clip job from an Analytics moment:"
+echo "To trigger a full clip job from ReplayForge:"
 echo "  1. Open $STREAMCLONE_URL in browser"
-echo "  2. Navigate to Analytics → select a stream with VOD"
-echo "  3. Click Export Moment on a clip candidate"
+echo "  2. Open a channel VOD or live stream with clip candidates"
+echo "  3. Export a moment to ReplayForge when prompted"
 echo "  4. Verify job appears in Clip Studio at $REPLAYFORGE_URL:8096/studio"
 echo ""
 echo "For automated unit/integration tests (no running stacks needed):"
-echo "  INTEGRATION=1 go test ./internal/analytics/ -run TestAnalyticsExportMomentToReplayForgeJobCreationE2E -v"
+echo "  INTEGRATION=1 go test ./internal/video/ -run TestClip -v"
 echo ""
 echo "=== Done ==="
