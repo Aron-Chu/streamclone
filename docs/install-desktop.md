@@ -89,7 +89,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs storygraph
 docker compose --env-file .env -f deploy/docker-compose.yml up -d
 ```
 
-`make up` / `make down` wrap the same flags. Without `--env-file .env`, interpolated values like `PULSE_WIRE_ENABLED`, `REDDIT_PROVIDER`, and `SCRAPER_API_URL` may fall back to compose defaults.
+`make up` / `make down` wrap the same flags. Without `--env-file .env`, interpolated values like `REDDIT_PROVIDER` and `SCRAPER_API_URL` may fall back to compose defaults.
 
 ## Troubleshooting
 

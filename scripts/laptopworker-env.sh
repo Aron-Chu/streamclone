@@ -165,7 +165,7 @@ laptopworker_plan_update() {
         build_pick[analytics]=1
         build_pick[emote]=1
         ;;
-      frontend/*|packages/pulse-core/*)
+      frontend/*|packages/analytics-console/*)
         build_pick[frontend]=1
         ;;
       cmd/*|internal/*|deploy/Dockerfile*)

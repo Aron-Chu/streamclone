@@ -4,7 +4,7 @@ All browser and agent probes should use **`http://localhost:8090`** (Caddy `loca
 
 See also: [ENVIRONMENT.md](ENVIRONMENT.md), [MCP.md](MCP.md), `deploy/Caddyfile.local-tunnel`.
 
-**Scope:** core Twitch-replica stack only. StreamPulse BFF routes (`/v1/extension/*`, `/v1/pulse/*`, etc.) are owned by private **streampulse-backend** — not part of this product surface. See [streampulse-product-boundary.md](streampulse-product-boundary.md).
+**Scope:** core Twitch-replica stack only. StreamPulse BFF routes are owned by private **streampulse-backend** — not part of this product surface. See [streampulse-product-boundary.md](streampulse-product-boundary.md).
 
 ---
 
@@ -61,7 +61,7 @@ Go services listen on **`:8080` inside the container**. Health default: `GET /he
 
 ## Legacy / split in progress
 
-The compose tree may still include **analytics**, **scraper**, and **storygraph** services for migration. They are **not** part of the Streamclone desktop product. Do not document or route agent work through them from this repo — see [docs/split/route-api-matrix.md](split/route-api-matrix.md).
+The compose tree may still include legacy **analytics** and **scraper** services during migration. They are **not** part of the Streamclone desktop product. Do not document or route agent work through them from this repo — see [docs/split/route-api-matrix.md](split/route-api-matrix.md).
 
 ---
 

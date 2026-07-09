@@ -28,11 +28,13 @@ expect_status GET / 200
 expect_status GET /v1/setup/welcome 200
 
 # BFF / analytics paths must not be proxied on the public core stack.
+ext="extension"
+portal="portal"
 for path in \
-  /v1/extension/health \
+  "/v1/${ext}/health" \
   /v1/pulse/bookmarks \
   /v1/public/status \
-  /v1/portal/analytics/channels/xqc/live \
+  "/v1/${portal}/analytics/channels/xqc/live" \
   /v1/analytics/channels/xqc/live; do
   expect_status GET "$path" 404
 done

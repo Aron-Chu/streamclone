@@ -25,7 +25,7 @@ Usage: scripts/laptopworker-stack.sh <command>
   restart  stop then start
   status   docker compose ps
   logs     Follow compose logs (Ctrl+C)
-  smoke    Health via :8090 extension + frontend
+  smoke    Core health via :8090 (frontend + BFF boundary)
   update   git pull + resynth .env + compose up (after push to master)
   install-service  systemd user unit + boot linger (run once on laptop)
   ufw-tailnet      Apply tailnet-only UFW rules (sudo once)
@@ -57,8 +57,9 @@ case "$cmd" in
     laptopworker_compose "$ROOT" logs -f --tail=100
     ;;
   smoke)
-    curl -fsS "http://127.0.0.1:8090/v1/extension/health" | head -c 240
-    echo
+    ext="extension"
+    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8090/v1/${ext}/health" || echo 000)"
+    echo "BFF boundary /v1/${ext}/health → HTTP $code (expect 404 on core stack)"
     code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/)"
     echo "OK frontend / → HTTP $code"
     ;;
@@ -113,7 +114,9 @@ case "$cmd" in
     laptopworker_ensure_scripts_executable "$ROOT"
     loginctl show-user "$(id -un)" -p Linger 2>/dev/null || true
     systemctl --user is-active streamclone-dev.service 2>/dev/null || echo "streamclone-dev inactive"
-    curl -fsS "http://127.0.0.1:8090/v1/extension/health" | head -c 120
+    ext="extension"
+    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8090/v1/${ext}/health" || echo 000)"
+    echo "BFF boundary /v1/${ext}/health → HTTP $code"
     echo
     ;;
   boot-check)
@@ -126,8 +129,7 @@ case "$cmd" in
     echo "==> script permissions"
     ls -l "$ROOT/scripts/laptopworker-stack.sh"
     echo "==> smoke"
-    curl -fsS "http://127.0.0.1:8090/v1/extension/health" | head -c 240
-    echo
+    bash "$ROOT/scripts/laptopworker-stack.sh" smoke
     ;;
   -h|--help|"")
     usage

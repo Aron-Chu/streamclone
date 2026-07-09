@@ -153,10 +153,9 @@ if [ -z "$oauth_id" ] || [ -z "$oauth_secret" ]; then
   fi
 fi
 
-pulse_wire="$(env_read_value "$ENV_FILE" PULSE_WIRE_ENABLED || true)"
 reddit_ok="$(env_read_value "$ENV_FILE" REDDIT_COMMERCIAL_OK || true)"
-if [ "$pulse_wire" = "true" ] && [ "$reddit_ok" != "true" ]; then
-  warn "PULSE_WIRE_ENABLED=true but REDDIT_COMMERCIAL_OK is not true" "Reddit ingest stays disabled until you accept commercial API terms (set REDDIT_COMMERCIAL_OK=true in .env.local)"
+if [ "$reddit_ok" != "true" ] && [ "$(env_read_value "$ENV_FILE" REDDIT_PROVIDER || true)" = "oauth" ]; then
+  warn "REDDIT_PROVIDER=oauth but REDDIT_COMMERCIAL_OK is not true" "Set REDDIT_COMMERCIAL_OK=true in .env.local when using Reddit OAuth for LSF metadata"
 fi
 
 streamerbans_enabled="$(env_read_value "$ENV_FILE" STREAMERBANS_INGEST_ENABLED || true)"
