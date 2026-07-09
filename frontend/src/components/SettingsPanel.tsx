@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getAuthDebug, getAlwaysTracked, setAlwaysTracked } from '../api'
 import { useThemeEffect, useUiSettings, type ThemeName } from '../settings'

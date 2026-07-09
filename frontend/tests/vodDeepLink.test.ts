@@ -72,6 +72,13 @@ test('25.2: deep link URL-encodes the channel login', () => {
   assert.match(url, /^\/c\/My%20Channel\?vod=2371095470&offset=10$/)
 })
 
+test('25.2: optional stream id adds analytics sid/from markers', () => {
+  const url = buildVodDeepLink(MOMENT.channel, MOMENT.vodId, 0, '316955094498')
+  const parsed = new URL(url, 'http://localhost:8090')
+  assert.equal(parsed.searchParams.get('sid'), '316955094498')
+  assert.equal(parsed.searchParams.get('from'), 'analytics')
+})
+
 test('25.3: relay request body uses snake_case vod_id and offset_seconds', () => {
   const outcome = simulateVodStart(MOMENT.vodId, MOMENT.offsetSeconds, () => ({
     status: 200,

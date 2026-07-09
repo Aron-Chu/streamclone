@@ -16,6 +16,7 @@ export function buildVodDeepLink(
   login: string,
   vodId: string,
   offsetSeconds: number,
+  streamId?: string | null,
 ): string {
   const safeOffset = Number.isFinite(offsetSeconds)
     ? Math.max(0, Math.trunc(offsetSeconds))
@@ -24,6 +25,11 @@ export function buildVodDeepLink(
     vod: vodId,
     offset: String(safeOffset),
   })
+  const sid = (streamId ?? '').trim()
+  if (sid) {
+    params.set('sid', sid)
+    params.set('from', 'analytics')
+  }
   return `/c/${encodeURIComponent(login)}?${params.toString()}`
 }
 
