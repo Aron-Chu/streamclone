@@ -2,6 +2,8 @@
 
 128 migration files today under `migrations/` (64 `.up.sql` + paired `.down.sql`). **Never edit applied migrations** in either repo.
 
+Field names for the production migration row: [`migration-state.md`](migration-state.md) (`pre_cutover_schema_version`, `pre_cutover_schema_dirty`). **Do not** use placeholder version numbers in public docs until ops records them.
+
 ---
 
 ## Ownership classes
@@ -24,20 +26,30 @@ Full file list: `ls migrations/*.up.sql` — classify any unlisted file as backe
 
 | Install | Migration path | Table | Baseline |
 |---------|----------------|-------|----------|
-| **Hosted production** (existing PG) | backend `migrations/` | `schema_migrations_backend` (override) or default after cutover lock | Ops force `version=PRE_SPLIT_MAX`, `dirty=false` without re-running historical SQL |
-| **Backend local dev** | backend bundle | same as prod | Empty DB applies full copied history + `100000_+` |
-| **Fresh public desktop** | core-only subset | default public table | Core migrations only |
-| **Upgraded pre-split desktop** | core-only | existing public table | New core files numbered **> PRE_SPLIT_MAX** |
+| **Hosted production** (existing PG) | backend `migrations/` | `schema_migrations_backend` (override) or default after cutover lock | Ops sets `version` / `dirty` to recorded `pre_cutover_schema_version` / `pre_cutover_schema_dirty` without re-running historical SQL |
+| **Backend local dev** | backend bundle | same as prod policy | Empty DB applies full copied history + `100000_+` |
+| **Fresh public desktop** | core-only subset | default public table | Core migrations only from empty DB |
+| **Upgraded pre-split desktop** | core-only | existing public table | New core files numbered **> `pre_cutover_schema_version`** (ops-recorded) |
 
-**PRE_SPLIT_MAX:** archive from production before cutover → private ops `docs/deployments/boundary-split-rollback.md`.
+---
+
+## Fresh vs upgraded paths
+
+| Scenario | Repo | Steps |
+|----------|------|-------|
+| **Fresh desktop install** | streamclone | Core-only migrate bundle; empty DB; no backend analytics files in public tree after final deletion PR |
+| **Backend developer** | streampulse-backend | Full copied history; empty local PG; verify migrate up from zero |
+| **Old desktop upgrade (pre-split)** | streamclone | Simulate DB already at ops-recorded `pre_cutover_schema_version`; apply next **core-only** migration numbered above that version; confirm golang-migrate does not downgrade or re-apply removed analytics files |
 
 ---
 
 ## Numbering after split
 
+**Upgraded installs win:** new public core migrations must be numbered **greater than** ops-recorded `pre_cutover_schema_version`, even though many lower analytics numbers are removed from the public bundle.
+
 | Repo | Rule |
 |------|------|
-| **streamclone** | Continue core sequence; freeze historical analytics numbers in public bundle removal |
+| **streamclone** | **Fresh install:** core-only subset. **Upgraded install:** next core file **> `pre_cutover_schema_version`**, not “continue from last core 000NNN” |
 | **streampulse-backend** | Copied history keeps original `000NNN`; **new** backend-only files start at **`100000_`** prefix |
 
 ---
@@ -46,15 +58,23 @@ Full file list: `ls migrations/*.up.sql` — classify any unlisted file as backe
 
 - Inserting one row per historical migration into golang-migrate state tables
 - Re-running analytics `.up.sql` on production during cutover
-- New public core migrations numbered ≤ `PRE_SPLIT_MAX` on upgraded installs
+- New public core migrations numbered ≤ ops-recorded `pre_cutover_schema_version` on upgraded installs
 - Public Streamclone migrate job against hosted production DSN after cutover
+- Publishing guessed `version` / `dirty` values in this public repo (use [`migration-state.md`](migration-state.md) field names only)
 
 ---
 
 ## Checklist
 
-- [ ] Production `SELECT version, dirty FROM schema_migrations` archived in ops
-- [ ] Backend baseline documented with `PRE_SPLIT_MAX`
+### Public (this repo)
+
+- [x] Ownership class table and numbering rules documented
+- [x] [`migration-state.md`](migration-state.md) field template (no live prod values)
+- [ ] Public fresh-DB core-only migration test (after core subset is defined in deletion PR)
+- [ ] Upgraded-install simulation documented with ops-recorded `pre_cutover_schema_version` (blocked on ops query)
+
+### Ops-owned (streampulse-ops)
+
+- [ ] Production `SELECT version, dirty FROM schema_migrations` archived (`pre_cutover_*` fields)
+- [ ] Backend baseline and rollback anchor updated with recorded row
 - [ ] Backend fresh-DB migration test from empty
-- [ ] Public fresh-DB core-only migration test
-- [ ] Existing-install simulation at `version = PRE_SPLIT_MAX`

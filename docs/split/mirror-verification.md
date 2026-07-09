@@ -73,7 +73,7 @@ Record in private ops (not public):
 
 - Image tag / digest serving `https://api.streampulse.stream/v1/extension/health`
 - `version` field matches promoted **streampulse-backend** build (not legacy `streamclone/*` rc23 unless explicitly pinned)
-- Migration table `schema_migrations_backend` bootstrap documented (`PRE_SPLIT_MAX` candidate: **63**)
+- Migration table bootstrap documented with ops-recorded `pre_cutover_schema_version` / `pre_cutover_schema_dirty` (see docs/split/migration-state.md; no live values in public repo)
 
 Public check only:
 
