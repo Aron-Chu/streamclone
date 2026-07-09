@@ -62,9 +62,6 @@ func (s *Source) Capabilities() social.Caps {
 }
 
 func (s *Source) Healthy(ctx context.Context) error {
-	if !s.cfg.RedditCommercialOK && s.cfg.PulseWireEnabled {
-		return fmt.Errorf("reddit commercial gate: set REDDIT_COMMERCIAL_OK=true")
-	}
 	if s.client == nil || s.client.baseURL == "" {
 		return fmt.Errorf("reddit not configured")
 	}

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
@@ -27,7 +26,6 @@ type SetupWelcomeOptions struct {
 type setupWelcomeServices struct {
 	Scraper string `json:"scraper"`
 	Clipper string `json:"clipper"`
-	Pulse   string `json:"pulse"`
 }
 
 type setupWelcomeResponse struct {
@@ -36,13 +34,6 @@ type setupWelcomeResponse struct {
 	Incomplete    bool                 `json:"incomplete"`
 	ShowWelcome   bool                 `json:"showWelcome"`
 	SetupGuideURL string               `json:"setupGuideUrl"`
-}
-
-type setupPulseTimeseriesStatus struct {
-	Enabled       bool   `json:"enabled"`
-	Configured    bool   `json:"configured"`
-	State         string `json:"state"`
-	BackfillState string `json:"backfillState,omitempty"`
 }
 
 func (h *Handler) WithSetupWelcome(opts SetupWelcomeOptions) *Handler {
@@ -78,7 +69,6 @@ func (h *Handler) setupWelcome(w http.ResponseWriter, r *http.Request) {
 	services := setupWelcomeServices{
 		Scraper: statuses["scraper"],
 		Clipper: statuses["clipper"],
-		Pulse:   h.pulseServiceReady(ctx),
 	}
 
 	incomplete := false
@@ -86,9 +76,6 @@ func (h *Handler) setupWelcome(w http.ResponseWriter, r *http.Request) {
 		incomplete = true
 	}
 	if profileHasClipper(profile) && services.Clipper == "offline" {
-		incomplete = true
-	}
-	if profileHasPulse(profile) && services.Pulse == "offline" {
 		incomplete = true
 	}
 
@@ -114,65 +101,6 @@ func profileHasScraper(profile string) bool {
 
 func profileHasClipper(profile string) bool {
 	return profile == "clipper" || profile == "full"
-}
-
-func profileHasPulse(profile string) bool {
-	return profile == "pulse"
-}
-
-func (h *Handler) pulseServiceReady(ctx context.Context) string {
-	grafanaTargets := []string{
-		"http://host.docker.internal:3000/api/health",
-		"http://grafana:3000/api/health",
-	}
-	influxTargets := []string{
-		"http://host.docker.internal:18086/health",
-		"http://host.docker.internal:18087/health",
-		"http://influxdb:8086/health",
-	}
-	if !h.probeAnyServiceHealth(ctx, grafanaTargets) {
-		return "offline"
-	}
-	if !h.probeAnyServiceHealth(ctx, influxTargets) {
-		return "offline"
-	}
-	if !h.pulseTimeseriesReady(ctx) {
-		return "offline"
-	}
-	return "ready"
-}
-
-func (h *Handler) pulseTimeseriesReady(ctx context.Context) bool {
-	for attempt := 0; attempt < 2; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return false
-			case <-time.After(setupProbeRetryDelay):
-			}
-		}
-		attemptCtx, cancel := context.WithTimeout(ctx, setupProbeRequestTimeout)
-		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, "http://analytics:8080/v1/analytics/timeseries/status", nil)
-		if err != nil {
-			cancel()
-			continue
-		}
-		resp, err := h.http.Do(req)
-		if err != nil {
-			cancel()
-			continue
-		}
-		var status setupPulseTimeseriesStatus
-		decodeErr := json.NewDecoder(resp.Body).Decode(&status)
-		resp.Body.Close()
-		cancel()
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 && decodeErr == nil &&
-			status.Enabled && status.Configured && status.State == "ready" &&
-			(status.BackfillState == "" || status.BackfillState == "completed") {
-			return true
-		}
-	}
-	return false
 }
 
 func scraperHealthURL(scrapeURL string) string {
@@ -204,24 +132,6 @@ func (h *Handler) probeSetupServices(ctx context.Context, targets map[string]str
 	return statuses
 }
 
-func (h *Handler) probeAnyServiceHealth(ctx context.Context, targets []string) bool {
-	if len(targets) == 0 {
-		return false
-	}
-	results := make(chan bool, len(targets))
-	for _, rawURL := range targets {
-		go func(rawURL string) {
-			results <- h.probeServiceHealth(ctx, rawURL)
-		}(rawURL)
-	}
-	for range targets {
-		if <-results {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *Handler) probeServiceHealth(ctx context.Context, rawURL string) bool {
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
@@ -238,39 +148,19 @@ func (h *Handler) probeServiceHealth(ctx context.Context, rawURL string) bool {
 			continue
 		}
 		resp, err := h.http.Do(req)
+		cancel()
 		if err != nil {
-			cancel()
 			continue
 		}
-		ok := resp.StatusCode >= 200 && resp.StatusCode < 300
 		resp.Body.Close()
-		cancel()
-		if ok {
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return true
 		}
 	}
 	return false
 }
 
-// scraperServiceReady reports whether the optional Analytics scraper is reachable.
-// When REDDIT_PROVIDER=off, LSF auto-enables via scraper once this returns true.
-func (h *Handler) scraperServiceReady(ctx context.Context) bool {
-	if h.scraperAPIKey == "" {
-		return false
-	}
-	h.scraperReadyMu.RLock()
-	if !h.scraperReadyAt.IsZero() && time.Since(h.scraperReadyAt) < scraperReadyCacheTTL {
-		ready := h.scraperReadyCached
-		h.scraperReadyMu.RUnlock()
-		return ready
-	}
-	h.scraperReadyMu.RUnlock()
-
-	ready := h.probeServiceHealth(ctx, scraperHealthURL(h.scraperAPIURL))
-
-	h.scraperReadyMu.Lock()
-	h.scraperReadyAt = time.Now()
-	h.scraperReadyCached = ready
-	h.scraperReadyMu.Unlock()
-	return ready
+// scraperServiceReady reports whether the optional TwitchTracker scraper is reachable.
+func (h *Handler) scraperServiceReady(ctx context.Context) string {
+	return serviceStatus(h.probeServiceHealth(ctx, scraperHealthURL(h.scraperAPIURL)))
 }

@@ -1,2 +1,2 @@
-DROP INDEX IF EXISTS idx_vod_chat_stream_offset_id;
-DROP INDEX IF EXISTS idx_vod_chat_text_trgm;
+DROP INDEX IF EXISTS idx_live_chat_channel_ts_id;
+DROP INDEX IF EXISTS idx_live_chat_text_trgm;

@@ -9,14 +9,12 @@ import (
 )
 
 type setupDiagnosticsServices struct {
-	Metadata  string `json:"metadata"`
-	Chat      string `json:"chat"`
-	Video     string `json:"video"`
-	Emote     string `json:"emote"`
-	Analytics string `json:"analytics"`
-	Scraper   string `json:"scraper"`
-	Clipper   string `json:"clipper"`
-	Pulse     string `json:"pulse"`
+	Metadata string `json:"metadata"`
+	Chat     string `json:"chat"`
+	Video    string `json:"video"`
+	Emote    string `json:"emote"`
+	Scraper  string `json:"scraper"`
+	Clipper  string `json:"clipper"`
 }
 
 type setupDiagnosticsResponse struct {
@@ -37,28 +35,24 @@ func (h *Handler) setupDiagnostics(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	statuses := h.probeSetupServices(ctx, map[string]string{
-		"chat":      "http://chat:8080/healthz",
-		"video":     "http://video:8080/healthz",
-		"emote":     "http://emote:8080/healthz",
-		"analytics": "http://analytics:8080/healthz",
-		"scraper":   scraperHealthURL(h.scraperAPIURL),
-		"clipper":   h.clipperServiceURL + "/healthz",
+		"chat":    "http://chat:8080/healthz",
+		"video":   "http://video:8080/healthz",
+		"emote":   "http://emote:8080/healthz",
+		"scraper": scraperHealthURL(h.scraperAPIURL),
+		"clipper": h.clipperServiceURL + "/healthz",
 	})
 	services := setupDiagnosticsServices{
-		Metadata:  "ready",
-		Chat:      statuses["chat"],
-		Video:     statuses["video"],
-		Emote:     statuses["emote"],
-		Analytics: statuses["analytics"],
-		Scraper:   statuses["scraper"],
-		Clipper:   statuses["clipper"],
-		Pulse:     h.pulseServiceReady(ctx),
+		Metadata: "ready",
+		Chat:     statuses["chat"],
+		Video:    statuses["video"],
+		Emote:    statuses["emote"],
+		Scraper:  statuses["scraper"],
+		Clipper:  statuses["clipper"],
 	}
 
 	healthy := services.Chat == "ready" &&
 		services.Video == "ready" &&
-		services.Emote == "ready" &&
-		services.Analytics == "ready"
+		services.Emote == "ready"
 
 	writeJSON(w, http.StatusOK, setupDiagnosticsResponse{
 		Profile:   profile,

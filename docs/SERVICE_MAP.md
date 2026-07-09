@@ -59,9 +59,9 @@ Go services listen on **`:8080` inside the container**. Health default: `GET /he
 
 ---
 
-## Legacy / split in progress
+## Optional scraper profile
 
-The compose tree may still include legacy **analytics** and **scraper** services during migration. They are **not** part of the Streamclone desktop product. Do not document or route agent work through them from this repo — see [docs/split/route-api-matrix.md](split/route-api-matrix.md).
+The compose tree may still include an optional **scraper** service (TwitchTracker minute charts). It is not part of the default desktop **core** profile. Analytics/backend services were removed from this repo in the Step 7 boundary split; hosted StreamPulse APIs live in private **streampulse-backend**.
 
 ---
 

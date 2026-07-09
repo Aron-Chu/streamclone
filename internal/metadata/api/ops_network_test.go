@@ -65,7 +65,7 @@ func TestOpsNetworkActiveStreams(t *testing.T) {
 	}
 }
 
-func TestOpsNetworkWithoutPulse(t *testing.T) {
+func TestOpsNetworkWithoutOptionalServices(t *testing.T) {
 	origVideoStatusURL := videoStatusURL
 	videoStatusURL = "http://127.0.0.1:1/v1/stream/status"
 	t.Cleanup(func() { videoStatusURL = origVideoStatusURL })
@@ -81,11 +81,8 @@ func TestOpsNetworkWithoutPulse(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.PulseReady {
-		t.Fatal("pulseReady = true, want false")
-	}
-	if resp.Prometheus != nil {
-		t.Fatalf("prometheus = %+v, want nil when pulse offline", resp.Prometheus)
+	if len(resp.ActiveStreams) != 0 {
+		t.Fatalf("activeStreams = %+v, want empty when video offline", resp.ActiveStreams)
 	}
 }
 

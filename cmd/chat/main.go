@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 
 	"github.com/redis/go-redis/v9"
@@ -11,7 +10,6 @@ import (
 	"streamclone/internal/chat/batch"
 	"streamclone/internal/chat/enrich"
 	"streamclone/internal/chat/hub"
-	"streamclone/internal/chat/ingest"
 	"streamclone/internal/chat/ircconn"
 	"streamclone/internal/chat/parse"
 	"streamclone/internal/chat/pubsub"
@@ -58,7 +56,6 @@ func main() {
 	eventBatcher := batch.NewEventBatcher(cfg.BatchWindowMS, func(channel string, data []byte) {
 		ps.Publish(context.Background(), channel, data)
 	})
-	archiver := ingest.New(cfg.AnalyticsServiceURL, cfg.ChatLogPersistEnabled)
 
 	var mgr *ircconn.Manager
 
@@ -75,18 +72,6 @@ func main() {
 				TS:        msg.TS,
 				Fragments: frags,
 			})
-			if archiver.Enabled() {
-				fragsJSON, _ := json.Marshal(frags)
-				archiver.ForwardMessages(ingest.Message{
-					Channel:     msg.Channel,
-					Login:       msg.Login,
-					DisplayName: msg.User,
-					MessageID:   msg.ID,
-					Text:        msg.Text,
-					Fragments:   fragsJSON,
-					TS:          msg.TS,
-				})
-			}
 			return
 		}
 		if ev, ok := parse.ParseEvent(line); ok {
@@ -104,19 +89,6 @@ func main() {
 				TS:          ev.TS,
 				SummaryText: summary,
 			})
-			if archiver.Enabled() {
-				archiver.ForwardEvents(ingest.Event{
-					Kind:        ev.Kind,
-					Channel:     ev.Channel,
-					ActorLogin:  ev.ActorLogin,
-					TargetLogin: ev.TargetLogin,
-					DurationSec: ev.DurationSec,
-					Reason:      ev.Reason,
-					MessageID:   ev.MessageID,
-					TextPreview: firstNonEmpty(ev.TextPreview, ev.DisplayText, summary),
-					TS:          ev.TS,
-				})
-			}
 		}
 	}
 
@@ -151,13 +123,4 @@ func main() {
 		logger.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

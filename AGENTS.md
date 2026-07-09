@@ -232,4 +232,3 @@ Database: `.codegraph/streamclone.kuzu` (gitignored).
 - Clipper (legacy stub): `clipper/` — active Clip Studio in sibling **ReplayForge**
 - Compose: `deploy/docker-compose*.yml`
 - Agent steering: `.kiro/steering/`
-- Boundary split inventories (temporary): `docs/split/`

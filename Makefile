@@ -278,9 +278,6 @@ compose-config-check: env
 		-f deploy/docker-compose.yml \
 		-f deploy/docker-compose.prod.yml config --quiet
 
-archive-restore-drill:
-	@bash scripts/archive-restore-drill.sh
-
 check-quick: test vet frontend-test compose-config-check product-boundary-preflight
 
 product-boundary-preflight:

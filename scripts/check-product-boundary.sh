@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Streamclone public product boundary grep gate (Step 7 preflight + strict).
-# See docs/streampulse-product-boundary.md and docs/split/mirror-verification.md.
+# Streamclone public product boundary grep gate (Step 7 strict).
+# See docs/streampulse-product-boundary.md.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -15,7 +15,6 @@ fi
 RG=(rg -n --no-heading
   'packages/pulse|test-analytics|profile-bearhost|profile-hosted|PULSE_|api\.streampulse\.stream|production-promotion|hosted-production|ingest-phase|/v1/extension|/v1/portal|pulse-live-coverage|ingest-core|storygraph|pulse-wire|make up-scraper|@streamclone/pulse'
   --glob '!docs/streampulse-product-boundary.md'
-  --glob '!docs/split/**'
   --glob '!CHANGELOG.md'
   --glob '!.cursor/plans/**'
   --glob '!scripts/check-product-boundary.sh'
@@ -25,18 +24,6 @@ RG=(rg -n --no-heading
   --glob '!.kiro/specs/**'
   --glob '!.kiro/steering/pulse-wire.md'
 )
-
-if [[ "${STRICT}" -eq 1 ]]; then
-  RG+=(
-    --glob '!cmd/analytics/**'
-    --glob '!cmd/backfill/**'
-    --glob '!cmd/archive/**'
-    --glob '!internal/analytics/**'
-    --glob '!packages/pulse-core/**'
-    --glob '!packages/pulse-charts/**'
-    --glob '!packages/analytics-console/**'
-  )
-fi
 
 mapfile -t HITS < <("${RG[@]}" . 2>/dev/null || true)
 
@@ -54,7 +41,7 @@ if [[ "${#HITS[@]}" -gt 0 ]]; then
 fi
 
 if [[ "${STRICT}" -eq 1 ]]; then
-  echo "Strict Step 7 gate failed. Trim scripts/docs/install surfaces or delete legacy trees." >&2
+  echo "Strict Step 7 gate failed. Trim scripts/docs/install surfaces." >&2
   exit 1
 fi
 
