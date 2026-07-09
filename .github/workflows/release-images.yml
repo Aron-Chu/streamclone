@@ -36,7 +36,7 @@ jobs:
     name: Release gate (make check)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -92,7 +92,7 @@ jobs:
             context: .
             build_args: ""
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
 
@@ -140,7 +140,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_scraper == 'true'
     steps:
       - name: Checkout scraper repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.event.inputs.scraper_repository || 'Aron-Chu/streamclone-scraper' }}
           path: scraper
@@ -209,7 +209,7 @@ jobs:
             echo "ref=" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ steps.tag.outputs.ref || github.sha }}
 
@@ -377,7 +377,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve bundle version
         id: ver

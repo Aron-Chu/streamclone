@@ -35,7 +35,7 @@ jobs:
     # Uncomment after OIDC is configured (docs/azure-archive-cicd.md):
     # environment: production-azure
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: hashicorp/setup-terraform@v4
         with:
