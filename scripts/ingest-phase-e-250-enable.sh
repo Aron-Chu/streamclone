@@ -22,7 +22,26 @@ resolve_ops_root() {
 }
 
 OPS_ROOT="$(resolve_ops_root)"
-ENV_FILE="${OPS_ROOT}/env/production.env"
+
+resolve_env_file() {
+  if [[ -n "${ENV_FILE:-}" ]]; then
+    echo "${ENV_FILE}"
+    return 0
+  fi
+  local prod_local="${OPS_ROOT}/env/production.${STREAMPULSE_PROD_ENV_SUFFIX:-local.env}"
+  if [[ -f "${prod_local}" ]]; then
+    echo "${prod_local}"
+    return 0
+  fi
+  if [[ -f "${OPS_ROOT}/env/production.env" ]]; then
+    echo "${OPS_ROOT}/env/production.env"
+    return 0
+  fi
+  echo "FAIL: no production env overlay under ${OPS_ROOT}/env — set ENV_FILE" >&2
+  return 1
+}
+
+ENV_FILE="$(resolve_env_file)"
 PRODUCTION_UP="${OPS_ROOT}/scripts/deploy/production-up.sh"
 
 : "${IMAGE_TAG:?Set IMAGE_TAG to current production tag (e.g. v0.3.0-rc24)}"
