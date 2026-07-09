@@ -25,11 +25,7 @@ wait_all_services() {
     "http://localhost:8082/healthz|video"
     "http://localhost:8083/healthz|chat"
     "http://localhost:8084/healthz|emote"
-    "http://localhost:8086/healthz|analytics"
   )
-  if [ "${SMOKE_STORYGRAPH:-0}" = "1" ]; then
-    urls+=("http://localhost:8087/healthz|storygraph")
-  fi
   echo "Checking core services..."
   for i in $(seq 1 60); do
     local all_ok=true
@@ -53,13 +49,9 @@ if [ "$skip_readiness" = false ]; then
   wait_all_services
 fi
 
-if [ -f .env ] && grep -q '^PULSE_WIRE_ENABLED=true' .env 2>/dev/null; then
-  feed_code="$(curl --connect-timeout 2 --max-time 5 -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8090/v1/pulse-wire/feed" 2>/dev/null || echo 000)"
-  if [ "$feed_code" = "200" ]; then
-    echo "  Pulse Wire feed proxy ok"
-  else
-    echo "  Pulse Wire feed not reachable through proxy (optional, http $feed_code)" >&2
-  fi
+if [ -x "$ROOT/deploy/smoke/test-core-routes-only.sh" ]; then
+  echo "Checking core-only route boundary..."
+  bash "$ROOT/deploy/smoke/test-core-routes-only.sh"
 fi
 
 if [ "$run_ui" = true ]; then

@@ -13,8 +13,6 @@ x-go: &go
     LOG_LEVEL: info
     REDIS_URL: redis://redis:6379/0
     DATABASE_URL: postgres://app:app@postgres:5432/streamclone?sslmode=disable
-    SCRAPER_API_URL: http://scraper:8000/v2/scrape
-    SCRAPER_API_KEY: ${SCRAPER_API_KEY:-local-dev-key}
 
 services:
   redis:
@@ -142,6 +140,7 @@ services:
 
   analytics:
     <<: *go
+    profiles: [analytics]
     build:
       context: ..
       dockerfile: deploy/Dockerfile
@@ -205,46 +204,6 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  storygraph:
-    <<: *go
-    profiles: [pulse-wire]
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-      args: { SERVICE: storygraph }
-    env_file:
-      - ../.env
-    environment:
-      <<: *go-env
-      PULSE_WIRE_SEMANTIC: ${PULSE_WIRE_SEMANTIC:-false}
-      STORYGRAPH_INGEST_INTERVAL: ${STORYGRAPH_INGEST_INTERVAL:-5m}
-      STORYGRAPH_SOCIAL_BROWSER_FETCH_BUDGET: ${STORYGRAPH_SOCIAL_BROWSER_FETCH_BUDGET:-0}
-      STORYGRAPH_YOUTUBE_BROWSER_FETCH_BUDGET: ${STORYGRAPH_YOUTUBE_BROWSER_FETCH_BUDGET:-0}
-      STORYGRAPH_SOCIAL_SCRAPE_USE_PROXY: ${STORYGRAPH_SOCIAL_SCRAPE_USE_PROXY:-false}
-      SCRAPER_API_URL: ${SCRAPER_API_URL:-http://scraper:8000/v2/scrape}
-      ANALYTICS_SERVICE_URL: http://analytics:8080
-      CLIPPER_SERVICE_URL: ${CLIPPER_SERVICE_URL:-http://host.docker.internal:8095}
-      SETUP_CONTROL_TOKEN: ${SETUP_CONTROL_TOKEN:-}
-      SOCIAL_RETENTION_DAYS: ${SOCIAL_RETENTION_DAYS:-90}
-      MEDIA_MATCHER_URL: ${MEDIA_MATCHER_URL:-http://media-matcher:8001}
-      METADATA_SERVICE_URL: http://metadata:8080
-      X_UNOFFICIAL_OK: ${X_UNOFFICIAL_OK:-false}
-      X_AUTH_TOKEN: ${X_AUTH_TOKEN:-}
-      EMUSKS_X_AUTH_TOKEN: ${EMUSKS_X_AUTH_TOKEN:-}
-      X_INGEST_URL: ${X_INGEST_URL:-http://x-ingest:8098}
-    ports: ["127.0.0.1:8087:8080"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-      metadata:
-        condition: service_healthy
-      analytics:
-        condition: service_healthy
-
   emote:
     <<: *go
     build:
@@ -275,12 +234,9 @@ services:
       VITE_METADATA_URL: auto
       VITE_VIDEO_URL: auto
       VITE_EMOTE_URL: auto
-      VITE_ANALYTICS_URL: auto
       VITE_CHAT_HTTP: auto
       VITE_CHAT_WS: auto
       VITE_CLIPPER_URL: auto
-      VITE_CLIPPER_TOKEN: ${VITE_CLIPPER_TOKEN:-${CLIPPER_WEBHOOK_TOKEN:-}}
-      VITE_PULSE_WIRE_ENABLED: ${PULSE_WIRE_ENABLED}
       VITE_HLS_LOW_LATENCY_ENABLED: ${HLS_LOW_LATENCY_ENABLED:-false}
       VITE_ADAPTIVE_LIVE_LATENCY_ENABLED: ${ADAPTIVE_LIVE_LATENCY_ENABLED:-false}
       VITE_MAX_RETAINED_MESSAGES: ${MAX_RETAINED_MESSAGES:-250}
@@ -305,206 +261,9 @@ services:
         condition: service_healthy
       chat:
         condition: service_healthy
-      analytics:
-        condition: service_healthy
       emote:
         condition: service_healthy
-
-  # Clip Studio moved to ReplayForge (sibling repo ../replayforge). Run API on :8095 and UI on :8096.
-  # Legacy in-repo clipper profile kept in git history; use ReplayForge for new installs.
-  # clipper:
-  #   profiles: [clipper]
-  #   restart: unless-stopped
-  #   build:
-  #     context: ..
-  #     dockerfile: deploy/Dockerfile.clipper
-  #   env_file:
-  #     - ../.env
-  #   environment:
-  #     CLIPPER_HOST: "0.0.0.0"
-  #     CLIPPER_PORT: 8095
-  #     CLIPPER_DATA_DIR: "/data"
-  #     CLIPPER_DB_PATH: "/data/clipper.sqlite"
-  #     CLIPPER_OUTPUT_DIR: "/data/output"
-  #   ports: ["127.0.0.1:8095:8095"]
-  #   volumes:
-  #     - clipper-data:/data
-
-  # Scraper browser profiles (override via ../.env):
-  #   Bridge (local Windows dev): SCRAPER_EPHEMERAL_BROWSER=true, SCRAPER_MAX_CONCURRENT=1
-  #   Pooled (production): SCRAPER_EPHEMERAL_BROWSER=false, SCRAPER_BROWSER_POOL_SIZE=1, SCRAPER_MAX_CONCURRENT=2
-  # Never raise MAX_CONCURRENT above 1 while ephemeral=true — competing Camoufox profiles deadlock TT detail scrapes.
-  # Release image (SCRAPER_USE_IMAGES=1): ghcr.io/aron-chu/streamclone/scraper:${IMAGE_TAG:-latest} via docker-compose.release.yml
-  scraper:
-    profiles: [scraper]
-    build:
-      context: ../../streamclone-scraper
-      dockerfile: Dockerfile
-    container_name: streamclone-scraper
-    ports:
-      - "127.0.0.1:8000:8000"
-    shm_size: "2gb"
-    env_file:
-      - ../.env
-    environment:
-      - SCRAPER_BROWSER=${SCRAPER_BROWSER:-camoufox}
-      - CHALLENGE_FALLBACK_ENABLED=${CHALLENGE_FALLBACK_ENABLED:-false}
-      - PYDOLL_CDP_URL=${PYDOLL_CDP_URL:-}
-      - PYDOLL_TIME_TO_WAIT_CAPTCHA=${PYDOLL_TIME_TO_WAIT_CAPTCHA:-10}
-      - PYDOLL_HEADLESS=${PYDOLL_HEADLESS:-}
-      - PYDOLL_PROFILE_DIR=${PYDOLL_PROFILE_DIR:-/data/chrome-profile}
-      - CDP_URL=${CDP_URL:-}
-      - SCRAPER_CDP_EPHEMERAL=${SCRAPER_CDP_EPHEMERAL:-false}
-      - CDP_DEBUG_PORT=${CDP_DEBUG_PORT:-9222}
-      - CDP_CHROME_PATH=${CDP_CHROME_PATH:-}
-      - CAMOUFOX_GEOIP=${CAMOUFOX_GEOIP:-false}
-      - CAMOUFOX_PERSISTENT_PROFILE=/data/camoufox-profile
-      - SCRAPER_EPHEMERAL_BROWSER=${SCRAPER_EPHEMERAL_BROWSER:-false}
-      - SCRAPER_HEADLESS=${SCRAPER_HEADLESS:-true}
-      - SCRAPER_MAX_CONCURRENT=${SCRAPER_MAX_CONCURRENT:-2}
-      - SCRAPER_BROWSER_POOL_SIZE=${SCRAPER_BROWSER_POOL_SIZE:-1}
-      - SCRAPER_CONTEXT_TTL_REQUESTS=${SCRAPER_CONTEXT_TTL_REQUESTS:-50}
-      - SCRAPER_BROWSER_TTL_SECONDS=${SCRAPER_BROWSER_TTL_SECONDS:-3600}
-      - SCRAPER_TT_DETAIL_CACHE_MS=${SCRAPER_TT_DETAIL_CACHE_MS:-604800000}
-      - SCRAPER_TWITCHTRACKER_INJECT_HIGHCHARTS=${SCRAPER_TWITCHTRACKER_INJECT_HIGHCHARTS:-true}
-      - BROWSER_PROFILE_DIR=/data/camoufox-profile
-      - PROXY_SERVER=${PROXY_SERVER:-}
-      - PROXY_USERNAME=${PROXY_USERNAME:-}
-      - PROXY_PASSWORD=${PROXY_PASSWORD:-}
-      - PROXY_BYPASS=${PROXY_BYPASS:-}
-      - PROXY_POOL=${PROXY_POOL:-}
-      - SESSION_VAULT_KEY=${SESSION_VAULT_KEY:-}
-      - SESSION_VAULT_DIR=${SESSION_VAULT_DIR:-/data/sessions}
-    volumes:
-      - scraper-profile:/data
-      - camoufox-cache:/root/.cache/camoufox
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/health >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 30s
-
-  influxdb:
-    profiles: [pulse]
-    image: influxdb:2.7-alpine
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:18086:8086"
-    environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_INIT_USERNAME:-admin}
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_INIT_PASSWORD:-streampulse}
-      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-streamclone}
-      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-streamclone}
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-local-pulse-token}
-    volumes:
-      - influx-data:/var/lib/influxdb2
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8086/health >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 20s
-
-  prometheus:
-    profiles: [pulse]
-    image: prometheus/prometheus:v2.55.0
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:9090:9090"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --web.enable-lifecycle
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
-  grafana:
-    profiles: [pulse]
-    image: grafana/grafana:11.5.0
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-streampulse}
-      GF_USERS_DEFAULT_THEME: dark
-      INFLUXDB_URL: http://influxdb:8086
-      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-local-pulse-token}
-      INFLUXDB_ORG: ${INFLUXDB_ORG:-streamclone}
-      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-streamclone}
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on:
-      influxdb:
-        condition: service_healthy
-      prometheus:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 20s
-
-  media-matcher:
-    profiles: [pulse-wire]
-    build:
-      context: ../media-matcher
-      dockerfile: Dockerfile
-    ports: ["127.0.0.1:8001:8001"]
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8001/healthz >/dev/null || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 6
-      start_period: 15s
-
-  x-ingest:
-    profiles: [pulse-wire]
-    build:
-      context: ../cmd/x-ingest
-      dockerfile: Dockerfile
-    environment:
-      PORT: "8098"
-      X_AUTH_TOKEN: ${X_AUTH_TOKEN:-}
-      EMUSKS_X_AUTH_TOKEN: ${EMUSKS_X_AUTH_TOKEN:-}
-    ports: ["127.0.0.1:8098:8098"]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8098/healthz >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 6
-      start_period: 20s
-
-  migrate-semantic:
-    profiles: [pulse-wire-semantic]
-    image: migrate/migrate
-    volumes: ["../migrations/optional:/migrations-optional:ro"]
-    command: ["-path", "/migrations-optional", "-database", "postgres://app:app@postgres:5432/streamclone?sslmode=disable", "up"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
 
 volumes:
   pg-data:
   minio-data:
-  # clipper-data:  # ReplayForge manages its own data dir (see ../replayforge)
-  scraper-profile:
-  camoufox-cache:
-  influx-data:
-  grafana-data:

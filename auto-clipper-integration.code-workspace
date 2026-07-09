@@ -3,5 +3,8 @@
     { "path": ".", "name": "streamclone" },
     { "path": "../replayforge", "name": "replayforge" }
   ],
-  "settings": {}
+  "settings": {
+    "markdown.extension.completion.enabled": false,
+    "markdown.extension.tableFormatter.enabled": false
+  }
 }

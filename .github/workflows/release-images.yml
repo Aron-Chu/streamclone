@@ -83,10 +83,6 @@ jobs:
             dockerfile: deploy/Dockerfile.emote
             context: .
             build_args: ""
-          - image: analytics
-            dockerfile: deploy/Dockerfile
-            context: .
-            build_args: SERVICE=analytics
           - image: frontend
             dockerfile: frontend/Dockerfile
             context: .
@@ -257,7 +253,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "GHCR pull sanity: pulling tagged release images before stack start"
-          services=(metadata video chat analytics emote frontend migrate)
+          services=(metadata video chat emote frontend migrate)
           if [ "$SCRAPER_PUBLISHED" = "success" ]; then
             services+=(scraper)
           else

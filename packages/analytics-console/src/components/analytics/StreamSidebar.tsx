@@ -19,12 +19,14 @@ export function StreamSidebar({
   activeMinutesUnavailable = false,
   buildSessionPath,
   buildChannelPath,
+  liveSessionPath,
 }: {
   login: string
   streams: AnalyticsStream[]
   activeID?: string
   isLiveView: boolean
   liveState?: string
+  liveSessionPath?: string
   syncing?: boolean
   syncedOnly?: boolean
   onSyncedOnlyChange?: (value: boolean) => void
@@ -64,7 +66,7 @@ export function StreamSidebar({
       ) : null}
       <div className="sc-console-scroll min-h-0 flex-1 overflow-y-auto">
         <Link
-          to={buildChannelPath(login)}
+          to={liveSessionPath ?? buildChannelPath(login)}
           className={`sc-stream-row block border-b border-white/5 px-3 py-2.5 transition hover:bg-white/[0.05] ${
             isLiveView ? 'border-l-2 border-l-red-400 bg-red-500/10' : 'border-l-2 border-l-transparent'
           }`}

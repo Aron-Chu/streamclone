@@ -47,15 +47,23 @@ export function resolveVodLinkState(input: {
     stream?: { vodId?: string; endedAt?: string | null }
   }
   recapVodId?: string
+  fallbackVodId?: string
   isLiveCollector?: boolean
+  channelIsLive?: boolean
 }): VodLinkState {
-  const vodId = resolveAnalyticsVodId(input.detail, input.recapVodId)
+  const vodId =
+    resolveAnalyticsVodId(input.detail, input.recapVodId)
+    || input.fallbackVodId?.trim()
+    || undefined
   if (vodId) {
+    const liveArchive = input.isLiveCollector === true
     return {
       status: 'linked',
       vodId,
-      label: 'Jump to VOD',
-      detail: '',
+      label: liveArchive ? 'Jump to VOD (live archive)' : 'Jump to VOD',
+      detail: liveArchive
+        ? 'Twitch is archiving this broadcast. Timestamps track stream offset from go-live.'
+        : '',
     }
   }
 
@@ -71,7 +79,10 @@ export function resolveVodLinkState(input: {
   }
 
   const endedAt = input.detail?.stream?.endedAt?.trim()
-  const isLive = input.isLiveCollector ?? (input.detail?.state === 'live' || !endedAt)
+  const channelLive = input.channelIsLive
+  const isLive = input.isLiveCollector ?? (
+    channelLive !== false && (input.detail?.state === 'live' || !endedAt)
+  )
   if (isLive) {
     return {
       status: 'live',
@@ -85,4 +96,23 @@ export function resolveVodLinkState(input: {
     label: 'VOD unavailable',
     detail: 'No Twitch VOD exists for this session — it may have been deleted, expired, or was never archived.',
   }
+}
+
+/** VOD id for the active session only — never another sidebar row. */
+export function resolveSessionFallbackVodId(input: {
+  sidebarStreams: Array<{ streamId?: string; id?: string; vodId?: string }>
+  targetQueryStreamId?: string
+  detail?: {
+    vodId?: string
+    stream?: { vodId?: string }
+  }
+}): string | undefined {
+  const currentRow = input.sidebarStreams.find(
+    (row) => String(row.streamId ?? row.id ?? '') === String(input.targetQueryStreamId ?? ''),
+  )
+  const id =
+    currentRow?.vodId?.trim()
+    || input.detail?.stream?.vodId?.trim()
+    || input.detail?.vodId?.trim()
+  return id || undefined
 }

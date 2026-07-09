@@ -587,9 +587,6 @@ function PulseMultiSignalChartInnerImpl({
 
     return base * 0.14
   }, [focusedSeriesKey])
-  const toggleSeriesFocus = useCallback((seriesKey: string) => {
-    setFocusedSeriesKey(focusedSeriesKey === seriesKey ? null : seriesKey)
-  }, [focusedSeriesKey, setFocusedSeriesKey])
   const rollups = allRollups
   const commitHover = useCallback((index: number | null) => {
     hoverIndexRef.current = index
@@ -660,10 +657,6 @@ function PulseMultiSignalChartInnerImpl({
   const emotesItem = useMemo(() => series.find(s => s.key === 'emotes'), [series])
   const perEmoteSeries = useMemo(() => series.filter(s => s.dashed), [series])
   const hasPlottedEmotes = perEmoteSeries.length > 0
-  const coreLegendSeries = useMemo(
-    () => series.filter(s => !s.dashed),
-    [series],
-  )
   const activityAxisSeries = useMemo(
     () => series.filter(s => s.key !== 'viewers' && s.key !== 'chat'),
     [series],
@@ -830,8 +823,14 @@ function PulseMultiSignalChartInnerImpl({
   const plottedEmoteKeys = useMemo(() => perEmoteSeries.map(item => item.key), [perEmoteSeries])
   const handleSpikeSelect = useCallback((idx: number, event: { stopPropagation: () => void }) => {
     event.stopPropagation()
-    if (rollups[idx]) onSelectRollup?.(rollups[idx] ?? null)
-  }, [rollups, onSelectRollup])
+    const rollup = rollups[idx]
+    if (!rollup) return
+    if (selectedRollup?.minuteTs === rollup.minuteTs) {
+      onSelectRollup?.(null)
+      return
+    }
+    onSelectRollup?.(rollup)
+  }, [rollups, onSelectRollup, selectedRollup])
   const perEmoteOverlays = useMemo(() => perEmoteSeries.map(item => ({
     key: item.key,
     color: item.color,
@@ -1428,6 +1427,9 @@ function PulseMultiSignalChartInnerImpl({
             hoverIndexRef.current = null
             setHover(null)
           }}
+          onPointerDown={event => {
+            event.stopPropagation()
+          }}
           onClick={event => {
             if (rollups.length === 0) return
             const rect = event.currentTarget.getBoundingClientRect()
@@ -1435,9 +1437,13 @@ function PulseMultiSignalChartInnerImpl({
             const clientXRelative = event.clientX - rect.left
             const pct = Math.min(1, Math.max(0, clientXRelative / rect.width))
             const idx = Math.round(pct * (rollups.length - 1))
-            if (rollups[idx]) {
-              onSelectRollup?.(rollups[idx] ?? null)
+            const rollup = rollups[idx]
+            if (!rollup) return
+            if (selectedRollup?.minuteTs === rollup.minuteTs) {
+              onSelectRollup?.(null)
+              return
             }
+            onSelectRollup?.(rollup)
           }}
         />
 

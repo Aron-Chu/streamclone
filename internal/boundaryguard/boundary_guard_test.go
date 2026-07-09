@@ -512,3 +512,209 @@ func TestAllowListedClipperResponsibilitiesDoNotTrip(t *testing.T) {
 		})
 	}
 }
+
+// --- Phase 5 integration surface (non-Go) --------------------------------
+//
+// The render-marker and allow-list guards above statically scan Streamclone Go
+// (cmd/*, internal/*), which already covers the Phase 5 Go additions
+// (internal/analytics/clip_replayforge*.go, job_mirror*.go). The Phase 5
+// integration wiring also introduced non-Go surfaces the Go scan does not see:
+// the frontend `/studio` redirect + Recent-Clips link builder and the Caddy
+// same-origin `/v1/clipper/*` reverse proxy. Those are integration/orchestration
+// surfaces (redirect, mirror display, passthrough proxy) and must stay within
+// the allowed surface — they must never carry clip render / FFmpeg / Whisper /
+// transcription / durable-artifact / caption-burn-in code, which belongs to
+// ReplayForge (host :8095).
+
+// phase5NonGoIntegrationFiles are the exact Phase 5 non-Go integration files the
+// wiring added (RF-P5-005 / RF-P5-007 / RF-P5-008). They are enumerated
+// explicitly (rather than scanning all of frontend/) so this guard stays scoped
+// to the integration surface this spec owns and does not police unrelated,
+// pre-existing frontend code.
+var phase5NonGoIntegrationFiles = []string{
+	"frontend/src/utils/studioLink.ts",
+	"frontend/src/components/StudioRedirect.tsx",
+}
+
+// caddyProxyConfigFiles are the Caddy configs that define the same-origin
+// `/v1/clipper/*` passthrough proxy to host ReplayForge :8095 (RF-P5-008).
+var caddyProxyConfigFiles = []string{
+	"deploy/Caddyfile",
+	"deploy/Caddyfile.local-tunnel",
+}
+
+// integrationForbiddenMarkers are render/transcription/acquisition/artifact
+// tokens that must never appear in the non-Go integration surface. Bare verbs
+// that legitimately occur in redirect/proxy code (e.g. "encode" inside
+// encodeURIComponent, or React "render") are deliberately excluded; only
+// clip-render-specific tokens are matched so allowed integration terms
+// (proxying, mirroring status, describing clipper failures) stay permitted.
+var integrationForbiddenMarkers = []renderMarker{
+	{token: "ffmpeg", why: "FFmpeg clip render/acquisition is a ReplayForge responsibility (Req 6.5)"},
+	{token: "ffprobe", why: "FFmpeg/ffprobe media processing is a ReplayForge responsibility (Req 6.5)"},
+	{token: "streamlink", why: "source acquisition is a ReplayForge responsibility (Req 6.5)"},
+	{token: "whisper", why: "Whisper transcription is a ReplayForge responsibility (Req 1.2/6.5)"},
+	{token: "transcrib", why: "transcription is a ReplayForge responsibility (Req 1.2/6.5)"},
+	{token: "libx264", why: "clip video re-encode/render is a ReplayForge responsibility (Req 6.5)"},
+	{token: "libx265", why: "clip video re-encode/render is a ReplayForge responsibility (Req 6.5)"},
+	{token: "-filter_complex", why: "clip video filter/render is a ReplayForge responsibility (Req 6.5)"},
+	{token: "-c:v ", why: "clip video re-encode/render is a ReplayForge responsibility (Req 6.5)"},
+	{token: "-vf ", why: "clip video filter/render is a ReplayForge responsibility (Req 6.5)"},
+	{token: "drawtext", why: "caption burn-in/render is a ReplayForge responsibility (Req 1.3/6.5)"},
+	{token: "subtitles=", why: "subtitle burn-in/render is a ReplayForge responsibility (Req 1.3/6.5)"},
+	{token: "burn-in", why: "caption/subtitle burn-in is a ReplayForge responsibility (Req 1.3/6.5)"},
+	{token: "renderclip", why: "clip render is a ReplayForge responsibility (Req 6.5)"},
+	{token: "cliprender", why: "clip render is a ReplayForge responsibility (Req 6.5)"},
+	{token: "renderworker", why: "the render worker is a ReplayForge responsibility (Req 6.5)"},
+	{token: "burncaption", why: "caption burn-in is a ReplayForge responsibility (Req 1.3/6.5)"},
+	{token: "burnsubtitle", why: "subtitle burn-in is a ReplayForge responsibility (Req 1.3/6.5)"},
+	{token: "exportclip", why: "clip export is a ReplayForge responsibility (Req 6.5)"},
+}
+
+// scanIntegrationContentForViolations applies integrationForbiddenMarkers to a
+// single non-Go integration file's content, returning human-readable violations.
+func scanIntegrationContentForViolations(relPath, content string) []string {
+	var violations []string
+	lower := strings.ToLower(content)
+	for _, m := range integrationForbiddenMarkers {
+		if strings.Contains(lower, strings.ToLower(m.token)) {
+			violations = append(violations,
+				relPath+": forbidden render/transcription/acquisition marker "+quote(m.token)+" — "+m.why)
+		}
+	}
+	return violations
+}
+
+// extractClipperProxyBlock returns the `route @clipper { ... }` block from a
+// Caddy config via brace matching, or "" if the block is absent. Scoping to the
+// block keeps the guard from policing unrelated proxy config in the same file.
+func extractClipperProxyBlock(content string) string {
+	idx := strings.Index(content, "route @clipper")
+	if idx < 0 {
+		return ""
+	}
+	open := strings.Index(content[idx:], "{")
+	if open < 0 {
+		return ""
+	}
+	start := idx + open
+	depth := 0
+	for i := start; i < len(content); i++ {
+		switch content[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return content[start : i+1]
+			}
+		}
+	}
+	return content[start:]
+}
+
+// TestPhase5ClipperIntegrationSurfaceStaysWithinAllowedSurface re-asserts the
+// ownership boundary after the Phase 5 integration wiring (tasks RF-P5-001..008)
+// for the non-Go surfaces the Go scan cannot see: the frontend `/studio`
+// redirect + Recent-Clips link builder and the Caddy `/v1/clipper/*` proxy. It
+// confirms the integration wiring did not smuggle clip render / transcription /
+// acquisition / burn-in responsibilities into Streamclone, and that the clipper
+// proxy is a passthrough to host ReplayForge :8095 (the allowed proxy surface).
+//
+// Validates: Requirements 6.5, 1.6
+func TestPhase5ClipperIntegrationSurfaceStaysWithinAllowedSurface(t *testing.T) {
+	root := repoRoot(t)
+
+	var violations []string
+
+	for _, rel := range phase5NonGoIntegrationFiles {
+		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("Phase 5 integration file %q must exist for the guard to assert it: %v", rel, err)
+		}
+		violations = append(violations, scanIntegrationContentForViolations(rel, string(raw))...)
+	}
+
+	for _, rel := range caddyProxyConfigFiles {
+		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("Caddy config %q must exist for the guard to assert the clipper proxy: %v", rel, err)
+		}
+		block := extractClipperProxyBlock(string(raw))
+		if block == "" {
+			t.Fatalf("%s: could not find the `route @clipper { ... }` proxy block", rel)
+		}
+		// The clipper proxy must be a passthrough to host ReplayForge :8095 —
+		// an allowed routing surface, not a Streamclone-owned render route.
+		if !strings.Contains(block, "reverse_proxy host.docker.internal:8095") {
+			violations = append(violations,
+				rel+": clipper proxy block must reverse_proxy to host ReplayForge (host.docker.internal:8095); "+
+					"Streamclone must not terminate/render clipper requests locally (Req 6.6/6.5)")
+		}
+		violations = append(violations, scanIntegrationContentForViolations(rel+" (@clipper block)", block)...)
+	}
+
+	if len(violations) > 0 {
+		t.Fatalf("Phase 5 clipper integration surface left the allowed surface (Requirements 6.5, 1.6): "+
+			"the redirect/link builder and the /v1/clipper/* proxy may only redirect, mirror, and passthrough — "+
+			"clip render/transcription/acquisition/burn-in belongs to ReplayForge (host :8095):\n  - %s",
+			strings.Join(violations, "\n  - "))
+	}
+}
+
+// TestPhase5IntegrationGuardDetectsRenderMarkers is the negative control for the
+// Phase 5 integration guard: it proves the scan fails when clip render /
+// transcription / acquisition markers are added to the non-Go integration
+// surface, without dirtying the tree.
+//
+// Validates: Requirements 6.5, 1.6
+func TestPhase5IntegrationGuardDetectsRenderMarkers(t *testing.T) {
+	cases := []struct {
+		name    string
+		relPath string
+		content string
+	}{
+		{
+			name:    "ffmpeg render in the studio link builder",
+			relPath: "frontend/src/utils/studioLink.ts",
+			content: "export function render(){ return spawn('ffmpeg', ['-i', src, '-c:v', 'libx264']) }\n",
+		},
+		{
+			name:    "whisper transcription in the redirect component",
+			relPath: "frontend/src/components/StudioRedirect.tsx",
+			content: "// call whisper to transcribe the clip before redirecting\n",
+		},
+		{
+			name:    "caption burn-in via drawtext in a caddy block",
+			relPath: "deploy/Caddyfile (@clipper block)",
+			content: "route @clipper { exec ffmpeg -vf drawtext=subtitles=cap.srt }\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := scanIntegrationContentForViolations(tc.relPath, tc.content); len(got) == 0 {
+				t.Fatalf("expected an integration boundary violation for %q, got none", tc.relPath)
+			}
+		})
+	}
+}
+
+// TestPhase5IntegrationSurfaceCleanFilesDoNotTrip ensures the integration guard
+// does not false-positive on the real, permitted integration content —
+// including terms that merely resemble forbidden verbs (encodeURIComponent,
+// React render, "describe failure", "mirror status").
+//
+// Validates: Requirements 6.5, 1.6
+func TestPhase5IntegrationSurfaceCleanFilesDoNotTrip(t *testing.T) {
+	clean := []string{
+		"return `${base}${encodeURIComponent(jobId)}`\n",                // encode* is not a render token
+		"window.location.replace(replayforgeStudioUrl(base, jobId))\n",  // redirect
+		"// mirror the last known Job_State and describe the failure\n", // mirror/describe are allowed
+		"route @clipper { reverse_proxy host.docker.internal:8095 }\n",  // passthrough proxy
+	}
+	for _, c := range clean {
+		if got := scanIntegrationContentForViolations("frontend/src/utils/studioLink.ts", c); len(got) != 0 {
+			t.Fatalf("permitted integration content must not trip the guard, got: %v (content=%q)", got, c)
+		}
+	}
+}

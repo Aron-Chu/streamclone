@@ -50,3 +50,39 @@ export function hasMeaningfulGameSegments(
   const coverage = only.durationSeconds / durationSeconds
   return coverage < 0.9
 }
+
+export function gameSegmentKey(
+  segment: Pick<ChartGameSegment, 'gameName' | 'offsetSeconds'>,
+): string {
+  return `${segment.gameName.trim().toLowerCase()}:${segment.offsetSeconds}`
+}
+
+function gameSegmentEndOffset(
+  segment: Pick<ChartGameSegment, 'offsetSeconds' | 'durationSeconds'>,
+): number {
+  return segment.offsetSeconds + Math.max(0, segment.durationSeconds)
+}
+
+export function gameSegmentOverlapsOffsetRange(
+  segment: Pick<ChartGameSegment, 'offsetSeconds' | 'durationSeconds'>,
+  rangeStart: number,
+  rangeEnd: number,
+): boolean {
+  if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd)) return false
+  const start = segment.offsetSeconds
+  const end = gameSegmentEndOffset(segment)
+  return end > rangeStart && start <= rangeEnd
+}
+
+export function gameSegmentVisibleSecondsInRange(
+  segment: Pick<ChartGameSegment, 'offsetSeconds' | 'durationSeconds'>,
+  rangeStart: number,
+  rangeEnd: number,
+): number {
+  if (!gameSegmentOverlapsOffsetRange(segment, rangeStart, rangeEnd)) return 0
+  const start = segment.offsetSeconds
+  const end = gameSegmentEndOffset(segment)
+  const visibleStart = Math.max(start, rangeStart)
+  const visibleEnd = Math.min(end, rangeEnd)
+  return Math.max(0, visibleEnd - visibleStart)
+}

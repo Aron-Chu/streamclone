@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AnalyticsMinuteRollup, AnalyticsStreamDetail, GameSegment } from '../../api.ts'
 import {
@@ -137,6 +137,7 @@ function AnalyticsChart({
   const [activityExpanded, setActivityExpanded] = useState(() => selectedEmotes.size > 0)
   const [focusedSeriesKey, setFocusedSeriesKey] = useState<string | null>(null)
   const [hoverRollup, setHoverRollup] = useState<AnalyticsMinuteRollup | null>(null)
+  const chartInteractionRef = useRef<HTMLDivElement>(null)
   const playheadStreamId = usePlayheadStore(s => s.streamId)
   const playheadOffsetSeconds = usePlayheadStore(s => s.offsetSeconds)
   const playheadPlaying = usePlayheadStore(s => s.isPlaying)
@@ -150,6 +151,18 @@ function AnalyticsChart({
       setFocusedSeriesKey(null)
     }
   }, [viewMode])
+
+  useEffect(() => {
+    if (!selectedRollup) return
+    function handlePointerDown(event: PointerEvent) {
+      const boundary = chartInteractionRef.current
+      if (!boundary || boundary.contains(event.target as Node)) return
+      if (event.defaultPrevented) return
+      onSelectRollup(null)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [onSelectRollup, selectedRollup])
 
   const allRollups = detail?.rollups ?? []
   const streamStartedAt = detail?.stream?.startedAt
@@ -508,6 +521,7 @@ function AnalyticsChart({
         </div>
       </div>
 
+      <div ref={chartInteractionRef}>
       <PulseMultiSignalChartInner
         chromeless
         variant="console"
@@ -559,6 +573,7 @@ function AnalyticsChart({
           heatmapDetail={heatmapDetail}
         />
       ) : null}
+      </div>
     </div>
   )
 }

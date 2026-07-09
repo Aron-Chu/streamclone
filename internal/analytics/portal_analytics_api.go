@@ -318,14 +318,19 @@ func (h *Handler) portalStreamDetail(w http.ResponseWriter, r *http.Request) {
 			badges = append(badges, PortalDataSourceBadge{Source: meta.ChatSource, State: meta.SourceConfidence, Label: label + " — " + status})
 		}
 	}
+	vodID := h.resolveStreamVodIDForRead(r.Context(), *stream)
+	streamForPortal := *stream
+	if vodID != "" {
+		streamForPortal.VodID = vodID
+	}
 	writeJSON(w, http.StatusOK, PortalStreamDetail{
 		Channel:          stream.Login,
 		State:            state,
 		SyncPhase:        syncPhase,
-		Stream:           portalStreamRecordFrom(stream),
+		Stream:           portalStreamRecordFrom(&streamForPortal),
 		Sources:          sources,
 		UpdatedAt:        time.Now().UnixMilli(),
-		VodID:            strings.TrimSpace(stream.VodID),
+		VodID:            vodID,
 		ChatCoveragePct:  metrics.DataCoveragePct,
 		ChatSourceMeta:   chatSourceMeta,
 		AnalyticsQuality: portalQualityFromMetrics(metrics),
@@ -673,15 +678,20 @@ func (h *Handler) portalChannelLive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	coverageStart := portalCoverageStartOffset(stream, timeline)
+	vodID := h.resolveStreamVodIDForRead(r.Context(), *stream)
+	streamForPortal := *stream
+	if vodID != "" {
+		streamForPortal.VodID = vodID
+	}
 	liveResp := PortalChannelLiveResponse{
 		Channel:      login,
 		State:        state,
-		Stream:       h.portalLiveStreamRecord(r.Context(), stream),
+		Stream:       h.portalLiveStreamRecord(r.Context(), &streamForPortal),
 		Rollups:      points,
 		TopEmotes:    topEmotes,
 		Sources:      []SourceStatus{{Source: "analytics_db", State: "ready"}},
 		UpdatedAt:    time.Now().UnixMilli(),
-		VodID:        strings.TrimSpace(stream.VodID),
+		VodID:        vodID,
 		SyncPhase:    syncPhase,
 		ViewerSource: persistedViewerSource(stream, timeline),
 	}

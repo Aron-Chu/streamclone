@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
+import { studioPath } from '../utils/studioLink'
+
 import {
   ensureChannelEmotes,
   getAnalyticsStream,
@@ -1761,7 +1763,7 @@ function SelectedMomentPanel({
               : 'Clip queued — open Clip Studio to edit while the source downloads (~30–90s).'}
           </span>
           {createdJobId ? (
-            <Link to={`/studio/${createdJobId}`} className="ml-2 underline text-emerald-300 font-bold hover:text-emerald-200">
+            <Link to={studioPath(createdJobId)} className="ml-2 underline text-emerald-300 font-bold hover:text-emerald-200">
               Open in Clip Studio →
             </Link>
           ) : null}
@@ -3048,7 +3050,7 @@ function RecentClipsList({
       const result = await retryClipperJob(jobId)
       window.dispatchEvent(new CustomEvent('streamclone:clip-created'))
       if (result.job.id !== jobId) {
-        window.location.href = `/studio/${result.job.id}`
+        window.location.href = studioPath(result.job.id)
         return
       }
       await fetchJobs()
@@ -3151,7 +3153,7 @@ function RecentClipsList({
               </button>
             ) : null}
             <Link
-              to={`/studio/${job.id}`}
+              to={studioPath(job.id)}
               className="flex-1 rounded bg-violet-600/20 border border-violet-500/30 px-2 py-1 text-center text-[10px] font-bold text-violet-200 transition hover:bg-violet-600/35"
             >
               Open in Studio

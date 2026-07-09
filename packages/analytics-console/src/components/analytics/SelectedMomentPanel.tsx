@@ -60,6 +60,8 @@ export function SelectedMomentPanel({
     <div
       key={rollup.minuteTs}
       className={`relative overflow-hidden rounded border border-amber-500/10 bg-[#0d0d12] p-4${motionEnabled ? ' sc-selected-moment-panel' : ''}`}
+      role="region"
+      aria-label={`Selected moment at ${offsetStr || timeStr}`}
     >
       <div className="absolute left-0 right-0 top-0 h-1 bg-gradient-to-r from-amber-500/25 via-amber-400/60 to-amber-500/25" />
 

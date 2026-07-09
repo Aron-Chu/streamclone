@@ -1,16 +1,13 @@
 import { useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { REPLAYFORGE_UI } from '../config'
+import { replayforgeStudioUrl } from '../utils/studioLink'
 
 export default function StudioRedirect() {
   const { jobId } = useParams<{ jobId?: string }>()
 
   useEffect(() => {
-    const base = REPLAYFORGE_UI.replace(/\/$/, '')
-    const target = jobId
-      ? `${base}/studio/${encodeURIComponent(jobId)}`
-      : `${base}/studio`
-    window.location.replace(target)
+    window.location.replace(replayforgeStudioUrl(REPLAYFORGE_UI, jobId))
   }, [jobId])
 
   return (

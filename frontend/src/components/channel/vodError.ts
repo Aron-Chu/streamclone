@@ -6,6 +6,9 @@
 // VodErrorState.tsx re-exports everything here, so existing importers are
 // unaffected.
 
+
+import { STREAMPULSE_ANALYTICS_ORIGIN } from '../../utils/vodLink.ts'
+
 // VOD relay error codes surfaced by POST /v1/stream/vod/start plus the
 // client-detected HLS proxy auth condition (Requirement 2.8). Keep this list
 // aligned with the backend orchestrator error codes.
@@ -99,20 +102,23 @@ export function isVodErrorRetryable(error: VodErrorInput): boolean {
   return error.retryable === true
 }
 
+
+
 function twitchUrl(ctx: VodErrorContext): string {
   if (ctx.vodId) return `https://www.twitch.tv/videos/${encodeURIComponent(ctx.vodId)}`
   if (ctx.channelLogin) return `https://www.twitch.tv/${encodeURIComponent(ctx.channelLogin)}`
   return 'https://www.twitch.tv'
 }
 
-function analyticsAction(ctx: VodErrorContext, primary = false): VodErrorAction {
+function streampulseAction(ctx: VodErrorContext, primary = false): VodErrorAction {
   const href =
     ctx.analyticsHref ??
-    (ctx.channelLogin ? `/analytics/${encodeURIComponent(ctx.channelLogin)}` : '/analytics')
+    (ctx.channelLogin ? `${STREAMPULSE_ANALYTICS_ORIGIN}/${encodeURIComponent(ctx.channelLogin)}` : STREAMPULSE_ANALYTICS_ORIGIN)
   return {
     kind: 'analytics',
-    label: 'Back to Analytics',
+    label: 'Back to StreamPulse',
     href,
+    external: true,
     primary,
   }
 }
@@ -143,7 +149,7 @@ export function describeVodError(error: VodErrorInput, ctx: VodErrorContext = {}
         description:
           'This VOD link is invalid or the analytics data is stale. Head back to analytics and pick a fresh moment.',
         retryable: false,
-        actions: [analyticsAction(ctx, true)],
+        actions: [streampulseAction(ctx, true)],
       }
     case 'vod_unavailable': {
       if (ctx.fromAnalytics) {
@@ -151,7 +157,7 @@ export function describeVodError(error: VodErrorInput, ctx: VodErrorContext = {}
           { kind: 'twitch', label: 'Open on Twitch', href: twitchUrl(ctx), external: true, primary: true },
         ]
         if (ctx.analyticsHref) {
-          actions.push(analyticsAction(ctx))
+          actions.push(streampulseAction(ctx))
         }
         if (ctx.analyticsStreamId) {
           actions.push(resyncAction())
@@ -180,7 +186,7 @@ export function describeVodError(error: VodErrorInput, ctx: VodErrorContext = {}
           retryable: false,
           actions: [
             { kind: 'twitch', label: 'Open on Twitch', href: twitchUrl(ctx), external: true, primary: true },
-            analyticsAction(ctx),
+            streampulseAction(ctx),
           ],
         }
       }
@@ -192,7 +198,7 @@ export function describeVodError(error: VodErrorInput, ctx: VodErrorContext = {}
         description:
           'Streamclone could not authenticate with Twitch upstream. Check your token configuration, then try again.',
         retryable,
-        actions: [...(retryable ? [retryAction()] : []), analyticsAction(ctx)],
+        actions: [...(retryable ? [retryAction()] : []), streampulseAction(ctx)],
       }
     case 'capacity_reached':
       return {
@@ -228,7 +234,7 @@ export function describeVodError(error: VodErrorInput, ctx: VodErrorContext = {}
           ? `VOD playback failed: ${detail}`
           : 'VOD playback failed for an unexpected reason. You can retry or head back to analytics.',
         retryable,
-        actions: [...(retryable ? [retryAction()] : []), analyticsAction(ctx)],
+        actions: [...(retryable ? [retryAction()] : []), streampulseAction(ctx)],
       }
     default:
       return {
@@ -236,7 +242,7 @@ export function describeVodError(error: VodErrorInput, ctx: VodErrorContext = {}
         title: 'VOD playback failed',
         description: detail || 'VOD playback failed for an unexpected reason.',
         retryable,
-        actions: [...(retryable ? [retryAction()] : []), analyticsAction(ctx)],
+        actions: [...(retryable ? [retryAction()] : []), streampulseAction(ctx)],
       }
   }
 }

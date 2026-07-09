@@ -162,6 +162,9 @@ export interface PulseRecapMoment {
   score: number
   reasons?: string[]
   topEmotes?: PulseRecapEmote[]
+  viewerCount?: number
+  chatCount?: number
+  emoteCount?: number
 }
 
 export interface PulseStreamRecap {

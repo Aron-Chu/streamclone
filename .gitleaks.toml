@@ -14,6 +14,7 @@ description = "Known non-secret source templates and public client IDs. Env temp
 paths = [
   '''(?i)internal/config/config\.go$''',
   '''(?i)internal/upstream/upstream\.go$''',
+  '''(?i)internal/redact/redact_test\.go$''',
   '''(?i)deploy/docker-compose\.yml$''',
   '''(?i)deploy/docker-compose\.observability\.yml$''',
   '''(?i)deploy/FREE_DEPLOYMENT\.md$''',

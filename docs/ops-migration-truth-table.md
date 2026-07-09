@@ -4,12 +4,11 @@
 
 The 2026-07 **ops boundary migration** moved **production control** into private **`streampulse-ops`**. It did **not** move release tags, application source, or customer data into a private-only tag system.
 
-Related contracts:
+Related (public stubs only):
 
-- [hosted-production-ops.md](hosted-production-ops.md)
-- [ops-migration-manifest.md](ops-migration-manifest.md)
-- [production-artifact-contract.md](production-artifact-contract.md)
-- [production-promotion-contract.md](production-promotion-contract.md)
+- [streampulse-product-boundary.md](streampulse-product-boundary.md)
+- [ops-migration-manifest.md](ops-migration-manifest.md) (historical)
+- Hosted contracts → private **streampulse-ops**
 
 ---
 
@@ -43,7 +42,8 @@ Related contracts:
 
 ```bash
 curl -fsS https://api.streampulse.stream/v1/extension/health
-bash scripts/hosted-launch-probes.sh
 ```
+
+Hub and activity probes live in **private streampulse-ops** (`scripts/hosted-launch-probes.sh`).
 
 Operator SSH, internal ops routes, and VPS shell checks are documented in **private streampulse-ops** only.

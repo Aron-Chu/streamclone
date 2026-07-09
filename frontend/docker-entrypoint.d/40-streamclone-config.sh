@@ -10,7 +10,6 @@ window.__STREAMCLONE_CONFIG__ = {
   chatWs: "${VITE_CHAT_WS:-auto}",
   chatHttp: "${VITE_CHAT_HTTP:-auto}",
   clipperUrl: "${VITE_CLIPPER_URL:-auto}",
-  clipperToken: "${VITE_CLIPPER_TOKEN:-}",
   replayforgeUiUrl: "${VITE_REPLAYFORGE_UI_URL:-http://localhost:8096}",
   maxRetainedMessages: "${VITE_MAX_RETAINED_MESSAGES:-250}",
   streamcloneProfile: "${STREAMCLONE_PROFILE:-core}",

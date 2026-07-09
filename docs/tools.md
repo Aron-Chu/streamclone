@@ -57,9 +57,9 @@ Split every external input into **core** (product depends on it), **enrichment**
 | **streamclone-stack** MCP | Health, ports, compose logs |
 | **streamclone-data** MCP | SELECT-only Postgres/Redis |
 | **make context-snapshots** | Offline runtime summaries |
-| **Pulse review skills** | `.agents/skills/pulse/pulse-live-coverage-review` |
+| **StreamPulse backend/ops skills** | private **streampulse-backend** / **streampulse-ops** / **streamclone-pulse** — not this repo |
 
-See [`CODEX.md`](CODEX.md) for the full Pulse architecture review prompt.
+See [streampulse-product-boundary.md](streampulse-product-boundary.md) and [`CODEX.md`](CODEX.md).
 
 ---
 

@@ -1,7 +1,6 @@
 # Streamclone — quick links
 
-Hosted production ops are maintained in private **streampulse-ops**.
-This public repo contains only local/self-hosted examples.
+Local/self-hosted links for the Twitch replica. **StreamPulse** (hosted extension + portal) is a separate product — see [streampulse-product-boundary.md](streampulse-product-boundary.md).
 
 ## Site
 
@@ -9,14 +8,12 @@ This public repo contains only local/self-hosted examples.
 |------|-----|
 | Local dev | http://localhost:8090 |
 | GitHub | https://github.com/Aron-Chu/streamclone |
-| Production API | https://api.streampulse.stream (hosted; ops in private repo) |
 
 ## Login
 
 | Where | Works? |
 |-------|--------|
 | **localhost:8090** | Yes — “Sign in with Twitch” uses loopback-only dev/device auth |
-| **Hosted production** | See StreamPulse portal / Twitch OAuth requirements in `docs/multi-user/requirements.md` |
 
 ## Local development
 
@@ -26,9 +23,8 @@ make up
 make smoke
 ```
 
-See [docs/install-desktop.md](install-desktop.md) and [docs/ENVIRONMENT.md](ENVIRONMENT.md).
+See [install-desktop.md](install-desktop.md) and [ENVIRONMENT.md](ENVIRONMENT.md).
 
-## Production operations
+## Hosted / operator work
 
-Operator runbooks, deploy scripts, and host topology live in the private **streampulse-ops** repository.
-See [docs/hosted-production-ops.md](hosted-production-ops.md), [docs/production-promotion-contract.md](production-promotion-contract.md), and [docs/production-artifact-contract.md](production-artifact-contract.md).
+Deploy runbooks, production contracts, and host topology live in private **streampulse-ops** and **streampulse-backend** — not in this public repository. See [streampulse-product-boundary.md](streampulse-product-boundary.md).

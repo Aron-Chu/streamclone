@@ -49,7 +49,7 @@ test('34.3 vod_unavailable from analytics: honest copy + open/back/resync, no de
   const analyticsCtx = {
     ...ctx,
     fromAnalytics: true,
-    analyticsHref: '/analytics/caedrel/316955094498',
+    analyticsHref: 'https://streampulse.stream/analytics/caedrel/316955094498',
     analyticsStreamId: '316955094498',
   }
   const d = describeVodError({ code: 'vod_unavailable' }, analyticsCtx)
@@ -62,7 +62,7 @@ test('34.3 vod_unavailable from analytics: honest copy + open/back/resync, no de
   assert.ok(kinds.includes('resync'))
   assert.ok(!kinds.includes('retry'))
   const analytics = d.actions.find(a => a.kind === 'analytics')
-  assert.equal(analytics?.href, '/analytics/caedrel/316955094498')
+  assert.equal(analytics?.href, 'https://streampulse.stream/analytics/caedrel/316955094498')
 })
 
 test('2.3 upstream_token_failed: auth-issue copy, retry follows flag', () => {

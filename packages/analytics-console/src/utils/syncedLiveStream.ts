@@ -118,6 +118,41 @@ export function pickSyncedLiveStreamTarget(
   return synced[0]
 }
 
+/** Canonical session row for `/analytics/:login` → `/analytics/:login/:slug` redirects. */
+export function resolveCanonicalLiveSessionTarget(
+  combinedStreams: AnalyticsStream[],
+  opts?: {
+    liveStreamId?: string
+    channelLive?: boolean
+    channelLogin?: string
+    startedAt?: string
+  },
+): AnalyticsStream | undefined {
+  const liveStreamId = opts?.liveStreamId?.trim()
+  const channelLive = opts?.channelLive ?? false
+
+  if (liveStreamId) {
+    const visible = combinedStreams.find(
+      (stream) =>
+        stream.streamId === liveStreamId
+        && (!stream.canonicalStreamId || stream.canonicalStreamId === stream.streamId),
+    )
+    if (visible) return visible
+    if (channelLive) {
+      return {
+        streamId: liveStreamId,
+        login: opts?.channelLogin ?? '',
+        startedAt: opts?.startedAt ?? '',
+      }
+    }
+  }
+
+  return pickSyncedLiveStreamTarget(combinedStreams, {
+    liveStreamId,
+    channelLive,
+  })
+}
+
 /** Long streams stay "live" for many hours; allow redirect for recent synced sessions. */
 function isRecentSyncedSession(stream: AnalyticsStream, referenceMs = Date.now()): boolean {
   if (!stream.startedAt) return false

@@ -1,5 +1,5 @@
 import type { PulseWireStory } from '../pulseWireApi.ts'
-import { buildVodDeepLink } from '@streamclone/pulse-core'
+import { buildVodDeepLink } from './vodLink.ts'
 
 export function buildPulseWireOriginHref(story: PulseWireStory): string | undefined {
   const login = story.entity?.login?.trim()

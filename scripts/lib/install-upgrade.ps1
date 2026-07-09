@@ -5,7 +5,7 @@
 . (Join-Path $PSScriptRoot 'stack-progress.ps1')
 
 $Script:StreamcloneCoreImageRepos = @(
-    'metadata', 'video', 'chat', 'analytics', 'emote', 'storygraph', 'frontend'
+    'metadata', 'video', 'chat', 'emote', 'frontend'
 )
 
 $Script:StreamcloneGhcrPrefix = 'ghcr.io/aron-chu/streamclone'

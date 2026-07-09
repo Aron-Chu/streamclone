@@ -22,4 +22,14 @@
 // route (detected by render markers, clip-render package paths, or clip render
 // route literals) appears under cmd/ or internal/. The human-readable mirror is
 // docs/clipper-responsibility-allowlist.md.
+//
+// Phase 5 integration surface (Requirement 6.5): the Go scan covers the Phase 5
+// Go additions (internal/analytics/clip_replayforge*.go, job_mirror*.go)
+// automatically. A separate guard re-asserts the non-Go integration surface the
+// Go scan cannot see — the frontend /studio redirect + Recent-Clips link builder
+// (frontend/src/utils/studioLink.ts, frontend/src/components/StudioRedirect.tsx)
+// and the Caddy same-origin /v1/clipper/* reverse proxy (deploy/Caddyfile,
+// deploy/Caddyfile.local-tunnel) — confirming they only redirect, mirror, and
+// passthrough to host ReplayForge :8095 and never carry clip render /
+// transcription / acquisition / caption-burn-in code.
 package boundaryguard

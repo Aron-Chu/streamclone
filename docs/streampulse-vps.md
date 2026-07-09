@@ -1,18 +1,7 @@
-# Hosted production (private ops)
+# streampulse-vps (stub)
 
-Hosted production execution (deploy, secrets, smoke, rollback evidence) lives in **private streampulse-ops** — never commit operator runbooks or host topology to this public repository.
+Production VPS topology, SSH access, and host-specific runbooks live in private **streampulse-ops** (`docs/streampulse-vps.md`, `docs/runbooks/ssh-access.md`).
 
-## Public contract
+Do not add host IPs, fingerprints, or key paths to this public repository.
 
-- [hosted-production-ops.md](hosted-production-ops.md)
-- [production-artifact-contract.md](production-artifact-contract.md)
-- [production-promotion-contract.md](production-promotion-contract.md)
-
-## Public API (safe probes)
-
-```bash
-curl -fsS https://api.streampulse.stream/v1/extension/health
-bash scripts/hosted-launch-probes.sh
-```
-
-Internal ops routes, SSH, and VPS shell checks belong in **private streampulse-ops** only.
+See [streampulse-product-boundary.md](streampulse-product-boundary.md).

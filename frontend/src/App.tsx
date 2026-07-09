@@ -5,13 +5,8 @@ import { ChatEmoteTooltipProvider } from './components/chat/ChatEmoteTooltipLaye
 
 const Directory = lazy(() => import('./components/Directory'))
 const Channel = lazy(() => import('./components/Channel'))
-const Analytics = lazy(() => import('./components/Analytics'))
 const StudioRedirect = lazy(() => import('./components/StudioRedirect'))
 const BrowsePage = lazy(() => import('./components/BrowsePage'))
-const ChatLogsPage = lazy(() => import('./components/ChatLogsPage'))
-const NetworkPage = lazy(() => import('./components/NetworkPage'))
-const PulseWire = lazy(() => import('./components/pulsewire/PulseWirePage'))
-const StreamerPulseWire = lazy(() => import('./components/pulsewire/StreamerStatProfile'))
 const ArchiveAdminPage = lazy(() => import('./pages/admin/ArchiveAdminPage'))
 const AdminJobsPage = lazy(() => import('./pages/admin/AdminJobsPage'))
 const AdminCoveragePage = lazy(() => import('./pages/admin/AdminCoveragePage'))
@@ -82,14 +77,8 @@ export default function App() {
           <Route path="/browse/live" element={<BrowsePage />} />
           <Route path="/browse/category/:categoryId" element={<BrowsePage />} />
           <Route path="/c/:login" element={<Channel />} />
-          <Route path="/analytics/:login" element={<Analytics />} />
-          <Route path="/analytics/:login/:streamId" element={<Analytics />} />
-          <Route path="/logs/:login" element={<ChatLogsPage />} />
-          <Route path="/logs/:login/:streamId" element={<ChatLogsPage />} />
-          <Route path="/network" element={<NetworkPage />} />
-          <Route path="/pulse-wire" element={<PulseWire />} />
-          <Route path="/pulse-wire/streamer/:login" element={<StreamerPulseWire />} />
-          <Route path="/pulse-wire/:storyId" element={<PulseWire />} />
+          <Route path="/analytics/*" element={<Navigate to="/" replace />} />
+          <Route path="/pulse-wire/*" element={<Navigate to="/" replace />} />
           <Route path="/admin/archive" element={<ArchiveAdminPage />} />
           <Route path="/admin/jobs" element={<AdminJobsPage />} />
           <Route path="/admin/coverage" element={<AdminCoveragePage />} />

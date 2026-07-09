@@ -2,7 +2,7 @@
 # docker compose restart does NOT reload env_file — only --force-recreate does.
 param(
     [string]$EnvFile = '.env',
-    [string[]]$Services = @('chat', 'metadata', 'analytics', 'emote', 'storygraph', 'frontend')
+    [string[]]$Services = @('chat', 'metadata', 'emote', 'frontend')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,7 +77,7 @@ foreach ($line in $psResult.Output) {
         }
     }
 
-    if ($service -in @('frontend', 'storygraph')) {
+    if ($service -in @('frontend')) {
         $pulseKey = if ($service -eq 'frontend') { 'VITE_PULSE_WIRE_ENABLED' } else { 'PULSE_WIRE_ENABLED' }
         $actualPulse = Get-ContainerEnvValue -Container $container -Key $pulseKey
         if ($null -ne $actualPulse -and $actualPulse -ne $desiredPulseWire) {

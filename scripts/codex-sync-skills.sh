@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Mirror skills for Codex discovery:
 #   .cursor/skills/streamclone → .agents/skills/streamclone
-#   .cursor/skills/pulse       → .agents/skills/pulse
+# Pulse/backend skills live in streamclone-pulse / streampulse-backend — not synced here.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -19,16 +19,3 @@ sync_dir() {
 }
 
 sync_dir "$ROOT/.cursor/skills/streamclone" "$ROOT/.agents/skills/streamclone" "streamclone skills"
-sync_dir "$ROOT/.cursor/skills/pulse" "$ROOT/.agents/skills/pulse" "pulse skills"
-
-# Optional: refresh helper scripts from sibling streamclone-pulse (SKILL.md stays streamclone-authored).
-PULSE_SIBLING="$ROOT/../streamclone-pulse/.cursor/skills"
-if [[ -d "$PULSE_SIBLING" ]]; then
-  for skill in backfill-safety-review api-contract-drift-check; do
-    if [[ -d "$PULSE_SIBLING/$skill/scripts" ]]; then
-      mkdir -p "$ROOT/.agents/skills/pulse/$skill/scripts"
-      rsync -a "$PULSE_SIBLING/$skill/scripts/" "$ROOT/.agents/skills/pulse/$skill/scripts/"
-    fi
-  done
-  echo "merged pulse helper scripts from sibling streamclone-pulse (if present)"
-fi

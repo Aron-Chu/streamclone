@@ -121,10 +121,10 @@ Kick **not** in MVP: deleted VOD recovery, full historical chat, unofficial Push
 ## Cross-links
 
 ```text
-docs/pulse-extension/live-coverage-requirements.md  → redirect to streamclone-pulse
-docs/website-portal/requirements.md                 → portal PRD (streamclone-pulse)
-AGENTS.md                                           → task router
-docs/CODEX.md                                       → architecture review prompt
+streamclone-pulse/docs/pulse-extension/live-coverage-requirements.md  → canonical (pulse repo)
+docs/streampulse-product-boundary.md                                  → public boundary stub
+AGENTS.md                                                             → task router
+docs/CODEX.md                                                         → Codex setup
 ```
 
 ---

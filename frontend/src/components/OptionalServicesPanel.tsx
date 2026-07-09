@@ -1,40 +1,9 @@
 import { Link } from 'react-router-dom'
 import type { ReactNode } from 'react'
-import { STREAMPULSE_ANALYTICS_URL } from '../setupProfile'
 import { SETUP_CONTROL_WAKE_ENABLED, REPLAYFORGE_UI } from '../config'
 import { useOptionalServices } from '../hooks/useOptionalServices'
 
 type ServiceStatus = 'ready' | 'offline' | 'checking'
-
-export function CoreMinuteChartsNotice({ compact = false }: { compact?: boolean }) {
-  return (
-    <div className={compact ? 'mt-2 text-left' : 'max-w-md'}>
-      <div className={`font-black text-zinc-100 ${compact ? 'text-[11px]' : 'text-base'}`}>
-        Minute charts on StreamPulse
-      </div>
-      <p className={`mt-1 font-semibold text-zinc-500 ${compact ? 'text-[10px] leading-4' : 'text-sm'}`}>
-        Per-minute viewer, chat, and emote analytics are hosted on StreamPulse — not bundled in the desktop install.
-        Core Watch still includes live playback, IRC chat, and emotes.
-      </p>
-      <div className={`mt-2 flex flex-wrap items-center gap-2 ${compact ? 'text-[10px]' : 'text-xs'}`}>
-        <a
-          href={STREAMPULSE_ANALYTICS_URL}
-          target="_blank"
-          rel="noreferrer"
-          className={`rounded border border-violet-400/40 bg-violet-500/15 px-2.5 py-1 font-black text-violet-100 transition hover:bg-violet-500/25 ${compact ? 'text-[10px]' : 'text-xs'}`}
-        >
-          Open StreamPulse Analytics
-        </a>
-        <Link
-          to="/"
-          className="font-bold text-zinc-300 underline decoration-zinc-500/40 underline-offset-2 transition hover:text-white"
-        >
-          Live directory
-        </Link>
-      </div>
-    </div>
-  )
-}
 
 function ServiceCard({
   title,
@@ -109,7 +78,6 @@ export default function OptionalServicesPanel({
   focus = 'all',
   onDismiss,
   onBrowse,
-  channelLogin,
 }: OptionalServicesPanelProps) {
   const {
     hasServiceSnapshot,
@@ -161,14 +129,6 @@ export default function OptionalServicesPanel({
             >
               Live directory
             </Link>
-            {channelLogin ? (
-              <Link
-                to={`/analytics/${encodeURIComponent(channelLogin)}`}
-                className="rounded border border-white/10 bg-white/[0.06] px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-zinc-200 transition hover:bg-white/10"
-              >
-                Back to Analytics
-              </Link>
-            ) : null}
           </div>
         </div>
       </div>
@@ -181,7 +141,7 @@ export default function OptionalServicesPanel({
         <div className="text-xs font-black uppercase tracking-[0.2em] text-violet-300">Welcome to Streamclone</div>
         <h1 className="text-2xl font-black text-white">What is running right now</h1>
         <p className="text-sm font-semibold leading-6 text-zinc-400">
-          Live checks for the core stack and optional ReplayForge. Minute analytics live on StreamPulse.
+          Live checks for the core stack and optional ReplayForge.
         </p>
       </div>
 
@@ -206,7 +166,7 @@ export default function OptionalServicesPanel({
       <div className="mx-auto grid w-full max-w-5xl justify-center gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))]">
         <ServiceCard
           title="Core app"
-          detail="Directory, playback, chat, emotes, and analytics API."
+          detail="Directory, playback, chat, and emotes."
           status={coreStatus}
         />
         {showClipper ? (

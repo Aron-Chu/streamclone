@@ -72,6 +72,65 @@ func TestBuildReplayForgeTriggerFromCandidatePreservesMomentContext(t *testing.T
 	}
 }
 
+func TestBuildReplayForgeTriggerEmitsServerScoredTokenFreeContract(t *testing.T) {
+	// RF-P5-001: the moment_context Streamclone emits to ReplayForge must carry the
+	// documented fields (channel_login, vod_id, start/end, reason, server-side
+	// candidate_score) and must NOT carry any token/secret shapes (Phase 0 redaction
+	// guardrail). Ownership (requested_by) and idempotency are enforced server-side and
+	// are intentionally absent from the outbound body; the Auth_Token rides the
+	// Authorization header, never the payload.
+	vodID := "998877"
+	candidate := ClipCandidate{
+		ID:            "cc_contract",
+		Login:         "example",
+		StreamID:      "stream-contract",
+		VodID:         &vodID,
+		StreamTitle:   "Contract check",
+		OffsetSeconds: 3600,
+		StartSeconds:  3600,
+		EndSeconds:    3660,
+		Score:         82, // server-computed, clamped 0..100 upstream in clip_candidates.go
+		Confidence:    0.91,
+		Reason:        "chat_spike",
+		ChatCount:     150,
+		EmoteCount:    120,
+		ViewerCount:   30000,
+		SourceKind:    ClipCandidateSourceRecap,
+		SourceStatus:  ClipCandidateSourceAvailable,
+	}
+
+	req := BuildReplayForgeTriggerFromCandidate(candidate, ClipCandidateState{Status: ClipCandidateStatusSaved})
+
+	// Documented contract fields are present and consistent.
+	if req.Channel != "example" {
+		t.Fatalf("channel_login = %q, want example", req.Channel)
+	}
+	ctx := req.MomentContext
+	assertMomentContextString(t, ctx, "vod_id", "998877")
+	assertMomentContextString(t, ctx, "pick_reason", "chat_spike")
+	assertMomentContextFloat(t, ctx, "clip_start_seconds", 3600)
+	assertMomentContextFloat(t, ctx, "clip_end_seconds", 3660)
+	// candidate_score is server-computed and surfaced as moment_score.
+	assertMomentContextFloat(t, ctx, "moment_score", float64(candidate.Score))
+
+	// The outbound body must never carry an auth/ownership token. requested_by and
+	// idempotency_key are server-side concerns and must not leak here.
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal trigger request: %v", err)
+	}
+	assertJSONOmitsForbiddenFields(t, body, []string{
+		"authorization", "auth_token", "access_token", "refresh_token",
+		"bearer", "token", "requested_by",
+	})
+	lower := strings.ToLower(string(body))
+	for _, marker := range []string{"bearer ", "token=", "access_token", "refresh_token", "clips:edit"} {
+		if strings.Contains(lower, marker) {
+			t.Fatalf("moment_context payload leaked secret marker %q: %s", marker, body)
+		}
+	}
+}
+
 func TestReplayForgeHTTPClientSendsBearerAndParsesQueuedJob(t *testing.T) {
 	var gotPath, gotAuth string
 	var gotBody ReplayForgeTriggerRequest

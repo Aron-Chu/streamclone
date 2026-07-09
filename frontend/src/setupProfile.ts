@@ -1,6 +1,4 @@
-export const STREAMPULSE_ANALYTICS_URL = 'https://streampulse.stream/analytics'
-
-/** Desktop install no longer bundles the TwitchTracker scraper profile. */
+/** Desktop install is core watch only (no bundled scraper tier). */
 export function profileNeedsScraper(_profile: string) {
   return false
 }

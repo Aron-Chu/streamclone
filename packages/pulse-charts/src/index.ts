@@ -1,7 +1,7 @@
 export type { ChartGameSegment, ChartMinuteRollup, ChartPlayhead } from './types.ts'
 export { PulseMultiSignalChart, type PulseMultiSignalChartProps } from './PulseMultiSignalChartPublic.tsx'
 export { PulseMultiSignalChartInner } from './PulseMultiSignalChart.tsx'
-export { normalizeGameSegments, hasMeaningfulGameSegments } from './gameSegments.ts'
+export { normalizeGameSegments, hasMeaningfulGameSegments, gameSegmentKey, gameSegmentOverlapsOffsetRange, gameSegmentVisibleSecondsInRange } from './gameSegments.ts'
 export { gameSegmentPlotBounds } from './gameSegmentChart.ts'
 export { GameSegmentOverlay, type GameSegmentOverlayProps } from './GameSegmentOverlay.tsx'
 export { rollupsForChart } from './chartSession.ts'

@@ -14,7 +14,6 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
-    "@streamclone/pulse-core": "file:../packages/pulse-core",
     "@tanstack/react-query": "5.101.0",
     "@tanstack/react-virtual": "^3.14.3",
     "hls.js": "1.6.16",

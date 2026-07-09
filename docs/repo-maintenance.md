@@ -15,8 +15,8 @@ Small index for docs, cleanup, and install bug-fix notes.
 | [docs/MCP.md](MCP.md) | Local MCP setup and usage |
 | [docs/CODEX.md](CODEX.md) | Codex MCP, skills mirror, config |
 | [docs/workspace.md](workspace.md) | Two-repo layout, doc ownership, dev workflow |
-| [docs/pulse-extension/](pulse-extension/) | Redirect stubs → [streamclone-pulse extension spec](https://github.com/Aron-Chu/streamclone-pulse/tree/master/docs/pulse-extension) |
-| [packages/pulse-core/](../packages/pulse-core/) | Shared scoring/types for frontend + extension |
+| [docs/streampulse-product-boundary.md](streampulse-product-boundary.md) | What is *not* in public Streamclone (StreamPulse backend/ops) |
+| Extension spec | [streamclone-pulse `docs/pulse-extension/`](https://github.com/Aron-Chu/streamclone-pulse/tree/master/docs/pulse-extension) |
 | [SECURITY.md](../SECURITY.md) | Vulnerability reporting |
 | [docs/security.md](security.md) | Operator hardening |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow |

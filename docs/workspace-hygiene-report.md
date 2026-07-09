@@ -41,7 +41,7 @@ Runtime code is clean — no stale `console.log`, `debugger`, or agent debug ing
 | `docs/repo-maintenance.md` | Index updated; pending install log rows closed or split |
 | `.kiro/steering/{clipper,analytics,tech}.md` | Fixed broken relative links |
 | `.codex/AGENTS.md` | Fixed links to root AGENTS and CODEX docs |
-| `docs/pulse-extension/*` | Redirect stubs use GitHub URLs to streamclone-pulse; Figma mirror policy documented |
+| `docs/pulse-extension/*` | **Removed** — canonical docs in streamclone-pulse only; see streampulse-product-boundary.md |
 
 ### Spec (streamclone-pulse)
 
@@ -84,7 +84,7 @@ Parse warnings (non-fatal): `Channel.tsx`, SQL migrations, `pulse-core/src/index
 - `clipper/` stub — still in `make clipper-test` / `make check`
 - `packages/pulse-core`, extension BFF/bookmarks/recap
 - Grafana tunnel/watch/bearhost scripts (Makefile + docs wired)
-- `docs/pulse-extension/figma/*.png` mirrors — Codex-only; sync via `scripts/export-pulse-extension-figma.ps1`
+- Extension Figma PNGs — **streamclone-pulse** `docs/pulse-extension/figma/` only
 
 ---
 
@@ -93,7 +93,7 @@ Parse warnings (non-fatal): `Channel.tsx`, SQL migrations, `pulse-core/src/index
 - Migrate `frontend/src/utils/emoteImageUrl.ts` and `vodId.ts` to `@streamclone/pulse-core` (duplicate, not dead)
 - Repo hygiene bucket in install log (CodeQL, CODEOWNERS, issue templates)
 - Install automation partial items (Pulse Wire defaults, warming UI) — close per verified item
-- Optional: drop streamclone Figma PNG mirrors if multi-root workspace is always used
+- Optional: drop streamclone-only Figma export script if multi-root workspace is always used
 
 ---
 

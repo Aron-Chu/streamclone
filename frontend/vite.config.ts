@@ -74,10 +74,6 @@ export default defineConfig({
         target: 'http://localhost:8084',
         changeOrigin: true,
       },
-      '/v1/analytics': {
-        target: 'http://localhost:8086',
-        changeOrigin: true,
-      },
       '/v1/channels': {
         target: 'http://localhost:8081',
         changeOrigin: true,
@@ -104,7 +100,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('/components/Analytics.tsx') || id.includes('/components/analytics/')) return 'analytics'
           if (id.includes('/components/Channel.tsx') || id.includes('/components/channel/')) return 'channel'
           if (!id.includes('node_modules')) return undefined
           if (id.includes('/react/') || id.includes('/react-dom/')) return 'react'

@@ -154,7 +154,7 @@ export function MomentReviewPanel({
               onMouseEnter={() => onPreviewRollup?.(rollup)}
               onMouseLeave={() => onPreviewRollup?.(null)}
               title={`${reasonLabel} · ${scoreTitle}`}
-              className={`flex w-full flex-col gap-1.5 rounded border border-l-2 px-2 py-1.5 text-left text-xs transition ${momentRowClass(isSelected, isPreviewed)}`}
+              className={`flex w-full flex-col gap-1.5 rounded border border-l-2 px-2 py-1.5 text-left text-xs transition ${momentRowClass(isSelected, isPreviewed)}${isSelected ? ' sc-moment-row-selected' : ''}`}
             >
               <div className="flex min-w-0 items-baseline justify-between gap-2">
                 <span className="shrink-0 font-mono text-[10px] font-bold tabular-nums text-zinc-400">

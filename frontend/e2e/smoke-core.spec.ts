@@ -64,8 +64,7 @@ test('channel route loads player shell or structured offline state', async ({ pa
   }).toPass({ timeout: 60_000 })
 })
 
-test('analytics page shell loads', async ({ page }) => {
-  test.setTimeout(90_000)
+test('removed analytics routes redirect to directory', async ({ page }) => {
   await page.goto('/analytics/xqc')
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 60_000 })
+  await expect(page).toHaveURL(/\/(\?.*)?$/)
 })

@@ -45,10 +45,11 @@ Hosted production execution lives in **private streampulse-ops**. Safe public ch
 
 ```sh
 curl -fsS https://api.streampulse.stream/v1/extension/health
-bash scripts/hosted-launch-probes.sh
 ```
 
-Pre-commit runs `scripts/pre-commit-public-ops-guard.sh` to block common topology leaks.
+Extended hosted launch probes: **private streampulse-ops** only.
+
+Pre-commit runs `scripts/pre-commit-public-ops-guard.sh` and `scripts/pre-commit-product-boundary-guard.sh` (strict on `master`).
 
 ## Tunnels
 

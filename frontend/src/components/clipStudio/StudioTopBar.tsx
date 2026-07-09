@@ -53,7 +53,7 @@ export function StudioTopBar({
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <StackStatusButton className="!text-[10px]" />
         <Link
-          to={`/analytics/${encodeURIComponent(job.channel)}`}
+          to={`/c/${encodeURIComponent(job.channel)}`}
           className="flex items-center gap-1 text-xs text-zinc-400 transition hover:text-zinc-100"
         >
           <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
