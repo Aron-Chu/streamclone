@@ -104,7 +104,7 @@ Bug fixes ship from this repo. Copying source into the release install only upda
 | 2026-06-19 | `fc6406c` (assessed 2026-06-21) | Uninstall uses same compose profiles as start/stop (feature flags from `.env`) on Windows and bash |
 | 2026-07-09 | `2fb5385` | Core-only boundary lock: remove Analytics/ReplayForge from watch UI, install hints, clipper stub, and product-boundary gate; Desktop Start must use new release tag (not stale `%USERPROFILE%\streamclone` v0.3.0-rc8) |
 | 2026-07-09 | `63bea40` | Release install pull failed: `Test-ScraperBuildFromSource` required excluded `docker-compose.scraper-source.yml`; core profile now sets `STREAMCLONE_DISABLE_LOCAL_SCRAPER=1` and skips missing scraper-source overlay |
-| 2026-07-09 | `v0.5.6` | Uninstall crashed after volume prune: local `$volumes` clashed with `[switch]$Volumes` (PowerShell case-insensitive); rename local and finish install-dir delete |
+| 2026-07-09 | `d09049a6` | Uninstall crashed after volume prune: local `$volumes` clashed with `[switch]$Volumes` (PowerShell case-insensitive); rename local and finish install-dir delete |
 
 ## Legacy Config Aliases
 
