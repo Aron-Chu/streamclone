@@ -102,6 +102,7 @@ Bug fixes ship from this repo. Copying source into the release install only upda
 | 2026-06-15 | assessed 2026-06-21 | Repo hygiene (Phase 1): doc/router alignment (`AGENTS.md`, `SERVICE_MAP.md`, `docs/workspace.md`), `.gitignore` grafana PNG pattern, dead frontend shims removed, clipper profile refs cleaned — remaining: `make check`, CodeQL, CODEOWNERS, issue templates |
 | 2026-06-17 | assessed 2026-06-21 | Install automation (partial): ReplayForge vs clipper cleanup done in Makefile/skills; Pulse Wire release defaults, release env merge on upgrade, warming UI — verify and close per item |
 | 2026-06-19 | `fc6406c` (assessed 2026-06-21) | Uninstall uses same compose profiles as start/stop (feature flags from `.env`) on Windows and bash |
+| 2026-07-09 | `2fb5385` | Core-only boundary lock: remove Analytics/ReplayForge from watch UI, install hints, clipper stub, and product-boundary gate; Desktop Start must use new release tag (not stale `%USERPROFILE%\streamclone` v0.3.0-rc8) |
 
 ## Legacy Config Aliases
 
