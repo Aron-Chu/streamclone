@@ -64,6 +64,11 @@ function Test-ScraperSiblingRepoReady {
 
 function Test-ScraperBuildFromSource {
     param([string]$Root)
+    # Release ZIPs exclude docker-compose.scraper-source.yml — never require it there.
+    $sourceOverlay = Join-Path $Root 'deploy\docker-compose.scraper-source.yml'
+    if (-not (Test-Path -LiteralPath $sourceOverlay)) {
+        return $false
+    }
     if (-not (Test-StreamcloneScraperUseImagesFromRoot -Root $Root)) {
         return $true
     }
@@ -109,7 +114,9 @@ function Get-StreamcloneComposeArgs {
             $args += '-f', 'deploy/docker-compose.release.yml'
         }
         if ($ScraperSourceBuild.IsPresent -or (Test-ScraperBuildFromSource -Root $Root)) {
-            $args += '-f', 'deploy/docker-compose.scraper-source.yml'
+            if (Test-Path -LiteralPath (Join-Path $Root 'deploy\docker-compose.scraper-source.yml')) {
+                $args += '-f', 'deploy/docker-compose.scraper-source.yml'
+            }
         }
     } else {
         $args = @(
@@ -121,7 +128,10 @@ function Get-StreamcloneComposeArgs {
             $args += '-f', (Join-Path $Root 'deploy\docker-compose.release.yml')
         }
         if ($ScraperSourceBuild.IsPresent -or (Test-ScraperBuildFromSource -Root $Root)) {
-            $args += '-f', (Join-Path $Root 'deploy\docker-compose.scraper-source.yml')
+            $scraperSource = Join-Path $Root 'deploy\docker-compose.scraper-source.yml'
+            if (Test-Path -LiteralPath $scraperSource) {
+                $args += '-f', $scraperSource
+            }
         }
     }
     $envFile = Join-Path $Root '.env'

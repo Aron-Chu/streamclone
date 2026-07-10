@@ -40,6 +40,10 @@ function Get-EnvFeatureComposeProfiles {
     $profiles = @()
     if (-not (Test-Path $EnvFile)) { return $profiles }
     $vals = Read-EnvKeyValueFile -Path $EnvFile
+    $disableScraper = [string]$vals['STREAMCLONE_DISABLE_LOCAL_SCRAPER']
+    if ($disableScraper -eq '1' -or $disableScraper -eq 'true') {
+        return $profiles
+    }
     $scraperKey = [string]$vals['SCRAPER_API_KEY']
     if (-not [string]::IsNullOrWhiteSpace($scraperKey)) {
         $profiles += 'scraper'

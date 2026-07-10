@@ -102,6 +102,8 @@ cat >"$STAGE/deploy/env/release-bundle.env" <<EOF
 # Auto-generated release bundle — pull GHCR images pinned to this tag
 IMAGE_TAG=$VERSION
 STREAMCLONE_USE_IMAGES=1
+# Desktop core install: no local scraper compose profile (SCRAPER_API_KEY is still generated for API clients).
+STREAMCLONE_DISABLE_LOCAL_SCRAPER=1
 # Loopback token-import/device-code endpoints are dev-only (docs/security.md).
 TWITCH_DEV_TOKEN_IMPORT_ENABLED=false
 REDDIT_COMMERCIAL_OK=true
