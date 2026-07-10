@@ -24,7 +24,7 @@ This repository is **application source, local dev, CI, and contracts only**.
 
 ```bash
 curl -fsS https://api.streampulse.stream/v1/extension/health
-bash scripts/hosted-launch-probes.sh
+curl -fsS https://api.streampulse.stream/v1/public/status
 make smoke   # local stack only
 ```
 

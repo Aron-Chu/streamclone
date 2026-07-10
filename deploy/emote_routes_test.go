@@ -26,7 +26,6 @@ func TestEmoteAssetRoutesProxyToEmoteService(t *testing.T) {
 		"Caddyfile": {
 			filepath.Join(deployDir, "Caddyfile"),
 			filepath.Join(deployDir, "Caddyfile.local-tunnel"),
-			filepath.Join(deployDir, "Caddyfile.pulse-api"),
 		},
 		"nginx.conf": {
 			filepath.Join(repoRoot, "frontend", "nginx.conf"),

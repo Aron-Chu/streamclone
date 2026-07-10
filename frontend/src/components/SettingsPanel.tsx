@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getAuthDebug, getAlwaysTracked, setAlwaysTracked } from '../api'
+import { useQuery } from '@tanstack/react-query'
+import { getAuthDebug } from '../api'
 import { useThemeEffect, useUiSettings, type ThemeName } from '../settings'
 import SystemHealthPanel from './SystemHealthPanel'
 import { dispatchOpenStackStatus } from '../stackStatusEvents'
@@ -13,9 +13,6 @@ const themes: Array<{ id: ThemeName; label: string }> = [
 
 export default function SettingsButton() {
   const [open, setOpen] = useState(false)
-  const [newChannel, setNewChannel] = useState('')
-  const [errorMsg, setErrorMsg] = useState('')
-  const queryClient = useQueryClient()
   const settings = useUiSettings(s => s.settings)
   const updateSettings = useUiSettings(s => s.updateSettings)
   const authDebug = useQuery({
@@ -24,34 +21,7 @@ export default function SettingsButton() {
     enabled: open,
     staleTime: 10_000,
   })
-  const alwaysTracked = useQuery({
-    queryKey: ['always-tracked'],
-    queryFn: getAlwaysTracked,
-    enabled: open,
-  })
   useThemeEffect(settings.theme)
-
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newChannel.trim()) return
-    try {
-      await setAlwaysTracked(newChannel.trim().toLowerCase(), true)
-      setNewChannel('')
-      setErrorMsg('')
-      queryClient.invalidateQueries({ queryKey: ['always-tracked'] })
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to add channel')
-    }
-  }
-
-  const handleRemove = async (login: string) => {
-    try {
-      await setAlwaysTracked(login, false)
-      queryClient.invalidateQueries({ queryKey: ['always-tracked'] })
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to remove channel')
-    }
-  }
 
   return (
     <div className="relative z-50">
@@ -184,49 +154,6 @@ export default function SettingsButton() {
               />
             </div>
 
-            <div>
-              <div className="mb-2 text-[11px] font-black uppercase text-zinc-500">Always-Tracked Channels</div>
-              <div className="rounded border border-white/10 bg-white/[0.035] p-3 space-y-3">
-                <form onSubmit={handleAdd} className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Channel login (e.g. xqc)"
-                    value={newChannel}
-                    onChange={e => setNewChannel(e.target.value)}
-                    className="flex-1 rounded border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder-zinc-500 focus:border-violet-500 focus:outline-none"
-                  />
-                  <button
-                    type="submit"
-                    className="rounded bg-violet-600 px-3 py-1.5 text-xs font-black text-white hover:bg-violet-700 transition"
-                  >
-                    Add
-                  </button>
-                </form>
-                {errorMsg && (
-                  <div className="text-[10px] font-bold text-red-400">{errorMsg}</div>
-                )}
-                {alwaysTracked.isLoading ? (
-                  <div className="text-xs text-zinc-500">Loading channels...</div>
-                ) : alwaysTracked.data?.channels?.length ? (
-                  <div className="max-h-28 overflow-y-auto space-y-1.5 pr-1">
-                    {alwaysTracked.data.channels.map(ch => (
-                      <div key={ch} className="flex items-center justify-between rounded bg-white/[0.03] px-2 py-1 text-xs">
-                        <span className="font-bold text-zinc-200">{ch}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemove(ch)}
-                          className="text-[10px] font-black text-red-400 hover:text-red-300 transition"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-xs text-zinc-500 italic">No channels tracked yet.</div>
-                )}
-              </div>
-            </div>
             <div>
               <div className="mb-2 text-[11px] font-black uppercase text-zinc-500">System status</div>
               <div className="rounded border border-white/10 bg-white/[0.035] p-3 space-y-3">

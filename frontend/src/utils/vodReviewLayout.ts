@@ -1,7 +1,6 @@
-﻿import type { AnalyticsStream, AnalyticsStreamDetail } from '../api'
-
-/**
- * Layout helpers for analytics-origin VOD review (Twitch embed + Pulse sidebar).
+﻿/**
+ * Layout helpers for VOD review (Twitch embed + sidebar).
+ * Deep-link query flags may still say "fromAnalytics" for compat; no Analytics product UI.
  */
 
 export type AnalyticsVodSidebarTab = 'chat' | 'pulse'
@@ -18,30 +17,6 @@ export function defaultAnalyticsVodSidebarTab(
   _streamId: string | null | undefined,
 ): AnalyticsVodSidebarTab {
   return 'chat'
-}
-
-function streamDurationFromBounds(stream?: AnalyticsStream): number | null {
-  if (!stream?.startedAt || !stream.endedAt) return null
-  const startMs = Date.parse(stream.startedAt)
-  const endMs = Date.parse(stream.endedAt)
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null
-  return Math.floor((endMs - startMs) / 1000)
-}
-
-export function resolveVodDetailDurationSec(
-  detail: AnalyticsStreamDetail | null | undefined,
-): number | null {
-  const fromDetail = detail?.vodDurationSec
-  if (fromDetail != null && Number.isFinite(fromDetail) && fromDetail > 0) {
-    return fromDetail
-  }
-  const fromBounds = streamDurationFromBounds(detail?.stream)
-  if (fromBounds != null) return fromBounds
-  const rollupMinutes = detail?.rollups?.length ?? 0
-  if (rollupMinutes > 0) {
-    return rollupMinutes * 60
-  }
-  return null
 }
 
 function pickPositiveDuration(...values: Array<number | null | undefined>): number | null {
@@ -78,7 +53,7 @@ export function resolveVodTotalDurationSec(input: {
 }
 
 /**
- * Resolves total VOD seconds for banners and Pulse charts.
+ * Resolves total VOD seconds for banners.
  * Embed review prefers rollup/detail duration because Twitch getDuration() is often null.
  */
 export function resolveVodBannerTotalSec(input: {

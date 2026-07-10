@@ -205,7 +205,6 @@ try {
     if ($env:STREAMCLONE_NO_BROWSER -ne '1') {
         Start-Process (Get-StreamcloneWelcomeUrl)
     }
-    Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
     Complete-InstallProgress -ExitCode 0
     exit 0
 } catch {

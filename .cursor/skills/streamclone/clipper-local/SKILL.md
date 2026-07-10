@@ -1,28 +1,16 @@
 ---
-description: Work on Streamclone Clip Studio, live clipper worker/API, VOD exports, captions, templates, and clipper auth.
+description: Clip Studio / ReplayForge work is out of scope for Streamclone. Route to sibling replayforge.
 ---
 
-# Clipper Local
+# Clipper Local — Route to replayforge
 
-Read `AGENTS.md`, `.kiro/steering/clipper.md`, and `docs/security.md`.
+> **Boundary lock.** Streamclone no longer ships Clip Studio, ReplayForge deeplinks, or an in-repo clipper worker.
 
-## Guardrails
+**Do not implement clipper/Clip Studio changes in this repo.** Route to:
 
-- **Active Clip Studio lives in the ReplayForge sibling repo** (`../replayforge` on host `:8095` API, `:8096` UI). The in-repo `clipper/` stub is deprecated — used only for `make clipper-test` fallback.
-- Keep Go viewer services as API consumers only (proxy `/v1/clipper/*` to ReplayForge).
-- Do not log or expose Twitch tokens or webhook tokens.
+| Need | Repo |
+|------|------|
+| Clip Studio UI / worker / exports | sibling **replayforge** |
+| Analytics moment → clip triggers | private **streampulse-backend** / **streamclone-pulse** |
 
-## Codegraph
-
-- `get_ast_chunk("ClipStudio")`
-- `get_ast_chunk("VideoStage")`
-- `get_ast_chunk("CaptionOverlayEditor")`
-- `get_ast_chunk("_process")` (ReplayForge backend when sibling checkout exists)
-
-## Tests
-
-```sh
-make clipper-test
-cd frontend && npm run build
-make security-scan
-```
+See [`docs/streampulse-product-boundary.md`](../../../../docs/streampulse-product-boundary.md).

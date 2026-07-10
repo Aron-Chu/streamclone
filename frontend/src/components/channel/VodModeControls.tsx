@@ -35,13 +35,7 @@ export interface VodModeControlsProps {
   currentTimeSec: number | null
   /** Total VOD duration in seconds, or null when unknown (placeholder shown). */
   totalDurationSec: number | null
-  /**
-   * Analytics stream page href to return to, or null when no analytics context
-   * is available from the referring deep link. When null, the "Back to
-   * Analytics" action is hidden. Requirement 20.5.
-   */
-  analyticsHref?: string | null
-  /** Full chat log page for this stream, when analytics context is present. */
+  /** Full chat log page for this stream, when available. */
   chatLogHref?: string | null
   /** True while the relay is repositioning after a far seek. */
   seekPending?: boolean
@@ -51,13 +45,6 @@ export interface VodModeControlsProps {
 /**
  * VodModeControls renders the VOD review-mode banner shown in the channel
  * workspace when a `?vod=&offset=` deep link is active.
- *
- * It surfaces the VOD identifier and requested offset, the current/total
- * playback duration (with a placeholder when total duration is unknown), a
- * "Back to live channel" action that drops the VOD query parameters, and a
- * conditional "Back to Analytics" action.
- *
- * Requirements: 1.1, 1.2, 20.1, 20.2, 20.3, 20.4, 20.5.
  */
 export function VodModeControls({
   vodId,
@@ -65,7 +52,6 @@ export function VodModeControls({
   channelLogin,
   currentTimeSec,
   totalDurationSec,
-  analyticsHref,
   chatLogHref,
   seekPending = false,
   className,
@@ -121,14 +107,6 @@ export function VodModeControls({
             className="rounded border border-cyan-400/30 bg-cyan-500/15 px-3 py-1.5 text-[11px] font-black text-cyan-100 transition hover:bg-cyan-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             Chat log
-          </Link>
-        ) : null}
-        {analyticsHref ? (
-          <Link
-            to={analyticsHref}
-            className="rounded border border-violet-400/30 bg-violet-500/15 px-3 py-1.5 text-[11px] font-black text-violet-100 transition hover:bg-violet-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
-          >
-            Back to Analytics
           </Link>
         ) : null}
       </div>

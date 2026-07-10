@@ -52,4 +52,3 @@ if ! grep -q 'id="ecs"' "$OUT_PATH" 2>/dev/null; then
 fi
 
 echo "Saved $(wc -c < "$OUT_PATH") bytes"
-echo "Run: go test ./internal/analytics/... -run TestParseTwitchTrackerFixtures -count=1"

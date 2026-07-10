@@ -4,66 +4,16 @@ import {
   getHostDiagnostics,
   getMetadataDiagnostics,
   getSetupControlHealth,
-  getSetupStartStatus,
   getSetupWelcome,
-  startSetupService,
-  type MetadataDiagnostics,
-  type SetupWelcome,
 } from '../api'
-import { SETUP_CONTROL_AVAILABLE, SETUP_CONTROL_WAKE_ENABLED, CLIPPER } from '../config'
-import { wakeSetupControl } from '../setupControlWake'
-
-export type OptionalService = 'scraper' | 'clipper' | 'pulse'
-
-export type ServiceStartProgress = {
-  service: OptionalService
-  percent: number
-  phase: string
-  detail: string
-}
-
-const START_LABELS: Record<OptionalService, string> = {
-  scraper: 'Analytics',
-  clipper: 'ReplayForge',
-  pulse: 'Pulse Dashboards',
-}
-
-function serviceReadyFromDiagnostics(
-  diagnostics: MetadataDiagnostics | undefined,
-  service: OptionalService,
-): boolean {
-  if (!diagnostics) return false
-  return diagnostics.services[service] === 'ready'
-}
-
-function serviceReadyFromWelcome(
-  welcome: SetupWelcome | undefined,
-  service: OptionalService,
-): boolean {
-  if (!welcome) return false
-  return welcome.services[service] === 'ready'
-}
-
-function isServiceReady(
-  welcome: SetupWelcome | undefined,
-  diagnostics: MetadataDiagnostics | undefined,
-  service: OptionalService,
-): boolean {
-  return serviceReadyFromDiagnostics(diagnostics, service) || serviceReadyFromWelcome(welcome, service)
-}
+import { SETUP_CONTROL_AVAILABLE, SETUP_CONTROL_WAKE_ENABLED } from '../config'
 
 export function useOptionalServices(options: { probeControl?: boolean; pollActive?: boolean } = {}) {
   const queryClient = useQueryClient()
-  const [starting, setStarting] = useState<Set<OptionalService>>(() => new Set())
-  const [startProgressByService, setStartProgressByService] = useState<
-    Partial<Record<OptionalService, ServiceStartProgress>>
-  >({})
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const anyStarting = starting.size > 0
   const pollActive = options.pollActive ?? false
-  const statusPollMs = anyStarting ? 2_000 : pollActive ? 15_000 : 60_000
-  const startProgress = startProgressByService.scraper ?? startProgressByService.clipper ?? startProgressByService.pulse ?? null
+  const statusPollMs = pollActive ? 15_000 : 60_000
 
   const setup = useQuery({
     queryKey: ['setup-welcome'],
@@ -82,7 +32,7 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
   const control = useQuery({
     queryKey: ['setup-control-health'],
     queryFn: getSetupControlHealth,
-    enabled: SETUP_CONTROL_AVAILABLE && (Boolean(options.probeControl) || anyStarting),
+    enabled: SETUP_CONTROL_AVAILABLE && Boolean(options.probeControl),
     staleTime: 10_000,
     retry: false,
   })
@@ -102,40 +52,16 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
   const services = useMemo(() => {
     const welcome = setup.data?.services
     const diag = diagnostics.data?.services
-    const host = hostDiagnostics.data?.optionalServices
     return {
       scraper: diag?.scraper === 'ready' || welcome?.scraper === 'ready'
         ? 'ready'
         : welcome?.scraper ?? diag?.scraper ?? 'offline',
-      clipper: diag?.clipper === 'ready' || welcome?.clipper === 'ready'
-        ? 'ready'
-        : welcome?.clipper ?? diag?.clipper ?? 'offline',
-      pulse: diag?.pulse === 'ready' || welcome?.pulse === 'ready' || host?.pulse === 'ready'
-        ? 'ready'
-        : welcome?.pulse ?? diag?.pulse ?? host?.pulse ?? 'offline',
+      clipper: 'offline' as const,
+      pulse: 'offline' as const,
     } as const
-  }, [setup.data?.services, diagnostics.data?.services, hostDiagnostics.data?.optionalServices])
-
-  const clipperHealth = useQuery({
-    queryKey: ['clipper-health'],
-    queryFn: async () => {
-      const res = await fetch(`${CLIPPER.replace(/\/$/, '')}/healthz`, {
-        signal: AbortSignal.timeout(5000),
-      })
-      if (!res.ok) return false
-      const body = await res.json() as { status?: string }
-      return body.status === 'ok'
-    },
-    staleTime: 10_000,
-    refetchInterval: statusPollMs,
-    retry: false,
-  })
+  }, [setup.data?.services, diagnostics.data?.services])
 
   const controlReady = Boolean(control.data?.ok)
-  const scraperOffline = services.scraper === 'offline'
-  const clipperReady = clipperHealth.data === true
-  const clipperOffline = !clipperReady
-  const pulseOffline = services.pulse === 'offline'
 
   const refreshStatus = async () => {
     setActionError(null)
@@ -145,188 +71,11 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
       SETUP_CONTROL_AVAILABLE && Boolean(options.probeControl)
         ? queryClient.invalidateQueries({ queryKey: ['host-diagnostics'] })
         : Promise.resolve(),
-      queryClient.invalidateQueries({ queryKey: ['clipper-health'] }),
-      SETUP_CONTROL_AVAILABLE && (Boolean(options.probeControl) || anyStarting)
+      SETUP_CONTROL_AVAILABLE && Boolean(options.probeControl)
         ? queryClient.invalidateQueries({ queryKey: ['setup-control-health'] })
         : Promise.resolve(),
     ])
   }
-
-  const startService = async (service: OptionalService) => {
-    if (service === 'clipper') {
-      setActionError('ReplayForge runs as a separate app — install and start it from http://localhost:8096 (see docs/options.md).')
-      return false
-    }
-    setActionError(null)
-    let helperReady = controlReady
-    if (!helperReady) {
-      if (SETUP_CONTROL_WAKE_ENABLED) {
-        setStartProgressByService(prev => ({
-          ...prev,
-          [service]: {
-            service,
-            percent: 4,
-            phase: 'Starting install helper…',
-            detail: 'Waking the local setup helper...',
-          },
-        }))
-        helperReady = await wakeSetupControl()
-        if (helperReady) {
-          await queryClient.invalidateQueries({ queryKey: ['setup-control-health'] })
-        } else {
-          setStartProgressByService(prev => {
-            if (!prev[service]) return prev
-            const next = { ...prev }
-            delete next[service]
-            return next
-          })
-        }
-      }
-      if (!helperReady) {
-        const message = SETUP_CONTROL_AVAILABLE
-          ? `The install helper did not start in time (needed for ${START_LABELS[service]}). If the browser blocked the Streamclone link, run Start Streamclone from Desktop once, then try again.`
-          : SETUP_CONTROL_WAKE_ENABLED
-            ? `The install helper did not start in time (needed for ${START_LABELS[service]}). If the browser blocked the Streamclone link, run Start Streamclone from Desktop once, then try again.`
-            : `Cannot start ${START_LABELS[service]} from the browser yet. Run Start Streamclone (or \`powershell -File scripts/ensure-setup-control.ps1\`) once so SETUP_CONTROL_TOKEN is loaded, then refresh this page.`
-        setActionError(message)
-        return false
-      }
-    }
-    setStarting(prev => new Set(prev).add(service))
-    setStartProgressByService(prev => ({
-      ...prev,
-      [service]: {
-        service,
-        percent: 8,
-        phase: 'Sending start request',
-        detail: `Starting ${START_LABELS[service]}...`,
-      },
-    }))
-    try {
-      const startResp = await startSetupService(service)
-      if (startResp.message?.includes('queued')) {
-        setStartProgressByService(prev => ({
-          ...prev,
-          [service]: {
-            service,
-            percent: 12,
-            phase: 'Queued',
-            detail: startResp.message,
-          },
-        }))
-      } else {
-        setStartProgressByService(prev => ({
-          ...prev,
-          [service]: {
-            service,
-            percent: 18,
-            phase: 'Docker compose running',
-            detail: service === 'scraper'
-              ? 'First start may build a large browser image (5–15 min).'
-              : service === 'pulse'
-                ? 'Starting local Grafana and InfluxDB, then enabling export...'
-                : 'Bringing optional containers online...',
-          },
-        }))
-      }
-      const maxAttempts = service === 'scraper' ? 450 : 90
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        await new Promise(resolve => window.setTimeout(resolve, 2000))
-        let hostPercent = 18
-        let hostPhase = 'Docker compose running'
-        let hostDetail = ''
-        try {
-          const status = await getSetupStartStatus(service)
-          hostPercent = Math.min(95, Math.max(18, status.percent))
-          hostPhase = status.phase
-          hostDetail = status.detail
-          if (status.warmup && service === 'scraper') {
-            hostDetail = status.warmup
-            if (status.phase === 'Warming Camoufox profile') {
-              hostPhase = status.phase
-            }
-          }
-          setStartProgressByService(prev => ({
-            ...prev,
-            [service]: {
-              service,
-              percent: hostPercent,
-              phase: hostPhase,
-              detail: hostDetail || prev[service]?.detail || '',
-            },
-          }))
-        } catch {
-          setStartProgressByService(prev => {
-            const cur = prev[service]
-            if (!cur) return prev
-            return {
-              ...prev,
-              [service]: {
-                ...cur,
-                percent: Math.min(90, cur.percent + 1),
-                phase: 'Still starting',
-              },
-            }
-          })
-        }
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['setup-welcome'] }),
-          queryClient.invalidateQueries({ queryKey: ['setup-diagnostics'] }),
-        ])
-        const welcome = queryClient.getQueryData<SetupWelcome>(['setup-welcome'])
-        const diag = queryClient.getQueryData<MetadataDiagnostics>(['setup-diagnostics'])
-        const ready = isServiceReady(welcome, diag, service)
-        if (ready) {
-          setStartProgressByService(prev => ({
-            ...prev,
-            [service]: {
-              service,
-              percent: 100,
-              phase: 'Ready',
-              detail: `${START_LABELS[service]} is online`,
-            },
-          }))
-          return true
-        }
-        if (hostPercent >= 82 && hostPhase === 'Container is up' && service !== 'scraper') {
-          setStartProgressByService(prev => ({
-            ...prev,
-            [service]: {
-              service,
-              percent: 98,
-              phase: 'Waiting for health check',
-              detail: hostDetail || 'Container is up — confirming API...',
-            },
-          }))
-        }
-      }
-      setActionError(
-        service === 'scraper'
-          ? 'Analytics is still building or starting. First install can take 5–15 minutes — leave Docker Desktop open and refresh status.'
-          : 'Pulse is still starting. Check Docker Desktop, then refresh Stack status in a minute.',
-      )
-      return false
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : `Unable to start ${service}.`)
-      return false
-    } finally {
-      setStarting(prev => {
-        const next = new Set(prev)
-        next.delete(service)
-        return next
-      })
-      window.setTimeout(() => {
-        setStartProgressByService(prev => {
-          if (!prev[service]) return prev
-          const next = { ...prev }
-          delete next[service]
-          return next
-        })
-      }, 2500)
-    }
-  }
-
-  const isStarting = (service: OptionalService) => starting.has(service)
 
   return {
     setup,
@@ -337,18 +86,25 @@ export function useOptionalServices(options: { probeControl?: boolean; pollActiv
     profile,
     services,
     controlReady,
-    scraperOffline,
-    clipperReady,
-    clipperOffline,
-    pulseOffline,
-    starting: isStarting('scraper') ? 'scraper' : isStarting('clipper') ? 'clipper' : isStarting('pulse') ? 'pulse' : null,
-    startingServices: starting,
-    startProgress,
-    startProgressByService,
+    scraperOffline: services.scraper === 'offline',
+    clipperReady: false,
+    clipperOffline: true,
+    pulseOffline: true,
+    starting: null,
+    startingServices: new Set(),
+    startProgress: null,
+    startProgressByService: {},
     actionError,
     setActionError,
-    startService,
+    startService: async () => {
+      setActionError(
+        SETUP_CONTROL_WAKE_ENABLED
+          ? 'Optional Analytics and ReplayForge services are not part of Streamclone. Use streampulse-backend / replayforge instead.'
+          : 'Optional services are not available from this app.',
+      )
+      return false
+    },
     refreshStatus,
-    isStarting,
+    isStarting: () => false,
   }
 }

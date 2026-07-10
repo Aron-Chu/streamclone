@@ -1,6 +1,6 @@
 ---
 description: React/TS frontend — Vite, playback, Zustand, same-origin API
-globs: frontend/**,packages/pulse-core/**,*.tsx,*.ts
+globs: frontend/**,*.tsx,*.ts
 alwaysApply: false
 ---
 
@@ -12,6 +12,6 @@ Read `.kiro/steering/tech.md` and `.kiro/steering/product.md` when UX matters.
 - API calls through same-origin `:8090` — no raw service ports in client config.
 - **Symbol lookup:** codegraph MCP for component/hook symbols — not full-tree Repomix dumps.
 - Build check: `cd frontend && npm run build` or `make frontend-test`.
-- Pulse extension UI lives in sibling **streamclone-pulse** — shared types in `packages/pulse-core/`.
+- Pulse extension UI lives in sibling **streamclone-pulse** (`src/`, `streampulse-web/`); its packages are in **streampulse-backend** private repo.
 
 Do not compute Pulse scores client-side; use backend peaks/coverage payloads.

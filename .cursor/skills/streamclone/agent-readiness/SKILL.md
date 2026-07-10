@@ -18,7 +18,7 @@ Docs and tooling only — **no product/runtime behavior changes** unless the tas
 
 ```sh
 make check-quick     # PR gate: test, vet, frontend-test, compose-config-check
-make check           # full gate before release (security-scan, build, audit, clipper, …)
+make check           # full gate before release (security-scan, build, audit, …)
 make mcp-setup       # codegraph-install + codegraph + mcp-preflight
 make compose-config-check
 make validate-env PROFILE=core
@@ -44,6 +44,7 @@ pre-commit run check-quick-light --all-files   # opt-in manual hook
 
 ## When editing agent docs
 
-- Update steering/docs after scraper, analytics, Pulse Wire, install, OAuth, or large frontend changes
+- Update steering/docs after install, OAuth, playback, or large frontend changes
 - Run `make codegraph` when symbols move
 - Never commit `.cursor/mcp.json`, `.env`, or tokens
+- Do not re-add Analytics / ReplayForge product surfaces — see `docs/streampulse-product-boundary.md`

@@ -9,13 +9,12 @@ import sys
 from pathlib import Path
 
 RULES: list[tuple[str, str]] = [
-    ("internal/analytics/", "go test ./internal/analytics/..."),
     ("internal/chat/", "go test ./internal/chat/..."),
     ("internal/video/", "go test ./internal/video/..."),
     ("internal/metadata/", "go test ./internal/metadata/..."),
-    ("clipper/", "make clipper-test"),
     ("frontend/", "cd frontend && npm run build"),
     ("deploy/", "docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.local-tunnel.yml config"),
+    ("scripts/check-product-boundary.sh", "make product-boundary-strict"),
 ]
 
 

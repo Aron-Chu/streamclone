@@ -56,9 +56,7 @@ PROFILE="${PROFILE:-core}"
 
 if [ "$PROFILE" = "clipper" ]; then
   if command -v powershell.exe >/dev/null 2>&1; then
-    powershell.exe -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-replayforge-hint.ps1" || true
   elif command -v pwsh >/dev/null 2>&1; then
-    pwsh -ExecutionPolicy Bypass -File "$ROOT/scripts/ensure-replayforge-hint.ps1" || true
   fi
 fi
 

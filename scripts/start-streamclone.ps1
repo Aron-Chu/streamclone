@@ -36,10 +36,6 @@ if ([string]::IsNullOrWhiteSpace($Profile)) {
     $Profile = 'core'
 }
 
-if ($Profile -eq 'clipper') {
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-replayforge-hint.ps1')
-}
-
 $pullImages = $UseImages.IsPresent
 if (-not $UseImages.IsPresent) {
     $pullImages = Test-StreamcloneUseImagesDefault -Base $Root

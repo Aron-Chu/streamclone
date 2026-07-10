@@ -16,4 +16,4 @@ Read `.kiro/steering/tech.md` first.
 - **Runtime truth:** `make context-snapshots` or MCP `stack_health` / `postgres_query` (SELECT only).
 - Tests: `go test ./internal/<pkg>/...` before `make check-quick`.
 
-Legacy analytics code may remain during boundary split. For StreamPulse BFF work, use private **streampulse-backend** — see [docs/streampulse-product-boundary.md](../../docs/streampulse-product-boundary.md).
+Do **not** re-add `cmd/analytics` or `internal/analytics`. For StreamPulse BFF work, use private **streampulse-backend** — see [docs/streampulse-product-boundary.md](../../docs/streampulse-product-boundary.md).

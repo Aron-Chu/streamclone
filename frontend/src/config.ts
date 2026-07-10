@@ -2,11 +2,8 @@ type RuntimeConfig = {
   metadataUrl?: string
   videoUrl?: string
   emoteUrl?: string
-  analyticsUrl?: string
   chatWs?: string
   chatHttp?: string
-  clipperUrl?: string
-  replayforgeUiUrl?: string
   maxRetainedMessages?: string | number
   streamcloneProfile?: string
   setupControlToken?: string
@@ -79,17 +76,8 @@ export const HLS_CDN_BEARER = resolveHlsCdnBearer()
 export const METADATA = resolveHttp(runtime.metadataUrl || viteEnv.VITE_METADATA_URL, browserOrigin || 'http://localhost:8081')
 export const VIDEO = resolveHttp(runtime.videoUrl || viteEnv.VITE_VIDEO_URL, browserOrigin || 'http://localhost:8082')
 export const EMOTE = resolveHttp(runtime.emoteUrl || viteEnv.VITE_EMOTE_URL, browserOrigin || 'http://localhost:8084')
-export const ANALYTICS = resolveHttp(runtime.analyticsUrl || viteEnv.VITE_ANALYTICS_URL, browserOrigin || 'http://localhost:8086')
 export const CHAT_WS = resolveWs(runtime.chatWs || viteEnv.VITE_CHAT_WS, browserWsOrigin ? `${browserWsOrigin}/v1/ws` : 'ws://localhost:8083/v1/ws')
 export const CHAT_HTTP = resolveHttp(runtime.chatHttp || viteEnv.VITE_CHAT_HTTP, browserOrigin || 'http://localhost:8083')
-export const CLIPPER = resolveHttp(runtime.clipperUrl || viteEnv.VITE_CLIPPER_URL, 'http://localhost:8095')
-// RF-P5-013: the clipper mutation Auth_Token is injected server-side by the
-// same-origin /v1/clipper/* proxy (Caddy header_up from CLIPPER_WEBHOOK_TOKEN).
-// It is deliberately never read into the browser bundle/config.
-export const REPLAYFORGE_UI = resolveHttp(
-  runtime.replayforgeUiUrl || viteEnv.VITE_REPLAYFORGE_UI_URL,
-  'http://localhost:8096',
-)
 export const MAX_RETAINED_MESSAGES = Number(runtime.maxRetainedMessages ?? viteEnv.VITE_MAX_RETAINED_MESSAGES ?? 250)
 export const STREAMCLONE_PROFILE = String(runtime.streamcloneProfile ?? viteEnv.VITE_STREAMCLONE_PROFILE ?? 'core').toLowerCase()
 export const DEV_TOKEN_IMPORT_ENABLED = String(runtime.devTokenImportEnabled ?? viteEnv.VITE_TWITCH_DEV_TOKEN_IMPORT_ENABLED ?? 'false') === 'true'
@@ -124,16 +112,3 @@ export const HLS_LOW_LATENCY_ENABLED = ['true', '1'].includes(
 export const ADAPTIVE_LIVE_LATENCY_ENABLED = ['true', '1'].includes(
   String(runtime.adaptiveLiveLatencyEnabled ?? viteEnv.VITE_ADAPTIVE_LIVE_LATENCY_ENABLED ?? 'false').toLowerCase(),
 )
-
-export const ADMIN_ARCHIVE_UI_ENABLED = ['true', '1'].includes(
-  String(viteEnv.VITE_ADMIN_ARCHIVE_UI_ENABLED ?? 'false').toLowerCase(),
-)
-
-/** TASK-021B: token UI only on localhost or HTTPS — public BearHost HTTP shows CLI instructions. */
-export const ADMIN_ARCHIVE_UI_ALLOWED = (() => {
-  if (ADMIN_ARCHIVE_UI_ENABLED) return true
-  if (typeof window === 'undefined') return false
-  const { protocol, hostname } = window.location
-  if (protocol === 'https:') return true
-  return hostname === 'localhost' || hostname === '127.0.0.1'
-})()

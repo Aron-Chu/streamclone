@@ -2417,7 +2417,6 @@ function ChannelPage() {
                           currentTimeSec={vodBannerCurrentSec}
                           totalDurationSec={vodBannerTotalSec}
                           seekPending={vodSeekPending}
-                          analyticsHref={null}
                           chatLogHref={
                             vodAnalyticsStreamId
                               ? `/logs/${encodeURIComponent(channelLogin)}/${encodeURIComponent(vodAnalyticsStreamId)}`

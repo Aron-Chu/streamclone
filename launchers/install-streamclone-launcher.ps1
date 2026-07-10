@@ -103,7 +103,6 @@ function Invoke-StreamcloneInstall {
                 if ($setupControlExitCode -ne 0) { exit $setupControlExitCode }
                 Start-Process (Get-StreamcloneAppUrl)
             }
-            Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
             return
         }
 
@@ -188,7 +187,6 @@ function Invoke-StreamcloneInstall {
             }
             Start-Process (Get-StreamcloneWelcomeUrl)
         }
-        Write-Host 'Optional Analytics and Clip Studio: open app -> Stack status -> Start Analytics / Clip Studio.' -ForegroundColor DarkGray
         return
     }
 

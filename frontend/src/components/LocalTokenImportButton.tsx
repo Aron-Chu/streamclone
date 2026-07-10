@@ -9,7 +9,6 @@ import {
   type MeResponse,
   pollDevTwitchDeviceAuth,
   startDevTwitchDeviceAuth,
-  syncClipperAuthFromSignIn,
 } from '../api'
 import { useAuth } from '../auth'
 
@@ -150,7 +149,6 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
       await auth.claimPreparedLocalToken()
       closeTwitchTab()
       setStatus(null)
-      void syncClipperAuthFromSignIn().catch(() => {})
     } catch (error) {
       const statusCode = error instanceof ApiError
         ? error.status
@@ -191,7 +189,7 @@ export default function LocalTokenImportButton({ compact = false }: LocalTokenIm
         onClick={useLocalToken}
         disabled={opening || auth.isClaimingPreparedLocalToken}
         className={`${compact ? 'px-3' : 'px-4'} rounded border border-cyan-300/30 bg-cyan-400/10 py-2 text-xs font-black text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-70`}
-        title="Optional: sign in for chat badges and follows. Clipping and analytics work without it."
+        title="Optional: sign in for chat badges and follows. Core watch works without it."
       >
         {opening || auth.isClaimingPreparedLocalToken ? 'Opening Twitch login…' : 'Sign in (optional)'}
       </button>
@@ -303,7 +301,6 @@ function applyAuthenticatedDeviceLogin(queryClient: ReturnType<typeof useQueryCl
   queryClient.invalidateQueries({ queryKey: ['me'] })
   queryClient.invalidateQueries({ queryKey: ['followed'] })
   queryClient.invalidateQueries({ queryKey: ['followed', 'local'] })
-  void syncClipperAuthFromSignIn().catch(() => {})
 }
 
 function formatRemaining(totalSeconds: number) {

@@ -24,7 +24,8 @@ StreamPulse backend, extension BFF, portal analytics, ingest, and hosted ops →
 
 ## Guardrails
 
-- Route browser/probes through Caddy `http://localhost:8090`
+- Route browser/probes through Caddy `http://localhost:8090` (watch stack only — not Pulse BFF)
 - Never commit secrets, host IPs, or SSH paths to this public tree
 - Narrow diffs — no drive-by refactors
-- Legacy `internal/analytics/` may exist during split — do not extend from this rule surface
+- Do **not** re-add Pulse BFF / analytics trees here — route to **streampulse-backend** / **streamclone-pulse** / **streampulse-ops** (see product boundary doc)
+- Cross-repo index: [`../streampulse-sdlc/AGENTS.md`](../../streampulse-sdlc/AGENTS.md)

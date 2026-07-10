@@ -41,7 +41,6 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
       <div className="space-y-3">
         <div className="flex flex-wrap gap-1.5">
           <StatusChip label="Core" good={health.coreReady} loading={health.statusLoading} />
-          <StatusChip label="ReplayForge" good={health.clipperReady} loading={health.statusLoading} />
         </div>
       </div>
     )
@@ -64,7 +63,6 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
         </div>
         <div className="mb-4 flex flex-wrap gap-1.5">
           <StatusChip label="Core" good={health.coreReady} loading={health.metadata.isLoading && !health.metadata.data} />
-          <StatusChip label="ReplayForge" good={health.clipperReady} loading={health.statusLoading} />
           <StatusChip label="Install helper" good={health.installHelperReady} loading={health.control.isLoading} />
           <StatusChip label="Docker" good={health.dockerReady} loading={health.host.isLoading} />
         </div>
@@ -80,10 +78,10 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
                 </tr>
               </thead>
               <tbody>
-                {health.host.data.containers.map(row => (
-                  <tr key={row.name} className="border-t border-white/5 text-zinc-300">
-                    <td className="py-1.5 pr-4 font-semibold">{row.name}</td>
-                    <td className="py-1.5 font-medium">{row.status}</td>
+                {health.host.data.containers.map((c) => (
+                  <tr key={c.name} className="border-t border-white/5 text-zinc-300">
+                    <td className="py-1.5 pr-4 font-mono text-[11px]">{c.name}</td>
+                    <td className="py-1.5 text-[11px]">{c.status}</td>
                   </tr>
                 ))}
               </tbody>
@@ -91,38 +89,21 @@ export default function SystemHealthPanel({ variant = 'full', onDismiss, onBrows
           </div>
         ) : null}
 
-        {health.metadata.data?.services ? (
-          <div className="mb-4">
-            <div className="mb-2 text-[11px] font-black uppercase text-zinc-500">In-cluster probes</div>
-            <div className="flex flex-wrap gap-1.5">
-              {Object.entries(health.metadata.data.services).map(([name, status]) => (
-                <StatusChip key={name} label={name} good={status === 'ready'} />
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {health.host.data?.suggestions?.length ? (
-          <div className="mb-4 rounded border border-amber-300/20 bg-amber-500/10 p-3">
-            <div className="mb-2 text-[11px] font-black uppercase text-amber-100">Suggested fixes</div>
-            <ul className="space-y-1 text-xs font-semibold text-amber-50">
-              {health.host.data.suggestions.map(item => (
-                <li key={item}>• {item}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => void copyDiagnostics()}
-            className="rounded border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-white/10"
+            className="rounded border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-black text-zinc-200 transition hover:bg-white/10"
           >
             {copied ? 'Copied' : 'Copy diagnostics'}
           </button>
-          <a href={INSTALL_GUIDE_URL} target="_blank" rel="noreferrer" className="rounded border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-white/10">
-            Desktop install guide
+          <a
+            href={INSTALL_GUIDE_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded border border-white/10 px-3 py-1.5 text-xs font-black text-zinc-400 transition hover:bg-white/10 hover:text-zinc-200"
+          >
+            Install guide
           </a>
         </div>
       </div>

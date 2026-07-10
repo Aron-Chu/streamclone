@@ -43,7 +43,6 @@ if (-not $NonInteractive) {
 Write-Host "Profile: $Profile"
 
 if ($Profile -in @('clipper', 'full')) {
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ensure-replayforge-hint.ps1')
 }
 
 if (-not $SkipPreflight) {

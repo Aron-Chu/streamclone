@@ -107,7 +107,6 @@ TWITCH_DEV_TOKEN_IMPORT_ENABLED=false
 REDDIT_COMMERCIAL_OK=true
 # ReplayForge runs outside compose; host.docker.internal reaches the host from containers
 CLIPPER_SERVICE_URL=http://host.docker.internal:8095
-VITE_REPLAYFORGE_UI_URL=http://localhost:8096
 EOF
 
 if [ -n "${TWITCH_OAUTH_CLIENT_ID:-}" ] && [ -n "${TWITCH_OAUTH_CLIENT_SECRET:-}" ]; then

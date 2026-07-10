@@ -39,8 +39,6 @@ Set in `.env` or pass `--profile` to compose.
 | `deploy/env/profile-scraper.env` | *(legacy — boundary split)* TwitchTracker scraper |
 | `deploy/env/profile-full.env` | *(legacy)* core + scraper |
 
-Deprecated: `STREAMCLONE_PROFILE=clipper` maps to core compose (ReplayForge runs outside compose).
-
 Makefile shortcuts:
 
 ```sh
@@ -64,7 +62,6 @@ The Stack activity page reads container rx/tx totals from setup-control.
 | **Public URL** | `PUBLIC_ORIGIN`, `HLS_PUBLIC_BASE` | Tunnel / desktop install |
 | **Twitch OAuth** | `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, token import flags | `.kiro/steering/local-auth.md` |
 | **Playback / HLS** | `HLS_LOW_LATENCY_ENABLED`, `MTX_*`, MediaMTX CDN secret | `.kiro/steering/playback.md` |
-| **Clipper** | `CLIPPER_SERVICE_URL`, `VITE_REPLAYFORGE_UI_URL` | `docs/agents-streamclone-and-replayforge.md` |
 
 ---
 

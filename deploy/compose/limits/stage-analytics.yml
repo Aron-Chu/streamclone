@@ -1,6 +1,0 @@
-# Stage 2 — analytics API (+ headroom over ~2.5G measured)
-services:
-  analytics:
-    mem_limit: 3584m
-    cpus: "2.0"
-    restart: unless-stopped

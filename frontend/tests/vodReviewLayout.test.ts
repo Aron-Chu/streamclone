@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import type { AnalyticsStreamDetail } from '../src/api.ts'
 import {
   defaultAnalyticsVodSidebarTab,
   isEmbedAnalyticsVodReview,
   resolveVodBannerTotalSec,
-  resolveVodDetailDurationSec,
   resolveVodTotalDurationSec,
 } from '../src/utils/vodReviewLayout.ts'
 
@@ -20,18 +18,6 @@ test('defaultAnalyticsVodSidebarTab always opens chat sidebar', () => {
   assert.equal(defaultAnalyticsVodSidebarTab(true, 'abc123'), 'chat')
   assert.equal(defaultAnalyticsVodSidebarTab(true, ''), 'chat')
   assert.equal(defaultAnalyticsVodSidebarTab(false, 'abc123'), 'chat')
-})
-
-test('resolveVodDetailDurationSec prefers vodDurationSec then rollup minutes', () => {
-  assert.equal(
-    resolveVodDetailDurationSec({ vodDurationSec: 5400, rollups: [] } as AnalyticsStreamDetail),
-    5400,
-  )
-  assert.equal(
-    resolveVodDetailDurationSec({ rollups: Array.from({ length: 90 }) } as AnalyticsStreamDetail),
-    5400,
-  )
-  assert.equal(resolveVodDetailDurationSec(null), null)
 })
 
 test('resolveVodBannerTotalSec prefers rollups for embed analytics review', () => {

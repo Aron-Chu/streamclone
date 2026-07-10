@@ -48,6 +48,23 @@ else
 fi
 
 echo
+echo "=== Product boundary preflight ==="
+if bash scripts/check-product-boundary.sh --preflight 2>/dev/null; then
+  echo "OK  product-boundary-preflight"
+else
+  echo "WARN product-boundary-preflight hit(s) — run: make product-boundary-strict"
+fi
+
+echo
+echo "=== Context contract (sdlc pointer) ==="
+if bash scripts/ci-context-contract.sh; then
+  echo "OK  ci-context-contract"
+else
+  echo "FAIL ci-context-contract"
+  FAIL=1
+fi
+
+echo
 echo "=== Streamclone MCP (WSL) ==="
 if bash scripts/mcp-preflight.sh >/tmp/context-verify-mcp.txt 2>&1; then
   echo "OK  streamclone MCP preflight"

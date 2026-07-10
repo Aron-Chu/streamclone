@@ -1,4 +1,4 @@
-import type { AnalyticsMinuteRollup, AnalyticsTopEmote, ChannelEmote } from './api'
+import type { ChannelEmote } from './api'
 
 export type EmoteProviderKind = 'seventv' | 'twitch' | 'ffz' | 'bttv' | 'unknown'
 
@@ -29,9 +29,14 @@ export function emoteProviderTone(provider?: string): string {
   return 'text-zinc-400 bg-white/[0.06] border-white/10'
 }
 
-export function emoteCountForProvider(rollup: AnalyticsMinuteRollup, provider: EmoteProviderKind): number {
+export type MinuteRollupEmotes = {
+  seventvEmoteCount?: number
+  emotes?: Record<string, number>
+}
+
+export function emoteCountForProvider(rollup: MinuteRollupEmotes, provider: EmoteProviderKind): number {
   if (provider === 'seventv' && (rollup.seventvEmoteCount ?? 0) > 0) {
-    return rollup.seventvEmoteCount
+    return rollup.seventvEmoteCount ?? 0
   }
   if (!rollup.emotes) return 0
   let total = 0
@@ -41,7 +46,7 @@ export function emoteCountForProvider(rollup: AnalyticsMinuteRollup, provider: E
   return total
 }
 
-export function sortChannelEmotesByUsage(emotes: ChannelEmote[], topEmotes?: AnalyticsTopEmote[]) {
+export function sortChannelEmotesByUsage(emotes: ChannelEmote[], topEmotes?: Array<{ name: string; count: number }>) {
   const usage = new Map<string, number>()
   for (const emote of topEmotes ?? []) {
     const key = emote.name.trim().toLowerCase()

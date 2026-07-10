@@ -46,19 +46,6 @@
 		}
 	}
 
-	@clipper {
-		path /v1/clipper /v1/clipper/*
-	}
-	route @clipper {
-		uri replace /v1/clipper /v1
-		reverse_proxy host.docker.internal:8095 {
-			# RF-P5-013: inject clipper mutation Auth_Token server-side from env
-			# so the browser never carries it. Empty when unset (ReplayForge then
-			# disables its token gate).
-			header_up Authorization "Bearer {$CLIPPER_WEBHOOK_TOKEN}"
-		}
-	}
-
 	@metadata {
 		path /v1/*
 	}

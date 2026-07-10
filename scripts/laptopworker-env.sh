@@ -162,17 +162,14 @@ laptopworker_plan_update() {
         build_pick[metadata]=1
         build_pick[video]=1
         build_pick[chat]=1
-        build_pick[analytics]=1
         build_pick[emote]=1
         ;;
-      frontend/*|packages/analytics-console/*)
         build_pick[frontend]=1
         ;;
       cmd/*|internal/*|deploy/Dockerfile*)
         build_pick[metadata]=1
         build_pick[video]=1
         build_pick[chat]=1
-        build_pick[analytics]=1
         build_pick[emote]=1
         ;;
       deploy/docker-compose*|deploy/env/profile-laptopworker*)
@@ -191,7 +188,6 @@ laptopworker_plan_update() {
         build_pick[metadata]=1
         build_pick[video]=1
         build_pick[chat]=1
-        build_pick[analytics]=1
         build_pick[emote]=1
         ;;
     esac

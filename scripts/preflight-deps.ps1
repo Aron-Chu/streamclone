@@ -249,9 +249,9 @@ if (Test-PortFree -Port 8090) {
 
 # Optional Twitch CLI
 if (Get-Command twitch -ErrorAction SilentlyContinue) {
-    Write-Check ok 'Twitch CLI found (optional - Clip Studio / chat login)'
+    Write-Check ok 'Twitch CLI found (optional - chat login)'
 } else {
-    Write-Check warn 'Twitch CLI not found - optional; use Sign in at http://localhost:8090 for Clip Studio'
+    Write-Check warn 'Twitch CLI not found - optional; use Sign in at http://localhost:8090 for chat login'
     $warnings++
     if ($InstallHints) {
         Write-Host '  Developers: https://github.com/twitchdev/twitch-cli#installation' -ForegroundColor DarkGray

@@ -61,4 +61,3 @@ if ($html -notmatch 'id="ecs"') {
 
 Set-Content -Path $outPath -Value $html -Encoding utf8NoBOM
 Write-Host "Saved $($html.Length) bytes to $outPath"
-Write-Host "Run parser tests: go test ./internal/analytics/... -run TestParseTwitchTrackerFixtures -count=1"

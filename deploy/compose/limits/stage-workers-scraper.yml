@@ -1,11 +1,5 @@
-# Stage 3 — analytics workers + scraper
+# Stage 3 — optional scraper profile limits
 services:
-  analytics-workers:
-    mem_limit: 1280m
-    cpus: "1.0"
-    pids_limit: 256
-    restart: unless-stopped
-
   scraper:
     mem_limit: 1280m
     pids_limit: 256

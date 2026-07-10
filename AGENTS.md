@@ -28,9 +28,8 @@ StreamPulse extension and portal: sibling **streamclone-pulse** checkout and its
 | Watch UI, directory UX, playback, chat, emotes | StreamPulse extension + portal → **streamclone-pulse** |
 | Core Go services (`metadata`, `video`, `chat`, `emote`) | Analytics BFF, ingest, hub → **streampulse-backend** (private) |
 | Core compose + desktop release CI | Production deploy, secrets, evidence → **streampulse-ops** (private) |
-| Optional ReplayForge deeplink | Clip Studio app → sibling **replayforge** |
 
-Legacy analytics code may remain temporarily during the boundary split; **do not** extend it from this repo's agent routing. Route StreamPulse work to the sibling or private checkouts above.
+**Step 7 complete.** Do **not** re-add Analytics API, portal, ReplayForge/Clip Studio UI, or `cmd/analytics` / `internal/analytics` / `packages/analytics-console` here. Route those products to **streampulse-backend**, **streamclone-pulse**, or sibling **replayforge**.
 
 **Verify after doc/code drift:** `make compose-config-check`, `cd frontend && npx tsc -b && npm test`, `curl http://127.0.0.1:8090/v1/metadata/health` or `make smoke`.
 
@@ -72,7 +71,7 @@ Windows localhost issues → `.kiro/steering/windows-dev.md`.
 
 ```sh
 make check-quick     # fast pre-PR gate (Go + frontend tests + compose config)
-make check           # full gate (adds security-scan, audit, clipper, build)
+make check           # full gate (adds security-scan, audit, build)
 make mcp-setup       # codegraph + mcp preflight (see docs/MCP.md)
 make codex-setup     # Codex: .codex/config.toml + .agents/skills sync (see docs/CODEX.md)
 bash scripts/mcp-preflight.sh
@@ -93,8 +92,7 @@ bash scripts/mcp-preflight.sh
 | **Local Twitch auth** | `.kiro/steering/local-auth.md` | `twitch_auth_status`, `make twitch-debug` |
 | **Install / desktop / bootstrap** | `docs/install-desktop.md`, `docs/repo-maintenance.md` | Launcher scripts under `scripts/` |
 | **Release / CI / images** | `.github/workflows/release-images.yml`, `VERSION`, `docs/repo-maintenance.md` | `make compose-config-check` |
-| Clip Studio / ReplayForge | `docs/agents-streamclone-and-replayforge.md` | Sibling `../replayforge` |
-| Clipper (legacy stub) | `.kiro/steering/clipper.md`, `clipper/README.md` | Deprecated in compose |
+| Clip Studio / ReplayForge | [docs/streampulse-product-boundary.md](docs/streampulse-product-boundary.md) | Sibling **replayforge** only — not this product |
 | System health | `.kiro/steering/windows-dev.md` | `stack_health`, `get_ast_chunk("SystemHealthPanel")` |
 | Security / secrets | `SECURITY.md`, `docs/security.md` | `make security-scan` |
 | **StreamPulse (extension, portal, BFF, ingest, hosted ops)** | [docs/streampulse-product-boundary.md](docs/streampulse-product-boundary.md) | **streamclone-pulse**, **streampulse-backend**, or **streampulse-ops** — not this repo |
@@ -112,7 +110,6 @@ Load skills from `.cursor/skills/streamclone/` when the task fits. Codex mirrors
 | Playback / HLS / latency | `playback-hls/SKILL.md` |
 | Stack health / ports / localhost | `stack-debug/SKILL.md` |
 | Emotes / 7TV / FFZ | `emote-pipeline/SKILL.md` |
-| Clip Studio / ReplayForge | `clipper-local/SKILL.md` |
 | Windows install / Setup.exe / release bundle | `release-windows/SKILL.md` |
 | Choosing tests by domain | `test-by-domain/SKILL.md` |
 | Context ladder (codegraph → snapshots → Repomix) | `context-retrieval/SKILL.md` |
@@ -164,7 +161,7 @@ Load skills from `.cursor/skills/streamclone/` when the task fits. Codex mirrors
 | Auth | `internal/chat/auth*`, Twitch OAuth env | Session cookies, token import |
 | Release | `VERSION`, `.github/workflows/release-images.yml` | Tag push triggers GHCR + Setup.exe |
 | Agent config | `.cursor/mcp.json` | Gitignored; use `*.example` only |
-| Legacy analytics (split in progress) | `internal/analytics/`, `cmd/analytics/` | Do not delete yet; do not route new work here |
+| Removed products (do not re-add) | `cmd/analytics`, `internal/analytics/`, `packages/analytics-console`, Clip Studio UI | Route to streampulse-backend / streamclone-pulse / replayforge |
 
 ---
 
@@ -207,7 +204,6 @@ Detail: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), [docs/SERVICE_MAP.md](docs/S
 | Profile | Typical use |
 |---------|-------------|
 | **core** (default) | metadata, video, chat, emote, frontend, local-proxy, postgres, redis, minio, mediamtx |
-| **clipper** | *(deprecated — maps to core)* | ReplayForge on host `:8095` |
 
 Env overlays: `deploy/env/profile-core.env`. Feature profiles merge from `.env` via `scripts/lib/env.sh`.
 
@@ -231,6 +227,5 @@ Database: `.codegraph/streamclone.kuzu` (gitignored).
 - User docs: `README.md`, `docs/`
 - Go services: `cmd/metadata`, `cmd/video`, `cmd/chat`, `cmd/emote`, `cmd/healthcheck`
 - Frontend: `frontend/src/` (directory, channel watch, playback, chat, emotes)
-- Clipper (legacy stub): `clipper/` — active Clip Studio in sibling **ReplayForge**
 - Compose: `deploy/docker-compose*.yml`
 - Agent steering: `.kiro/steering/`

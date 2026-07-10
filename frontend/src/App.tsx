@@ -5,11 +5,7 @@ import { ChatEmoteTooltipProvider } from './components/chat/ChatEmoteTooltipLaye
 
 const Directory = lazy(() => import('./components/Directory'))
 const Channel = lazy(() => import('./components/Channel'))
-const StudioRedirect = lazy(() => import('./components/StudioRedirect'))
 const BrowsePage = lazy(() => import('./components/BrowsePage'))
-const ArchiveAdminPage = lazy(() => import('./pages/admin/ArchiveAdminPage'))
-const AdminJobsPage = lazy(() => import('./pages/admin/AdminJobsPage'))
-const AdminCoveragePage = lazy(() => import('./pages/admin/AdminCoveragePage'))
 
 function RouteLoadingSkeleton() {
   return (
@@ -80,11 +76,8 @@ export default function App() {
           {/* Legacy hosted-product bookmarks redirect to core watch home. */}
           <Route path="/analytics/*" element={<Navigate to="/" replace />} />
           <Route path={`/${['pulse', 'wire'].join('-')}/*`} element={<Navigate to="/" replace />} />
-          <Route path="/admin/archive" element={<ArchiveAdminPage />} />
-          <Route path="/admin/jobs" element={<AdminJobsPage />} />
-          <Route path="/admin/coverage" element={<AdminCoveragePage />} />
-          <Route path="/studio" element={<StudioRedirect />} />
-          <Route path="/studio/:jobId" element={<StudioRedirect />} />
+          <Route path="/admin/*" element={<Navigate to="/" replace />} />
+          <Route path="/studio/*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
     </ChatEmoteTooltipProvider>

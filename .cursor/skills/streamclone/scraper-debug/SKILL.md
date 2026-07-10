@@ -4,7 +4,7 @@ description: Debug Streamclone scraper — Camoufox, Cloudflare, TwitchTracker t
 
 # Scraper Debug
 
-Read `AGENTS.md`, `.kiro/steering/analytics.md`, and `docs/scraper-cloudflare-and-proxy.md`.
+Read `AGENTS.md`, `docs/scraper-cloudflare-and-proxy.md`, and `docs/archive/scraping-archive/requirements.md`.
 
 ## First checks
 
@@ -15,8 +15,7 @@ Read `AGENTS.md`, `.kiro/steering/analytics.md`, and `docs/scraper-cloudflare-an
 ## Camoufox / Cloudflare / TwitchTracker
 
 - CF wait states: `just a moment`, Turnstile, `performing security verification` — see `scraper_probe` hints.
-- TwitchTracker minute charts need `meta#ecs` in HTML — flat charts often mean CF block or stale cache, not Analytics CPU.
-- Timings: tracker scrape intervals vs Analytics sync expectations in `.kiro/steering/analytics.md`.
+- TwitchTracker minute charts need `meta#ecs` in HTML — flat charts often mean CF block or stale cache.
 
 ## Proxy / cache / concurrency
 
@@ -31,15 +30,11 @@ Read `AGENTS.md`, `.kiro/steering/analytics.md`, and `docs/scraper-cloudflare-an
 - `compose_logs("scraper")` — bounded tail via stack MCP
 - `stack_health` — scraper container presence
 
-## Codegraph
-
-- `get_ast_chunk("SyncService")` — archive/backfill paths
-- `search_symbols("scraper")` — scraper integration touchpoints
-
 ## Tests
 
 ```sh
 make scraper-preflight
 make scraper-check
-go test ./internal/analytics/...
 ```
+
+Analytics API / rollup work belongs in private **streampulse-backend** — do not run `go test ./internal/analytics/...` here.

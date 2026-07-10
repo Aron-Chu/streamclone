@@ -1,50 +1,19 @@
 ---
-description: Debug or change Streamclone Analytics sync, rollups, VOD context, scraper-backed charts, or Pulse rollup export.
+description: Analytics sync work is now routed to streampulse-backend. Do not implement analytics API or rollup changes in this repo.
 ---
 
-# Analytics Sync
+# Analytics Sync — Route to streampulse-backend
 
-Read `AGENTS.md`, `.kiro/steering/analytics.md`, and `.kiro/steering/tech.md`.
+> **Boundary split.** Analytics sync, rollups, VOD backfill, and Pulse rollup export were moved out of this repository during the StreamPulse boundary split.
 
-## Bottleneck: GQL rate limits (not CPU)
+**Do not implement analytics changes in this repo.** Route to:
 
-Analytics sync is usually limited by **Twitch GQL pages and rate limits** — VOD chat GQL, pagination, and backoff — not CPU on the analytics service. Check sync status and GQL error rates before scaling containers.
+| Need | Repo |
+|------|------|
+| Analytics API, rollups, ingest, hub | private **streampulse-backend** (`internal/analytics`, BFF routes) |
+| Portal UI | public **streamclone-pulse** (`streampulse-web/src/`) |
+| Deploy / secrets | private **streampulse-ops** |
 
-## Pulse Grafana vs Analytics charts
+See [`docs/streampulse-product-boundary.md`](../../../../docs/streampulse-product-boundary.md) for the canonical boundary.
 
-| Area | Pulse (Grafana / Influx) | Analytics (charts in app) |
-|------|--------------------------|-----------------------------|
-| Profile | `pulse` | core + optional `scraper` |
-| Data | Influx time-series, Prometheus | Postgres rollups, scraper minute data |
-| UI | Grafana `:3000` | `SyncProgressPanel`, minute charts, heatmaps |
-| Steering | `.kiro/steering/analytics.md` (Pulse section) | Same + scraper docs |
-
-Do not confuse Grafana live stats with scraper-backed minute charts in the Watch UI.
-
-## First checks
-
-- Use `http://localhost:8090`, not raw service ports.
-- Core Watch can have empty minute charts until Analytics/scraper is started.
-- Scraper/Cloudflare details: `docs/scraper-cloudflare-and-proxy.md`.
-- Rollups, heatmaps, VOD context: Postgres analytics tables via `postgres_query` (SELECT only).
-
-## Codegraph
-
-- `get_blast_radius("mergeMinuteRollups")`
-- `get_ast_chunk("gqlCommentText")`
-- `get_ast_chunk("hasGoodChatCoverageFromRollups")`
-- `get_ast_chunk("SyncProgressPanel")`
-
-## MCP / runtime
-
-- `stack_health`
-- `scraper_probe`
-- `postgres_query` for rollup/status checks
-
-## Tests
-
-```sh
-make test-analytics
-go test ./internal/analytics/...
-make scraper-check
-```
+If you are debugging local watch charts (optional Influx/Grafana layer), see `.kiro/steering/analytics.md` in this repo.

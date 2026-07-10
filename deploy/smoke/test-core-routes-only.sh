@@ -35,7 +35,6 @@ for path in \
   /v1/pulse/bookmarks \
   /v1/public/status \
   "/v1/${portal}/analytics/channels/xqc/live" \
-  /v1/analytics/channels/xqc/live; do
   expect_status GET "$path" 404
 done
 

@@ -9,7 +9,6 @@ TWITCH_SCOPES ?= chat:read chat:edit user:read:follows clips:edit
 TWITCH_LOCAL_AUTH_URL ?= http://localhost:8090
 TWITCH_ACTION ?= sync
 TWITCH_CLIP_LOGIN ?= sodapoppin
-CLIPPER_PYTHON ?= python3
 PROFILE ?= core
 PORTS ?= 8090
 
@@ -25,8 +24,8 @@ ENV_RELOAD_SERVICES ?= chat metadata emote frontend
 	test vet build tidy integration-up integration-down integration-test \
 	test-video test-emote test-metadata \
 	go-test-docker go-vet-docker go-build-docker \
-	twitch twitch-debug twitch-sync twitch-local-auth clipper-refresh-token \
-	clipper-test codegraph-install codegraph codegraph-full codegraph-smoke codegraph-incremental codegraph-mcp mcp-setup codex-setup codex-sync-skills claude-setup claude-sync-skills claude-sync-agents \
+	twitch twitch-debug twitch-sync twitch-local-auth \
+	codegraph-install codegraph codegraph-full codegraph-smoke codegraph-incremental codegraph-mcp mcp-setup codex-setup codex-sync-skills claude-setup claude-sync-skills claude-sync-agents \
 	context-snapshots context-verify \
 	docs-screenshots docs-media frontend-build frontend-test frontend-audit \
 	frontend-restart frontend-refresh frontend-logs compose-config-check \
@@ -48,7 +47,7 @@ help:
 	@printf '  make refresh-auth        OAuth sync + reload stale services\n'
 	@printf '  make twitch-local-auth   Device-code login for localhost:8090\n'
 	@printf '  make twitch-sync         Sync Twitch CLI creds into .env\n\n'
-	@printf 'Quality: make check-quick | make check | test | vet | build | clipper-test | smoke | agent-smoke\n'
+	@printf 'Quality: make check-quick | make check | test | vet | build | smoke | agent-smoke\n'
 	@printf 'Agent MCP: make mcp-setup | make mcp-verify | make codex-setup | make claude-setup | codegraph | bash scripts/mcp-preflight.sh\n'
 	@printf '          make test-video | test-emote | test-metadata\n'
 	@printf '          make frontend-test | frontend-audit | compose-config-check\n'
@@ -156,14 +155,6 @@ build:
 
 tidy:
 	$(GO) mod tidy
-
-# Prefers ../replayforge/backend tests when sibling checkout exists; falls back to in-repo clipper/.
-clipper-test:
-	@if [ -d ../replayforge/backend/tests ]; then \
-		cd ../replayforge/backend && PYTHONPATH=. $(CLIPPER_PYTHON) -m unittest discover -s tests; \
-	else \
-		PYTHONPATH=clipper $(CLIPPER_PYTHON) -m unittest discover -s clipper/tests; \
-	fi
 
 codegraph-install:
 	python3 -m venv $(CODEGRAPH_VENV)
@@ -286,7 +277,7 @@ product-boundary-preflight:
 product-boundary-strict:
 	@STREAMCLONE_BOUNDARY_STRICT=1 bash scripts/check-product-boundary.sh --strict
 
-check: security-scan frontend-build frontend-audit frontend-test clipper-test test vet build compose-config-check
+check: security-scan frontend-build frontend-audit frontend-test test vet build compose-config-check product-boundary-strict
 
 frontend-restart: env
 	$(COMPOSE_CORE) build frontend
