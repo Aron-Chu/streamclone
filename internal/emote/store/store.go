@@ -269,33 +269,38 @@ func (s *Store) EmoteSetExistsByOwnerName(ctx context.Context, name, ownerID str
 }
 
 func (s *Store) ClaimJob(ctx context.Context) (*Job, error) {
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-
 	j := &Job{}
-	err = tx.QueryRow(ctx, `
-		SELECT id, emote_id, source_key, state, attempts, last_error, created_at, updated_at
-		FROM processing_jobs
-		WHERE state IN (0, 2)
-			OR (state=1 AND updated_at < now() - interval '2 minutes')
-		ORDER BY
-			CASE WHEN state=1 THEN 0 ELSE 1 END,
-			id
-		LIMIT 1
-		FOR UPDATE SKIP LOCKED`,
+	// Atomic claim: single statement with FOR UPDATE SKIP LOCKED.
+	// RETURNING attempts-1 preserves pre-increment semantics for the worker.
+	err := s.db.QueryRow(ctx, `
+		WITH candidate AS (
+			SELECT id
+			FROM processing_jobs
+			WHERE state IN (0, 1, 2)
+				AND (state IN (0, 2)
+					OR updated_at < now() - interval '2 minutes')
+			ORDER BY CASE WHEN state = 1 THEN 0 ELSE 1 END, id
+			LIMIT 1
+			FOR UPDATE SKIP LOCKED
+		)
+		UPDATE processing_jobs job
+		SET state = 1, attempts = attempts + 1, updated_at = now()
+		FROM candidate
+		WHERE job.id = candidate.id
+		RETURNING
+			job.id,
+			job.emote_id,
+			job.source_key,
+			job.state,
+			job.attempts - 1,
+			job.last_error,
+			job.created_at,
+			job.updated_at`,
 	).Scan(&j.ID, &j.EmoteID, &j.SourceKey, &j.State, &j.Attempts, &j.LastError, &j.CreatedAt, &j.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
-
-	_, err = tx.Exec(ctx, `UPDATE processing_jobs SET state=1, attempts=attempts+1, updated_at=now() WHERE id=$1`, j.ID)
-	if err != nil {
-		return nil, err
-	}
-	return j, tx.Commit(ctx)
+	return j, nil
 }
 
 func (s *Store) FinishJob(ctx context.Context, id int64, success bool, lastErr string) error {
