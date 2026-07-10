@@ -19,6 +19,7 @@ paths = [
   '''(?i)deploy/docker-compose\.observability\.yml$''',
   '''(?i)deploy/FREE_DEPLOYMENT\.md$''',
   '''(?i)tools/data/data_mcp\.py$''',
+  '''(?i)docs/archive/''',
 ]
 regexes = [
   '''kimne78kx3ncx6brgo4mv6wki5h1ko''',

@@ -71,7 +71,7 @@ top_emote_key_mismatch_count
 gate_total / gate_match (chat tolerance gate unchanged at 2%)
 ```
 
-- First **10 closed mismatches** table: key, legacy/shadow chat/emote/viewer, deltas, diff pct, `recordedAt`
+- First **10 closed mismatches** table: key, legacy vs shadow chat/emote/viewer, deltas, diff pct, `recordedAt`
 - **Adjacent-minute check** (prev/next) for same stream+channel — classify `over_count`, `under_count`, `boundary_shift_suspect`, `viewer_only`
 - Emote parity is **required debug signal** on every gate run (not optional). First rc24 debug pass gates on **chat** ≥99%; emote deltas must be reported clearly. Phase D later requires emote parity or documented harmless delta.
 
