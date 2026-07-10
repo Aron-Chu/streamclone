@@ -278,14 +278,15 @@ function Invoke-StreamcloneDockerResourceCleanup {
         }
 
         if ($Volumes) {
-            $volumes = Invoke-EnvDockerCaptured -Arguments @(
+            # Do not name locals $volumes — PowerShell is case-insensitive and clashes with [switch]$Volumes.
+            $labeledVolumes = Invoke-EnvDockerCaptured -Arguments @(
                 'volume', 'ls',
                 '--filter', 'label=com.docker.compose.project=streamclone',
                 '--format', '{{.Name}}'
             )
             $volumeNames = @()
-            if ($volumes.ExitCode -eq 0 -and $volumes.Output) {
-                $volumeNames += @($volumes.Output)
+            if ($labeledVolumes.ExitCode -eq 0 -and $labeledVolumes.Output) {
+                $volumeNames += @($labeledVolumes.Output)
             }
             $prefixVolumes = Invoke-EnvDockerCaptured -Arguments @('volume', 'ls', '--format', '{{.Name}}')
             if ($prefixVolumes.ExitCode -eq 0 -and $prefixVolumes.Output) {
