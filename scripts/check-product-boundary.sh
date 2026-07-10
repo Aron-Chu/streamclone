@@ -20,6 +20,8 @@ RG=(rg -n --no-heading
   --glob '!scripts/check-product-boundary.sh'
   --glob '!scripts/pre-commit-product-boundary-guard.sh'
   --glob '!scripts/pre-commit-public-ops-guard.sh'
+  --glob '!scripts/ci-public-topology-scan.sh'
+  --glob '!scripts/ci-context-contract.sh'
   --glob '!docs/archive/**'
   --glob '!.kiro/specs/**'
   --glob '!.kiro/steering/pulse-wire.md'

@@ -278,7 +278,7 @@ compose-config-check: env
 		-f deploy/docker-compose.yml \
 		-f deploy/docker-compose.prod.yml config --quiet
 
-check-quick: test vet frontend-test compose-config-check product-boundary-preflight
+check-quick: test vet frontend-test compose-config-check product-boundary-strict
 
 product-boundary-preflight:
 	@bash scripts/check-product-boundary.sh --preflight

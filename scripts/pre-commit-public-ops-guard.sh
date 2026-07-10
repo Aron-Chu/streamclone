@@ -18,7 +18,7 @@ mapfile -t FILES < <(git diff --cached --name-only --diff-filter=ACM)
 violations=0
 for f in "${FILES[@]}"; do
   case "${f}" in
-    .env.example|deploy/env/profile-*.env.example|docs/ops-migration-manifest.md|scripts/pre-commit-public-ops-guard.sh|scripts/ops/filter-repo-paths.txt|scripts/ops/filter-repo-replacements.txt|.cursor/plans/*|.cursor/rules/public-repo-boundary.mdc)
+    .env.example|deploy/env/profile-*.env.example|docs/ops-migration-manifest.md|scripts/pre-commit-public-ops-guard.sh|scripts/ops/filter-repo-paths.txt|scripts/ops/filter-repo-replacements.txt|.cursor/plans/*|docs/archive/agent-plans/*|.cursor/rules/public-repo-boundary.mdc)
       continue
       ;;
   esac

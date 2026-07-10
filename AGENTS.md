@@ -17,6 +17,8 @@ Product name: **Streamclone** (GitHub: `Aron-Chu/streamclone`). The local checko
 
 StreamPulse extension and portal: sibling **streamclone-pulse** checkout and its `AGENTS.md`. Backend BFF and ingest: private **streampulse-backend**. Deploy and SSH: private **streampulse-ops**.
 
+**Cross-repo index:** [`../streampulse-sdlc/AGENTS.md`](../streampulse-sdlc/AGENTS.md) · workspace: [`../streampulse-sdlc/streampulse-sdlc.code-workspace`](../streampulse-sdlc/streampulse-sdlc.code-workspace).
+
 ---
 
 ## Product scope (2026-07)
