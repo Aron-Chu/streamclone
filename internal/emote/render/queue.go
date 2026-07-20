@@ -27,7 +27,13 @@ type Queue struct {
 	hc   *http.Client
 	mu   sync.Mutex
 	rate map[Reason]*rateBucket
+
+	asyncSem      chan struct{}
+	asyncInFlight map[string]struct{}
+	asyncDropped  int64
 }
+
+const maxAsyncEnqueue = 16
 
 type rateBucket struct {
 	limit    int
@@ -51,12 +57,14 @@ type Request struct {
 
 func NewQueue(st *store.Store, obj *objstore.Client, cfg Config, log *slog.Logger) *Queue {
 	q := &Queue{
-		st:   st,
-		obj:  obj,
-		cfg:  cfg,
-		log:  log,
-		hc:   &http.Client{Timeout: 20 * time.Second},
-		rate: make(map[Reason]*rateBucket),
+		st:            st,
+		obj:           obj,
+		cfg:           cfg,
+		log:           log,
+		hc:            &http.Client{Timeout: 20 * time.Second},
+		rate:          make(map[Reason]*rateBucket),
+		asyncSem:      make(chan struct{}, maxAsyncEnqueue),
+		asyncInFlight: make(map[string]struct{}),
 	}
 	if cfg.ChatObservedRateLimitPerMin > 0 {
 		q.rate[ReasonChatObserved] = &rateBucket{limit: cfg.ChatObservedRateLimitPerMin, window: time.Minute}
@@ -214,7 +222,41 @@ func (q *Queue) Enqueue(ctx context.Context, req Request) (bool, error) {
 }
 
 func (q *Queue) EnqueueAsync(ctx context.Context, req Request) {
+	key := strings.TrimSpace(req.EmoteID) + "|" + strings.TrimSpace(req.Scale)
+	q.mu.Lock()
+	if q.asyncSem == nil {
+		q.asyncSem = make(chan struct{}, maxAsyncEnqueue)
+	}
+	if q.asyncInFlight == nil {
+		q.asyncInFlight = make(map[string]struct{})
+	}
+	if _, dup := q.asyncInFlight[key]; dup {
+		q.mu.Unlock()
+		return
+	}
+	select {
+	case q.asyncSem <- struct{}{}:
+		q.asyncInFlight[key] = struct{}{}
+		q.mu.Unlock()
+	default:
+		q.asyncDropped++
+		q.mu.Unlock()
+		if q.log != nil {
+			q.log.Warn("async emote render enqueue dropped (semaphore full)",
+				"emote_id", req.EmoteID,
+				"provider", req.Provider,
+				"reason", req.Reason,
+			)
+		}
+		return
+	}
 	go func() {
+		defer func() {
+			<-q.asyncSem
+			q.mu.Lock()
+			delete(q.asyncInFlight, key)
+			q.mu.Unlock()
+		}()
 		bg, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if _, err := q.Enqueue(bg, req); err != nil && q.log != nil {

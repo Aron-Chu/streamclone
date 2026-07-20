@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,27 @@ func (h *Handler) Routes(r chi.Router) {
 	})
 }
 
+// etagMatches compares If-None-Match against a bare object ETag (no quotes).
+// Uses exact token match after stripping weak markers/quotes — never substring.
+func etagMatches(ifNoneMatch, etag string) bool {
+	etag = strings.Trim(strings.TrimSpace(etag), `"`)
+	if etag == "" || strings.TrimSpace(ifNoneMatch) == "" {
+		return false
+	}
+	for _, part := range strings.Split(ifNoneMatch, ",") {
+		part = strings.TrimSpace(part)
+		if part == "*" {
+			return true
+		}
+		part = strings.TrimPrefix(part, "W/")
+		part = strings.Trim(part, `"`)
+		if part == etag {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Handler) serveEmoteAsset(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	scale := strings.TrimSpace(chi.URLParam(r, "scale"))
@@ -84,17 +106,31 @@ func (h *Handler) serveEmoteAsset(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	data, contentType, err := h.obj.Get(r.Context(), id, scale)
+	rc, info, err := h.obj.Open(r.Context(), id, scale)
 	if err == nil {
+		defer rc.Close()
 		emote, emoteErr := h.st.GetEmote(r.Context(), id)
 		provider := "custom"
 		if emoteErr == nil && emote.Provider != "" {
 			provider = emote.Provider
 		}
 		metrics.EmoteImageServed.WithLabelValues(provider, scale, "local").Inc()
-		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Type", info.ContentType)
 		w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
-		_, _ = w.Write(data)
+		if info.Size > 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
+		}
+		if etag := strings.Trim(info.ETag, `"`); etag != "" {
+			w.Header().Set("ETag", `"`+etag+`"`)
+			if etagMatches(r.Header.Get("If-None-Match"), etag) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+		if !info.LastModified.IsZero() {
+			w.Header().Set("Last-Modified", info.LastModified.UTC().Format(http.TimeFormat))
+		}
+		_, _ = io.Copy(w, rc)
 		return
 	}
 

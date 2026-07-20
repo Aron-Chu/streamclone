@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -64,6 +65,68 @@ func (c *Client) Get(ctx context.Context, id, scale string) ([]byte, string, err
 		contentType = "image/webp"
 	}
 	return data, contentType, nil
+}
+
+// ObjectInfo is metadata from a Stat without reading the body.
+type ObjectInfo struct {
+	Size         int64
+	ContentType  string
+	ETag         string
+	LastModified time.Time
+}
+
+// Exists reports whether an emote scale object is present (Stat only).
+func (c *Client) Exists(ctx context.Context, id, scale string) (bool, error) {
+	_, err := c.Stat(ctx, id, scale)
+	if err != nil {
+		errResp := minio.ToErrorResponse(err)
+		if errResp.Code == "NoSuchKey" || errResp.StatusCode == 404 {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// Stat returns object metadata without downloading the body.
+func (c *Client) Stat(ctx context.Context, id, scale string) (ObjectInfo, error) {
+	info, err := c.mc.StatObject(ctx, c.bucket, c.emoteKey(id, scale), minio.StatObjectOptions{})
+	if err != nil {
+		return ObjectInfo{}, err
+	}
+	ct := info.ContentType
+	if ct == "" {
+		ct = "image/webp"
+	}
+	return ObjectInfo{
+		Size:         info.Size,
+		ContentType:  ct,
+		ETag:         info.ETag,
+		LastModified: info.LastModified,
+	}, nil
+}
+
+// Open returns a streaming reader for an emote asset. Caller must Close.
+func (c *Client) Open(ctx context.Context, id, scale string) (io.ReadCloser, ObjectInfo, error) {
+	obj, err := c.mc.GetObject(ctx, c.bucket, c.emoteKey(id, scale), minio.GetObjectOptions{})
+	if err != nil {
+		return nil, ObjectInfo{}, err
+	}
+	info, err := obj.Stat()
+	if err != nil {
+		_ = obj.Close()
+		return nil, ObjectInfo{}, err
+	}
+	ct := info.ContentType
+	if ct == "" {
+		ct = "image/webp"
+	}
+	return obj, ObjectInfo{
+		Size:         info.Size,
+		ContentType:  ct,
+		ETag:         info.ETag,
+		LastModified: info.LastModified,
+	}, nil
 }
 
 func (c *Client) Put(ctx context.Context, id, scale string, data []byte) error {
