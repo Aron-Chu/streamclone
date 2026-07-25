@@ -390,15 +390,30 @@ jobs:
             echo "value=dev" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build bundle
+      - name: Build bundle (OAuth secret canaries must not ship)
         env:
           VERSION: ${{ steps.ver.outputs.value }}
+          # Synthetic canaries prove package-release ignores Twitch client secrets.
+          TWITCH_OAUTH_CLIENT_ID: canary-client-id-DO-NOT-SHIP
+          TWITCH_OAUTH_CLIENT_SECRET: canary-client-secret-DO-NOT-SHIP
         run: bash scripts/package-release.sh
 
       - name: Validate release env synthesis
         env:
           VERSION: ${{ steps.ver.outputs.value }}
-        run: bash scripts/validate-release-env.sh
+        run: |
+          bash scripts/validate-release-env.sh
+          if [[ -f "dist/streamclone-${{ steps.ver.outputs.value }}/deploy/env/oauth-bundle.env" ]]; then
+            echo "FAIL: oauth-bundle.env present in release stage" >&2
+            exit 1
+          fi
+          if grep -R -n -E 'canary-client-secret-DO-NOT-SHIP|TWITCH_OAUTH_CLIENT_SECRET=.+' \
+            "dist/streamclone-${{ steps.ver.outputs.value }}/deploy/env" \
+            "dist/streamclone-${{ steps.ver.outputs.value }}/.env.example" 2>/dev/null \
+            | grep -v 'oauth-bundle\.env\.example' | grep -q .; then
+            echo "FAIL: secret canary found in release env material" >&2
+            exit 1
+          fi
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v3

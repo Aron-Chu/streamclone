@@ -41,6 +41,9 @@ for hit in "${HITS[@]:-}"; do
   [ -z "${hit}" ] && continue
   file="${hit%%:*}"
   file="${file#./}"
+  # Normalize Windows rg paths (.\foo\bar) so allowlists match on all hosts.
+  file="${file//\\//}"
+  file="${file#./}"
   if allowlisted "${file}"; then
     continue
   fi
