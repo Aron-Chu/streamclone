@@ -3,6 +3,7 @@ package dict
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestMarshalEntry(t *testing.T) {
@@ -92,5 +93,52 @@ func TestBrowserURLPrefersProviderCDN(t *testing.T) {
 	}
 	if got := d.BrowserURL(localID, "bttv", "", "1x"); got != "http://localhost:8090/emotes/"+localID+"/1x.webp" {
 		t.Fatalf("fallback url = %q", got)
+	}
+}
+
+func TestDictionaryTTLDefaultsAndOverride(t *testing.T) {
+	if got := New(nil, "").ttl; got != 24*time.Hour {
+		t.Fatalf("default ttl = %s, want 24h", got)
+	}
+	if got := NewWithTTL(nil, "", 6*time.Hour).ttl; got != 6*time.Hour {
+		t.Fatalf("override ttl = %s, want 6h", got)
+	}
+	if got := NewWithTTL(nil, "", 0).ttl; got != 0 {
+		t.Fatalf("disabled ttl = %s, want 0", got)
+	}
+}
+
+func TestDeterministicTTLJitterIsStableAndBounded(t *testing.T) {
+	const max = 24 * time.Hour
+	first := deterministicTTLJitter("channel:emotes:example", max)
+	second := deterministicTTLJitter("channel:emotes:example", max)
+	if first != second {
+		t.Fatalf("jitter changed for same key: %s != %s", first, second)
+	}
+	if first < 0 || first > max {
+		t.Fatalf("jitter = %s, want within [0,%s]", first, max)
+	}
+	if other := deterministicTTLJitter("channel:emotes:other", max); other == first {
+		t.Fatalf("expected distinct keys to spread expiry, both got %s", first)
+	}
+}
+
+func TestNormalizeLegacyBackfillOptions(t *testing.T) {
+	const ttl = 24 * time.Hour
+	got := normalizeLegacyBackfillOptions(LegacyBackfillOptions{
+		BatchPause: -time.Second,
+		TTLJitter:  -time.Second,
+	}, ttl)
+	if got.ScanCount != 500 {
+		t.Fatalf("scan count = %d, want 500", got.ScanCount)
+	}
+	if got.BatchSize != 100 {
+		t.Fatalf("batch size = %d, want 100", got.BatchSize)
+	}
+	if got.BatchPause != 0 {
+		t.Fatalf("batch pause = %s, want 0", got.BatchPause)
+	}
+	if got.TTLJitter != ttl {
+		t.Fatalf("ttl jitter = %s, want %s", got.TTLJitter, ttl)
 	}
 }

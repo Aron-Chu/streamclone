@@ -87,6 +87,59 @@ var (
 	EmoteDictionaryQueueDrops = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "emote_dictionary_queue_drops_total", Help: "Total dropped emote dictionary rebuild requests.",
 	})
+	EmoteDictionaryLoads = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "emote_dictionary_loads_total",
+		Help: "Redis emote dictionary loads by hit, miss, or error result.",
+	}, []string{"result"})
+	EmoteDictionaryRebuilds = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "emote_dictionary_rebuilds_total",
+		Help: "Emote dictionary rebuilds by terminal result.",
+	}, []string{"result"})
+	EmoteDictionaryRebuildDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "emote_dictionary_rebuild_duration_seconds",
+		Help:    "Time spent rebuilding and publishing an emote dictionary by terminal result.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"result"})
+	EmoteDictionaryLegacyBackfillRuns = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "emote_dictionary_legacy_backfill_runs_total",
+		Help: "Legacy emote dictionary TTL backfill runs by bounded result.",
+	}, []string{"result"})
+	EmoteDictionaryLegacyKeysScanned = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "emote_dictionary_legacy_keys_scanned_total",
+		Help: "Legacy channel-emote dictionary keys examined by the paced TTL backfill.",
+	})
+	EmoteDictionaryLegacyTTLsAttached = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "emote_dictionary_legacy_ttls_attached_total",
+		Help: "Legacy channel-emote dictionary keys that received an expiry through EXPIRE NX.",
+	})
+	EmoteDictionaryLegacyLastScanKeys = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "emote_dictionary_legacy_last_scan_keys",
+		Help: "Channel-emote dictionary keys examined by the latest legacy TTL backfill run.",
+	})
+	EmoteDictionaryLegacyLastTTLsAttached = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "emote_dictionary_legacy_last_ttls_attached",
+		Help: "Channel-emote dictionary keys that received an expiry in the latest legacy TTL backfill run.",
+	})
+	EmoteDictionaryLegacyNonExpiringRemaining = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "emote_dictionary_legacy_nonexpiring_remaining",
+		Help: "Non-expiring channel-emote dictionaries remaining after the latest complete legacy sweep; -1 means the sweep failed.",
+	})
+	EmoteObjectStoreMigrationOperations = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "emote_object_store_migration_operations_total",
+		Help: "Secondary object-store fallback, promotion, and dual-write operations by result.",
+	}, []string{"operation", "result"})
+	EmoteRosterPreloadRuns = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "emote_roster_preload_runs_total",
+		Help: "Active-roster emote dictionary preload runs by result.",
+	}, []string{"result"})
+	EmoteRosterPreloadChannelsWarmed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "emote_roster_preload_channels_warmed_total",
+		Help: "Active-roster channel dictionaries successfully warmed.",
+	})
+	EmoteRosterPreloadLastWarmed = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "emote_roster_preload_last_warmed_channels",
+		Help: "Channel dictionaries successfully warmed in the latest active-roster preload run.",
+	})
 	EmoteRenderEnqueued = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "emote_render_enqueued_total", Help: "Emote render jobs enqueued by reason, provider, and channel priority.",
 	}, []string{"reason", "provider", "channel_priority"})

@@ -27,7 +27,7 @@ const (
 
 type Worker struct {
 	st                 *store.Store
-	obj                *objstore.Client
+	obj                objstore.Store
 	d                  *dict.Dict
 	renderCfg          render.Config
 	log                *slog.Logger
@@ -36,21 +36,21 @@ type Worker struct {
 	startOnce          sync.Once
 }
 
-func New(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger) *Worker {
+func New(st *store.Store, obj objstore.Store, d *dict.Dict, log *slog.Logger) *Worker {
 	return NewWithConfig(st, obj, d, render.Config{
 		DefaultScales: []string{"1x", "2x", "3x", "4x"},
 		AllowedScales: []string{"1x", "2x", "3x", "4x"},
 	}, log, defaultDictionaryDebounce)
 }
 
-func NewWithDictionaryDebounce(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger, debounce time.Duration) *Worker {
+func NewWithDictionaryDebounce(st *store.Store, obj objstore.Store, d *dict.Dict, log *slog.Logger, debounce time.Duration) *Worker {
 	return NewWithConfig(st, obj, d, render.Config{
 		DefaultScales: []string{"1x", "2x", "3x", "4x"},
 		AllowedScales: []string{"1x", "2x", "3x", "4x"},
 	}, log, debounce)
 }
 
-func NewWithConfig(st *store.Store, obj *objstore.Client, d *dict.Dict, cfg render.Config, log *slog.Logger, debounce time.Duration) *Worker {
+func NewWithConfig(st *store.Store, obj objstore.Store, d *dict.Dict, cfg render.Config, log *slog.Logger, debounce time.Duration) *Worker {
 	if debounce < minDictionaryDebounce {
 		debounce = minDictionaryDebounce
 	}

@@ -252,6 +252,18 @@ func TestSetChangeToDelta(t *testing.T) {
 	st := store.New(pool)
 	d := dict.New(rdb, "/emotes")
 
+	if err := rdb.HSet(ctx, "channel:emotes:legacyttl", "LegacyEmote", "{}").Err(); err != nil {
+		t.Fatalf("seed legacy dictionary: %v", err)
+	}
+	if updated, err := d.BackfillLegacyTTLs(ctx, 100); err != nil {
+		t.Fatalf("BackfillLegacyTTLs: %v", err)
+	} else if updated < 1 {
+		t.Fatalf("BackfillLegacyTTLs updated=%d, want at least legacyttl", updated)
+	}
+	if ttl, err := rdb.TTL(ctx, "channel:emotes:legacyttl").Result(); err != nil || ttl <= 0 {
+		t.Fatalf("legacy dictionary ttl = %s, err=%v", ttl, err)
+	}
+
 	if err := st.UpsertChannel(ctx, "99999", "deltachannel", "DeltaChannel"); err != nil {
 		t.Fatalf("UpsertChannel: %v", err)
 	}
@@ -303,6 +315,9 @@ func TestSetChangeToDelta(t *testing.T) {
 	}
 	if val == "" {
 		t.Fatal("expected non-empty hash entry for DeltaEmote")
+	}
+	if ttl, err := rdb.TTL(ctx, "channel:emotes:deltachannel").Result(); err != nil || ttl <= 0 {
+		t.Fatalf("channel dictionary ttl after add = %s, err=%v", ttl, err)
 	}
 
 	if err := d.RemoveEmote(ctx, "deltachannel", "DeltaEmote"); err != nil {

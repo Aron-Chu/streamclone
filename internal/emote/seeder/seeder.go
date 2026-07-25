@@ -81,7 +81,7 @@ type ImportResult struct {
 
 type Seeder struct {
 	st                *store.Store
-	obj               *objstore.Client
+	obj               objstore.Store
 	d                 *dict.Dict
 	render            *render.Queue
 	log               *slog.Logger
@@ -94,15 +94,15 @@ type Seeder struct {
 	importConcurrency int
 }
 
-func New(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger, apiURL, cdnURL, ffzURL, bttvURL string, twitch *helix.Client) *Seeder {
+func New(st *store.Store, obj objstore.Store, d *dict.Dict, log *slog.Logger, apiURL, cdnURL, ffzURL, bttvURL string, twitch *helix.Client) *Seeder {
 	return NewWithImportConcurrency(st, obj, d, log, apiURL, cdnURL, ffzURL, bttvURL, twitch, 8)
 }
 
-func NewWithImportConcurrency(st *store.Store, obj *objstore.Client, d *dict.Dict, log *slog.Logger, apiURL, cdnURL, ffzURL, bttvURL string, twitch *helix.Client, importConcurrency int) *Seeder {
+func NewWithImportConcurrency(st *store.Store, obj objstore.Store, d *dict.Dict, log *slog.Logger, apiURL, cdnURL, ffzURL, bttvURL string, twitch *helix.Client, importConcurrency int) *Seeder {
 	return NewWithRenderQueue(st, obj, d, nil, log, apiURL, cdnURL, ffzURL, bttvURL, twitch, importConcurrency)
 }
 
-func NewWithRenderQueue(st *store.Store, obj *objstore.Client, d *dict.Dict, rq *render.Queue, log *slog.Logger, apiURL, cdnURL, ffzURL, bttvURL string, twitch *helix.Client, importConcurrency int) *Seeder {
+func NewWithRenderQueue(st *store.Store, obj objstore.Store, d *dict.Dict, rq *render.Queue, log *slog.Logger, apiURL, cdnURL, ffzURL, bttvURL string, twitch *helix.Client, importConcurrency int) *Seeder {
 	return &Seeder{
 		st:                st,
 		obj:               obj,

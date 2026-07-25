@@ -12,6 +12,7 @@ import (
 
 	"streamclone/internal/emote/seeder"
 	"streamclone/internal/metadata/helix"
+	"streamclone/internal/metrics"
 )
 
 type streamItem struct {
@@ -181,6 +182,20 @@ func (p *RosterPreloader) RunOnce(ctx context.Context) (int, error) {
 }
 
 func StartRosterPreloader(ctx context.Context, p *RosterPreloader, interval time.Duration, log *slog.Logger) {
+	StartRosterPreloaderAfterInitial(ctx, p, interval, log, nil)
+}
+
+// StartRosterPreloaderAfterInitial runs the active-roster preload immediately,
+// invokes afterInitial once the attempt completes, then continues on the normal
+// interval. The hook lets cache migrations protect the active roster before
+// attaching expiries to historical keys without delaying service startup.
+func StartRosterPreloaderAfterInitial(
+	ctx context.Context,
+	p *RosterPreloader,
+	interval time.Duration,
+	log *slog.Logger,
+	afterInitial func(),
+) {
 	if p == nil || interval <= 0 {
 		return
 	}
@@ -189,15 +204,25 @@ func StartRosterPreloader(ctx context.Context, p *RosterPreloader, interval time
 			runCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 			defer cancel()
 			n, err := p.RunOnce(runCtx)
-			if err != nil && log != nil {
-				log.Warn("roster preload cycle failed", "err", err)
+			if err != nil {
+				metrics.EmoteRosterPreloadRuns.WithLabelValues("error").Inc()
+				metrics.EmoteRosterPreloadLastWarmed.Set(float64(n))
+				if log != nil {
+					log.Warn("roster preload cycle failed", "warmed_channels", n, "err", err)
+				}
 				return
 			}
+			metrics.EmoteRosterPreloadRuns.WithLabelValues("success").Inc()
+			metrics.EmoteRosterPreloadChannelsWarmed.Add(float64(n))
+			metrics.EmoteRosterPreloadLastWarmed.Set(float64(n))
 			if log != nil {
 				log.Info("roster preload cycle complete", "channels", n)
 			}
 		}
 		run()
+		if afterInitial != nil {
+			afterInitial()
+		}
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {

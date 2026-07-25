@@ -3,14 +3,31 @@ package objstore
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
+
+// Store is the object-storage contract used by emote serving, rendering, and
+// migration routing. It preserves streamed reads and metadata on the hot path.
+type Store interface {
+	Get(context.Context, string, string) ([]byte, string, error)
+	Open(context.Context, string, string) (io.ReadCloser, ObjectInfo, error)
+	Stat(context.Context, string, string) (ObjectInfo, error)
+	Exists(context.Context, string, string) (bool, error)
+	Put(context.Context, string, string, []byte) error
+	PutSrc(context.Context, string, []byte, string) error
+	GetSrc(context.Context, string) ([]byte, error)
+	Delete(context.Context, string, string) error
+	EnsureBucket(context.Context, bool) error
+}
 
 type Client struct {
 	mc     *minio.Client
@@ -73,6 +90,90 @@ type ObjectInfo struct {
 	ContentType  string
 	ETag         string
 	LastModified time.Time
+}
+
+// ManifestEntry is a read-only inventory record for a stored emote object.
+// SHA256 is populated only when the inventory caller requests full-byte
+// verification; ETag is retained as provider metadata, not treated as a hash.
+type ManifestEntry struct {
+	Key          string    `json:"key"`
+	Kind         string    `json:"kind"`
+	Size         int64     `json:"size"`
+	ContentType  string    `json:"contentType,omitempty"`
+	ETag         string    `json:"etag,omitempty"`
+	SHA256       string    `json:"sha256,omitempty"`
+	LastModified time.Time `json:"lastModified,omitempty"`
+}
+
+// Inventory streams object metadata through emit without accumulating the
+// bucket listing in memory. includeSHA256 downloads each object sequentially
+// and is intended for an operator-controlled migration evidence run.
+func (c *Client) Inventory(
+	ctx context.Context,
+	includeSHA256 bool,
+	emit func(ManifestEntry) error,
+) error {
+	if c == nil || c.mc == nil {
+		return fmt.Errorf("emote object inventory: client unavailable")
+	}
+	if emit == nil {
+		return fmt.Errorf("emote object inventory: emit callback is required")
+	}
+	listPrefix := c.prefix
+	if listPrefix != "" {
+		listPrefix += "/"
+	}
+	for object := range c.mc.ListObjects(ctx, c.bucket, minio.ListObjectsOptions{
+		Prefix:    listPrefix,
+		Recursive: true,
+	}) {
+		if object.Err != nil {
+			return fmt.Errorf("emote object inventory list: %w", object.Err)
+		}
+		stat, err := c.mc.StatObject(ctx, c.bucket, object.Key, minio.StatObjectOptions{})
+		if err != nil {
+			return fmt.Errorf("emote object inventory stat %s: %w", object.Key, err)
+		}
+		entry := ManifestEntry{
+			Key:          object.Key,
+			Kind:         manifestObjectKind(object.Key),
+			Size:         stat.Size,
+			ContentType:  stat.ContentType,
+			ETag:         strings.Trim(stat.ETag, `"`),
+			LastModified: stat.LastModified,
+		}
+		if includeSHA256 {
+			obj, err := c.mc.GetObject(ctx, c.bucket, object.Key, minio.GetObjectOptions{})
+			if err != nil {
+				return fmt.Errorf("emote object inventory open %s: %w", object.Key, err)
+			}
+			hash := sha256.New()
+			_, copyErr := io.Copy(hash, obj)
+			closeErr := obj.Close()
+			if copyErr != nil {
+				return fmt.Errorf("emote object inventory hash %s: %w", object.Key, copyErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("emote object inventory close %s: %w", object.Key, closeErr)
+			}
+			entry.SHA256 = hex.EncodeToString(hash.Sum(nil))
+		}
+		if err := emit(entry); err != nil {
+			return fmt.Errorf("emote object inventory emit %s: %w", object.Key, err)
+		}
+	}
+	return nil
+}
+
+func manifestObjectKind(key string) string {
+	switch {
+	case path.Base(key) == "src":
+		return "source"
+	case strings.HasSuffix(strings.ToLower(key), ".webp"):
+		return "render"
+	default:
+		return "other"
+	}
 }
 
 // Exists reports whether an emote scale object is present (Stat only).
@@ -146,12 +247,31 @@ func (c *Client) PutSrc(ctx context.Context, id string, data []byte, contentType
 }
 
 func (c *Client) GetSrc(ctx context.Context, id string) ([]byte, error) {
+	data, _, err := c.GetSrcWithContentType(ctx, id)
+	return data, err
+}
+
+// GetSrcWithContentType preserves source-object metadata for read-through
+// promotion without widening the core Store contract used by existing fakes.
+func (c *Client) GetSrcWithContentType(ctx context.Context, id string) ([]byte, string, error) {
 	obj, err := c.mc.GetObject(ctx, c.bucket, c.srcKey(id), minio.GetObjectOptions{})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer obj.Close()
-	return io.ReadAll(obj)
+	info, err := obj.Stat()
+	if err != nil {
+		return nil, "", err
+	}
+	data, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, "", err
+	}
+	contentType := strings.TrimSpace(info.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return data, contentType, nil
 }
 
 func (c *Client) Delete(ctx context.Context, id, scale string) error {
