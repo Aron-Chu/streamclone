@@ -113,13 +113,13 @@ jobs:
           python-version: "3.12"
       - name: Cache codegraph venv
         if: steps.changes.outputs.code == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .codegraph/.venv
           key: codegraph-venv-${{ runner.os }}-py3.12-${{ hashFiles('tools/codegraph/requirements.txt') }}
       - name: Cache codegraph database
         if: steps.changes.outputs.code == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             .codegraph/streamclone.kuzu
