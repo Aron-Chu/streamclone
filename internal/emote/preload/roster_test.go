@@ -6,8 +6,8 @@ import (
 
 func TestMergeTargetsDedupesAlwaysAndTop(t *testing.T) {
 	top := []streamItem{
-		{ID: "1", Login: "xqc"},
-		{ID: "2", Login: "shroud"},
+		{Login: "xqc"},
+		{Login: "shroud"},
 	}
 	always := []string{"sodapoppin", "xqc", "XQC"}
 

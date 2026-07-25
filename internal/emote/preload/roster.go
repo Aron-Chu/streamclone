@@ -16,12 +16,16 @@ import (
 )
 
 type streamItem struct {
-	ID    string `json:"id"`
 	Login string `json:"login"`
 }
 
 type streamsResponse struct {
 	Items []streamItem `json:"items"`
+}
+
+type userIDResolver interface {
+	Enabled() bool
+	UserIDsByLogin(context.Context, []string) (map[string]string, error)
 }
 
 // RosterPreloader warms emote dictionaries for directory top-N plus always-tracked logins.
@@ -30,7 +34,7 @@ type RosterPreloader struct {
 	topN        int
 	always      []string
 	seed        *seeder.Seeder
-	twitch      *helix.Client
+	twitch      userIDResolver
 	log         *slog.Logger
 	httpClient  *http.Client
 }
@@ -74,14 +78,15 @@ func normalizeLogins(logins []string) []string {
 	return out
 }
 
-// MergeTargets returns deduplicated login→twitchID targets (always-tracked first).
+// MergeTargets returns deduplicated login targets (always-tracked first).
+// The metadata stream ID is intentionally not retained: it identifies a live
+// stream session, not the broadcaster account required by emote providers.
 func MergeTargets(top []streamItem, always []string) []streamItem {
 	seen := make(map[string]struct{})
 	out := make([]streamItem, 0, len(top)+len(always))
 
-	add := func(login, id string) {
+	add := func(login string) {
 		login = strings.ToLower(strings.TrimSpace(login))
-		id = strings.TrimSpace(id)
 		if login == "" {
 			return
 		}
@@ -89,14 +94,14 @@ func MergeTargets(top []streamItem, always []string) []streamItem {
 			return
 		}
 		seen[login] = struct{}{}
-		out = append(out, streamItem{ID: id, Login: login})
+		out = append(out, streamItem{Login: login})
 	}
 
 	for _, login := range always {
-		add(login, "")
+		add(login)
 	}
 	for _, item := range top {
-		add(item.Login, item.ID)
+		add(item.Login)
 	}
 	return out
 }
@@ -129,19 +134,15 @@ func (p *RosterPreloader) fetchTopStreams(ctx context.Context) ([]streamItem, er
 	return page.Items, nil
 }
 
-func (p *RosterPreloader) resolveLogin(ctx context.Context, login string) (string, error) {
+func (p *RosterPreloader) resolveTargets(ctx context.Context, targets []streamItem) (map[string]string, error) {
 	if p.twitch == nil || !p.twitch.Enabled() {
-		return "", fmt.Errorf("twitch helix not configured")
+		return nil, fmt.Errorf("twitch helix not configured")
 	}
-	details, err := p.twitch.ChannelDetails(ctx, login)
-	if err != nil {
-		return "", err
+	logins := make([]string, 0, len(targets))
+	for _, target := range targets {
+		logins = append(logins, target.Login)
 	}
-	id := strings.TrimSpace(details.ID)
-	if id == "" {
-		return "", fmt.Errorf("empty twitch id for %q", login)
-	}
-	return id, nil
+	return p.twitch.UserIDsByLogin(ctx, logins)
 }
 
 func (p *RosterPreloader) RunOnce(ctx context.Context) (int, error) {
@@ -150,22 +151,23 @@ func (p *RosterPreloader) RunOnce(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	targets := MergeTargets(top, p.always)
+	twitchIDs, err := p.resolveTargets(ctx, targets)
+	if err != nil {
+		return 0, err
+	}
 	providers := []seeder.Provider{seeder.ProviderSevenTV, seeder.ProviderFFZ}
 	var warmed int
 	for _, target := range targets {
 		if ctx.Err() != nil {
 			return warmed, ctx.Err()
 		}
-		twitchID := target.ID
 		login := target.Login
+		twitchID := strings.TrimSpace(twitchIDs[login])
 		if twitchID == "" {
-			twitchID, err = p.resolveLogin(ctx, login)
-			if err != nil {
-				if p.log != nil {
-					p.log.Warn("roster preload skip", "login", login, "err", err)
-				}
-				continue
+			if p.log != nil {
+				p.log.Warn("roster preload skip", "login", login, "err", "broadcaster id not found")
 			}
+			continue
 		}
 		if _, err := p.seed.SeedChannelProviders(ctx, login, twitchID, providers); err != nil {
 			if p.log != nil {

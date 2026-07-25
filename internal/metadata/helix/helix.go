@@ -42,6 +42,8 @@ type ChatEmote struct {
 	IsGlobal   bool
 }
 
+const usersByLoginBatchSize = 100
+
 func New(apiURL, tokenURL, clientID, secret, userAgent string) *Client {
 	return &Client{
 		http:      &http.Client{Timeout: 10 * time.Second},
@@ -55,6 +57,58 @@ func New(apiURL, tokenURL, clientID, secret, userAgent string) *Client {
 
 func (c *Client) Enabled() bool {
 	return c.clientID != "" && c.secret != "" && c.apiURL != "" && c.tokenURL != ""
+}
+
+// UserIDsByLogin resolves broadcaster identities in the largest batch accepted
+// by Helix. Stream IDs from GET /streams are session IDs and must never be used
+// as durable channel IDs.
+func (c *Client) UserIDsByLogin(ctx context.Context, logins []string) (map[string]string, error) {
+	if !c.Enabled() {
+		return nil, ErrDisabled
+	}
+
+	normalized := make([]string, 0, len(logins))
+	seen := make(map[string]struct{}, len(logins))
+	for _, raw := range logins {
+		login := strings.ToLower(strings.TrimSpace(raw))
+		if login == "" {
+			continue
+		}
+		if _, ok := seen[login]; ok {
+			continue
+		}
+		seen[login] = struct{}{}
+		normalized = append(normalized, login)
+	}
+
+	resolved := make(map[string]string, len(normalized))
+	for start := 0; start < len(normalized); start += usersByLoginBatchSize {
+		end := start + usersByLoginBatchSize
+		if end > len(normalized) {
+			end = len(normalized)
+		}
+		q := url.Values{}
+		for _, login := range normalized[start:end] {
+			q.Add("login", login)
+		}
+		var users struct {
+			Data []struct {
+				ID    string `json:"id"`
+				Login string `json:"login"`
+			} `json:"data"`
+		}
+		if err := c.get(ctx, "/users", q, &users); err != nil {
+			return nil, err
+		}
+		for _, user := range users.Data {
+			login := strings.ToLower(strings.TrimSpace(user.Login))
+			id := strings.TrimSpace(user.ID)
+			if login != "" && id != "" {
+				resolved[login] = id
+			}
+		}
+	}
+	return resolved, nil
 }
 
 func (c *Client) bearer(ctx context.Context) (string, error) {
