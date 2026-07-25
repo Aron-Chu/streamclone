@@ -38,6 +38,10 @@ jobs:
         run: bash scripts/ci-context-contract.sh
       - name: Public topology scan
         run: bash scripts/ci-public-topology-scan.sh
+      - name: Archive path topology canary
+        run: bash scripts/test-public-topology-scan-archive-canary.sh
+      - name: Release env secret canary (lightweight)
+        run: bash scripts/test-validate-release-env-canary.sh
       - name: Product boundary strict
         run: make product-boundary-strict
 

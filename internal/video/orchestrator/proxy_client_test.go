@@ -194,6 +194,42 @@ func TestPlaylistProxy_redirectToIPv6Loopback(t *testing.T) {
 	}
 }
 
+func TestPlaylistProxy_redirectToIPv6ULA(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://ula.ttvnw.net/x", http.StatusFound)
+	})
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	client := playlistTestClient(t, srv, map[string][]net.IP{
+		"usher.ttvnw.net": {net.ParseIP("8.8.8.8")},
+		"ula.ttvnw.net":   {net.ParseIP("fc00::1")},
+	})
+	_, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/start")
+	if err == nil {
+		t.Fatal("expected denial for IPv6 ULA redirect")
+	}
+}
+
+func TestPlaylistProxy_responseHeaderTimeout(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/slow-headers", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(400 * time.Millisecond)
+		_, _ = io.WriteString(w, "#EXTM3U\n")
+	})
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	client := playlistTestClient(t, srv, map[string][]net.IP{
+		"usher.ttvnw.net": {net.ParseIP("8.8.8.8")},
+	})
+	client.Timeout = 2 * time.Second
+	client.ResponseHeaderTimeout = 50 * time.Millisecond
+	_, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/slow-headers")
+	if err == nil {
+		t.Fatal("expected response-header timeout")
+	}
+}
+
 func TestPlaylistProxy_redirectUnapprovedPublicHost(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {

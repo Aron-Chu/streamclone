@@ -34,10 +34,17 @@ type PlaylistProxyClient struct {
 	// secure dial to a previously validated IP while TLS ServerName stays the hostname.
 	DialContext func(ctx context.Context, network, address string) (net.Conn, error)
 	// TLSConfig optionally customizes TLS (tests may set InsecureSkipVerify for httptest).
-	TLSConfig   *tls.Config
-	Timeout     time.Duration
-	MaxBytes    int64
-	MaxRedirect int
+	TLSConfig *tls.Config
+	// Timeout is the overall request budget (connect + TLS + headers + body).
+	Timeout time.Duration
+	// ConnectTimeout bounds TCP dial when DialContext is nil.
+	ConnectTimeout time.Duration
+	// TLSHandshakeTimeout bounds the TLS handshake after connect.
+	TLSHandshakeTimeout time.Duration
+	// ResponseHeaderTimeout bounds waiting for the HTTP response status/headers.
+	ResponseHeaderTimeout time.Duration
+	MaxBytes              int64
+	MaxRedirect           int
 }
 
 func defaultPlaylistProxyClient() *PlaylistProxyClient {
@@ -45,19 +52,32 @@ func defaultPlaylistProxyClient() *PlaylistProxyClient {
 		Resolver: func(ctx context.Context, host string) ([]net.IP, error) {
 			return net.DefaultResolver.LookupIP(ctx, "ip", host)
 		},
-		Timeout:     12 * time.Second,
-		MaxBytes:    maxProxyPlaylistBytes,
-		MaxRedirect: maxProxyRedirects,
+		Timeout:               12 * time.Second,
+		ConnectTimeout:        5 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Second,
+		MaxBytes:              maxProxyPlaylistBytes,
+		MaxRedirect:           maxProxyRedirects,
 	}
 }
 
 func (c *PlaylistProxyClient) effective() *PlaylistProxyClient {
 	out := *c
+	def := defaultPlaylistProxyClient()
 	if out.Resolver == nil {
-		out.Resolver = defaultPlaylistProxyClient().Resolver
+		out.Resolver = def.Resolver
 	}
 	if out.Timeout <= 0 {
-		out.Timeout = 12 * time.Second
+		out.Timeout = def.Timeout
+	}
+	if out.ConnectTimeout <= 0 {
+		out.ConnectTimeout = def.ConnectTimeout
+	}
+	if out.TLSHandshakeTimeout <= 0 {
+		out.TLSHandshakeTimeout = def.TLSHandshakeTimeout
+	}
+	if out.ResponseHeaderTimeout <= 0 {
+		out.ResponseHeaderTimeout = def.ResponseHeaderTimeout
 	}
 	if out.MaxBytes <= 0 {
 		out.MaxBytes = maxProxyPlaylistBytes
@@ -139,8 +159,12 @@ func (c *PlaylistProxyClient) fetchOne(ctx context.Context, u *url.URL) (status 
 
 	dial := c.DialContext
 	if dial == nil {
+		connectTimeout := c.ConnectTimeout
+		if connectTimeout <= 0 {
+			connectTimeout = 5 * time.Second
+		}
 		dial = func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+			d := net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second}
 			return d.DialContext(ctx, network, address)
 		}
 	}
@@ -171,7 +195,14 @@ func (c *PlaylistProxyClient) fetchOne(ctx context.Context, u *url.URL) (status 
 			}
 		}
 		tlsConn := tls.Client(rawConn, tlsCfg)
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
+		handshakeTimeout := c.TLSHandshakeTimeout
+		if handshakeTimeout <= 0 {
+			handshakeTimeout = 5 * time.Second
+		}
+		handshakeCtx, cancelHandshake := context.WithTimeout(ctx, handshakeTimeout)
+		err := tlsConn.HandshakeContext(handshakeCtx)
+		cancelHandshake()
+		if err != nil {
 			_ = rawConn.Close()
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return 0, nil, "", err
@@ -181,11 +212,6 @@ func (c *PlaylistProxyClient) fetchOne(ctx context.Context, u *url.URL) (status 
 		conn = tlsConn
 	}
 	defer conn.Close()
-
-	_ = conn.SetDeadline(time.Now().Add(c.Timeout))
-	if dl, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(dl)
-	}
 
 	reqPath := u.RequestURI()
 	if reqPath == "" {
@@ -197,6 +223,15 @@ func (c *PlaylistProxyClient) fetchOne(ctx context.Context, u *url.URL) (status 
 		reqPath,
 		host,
 	)
+	headerTimeout := c.ResponseHeaderTimeout
+	if headerTimeout <= 0 {
+		headerTimeout = 5 * time.Second
+	}
+	headerDeadline := time.Now().Add(headerTimeout)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(headerDeadline) {
+		headerDeadline = dl
+	}
+	_ = conn.SetDeadline(headerDeadline)
 	if _, err := io.WriteString(conn, payload); err != nil {
 		return 0, nil, "", fmt.Errorf("upstream fetch failed")
 	}
@@ -207,9 +242,21 @@ func (c *PlaylistProxyClient) fetchOne(ctx context.Context, u *url.URL) (status 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return 0, nil, "", err
 		}
+		// Conn deadline expiry surfaces as net.Error timeout, not always context.
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			return 0, nil, "", context.DeadlineExceeded
+		}
 		return 0, nil, "", fmt.Errorf("upstream fetch failed")
 	}
 	defer resp.Body.Close()
+
+	// Body read uses the remaining overall request budget.
+	bodyDeadline := time.Now().Add(c.Timeout)
+	if dl, ok := ctx.Deadline(); ok {
+		bodyDeadline = dl
+	}
+	_ = conn.SetDeadline(bodyDeadline)
 
 	loc := resp.Header.Get("Location")
 	limited := io.LimitReader(resp.Body, c.MaxBytes+1)
@@ -217,6 +264,10 @@ func (c *PlaylistProxyClient) fetchOne(ctx context.Context, u *url.URL) (status 
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return 0, nil, "", err
+		}
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			return 0, nil, "", context.DeadlineExceeded
 		}
 		return 0, nil, "", fmt.Errorf("upstream read failed")
 	}
