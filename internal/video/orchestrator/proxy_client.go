@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -8,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -26,10 +26,15 @@ var ErrProxyOversized = errors.New("playlist response too large")
 type HostResolver func(ctx context.Context, host string) ([]net.IP, error)
 
 // PlaylistProxyClient fetches Twitch HLS playlists with redirect-safe SSRF controls.
+// It never passes a user-controlled URL to net/http.Client; redirects are followed
+// manually after re-validating each hop and dialing a validated resolved address.
 type PlaylistProxyClient struct {
 	Resolver HostResolver
-	// DialContext is optional; when nil a secure dialer is built from Resolver.
+	// DialContext is optional; when set, tests may inject a dialer. Production uses
+	// secure dial to a previously validated IP while TLS ServerName stays the hostname.
 	DialContext func(ctx context.Context, network, address string) (net.Conn, error)
+	// TLSConfig optionally customizes TLS (tests may set InsecureSkipVerify for httptest).
+	TLSConfig   *tls.Config
 	Timeout     time.Duration
 	MaxBytes    int64
 	MaxRedirect int
@@ -66,11 +71,7 @@ func (c *PlaylistProxyClient) effective() *PlaylistProxyClient {
 // FetchPlaylist validates urlRaw, follows only approved redirects, and returns body bytes.
 func (c *PlaylistProxyClient) FetchPlaylist(ctx context.Context, urlRaw string) ([]byte, error) {
 	cfg := c.effective()
-	if _, err := allowedProxyURL(urlRaw); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProxyDenied, err)
-	}
-
-	client, err := cfg.buildHTTPClient()
+	current, err := allowedProxyURL(urlRaw)
 	if err != nil {
 		return nil, fmt.Errorf("%w", ErrProxyDenied)
 	}
@@ -82,129 +83,175 @@ func (c *PlaylistProxyClient) FetchPlaylist(ctx context.Context, urlRaw string) 
 		defer cancel()
 	}
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, urlRaw, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%w", ErrProxyDenied)
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	for redirects := 0; ; redirects++ {
+		if err := reqCtx.Err(); err != nil {
 			return nil, err
 		}
-		// Collapse transport/policy failures to a non-leaky denial or generic upstream error.
-		if errors.Is(err, ErrProxyDenied) || strings.Contains(err.Error(), ErrProxyDenied.Error()) {
-			return nil, ErrProxyDenied
+		status, body, location, err := cfg.fetchOne(reqCtx, current)
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("upstream fetch failed")
+		if status >= 300 && status < 400 {
+			if redirects >= cfg.MaxRedirect {
+				return nil, ErrProxyDenied
+			}
+			if location == "" {
+				return nil, ErrProxyDenied
+			}
+			next, err := current.Parse(location)
+			if err != nil {
+				return nil, ErrProxyDenied
+			}
+			current, err = allowedProxyURL(next.String())
+			if err != nil {
+				return nil, ErrProxyDenied
+			}
+			continue
+		}
+		if status != http.StatusOK {
+			return nil, fmt.Errorf("upstream status %d", status)
+		}
+		return body, nil
+	}
+}
+
+func (c *PlaylistProxyClient) fetchOne(ctx context.Context, u *url.URL) (status int, body []byte, location string, err error) {
+	host := u.Hostname()
+	if !isTwitchUsherHost(host) {
+		return 0, nil, "", ErrProxyDenied
+	}
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "http" {
+			port = "80"
+		} else {
+			port = "443"
+		}
+	}
+	if err := validateProxyPort(port); err != nil {
+		return 0, nil, "", err
+	}
+
+	ip, err := c.resolvePublicIP(ctx, host)
+	if err != nil {
+		return 0, nil, "", err
+	}
+
+	dial := c.DialContext
+	if dial == nil {
+		dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+			return d.DialContext(ctx, network, address)
+		}
+	}
+	rawConn, err := dial(ctx, "tcp", net.JoinHostPort(ip.String(), port))
+	if err != nil {
+		if errors.Is(err, ErrProxyDenied) {
+			return 0, nil, "", ErrProxyDenied
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return 0, nil, "", err
+		}
+		return 0, nil, "", fmt.Errorf("upstream dial failed")
+	}
+
+	var conn net.Conn = rawConn
+	if u.Scheme == "https" {
+		tlsCfg := &tls.Config{
+			ServerName: host,
+			MinVersion: tls.VersionTLS12,
+		}
+		if c.TLSConfig != nil {
+			tlsCfg = c.TLSConfig.Clone()
+			if tlsCfg.ServerName == "" {
+				tlsCfg.ServerName = host
+			}
+			if tlsCfg.MinVersion == 0 {
+				tlsCfg.MinVersion = tls.VersionTLS12
+			}
+		}
+		tlsConn := tls.Client(rawConn, tlsCfg)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = rawConn.Close()
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return 0, nil, "", err
+			}
+			return 0, nil, "", fmt.Errorf("upstream fetch failed")
+		}
+		conn = tlsConn
+	}
+	defer conn.Close()
+
+	_ = conn.SetDeadline(time.Now().Add(c.Timeout))
+	if dl, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(dl)
+	}
+
+	reqPath := u.RequestURI()
+	if reqPath == "" {
+		reqPath = "/"
+	}
+	// Write a fixed-shape request; Host is the already-allowlisted hostname.
+	payload := fmt.Sprintf(
+		"GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nAccept: */*\r\nConnection: close\r\n\r\n",
+		reqPath,
+		host,
+	)
+	if _, err := io.WriteString(conn, payload); err != nil {
+		return 0, nil, "", fmt.Errorf("upstream fetch failed")
+	}
+
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, &http.Request{Method: http.MethodGet, URL: u})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return 0, nil, "", err
+		}
+		return 0, nil, "", fmt.Errorf("upstream fetch failed")
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("upstream status %d", resp.StatusCode)
-	}
-
-	limited := io.LimitReader(resp.Body, cfg.MaxBytes+1)
-	body, err := io.ReadAll(limited)
+	loc := resp.Header.Get("Location")
+	limited := io.LimitReader(resp.Body, c.MaxBytes+1)
+	body, err = io.ReadAll(limited)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, err
+			return 0, nil, "", err
 		}
-		return nil, fmt.Errorf("upstream read failed")
+		return 0, nil, "", fmt.Errorf("upstream read failed")
 	}
-	if int64(len(body)) > cfg.MaxBytes {
-		return nil, ErrProxyOversized
+	if int64(len(body)) > c.MaxBytes {
+		return 0, nil, "", ErrProxyOversized
 	}
-	return body, nil
+	return resp.StatusCode, body, loc, nil
 }
 
-func (c *PlaylistProxyClient) buildHTTPClient() (*http.Client, error) {
-	dial := c.DialContext
-	if dial == nil {
-		dial = c.secureDialContext
-	}
-	transport := &http.Transport{
-		Proxy:                 func(*http.Request) (*url.URL, error) { return nil, nil },
-		DialContext:           dial,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          4,
-		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 5 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		TLSClientConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
-	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   c.Timeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= c.MaxRedirect {
-				return fmt.Errorf("%w: too many redirects", ErrProxyDenied)
-			}
-			if _, err := allowedProxyURL(req.URL.String()); err != nil {
-				return fmt.Errorf("%w", ErrProxyDenied)
-			}
-			// Force DialContext to re-validate the next hop IP.
-			return nil
-		},
-	}
-	return client, nil
-}
-
-func (c *PlaylistProxyClient) secureDialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, fmt.Errorf("%w", ErrProxyDenied)
-	}
-	if err := validateProxyPort(port); err != nil {
-		return nil, err
-	}
-
-	var ips []net.IP
-	if parsedIP := net.ParseIP(host); parsedIP != nil {
-		ips = []net.IP{parsedIP}
-	} else {
-		ips, err = c.Resolver(ctx, host)
-		if err != nil || len(ips) == 0 {
-			return nil, fmt.Errorf("%w", ErrProxyDenied)
+func (c *PlaylistProxyClient) resolvePublicIP(ctx context.Context, host string) (net.IP, error) {
+	if parsed := net.ParseIP(host); parsed != nil {
+		if isBlockedProxyIP(parsed) {
+			return nil, ErrProxyDenied
 		}
+		return parsed, nil
 	}
-
-	var lastErr error
+	ips, err := c.Resolver(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return nil, ErrProxyDenied
+	}
 	for _, ip := range ips {
-		if isBlockedProxyIP(ip) {
-			lastErr = fmt.Errorf("%w", ErrProxyDenied)
-			continue
+		if !isBlockedProxyIP(ip) {
+			return ip, nil
 		}
-		addrPort, err := netip.ParseAddrPort(net.JoinHostPort(ip.String(), port))
-		if err != nil {
-			lastErr = fmt.Errorf("%w", ErrProxyDenied)
-			continue
-		}
-		d := net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
-		conn, err := d.DialContext(ctx, network, addrPort.String())
-		if err != nil {
-			lastErr = fmt.Errorf("upstream dial failed")
-			continue
-		}
-		return conn, nil
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("%w", ErrProxyDenied)
-	}
-	return nil, lastErr
+	return nil, ErrProxyDenied
 }
 
 func validateProxyPort(port string) error {
 	n, err := strconv.Atoi(port)
 	if err != nil {
-		return fmt.Errorf("%w", ErrProxyDenied)
+		return ErrProxyDenied
 	}
 	if n != 80 && n != 443 {
-		return fmt.Errorf("%w", ErrProxyDenied)
+		return ErrProxyDenied
 	}
 	return nil
 }

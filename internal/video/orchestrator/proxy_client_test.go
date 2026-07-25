@@ -68,48 +68,9 @@ func TestIsBlockedProxyIP(t *testing.T) {
 	}
 }
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-func TestPlaylistProxy_allowedPublicHost(t *testing.T) {
-	var dialed string
-	client := &PlaylistProxyClient{
-		Resolver: func(ctx context.Context, host string) ([]net.IP, error) {
-			if host != "usher.ttvnw.net" {
-				t.Fatalf("unexpected host %s", host)
-			}
-			return []net.IP{net.ParseIP("8.8.8.8")}, nil
-		},
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			dialed = address
-			return nil, errors.New("stop-after-dial-check")
-		},
-		Timeout: 2 * time.Second,
-	}
-	// Build client and ensure dial validation path accepts public IP by invoking secureDial via Fetch with a stub transport.
-	// Use httptest redirect chain instead for success path below.
-	_ = dialed
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "#EXTM3U\n")
-	}))
-	t.Cleanup(srv.Close)
-
-	// Rewrite: use custom dial to httptest listener IP while presenting usher hostname via TLS.
-	lnAddr := srv.Listener.Addr().String()
-	host, port, _ := net.SplitHostPort(lnAddr)
-	pub := net.ParseIP(host)
-	if pub == nil || isBlockedProxyIP(pub) {
-		// httptest may bind to 127.0.0.1 — use injected DialContext that still validates via resolver separately.
-		t.Skip("httptest bound to blocked IP; covered by redirect/success injected tests")
-	}
-	_ = port
-	_ = client
-}
-
-func newProxyClientForServer(t *testing.T, srv *httptest.Server, resolve map[string][]net.IP) *PlaylistProxyClient {
+func playlistTestClient(t *testing.T, srv *httptest.Server, resolve map[string][]net.IP) *PlaylistProxyClient {
 	t.Helper()
-	c := &PlaylistProxyClient{
+	return &PlaylistProxyClient{
 		Resolver: func(ctx context.Context, host string) ([]net.IP, error) {
 			ips, ok := resolve[host]
 			if !ok {
@@ -117,41 +78,26 @@ func newProxyClientForServer(t *testing.T, srv *httptest.Server, resolve map[str
 			}
 			return ips, nil
 		},
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			if err := validateProxyPort(port); err != nil {
+				return nil, err
+			}
+			ip := net.ParseIP(host)
+			if ip == nil || isBlockedProxyIP(ip) {
+				return nil, ErrProxyDenied
+			}
+			d := net.Dialer{Timeout: time.Second}
+			return d.DialContext(ctx, "tcp", srv.Listener.Addr().String())
+		},
+		TLSConfig:   &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12},
 		Timeout:     3 * time.Second,
 		MaxBytes:    maxProxyPlaylistBytes,
 		MaxRedirect: maxProxyRedirects,
 	}
-	c.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		if err := validateProxyPort(port); err != nil {
-			return nil, err
-		}
-		var ips []net.IP
-		if parsed := net.ParseIP(host); parsed != nil {
-			ips = []net.IP{parsed}
-		} else {
-			ips, err = c.Resolver(ctx, host)
-			if err != nil || len(ips) == 0 {
-				return nil, ErrProxyDenied
-			}
-		}
-		ok := false
-		for _, ip := range ips {
-			if !isBlockedProxyIP(ip) {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			return nil, ErrProxyDenied
-		}
-		d := net.Dialer{Timeout: time.Second}
-		return d.DialContext(ctx, "tcp", srv.Listener.Addr().String())
-	}
-	return c
 }
 
 func TestPlaylistProxy_successRedirectChain(t *testing.T) {
@@ -173,24 +119,12 @@ func TestPlaylistProxy_successRedirectChain(t *testing.T) {
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
-	publicIP := net.ParseIP("203.0.113.50") // documentation range — blocked!
-	// Use a globally-routable test IP that isBlockedProxyIP allows: 8.8.8.8
-	publicIP = net.ParseIP("8.8.8.8")
-
-	client := newProxyClientForServer(t, srv, map[string][]net.IP{
-		"usher.ttvnw.net":                     {publicIP},
+	publicIP := net.ParseIP("8.8.8.8")
+	client := playlistTestClient(t, srv, map[string][]net.IP{
+		"usher.ttvnw.net":                  {publicIP},
 		"video-weaver.sfo01.hls.ttvnw.net": {publicIP},
 	})
-	// httptest uses its own cert; disable verify for test dial path by wrapping transport after build.
-	httpClient, err := client.buildHTTPClient()
-	if err != nil {
-		t.Fatal(err)
-	}
-	tr := httpClient.Transport.(*http.Transport)
-	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
-	// Replace FetchPlaylist temporarily via direct Do with CheckRedirect from client.
-	// Easier: monkey Dial already points at srv; call FetchPlaylist with custom client field hack.
-	body, err := fetchWithTestClient(t, client, "https://usher.ttvnw.net/start")
+	body, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/start")
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
@@ -200,43 +134,6 @@ func TestPlaylistProxy_successRedirectChain(t *testing.T) {
 	if hops.Load() != 3 {
 		t.Fatalf("hops=%d", hops.Load())
 	}
-}
-
-// fetchWithTestClient builds the HTTP client and disables TLS verify for httptest.
-func fetchWithTestClient(t *testing.T, c *PlaylistProxyClient, raw string) ([]byte, error) {
-	t.Helper()
-	cfg := c.effective()
-	if _, err := allowedProxyURL(raw); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProxyDenied, err)
-	}
-	httpClient, err := cfg.buildHTTPClient()
-	if err != nil {
-		return nil, err
-	}
-	if tr, ok := httpClient.Transport.(*http.Transport); ok {
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
-	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, raw, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("upstream status %d", resp.StatusCode)
-	}
-	limited := io.LimitReader(resp.Body, cfg.MaxBytes+1)
-	body, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(body)) > cfg.MaxBytes {
-		return nil, ErrProxyOversized
-	}
-	return body, nil
 }
 
 func TestPlaylistProxy_initialDisallowedHost(t *testing.T) {
@@ -254,15 +151,12 @@ func TestPlaylistProxy_redirectToLoopback(t *testing.T) {
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
-	client := newProxyClientForServer(t, srv, map[string][]net.IP{
+	client := playlistTestClient(t, srv, map[string][]net.IP{
 		"usher.ttvnw.net": {net.ParseIP("8.8.8.8")},
 	})
-	_, err := fetchWithTestClient(t, client, "https://usher.ttvnw.net/start")
-	if err == nil || !errors.Is(err, ErrProxyDenied) && !strings.Contains(err.Error(), "denied") {
-		// CheckRedirect returns ErrProxyDenied wrapped by http client
-		if err == nil {
-			t.Fatal("expected denial")
-		}
+	_, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/start")
+	if err == nil {
+		t.Fatal("expected denial")
 	}
 }
 
@@ -273,11 +167,11 @@ func TestPlaylistProxy_redirectToRFC1918Host(t *testing.T) {
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
-	client := newProxyClientForServer(t, srv, map[string][]net.IP{
+	client := playlistTestClient(t, srv, map[string][]net.IP{
 		"usher.ttvnw.net":    {net.ParseIP("8.8.8.8")},
 		"internal.ttvnw.net": {net.ParseIP("10.0.0.5")},
 	})
-	_, err := fetchWithTestClient(t, client, "https://usher.ttvnw.net/start")
+	_, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/start")
 	if err == nil {
 		t.Fatal("expected denial for RFC1918 dial")
 	}
@@ -290,11 +184,11 @@ func TestPlaylistProxy_redirectToIPv6Loopback(t *testing.T) {
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
-	client := newProxyClientForServer(t, srv, map[string][]net.IP{
+	client := playlistTestClient(t, srv, map[string][]net.IP{
 		"usher.ttvnw.net": {net.ParseIP("8.8.8.8")},
 		"loop6.ttvnw.net": {net.ParseIP("::1")},
 	})
-	_, err := fetchWithTestClient(t, client, "https://usher.ttvnw.net/start")
+	_, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/start")
 	if err == nil {
 		t.Fatal("expected denial")
 	}
@@ -307,10 +201,10 @@ func TestPlaylistProxy_redirectUnapprovedPublicHost(t *testing.T) {
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
-	client := newProxyClientForServer(t, srv, map[string][]net.IP{
+	client := playlistTestClient(t, srv, map[string][]net.IP{
 		"usher.ttvnw.net": {net.ParseIP("8.8.8.8")},
 	})
-	_, err := fetchWithTestClient(t, client, "https://usher.ttvnw.net/start")
+	_, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/start")
 	if err == nil {
 		t.Fatal("expected denial")
 	}
@@ -323,11 +217,11 @@ func TestPlaylistProxy_tooManyRedirects(t *testing.T) {
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
-	client := newProxyClientForServer(t, srv, map[string][]net.IP{
+	client := playlistTestClient(t, srv, map[string][]net.IP{
 		"usher.ttvnw.net": {net.ParseIP("8.8.8.8")},
 	})
 	client.MaxRedirect = 3
-	_, err := fetchWithTestClient(t, client, "https://usher.ttvnw.net/a")
+	_, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/a")
 	if err == nil {
 		t.Fatal("expected too many redirects")
 	}
@@ -360,28 +254,6 @@ func TestPlaylistProxy_ipv4MappedPrivate(t *testing.T) {
 }
 
 func TestPlaylistProxy_rebindingResistantDial(t *testing.T) {
-	var resolves atomic.Int32
-	client := &PlaylistProxyClient{
-		Resolver: func(ctx context.Context, host string) ([]net.IP, error) {
-			n := resolves.Add(1)
-			if n == 1 {
-				return []net.IP{net.ParseIP("8.8.8.8")}, nil
-			}
-			// Attacker flips DNS to loopback on later lookup — must still be checked.
-			return []net.IP{net.ParseIP("127.0.0.1")}, nil
-		},
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, _, _ := net.SplitHostPort(address)
-			ip := net.ParseIP(host)
-			if isBlockedProxyIP(ip) {
-				return nil, ErrProxyDenied
-			}
-			return nil, errors.New("public-ok-stop")
-		},
-		Timeout: time.Second,
-	}
-	// First dial uses secureDial through build — use FetchPlaylist which dials once.
-	// Force two dials via redirect to another allowed host.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/a", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "https://b.ttvnw.net/end", http.StatusFound)
@@ -392,8 +264,8 @@ func TestPlaylistProxy_rebindingResistantDial(t *testing.T) {
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
-	client = newProxyClientForServer(t, srv, map[string][]net.IP{})
 	var n atomic.Int32
+	client := playlistTestClient(t, srv, map[string][]net.IP{})
 	client.Resolver = func(ctx context.Context, host string) ([]net.IP, error) {
 		i := n.Add(1)
 		if i == 1 {
@@ -401,23 +273,7 @@ func TestPlaylistProxy_rebindingResistantDial(t *testing.T) {
 		}
 		return []net.IP{net.ParseIP("127.0.0.1")}, nil
 	}
-	// Override DialContext to validate IP then dial httptest only if public.
-	baseDial := client.DialContext
-	client.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		if err := validateProxyPort(port); err != nil {
-			return nil, err
-		}
-		ip := net.ParseIP(host)
-		if ip == nil || isBlockedProxyIP(ip) {
-			return nil, ErrProxyDenied
-		}
-		return baseDial(ctx, network, address)
-	}
-	_, err := fetchWithTestClient(t, client, "https://usher.ttvnw.net/a")
+	_, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/a")
 	if err == nil {
 		t.Fatal("expected second-hop private DNS to deny")
 	}
@@ -426,15 +282,15 @@ func TestPlaylistProxy_rebindingResistantDial(t *testing.T) {
 func TestPlaylistProxy_oversized(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/big", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(strings.Repeat("A", int(maxProxyPlaylistBytes)+10)))
+		_, _ = w.Write([]byte(strings.Repeat("A", 2048)))
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
-	client := newProxyClientForServer(t, srv, map[string][]net.IP{
+	client := playlistTestClient(t, srv, map[string][]net.IP{
 		"usher.ttvnw.net": {net.ParseIP("8.8.8.8")},
 	})
 	client.MaxBytes = 1024
-	_, err := fetchWithTestClient(t, client, "https://usher.ttvnw.net/big")
+	_, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/big")
 	if !errors.Is(err, ErrProxyOversized) {
 		t.Fatalf("err=%v", err)
 	}
@@ -448,11 +304,11 @@ func TestPlaylistProxy_timeoutAndCancel(t *testing.T) {
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
-	client := newProxyClientForServer(t, srv, map[string][]net.IP{
+	client := playlistTestClient(t, srv, map[string][]net.IP{
 		"usher.ttvnw.net": {net.ParseIP("8.8.8.8")},
 	})
 	client.Timeout = 50 * time.Millisecond
-	_, err := fetchWithTestClient(t, client, "https://usher.ttvnw.net/slow")
+	_, err := client.FetchPlaylist(context.Background(), "https://usher.ttvnw.net/slow")
 	if err == nil {
 		t.Fatal("expected timeout")
 	}
@@ -460,13 +316,7 @@ func TestPlaylistProxy_timeoutAndCancel(t *testing.T) {
 	client.Timeout = 2 * time.Second
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	cfg := client.effective()
-	httpClient, _ := cfg.buildHTTPClient()
-	if tr, ok := httpClient.Transport.(*http.Transport); ok {
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://usher.ttvnw.net/slow", nil)
-	_, err = httpClient.Do(req)
+	_, err = client.FetchPlaylist(ctx, "https://usher.ttvnw.net/slow")
 	if err == nil {
 		t.Fatal("expected cancel")
 	}
