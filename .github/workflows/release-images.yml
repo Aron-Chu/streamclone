@@ -393,8 +393,6 @@ jobs:
       - name: Build bundle
         env:
           VERSION: ${{ steps.ver.outputs.value }}
-          TWITCH_OAUTH_CLIENT_ID: ${{ secrets.TWITCH_OAUTH_CLIENT_ID }}
-          TWITCH_OAUTH_CLIENT_SECRET: ${{ secrets.TWITCH_OAUTH_CLIENT_SECRET }}
         run: bash scripts/package-release.sh
 
       - name: Validate release env synthesis
