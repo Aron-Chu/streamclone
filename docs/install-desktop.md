@@ -55,7 +55,7 @@ Not required for watching. Sign in only for chat send, follows, or Clip Studio e
 2. Click **Sign in (optional)**.
 3. Approve on Twitch.
 
-Official releases may include bundled OAuth (`oauth-bundle.env`) for Sign in. Self-builders: copy `deploy/env/oauth-bundle.env.example` or run `twitch configure` then setup. StreamPulse extension and hosted analytics are separate — see [streampulse-product-boundary.md](streampulse-product-boundary.md).
+Official releases do **not** ship Twitch OAuth client secrets. Copy `deploy/env/oauth-bundle.env.example` to a local `oauth-bundle.env` (gitignored) or run `twitch configure` then setup. StreamPulse extension and hosted analytics are separate — see [streampulse-product-boundary.md](streampulse-product-boundary.md).
 
 ## macOS / Linux
 

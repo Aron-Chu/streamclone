@@ -24,7 +24,7 @@ scripts/setup.sh --profile full --non-interactive
 
 Use `http://localhost:8090/` -> **Sign in (optional)**. Login is for chat send and follows. Watching remains anonymous.
 
-Official releases may ship bundled Twitch OAuth in `deploy/env/oauth-bundle.env`. Developers: copy `deploy/env/oauth-bundle.env.example`.
+Provide your own Twitch OAuth credentials locally via `deploy/env/oauth-bundle.env` (copy from `oauth-bundle.env.example`). Releases never embed a client secret. Developers: `twitch configure` then setup sync also works.
 
 ## Optional Scraper
 

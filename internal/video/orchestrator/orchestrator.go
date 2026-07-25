@@ -85,10 +85,11 @@ type Options struct {
 }
 
 type Orchestrator struct {
-	o       Options
-	sf      singleflight.Group
-	sem     chan struct{}
-	breaker *resilience.Breaker
+	o             Options
+	sf            singleflight.Group
+	sem           chan struct{}
+	breaker       *resilience.Breaker
+	playlistProxy *PlaylistProxyClient
 }
 
 func New(o Options) *Orchestrator {
@@ -1062,35 +1063,17 @@ func (h *Orchestrator) proxyPlaylist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing url parameter", http.StatusBadRequest)
 		return
 	}
-	if _, err := allowedProxyURL(sourceURL); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
 
 	ctx := r.Context()
 	started := time.Now()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	client := defaultPlaylistProxyClient()
+	if h != nil && h.playlistProxy != nil {
+		client = h.playlistProxy
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-	resp, err := http.DefaultClient.Do(req)
+	bodyBytes, err := client.FetchPlaylist(ctx, sourceURL)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		http.Error(w, fmt.Sprintf("upstream status %d", resp.StatusCode), http.StatusBadGateway)
-		return
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		msg, status := publicProxyError(err)
+		http.Error(w, msg, status)
 		return
 	}
 	recordDirectHLSFetch(sourceURL, time.Since(started))

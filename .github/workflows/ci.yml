@@ -37,12 +37,7 @@ jobs:
       - name: Owner-local context contract
         run: bash scripts/ci-context-contract.sh
       - name: Public topology scan
-        run: |
-          if [[ -f scripts/ci-public-topology-scan.sh ]]; then
-            bash scripts/ci-public-topology-scan.sh
-          else
-            echo "WARN: scripts/ci-public-topology-scan.sh missing (CI debt); skipping"
-          fi
+        run: bash scripts/ci-public-topology-scan.sh
       - name: Product boundary strict
         run: make product-boundary-strict
 

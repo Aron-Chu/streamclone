@@ -66,6 +66,7 @@ RELEASE_SCRIPT_EXCLUDES=(
   --exclude='helm-*'
   --exclude="sync-${_pulse}-chart.sh"
   --exclude="test-${_hpv}*"
+  --exclude='test-*'
   --exclude='vps-health-check.sh'
   --exclude="lib/${_bh}*"
   --exclude="lib/${_hpv}*"
@@ -111,14 +112,10 @@ REDDIT_COMMERCIAL_OK=true
 CLIPPER_SERVICE_URL=http://host.docker.internal:8095
 EOF
 
-if [ -n "${TWITCH_OAUTH_CLIENT_ID:-}" ] && [ -n "${TWITCH_OAUTH_CLIENT_SECRET:-}" ]; then
-  cat >"$STAGE/deploy/env/oauth-bundle.env" <<EOF
-TWITCH_OAUTH_CLIENT_ID=$TWITCH_OAUTH_CLIENT_ID
-TWITCH_OAUTH_CLIENT_SECRET=$TWITCH_OAUTH_CLIENT_SECRET
-EOF
-  echo "Included oauth-bundle.env from release secrets"
-else
-  echo "WARN: TWITCH_OAUTH secrets empty — bundle ships without oauth-bundle.env" >&2
+# Never embed Twitch OAuth client secrets in public release archives. Operators
+# supply credentials locally (see deploy/env/oauth-bundle.env.example).
+if [ -n "${TWITCH_OAUTH_CLIENT_ID:-}" ] || [ -n "${TWITCH_OAUTH_CLIENT_SECRET:-}" ]; then
+  echo "WARN: TWITCH_OAUTH_* env is set but ignored for release packaging (secrets must not ship in archives)" >&2
 fi
 cp "$ROOT/deploy/env/oauth-bundle.env.example" "$STAGE/deploy/env/oauth-bundle.env.example"
 mkdir -p "$STAGE/runtime"
