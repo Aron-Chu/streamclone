@@ -31,7 +31,7 @@ const maxUploadBytes = 5 << 20
 
 type Handler struct {
 	st              *store.Store
-	obj             *objstore.Client
+	obj             objstore.Store
 	d               *dict.Dict
 	seed            *seeder.Seeder
 	render          *render.Queue
@@ -54,11 +54,11 @@ func (h *Handler) SetEventSubscriber(sub eventSubscriber) {
 	h.eventSub = sub
 }
 
-func New(st *store.Store, obj *objstore.Client, d *dict.Dict, seed *seeder.Seeder, log *slog.Logger, token string) *Handler {
+func New(st *store.Store, obj objstore.Store, d *dict.Dict, seed *seeder.Seeder, log *slog.Logger, token string) *Handler {
 	return NewWithRenderQueue(st, obj, d, seed, nil, log, token)
 }
 
-func NewWithRenderQueue(st *store.Store, obj *objstore.Client, d *dict.Dict, seed *seeder.Seeder, rq *render.Queue, log *slog.Logger, token string) *Handler {
+func NewWithRenderQueue(st *store.Store, obj objstore.Store, d *dict.Dict, seed *seeder.Seeder, rq *render.Queue, log *slog.Logger, token string) *Handler {
 	return &Handler{st: st, obj: obj, d: d, seed: seed, render: rq, log: log, token: token, seeding: make(map[string]struct{}), loadedProviders: make(map[string]map[seeder.Provider]struct{})}
 }
 

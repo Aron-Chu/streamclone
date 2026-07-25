@@ -21,7 +21,7 @@ const maxSourceDownloadBytes = 5 << 20
 // Queue enqueues demand-driven emote render jobs with backpressure and metrics.
 type Queue struct {
 	st   *store.Store
-	obj  *objstore.Client
+	obj  objstore.Store
 	cfg  Config
 	log  *slog.Logger
 	hc   *http.Client
@@ -55,7 +55,7 @@ type Request struct {
 	AlreadyRendered bool
 }
 
-func NewQueue(st *store.Store, obj *objstore.Client, cfg Config, log *slog.Logger) *Queue {
+func NewQueue(st *store.Store, obj objstore.Store, cfg Config, log *slog.Logger) *Queue {
 	q := &Queue{
 		st:            st,
 		obj:           obj,

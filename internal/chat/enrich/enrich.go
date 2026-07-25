@@ -136,8 +136,14 @@ func (e *Enricher) ensure(channel string) *tokenize.ChannelDict {
 func (e *Enricher) loadTrie(ctx context.Context, channel string) (*tokenize.Trie, error) {
 	m, err := e.rdb.HGetAll(ctx, "channel:emotes:"+channel).Result()
 	if err != nil {
+		metrics.EmoteDictionaryLoads.WithLabelValues("error").Inc()
 		return nil, err
 	}
+	result := "hit"
+	if len(m) == 0 {
+		result = "miss"
+	}
+	metrics.EmoteDictionaryLoads.WithLabelValues(result).Inc()
 	t := tokenize.NewTrie()
 	for name, v := range m {
 		var ent struct {

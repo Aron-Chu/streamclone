@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -84,6 +85,16 @@ type Config struct {
 	S3PublicRead  bool   `env:"S3_PUBLIC_READ" envDefault:"false"`
 	CDNPublicBase string `env:"CDN_PUBLIC_BASE"`
 
+	EmoteObjectSecondaryEnabled   bool   `env:"EMOTE_OBJECT_SECONDARY_ENABLED" envDefault:"false"`
+	EmoteObjectSecondaryEndpoint  string `env:"EMOTE_OBJECT_SECONDARY_ENDPOINT"`
+	EmoteObjectSecondaryBucket    string `env:"EMOTE_OBJECT_SECONDARY_BUCKET"`
+	EmoteObjectSecondaryPrefix    string `env:"EMOTE_OBJECT_SECONDARY_PREFIX"`
+	EmoteObjectSecondaryAccessKey string `env:"EMOTE_OBJECT_SECONDARY_ACCESS_KEY"`
+	EmoteObjectSecondarySecretKey string `env:"EMOTE_OBJECT_SECONDARY_SECRET_KEY"`
+	EmoteObjectSecondaryPrimary   bool   `env:"EMOTE_OBJECT_SECONDARY_PRIMARY" envDefault:"false"`
+	EmoteObjectDualWrite          bool   `env:"EMOTE_OBJECT_DUAL_WRITE" envDefault:"false"`
+	EmoteObjectReadThrough        bool   `env:"EMOTE_OBJECT_READ_THROUGH" envDefault:"true"`
+
 	CuratorAPIToken   string `env:"CURATOR_API_TOKEN"`
 	SetupControlToken string `env:"SETUP_CONTROL_TOKEN"`
 
@@ -112,6 +123,10 @@ type Config struct {
 	EmoteRenderUIRequestRateLimitPerMin    int           `env:"EMOTE_RENDER_UI_REQUEST_RATE_LIMIT_PER_MIN" envDefault:"300"`
 	EmoteRenderBackfillEnabled             bool          `env:"EMOTE_RENDER_BACKFILL_ENABLED" envDefault:"false"`
 	EmoteDictionaryDebounceMS              int           `env:"EMOTE_DICTIONARY_DEBOUNCE_MS" envDefault:"3000"`
+	EmoteDictionaryTTL                     time.Duration `env:"EMOTE_DICTIONARY_TTL" envDefault:"24h"`
+	EmoteDictionaryLegacyJitter            time.Duration `env:"EMOTE_DICTIONARY_LEGACY_JITTER" envDefault:"24h"`
+	EmoteDictionaryLegacyBatchSize         int           `env:"EMOTE_DICTIONARY_LEGACY_BATCH_SIZE" envDefault:"100"`
+	EmoteDictionaryLegacyBatchPause        time.Duration `env:"EMOTE_DICTIONARY_LEGACY_BATCH_PAUSE" envDefault:"50ms"`
 	EmoteRosterPreloadEnabled              bool          `env:"EMOTE_ROSTER_PRELOAD_ENABLED" envDefault:"false"`
 	EmoteRosterPreloadInterval             time.Duration `env:"EMOTE_ROSTER_PRELOAD_INTERVAL" envDefault:"6h"`
 	EmoteRosterPreloadTopN                 int           `env:"EMOTE_ROSTER_PRELOAD_TOP_N" envDefault:"200"`
@@ -143,4 +158,22 @@ func (c Config) XContentToken() string {
 		return t
 	}
 	return strings.TrimSpace(c.EmusksXAuthToken)
+}
+
+// ValidateEmoteObjectStorage rejects partial or unsafe secondary-store
+// configurations before the emote service starts accepting traffic.
+func (c Config) ValidateEmoteObjectStorage() error {
+	if !c.EmoteObjectSecondaryEnabled {
+		if c.EmoteObjectSecondaryPrimary || c.EmoteObjectDualWrite {
+			return errors.New("EMOTE_OBJECT_SECONDARY_ENABLED must be true when secondary-primary or dual-write is enabled")
+		}
+		return nil
+	}
+	if strings.TrimSpace(c.EmoteObjectSecondaryEndpoint) == "" ||
+		strings.TrimSpace(c.EmoteObjectSecondaryBucket) == "" ||
+		strings.TrimSpace(c.EmoteObjectSecondaryAccessKey) == "" ||
+		strings.TrimSpace(c.EmoteObjectSecondarySecretKey) == "" {
+		return errors.New("secondary emote object store requires endpoint, bucket, access key, and secret key")
+	}
+	return nil
 }

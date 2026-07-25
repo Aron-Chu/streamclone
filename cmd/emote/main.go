@@ -32,6 +32,10 @@ func main() {
 		logger.Error("config load failed", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateEmoteObjectStorage(); err != nil {
+		logger.Error("emote object storage config invalid", "err", err)
+		os.Exit(1)
+	}
 
 	ctx := context.Background()
 
@@ -50,16 +54,35 @@ func main() {
 	rdb := redis.NewClient(opt)
 	defer rdb.Close()
 
-	useSSL := strings.HasPrefix(cfg.S3Endpoint, "https://")
-	endpoint := strings.TrimPrefix(cfg.S3Endpoint, "https://")
-	endpoint = strings.TrimPrefix(endpoint, "http://")
-
-	obj, err := objstore.New(endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3Prefix, useSSL)
+	localObj, err := newObjectStore(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3Prefix)
 	if err != nil {
-		logger.Error("objstore init failed", "err", err)
+		logger.Error("local objstore init failed", "err", err)
 		os.Exit(1)
 	}
 
+	var secondaryObj objstore.Store
+	if cfg.EmoteObjectSecondaryEnabled {
+		secondaryObj, err = newObjectStore(
+			cfg.EmoteObjectSecondaryEndpoint,
+			cfg.EmoteObjectSecondaryAccessKey,
+			cfg.EmoteObjectSecondarySecretKey,
+			cfg.EmoteObjectSecondaryBucket,
+			cfg.EmoteObjectSecondaryPrefix,
+		)
+		if err != nil {
+			logger.Error("secondary objstore init failed", "err", err)
+			os.Exit(1)
+		}
+	}
+	obj, err := objstore.NewReadThroughStore(localObj, secondaryObj, objstore.ReadThroughOptions{
+		PrimarySecondary: cfg.EmoteObjectSecondaryPrimary,
+		DualWrite:        cfg.EmoteObjectDualWrite,
+		ReadThrough:      cfg.EmoteObjectReadThrough,
+	})
+	if err != nil {
+		logger.Error("objstore routing init failed", "err", err)
+		os.Exit(1)
+	}
 	if err := obj.EnsureBucket(ctx, cfg.S3PublicRead); err != nil {
 		logger.Warn("ensure bucket failed", "err", err)
 	}
@@ -70,7 +93,26 @@ func main() {
 	} else if n > 0 {
 		logger.Info("startup provider metadata repair", "count", n)
 	}
-	d := dict.New(rdb, cfg.CDNPublicBase)
+	d := dict.NewWithTTL(rdb, cfg.CDNPublicBase, cfg.EmoteDictionaryTTL)
+	backfillLegacyTTLs := func() {
+		opts := dict.LegacyBackfillOptions{
+			ScanCount:  500,
+			BatchSize:  cfg.EmoteDictionaryLegacyBatchSize,
+			BatchPause: cfg.EmoteDictionaryLegacyBatchPause,
+			TTLJitter:  cfg.EmoteDictionaryLegacyJitter,
+		}
+		if n, err := d.BackfillLegacyTTLsWithOptions(ctx, opts); err != nil {
+			logger.Warn("legacy emote dictionary ttl backfill failed", "err", err)
+		} else {
+			logger.Info("legacy emote dictionary ttl backfill complete",
+				"updated", n,
+				"ttl", cfg.EmoteDictionaryTTL.String(),
+				"jitter", cfg.EmoteDictionaryLegacyJitter.String(),
+				"batch_size", cfg.EmoteDictionaryLegacyBatchSize,
+				"batch_pause", cfg.EmoteDictionaryLegacyBatchPause.String(),
+			)
+		}
+	}
 	renderCfg := render.ConfigFromApp(cfg)
 	rq := render.NewQueue(st, obj, renderCfg, logger)
 	render.StartObserveConsumer(ctx, rdb, rq, logger)
@@ -97,12 +139,20 @@ func main() {
 			twitch,
 			logger,
 		)
-		preload.StartRosterPreloader(ctx, rosterPreloader, cfg.EmoteRosterPreloadInterval, logger)
+		preload.StartRosterPreloaderAfterInitial(
+			ctx,
+			rosterPreloader,
+			cfg.EmoteRosterPreloadInterval,
+			logger,
+			backfillLegacyTTLs,
+		)
 		logger.Info("emote roster preloader started",
 			"interval", cfg.EmoteRosterPreloadInterval.String(),
 			"top_n", cfg.EmoteRosterPreloadTopN,
 			"always_tracked", len(cfg.AlwaysTrackedChannels),
 		)
+	} else {
+		go backfillLegacyTTLs()
 	}
 
 	h := api.NewWithRenderQueue(st, obj, d, seed, rq, logger, cfg.CuratorAPIToken)
@@ -121,4 +171,12 @@ func main() {
 		logger.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+func newObjectStore(endpoint, accessKey, secretKey, bucket, prefix string) (*objstore.Client, error) {
+	useSSL := strings.HasPrefix(strings.TrimSpace(endpoint), "https://")
+	endpoint = strings.TrimSpace(endpoint)
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	endpoint = strings.TrimPrefix(endpoint, "http://")
+	return objstore.New(endpoint, accessKey, secretKey, bucket, prefix, useSSL)
 }
