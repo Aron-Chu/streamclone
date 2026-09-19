@@ -431,16 +431,18 @@ func (c *Client) Clips(ctx context.Context, broadcasterID string, query model.Cl
 	}
 	var resp struct {
 		Data []struct {
-			ID              string  `json:"id"`
-			URL             string  `json:"url"`
-			EmbedURL        string  `json:"embed_url"`
-			BroadcasterName string  `json:"broadcaster_name"`
-			CreatorName     string  `json:"creator_name"`
-			Title           string  `json:"title"`
-			ViewCount       int     `json:"view_count"`
-			CreatedAt       string  `json:"created_at"`
-			ThumbnailURL    string  `json:"thumbnail_url"`
-			Duration        float64 `json:"duration"`
+			ID              string   `json:"id"`
+			URL             string   `json:"url"`
+			EmbedURL        string   `json:"embed_url"`
+			BroadcasterName string   `json:"broadcaster_name"`
+			CreatorName     string   `json:"creator_name"`
+			Title           string   `json:"title"`
+			ViewCount       int      `json:"view_count"`
+			CreatedAt       string   `json:"created_at"`
+			ThumbnailURL    string   `json:"thumbnail_url"`
+			Duration        float64  `json:"duration"`
+			VideoID         string   `json:"video_id"`
+			VODOffset       *float64 `json:"vod_offset"`
 		} `json:"data"`
 		Pagination struct {
 			Cursor string `json:"cursor"`
@@ -464,16 +466,18 @@ func (c *Client) Clips(ctx context.Context, broadcasterID string, query model.Cl
 	clips := make([]model.ClipCard, 0, len(resp.Data))
 	for _, item := range resp.Data {
 		clips = append(clips, model.ClipCard{
-			ID:              item.ID,
-			Title:           item.Title,
-			URL:             item.URL,
-			EmbedURL:        item.EmbedURL,
-			ThumbnailURL:    item.ThumbnailURL,
-			BroadcasterName: item.BroadcasterName,
-			CreatorName:     item.CreatorName,
-			ViewCount:       item.ViewCount,
-			CreatedAt:       item.CreatedAt,
-			DurationSeconds: item.Duration,
+			VideoID:          item.VideoID,
+			VODOffsetSeconds: item.VODOffset,
+			ID:               item.ID,
+			Title:            item.Title,
+			URL:              item.URL,
+			EmbedURL:         item.EmbedURL,
+			ThumbnailURL:     item.ThumbnailURL,
+			BroadcasterName:  item.BroadcasterName,
+			CreatorName:      item.CreatorName,
+			ViewCount:        item.ViewCount,
+			CreatedAt:        item.CreatedAt,
+			DurationSeconds:  item.Duration,
 		})
 	}
 	return model.ClipsResponse{Items: clips, Cursor: resp.Pagination.Cursor}, nil

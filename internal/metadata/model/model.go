@@ -64,16 +64,18 @@ type SocialLink struct {
 }
 
 type ClipCard struct {
-	ID              string  `json:"id"`
-	Title           string  `json:"title"`
-	URL             string  `json:"url"`
-	EmbedURL        string  `json:"embedUrl,omitempty"`
-	ThumbnailURL    string  `json:"thumbnailUrl,omitempty"`
-	BroadcasterName string  `json:"broadcasterName,omitempty"`
-	CreatorName     string  `json:"creatorName,omitempty"`
-	ViewCount       int     `json:"viewCount,omitempty"`
-	CreatedAt       string  `json:"createdAt,omitempty"`
-	DurationSeconds float64 `json:"durationSeconds,omitempty"`
+	VideoID          string   `json:"videoId,omitempty"`
+	VODOffsetSeconds *float64 `json:"vodOffsetSeconds,omitempty"`
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	URL              string   `json:"url"`
+	EmbedURL         string   `json:"embedUrl,omitempty"`
+	ThumbnailURL     string   `json:"thumbnailUrl,omitempty"`
+	BroadcasterName  string   `json:"broadcasterName,omitempty"`
+	CreatorName      string   `json:"creatorName,omitempty"`
+	ViewCount        int      `json:"viewCount,omitempty"`
+	CreatedAt        string   `json:"createdAt,omitempty"`
+	DurationSeconds  float64  `json:"durationSeconds,omitempty"`
 }
 
 type ClipsResponse struct {
