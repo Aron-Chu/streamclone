@@ -1,63 +1,127 @@
 #!/usr/bin/env bash
-# Fail closed if production topology leaks appear in any tracked file.
-# Preferred search: ripgrep. Fallback: git grep. Missing both => fail.
+# Scan every tracked public Streamclone file for production topology / operator
+# leak patterns. Guard definitions are allowlisted only by exact path.
+#
+# Matches are reported by path and line number only; line contents are never
+# printed. The exact private deny-list is supplied at run time (see below).
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 cd "${ROOT}"
 
-PATTERN='141\.11\.243|23\.173\.152|SHA256:[A-Za-z0-9+/=]{20,}|/root/streampulse-ops|/etc/streamclone/pulse\.env|root@streampulse-vps|id_ed25519_bearhost|PULSE_PROBE_SSH_|streampulse-vps-production-deploy|production\.local\.env'
+# Generic, value-free rules. The exact operator deny-list is supplied at run
+# time by private streampulse-ops through STREAMPULSE_PRIVATE_TOPOLOGY_PATTERN
+# (an extended regex) or STREAMPULSE_PRIVATE_TOPOLOGY_PATTERN_FILE (one
+# alternative per line) and is never committed to this public repository.
+# The key header is joined at runtime to avoid detect-private-key hook FPs.
+_fp='SHA256:[A-Za-z0-9+/=]{20,}'
+_openssh_hdr="$(printf '%s%s%s' 'BEGIN OPEN' 'SSH PRIVATE ' 'KEY')"
+_named_key='id_(rsa|dsa|ecdsa|ed25519)_[A-Za-z0-9][A-Za-z0-9_-]*'
+_root_login='root@[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]'
+_etc_env='/etc/[A-Za-z0-9._-]+/[A-Za-z0-9._-]*\.env'
+PATTERN="${_fp}|${_openssh_hdr}|${_named_key}|${_root_login}|${_etc_env}"
 
-# Files that must mention patterns while defining the boundary (not disclosures).
-allowlisted() {
-  case "$1" in
-    scripts/ci-public-topology-scan.sh|\
-    scripts/pre-commit-public-ops-guard.sh|\
-    scripts/ops/filter-repo-paths.txt|\
-    scripts/ops/filter-repo-replacements.txt|\
-    .cursor/rules/public-repo-boundary.mdc|\
-    docs/evidence/public-ref-contamination-report-*.md|\
-    docs/evidence/*contamination*)
-      return 0
-      ;;
-  esac
+PRIVATE_PATTERN="${STREAMPULSE_PRIVATE_TOPOLOGY_PATTERN:-}"
+if [[ -z "${PRIVATE_PATTERN}" && -n "${STREAMPULSE_PRIVATE_TOPOLOGY_PATTERN_FILE:-}" ]]; then
+  if [[ ! -r "${STREAMPULSE_PRIVATE_TOPOLOGY_PATTERN_FILE}" ]]; then
+    echo "Public topology scan FAILED: STREAMPULSE_PRIVATE_TOPOLOGY_PATTERN_FILE is not readable" >&2
+    exit 2
+  fi
+  PRIVATE_PATTERN="$(tr -d '\r' <"${STREAMPULSE_PRIVATE_TOPOLOGY_PATTERN_FILE}" | grep -v -e '^[[:space:]]*$' -e '^#' | paste -sd '|' - || true)"
+  if [[ -z "${PRIVATE_PATTERN}" ]]; then
+    echo "Public topology scan FAILED: STREAMPULSE_PRIVATE_TOPOLOGY_PATTERN_FILE has no patterns" >&2
+    exit 2
+  fi
+fi
+if [[ -n "${PRIVATE_PATTERN}" ]]; then
+  PATTERN="${PATTERN}|${PRIVATE_PATTERN}"
+  private_state="private deny-list applied"
+else
+  private_state="private deny-list not configured; generic rules only"
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    echo "::warning::Public topology scan ran without STREAMPULSE_PRIVATE_TOPOLOGY_PATTERN; generic rules only"
+  fi
+fi
+
+ALLOW_FILES=(
+  '.cursor/rules/public-repo-boundary.mdc'
+  'scripts/ci-public-topology-scan.sh'
+  'scripts/pre-commit-public-ops-guard.sh'
+)
+
+violations=0
+tmp="$(mktemp)"
+trap 'rm -f "${tmp}"' EXIT
+
+is_allowlisted_guard_file() {
+  local file="$1"
+  local allowed
+  for allowed in "${ALLOW_FILES[@]}"; do
+    [[ "${file}" == "${allowed}" ]] && return 0
+  done
   return 1
 }
 
-if command -v rg >/dev/null 2>&1; then
-  SEARCH_TOOL=rg
-  mapfile -t HITS < <(rg -n -H --hidden --no-messages -g '!.git/*' "${PATTERN}" . 2>/dev/null || true)
-elif command -v git >/dev/null 2>&1; then
-  SEARCH_TOOL=git-grep
-  # Repository-native fallback — covers every tracked file including archives.
-  mapfile -t HITS < <(git grep -nI -E "${PATTERN}" -- . 2>/dev/null || true)
+scan_file() {
+  local scanner="$1"
+  local file="$2"
+  local status
+
+  if [[ "${scanner}" == "rg" ]]; then
+    if rg -a -n -H -e "${PATTERN}" -- "${file}" >>"${tmp}" 2>/dev/null; then
+      return 0
+    else
+      status=$?
+    fi
+  else
+    if grep -a -E -n -H -e "${PATTERN}" -- "${file}" >>"${tmp}" 2>/dev/null; then
+      return 0
+    else
+      status=$?
+    fi
+  fi
+
+  case "${status}" in
+    1) return 0 ;;
+    *)
+      echo "Public topology scan FAILED — unable to scan tracked path: ${file}" >&2
+      exit 2
+      ;;
+  esac
+}
+
+scanner=""
+if [[ "${TOPOLOGY_SCAN_FORCE_GREP:-0}" != "1" ]] && command -v rg >/dev/null 2>&1; then
+  scanner="rg"
+elif command -v grep >/dev/null 2>&1 && printf 'fallback-check\n' | grep -Eq '^fallback-check$'; then
+  scanner="grep"
 else
-  echo "ci-public-topology-scan: FAIL closed — neither rg nor git available" >&2
-  exit 1
+  echo "Public topology scan FAILED — neither rg nor a working grep fallback is available." >&2
+  exit 2
 fi
 
-violations=0
-for hit in "${HITS[@]:-}"; do
-  [ -z "${hit}" ] && continue
-  file="${hit%%:*}"
-  file="${file#./}"
-  # Normalize Windows rg paths (.\foo\bar) so allowlists match on all hosts.
-  file="${file//\\//}"
-  file="${file#./}"
-  if allowlisted "${file}"; then
-    continue
-  fi
-  # Also allow docs/evidence contamination reports by prefix
-  case "${file}" in
-    docs/evidence/public-ref-contamination-report-*) continue ;;
-  esac
-  echo "${hit}"
-  violations=1
-done
+# Tracked files plus untracked files that are not ignored, so a file about to
+# be committed is caught before it lands. Deleted tracked paths are skipped.
+while IFS= read -r -d '' file; do
+  [[ -f "${file}" ]] || continue
+  scan_file "${scanner}" "${file}"
+done < <(git ls-files -z --cached --others --exclude-standard)
+
+if [[ -s "${tmp}" ]]; then
+  while IFS= read -r line; do
+    file="${line%%:*}"
+    if is_allowlisted_guard_file "${file}"; then
+      continue
+    fi
+    rest="${line#*:}"
+    echo "topology-hit file=${file} line=${rest%%:*}" >&2
+    violations=1
+  done <"${tmp}"
+fi
 
 if [[ "${violations}" -ne 0 ]]; then
-  echo "ci-public-topology-scan: FAIL (tool=${SEARCH_TOOL}) — move operator topology to private streampulse-ops" >&2
+  echo "Public topology scan FAILED — move host IPs / SSH / operator paths to private ops." >&2
   exit 1
 fi
 
-echo "ci-public-topology-scan: OK (tool=${SEARCH_TOOL}, all tracked files scanned)"
+echo "ci-public-topology-scan OK (${private_state})"
