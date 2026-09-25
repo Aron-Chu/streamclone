@@ -9,7 +9,7 @@ This repository is **application source, local dev, CI, and contracts only**.
 
 ## Never commit to this public repo
 
-- Production host IPs (`141.11.243.*`, `23.173.152.*`, or similar)
+- Production host IP addresses or address prefixes (IPv4 or IPv6, in any notation)
 - SSH fingerprints, `root@…` accounts, or private key path names used for production
 - Private ops checkout paths, production env file paths, or live env values
 - Operator runbooks under `docs/ops/` (except the stub README)
