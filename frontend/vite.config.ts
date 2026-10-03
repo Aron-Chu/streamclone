@@ -1,5 +1,16 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { assertBuildOnlyRuntimeBoundary } from '../scripts/frontend-npm-audit-disposition.mjs'
+
+function buildOnlyAuditBoundary(): Plugin {
+  return {
+    name: 'streamclone-build-only-audit-boundary',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      assertBuildOnlyRuntimeBoundary(bundle)
+    },
+  }
+}
 
 const cssEntry =
   process.env.STREAMCLONE_CSS_ENTRY === '.streamclone.css'
@@ -15,7 +26,7 @@ const usePollingWatch = Boolean(
 )
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), buildOnlyAuditBoundary()],
   resolve: {
     alias: {
       'streamclone-global-css': cssEntry,

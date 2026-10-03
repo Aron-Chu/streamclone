@@ -257,7 +257,7 @@ frontend-test:
 	cd frontend && npm test
 
 frontend-audit:
-	cd frontend && npm audit --audit-level=high
+	cd frontend && node ../scripts/frontend-npm-audit-disposition.mjs
 
 compose-config-check: env
 	$(COMPOSE_CORE) config --quiet
