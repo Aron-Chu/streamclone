@@ -33,8 +33,12 @@ make security-scan
 ## Frontend dependency audit
 
 `make frontend-audit` remains a required prerequisite of `make check`. It runs
-both the full `npm audit --json --audit-level=high` and the production
-`npm audit --omit=dev --json --audit-level=high`, retaining the raw JSON, stderr,
+both full and production `npm audit --json --audit-level=high` reports. The full
+command explicitly includes prod, dev, optional and peer dependencies; production
+explicitly includes prod, optional and peer dependencies and omits dev. These
+CLI settings override inherited npm include/omit defaults, so `NODE_ENV=production`
+cannot remove dev from the full audit and inherited `include=dev` cannot expand
+the production audit. The gate retains the raw JSON, stderr,
 and command status in a printed temporary directory. An optional
 `STREAMCLONE_AUDIT_REPORT_DIR` selects an evidence directory; existing reports
 are never overwritten. Invalid reports and failed audit commands fail the gate.
@@ -46,10 +50,13 @@ stack-exhaustion vulnerability in `braces` through deeply nested patterns. As of
 2026-10-02 its advisory lists no patched version. The exact reviewed development
 chain is `braces@3.0.3`, `chokidar@3.6.0`, `micromatch@4.0.8`,
 `fast-glob@3.3.3`, and `tailwindcss@3.4.19`. Every installed node must be marked
-development-only in this frontend's lock, with its reviewed dependency edges,
+development-only in this frontend's lock, with its complete reviewed regular
+dependency key/range map from commit `86e7014c121303894185f47e6e0545bfad294be1`,
 and every audit edge must lead to that exact advisory. New high/critical
 advisories, additional occurrences, version changes, missing nodes, changed
-metadata, or a production dependency fail. The production audit accepts no
+metadata, added or missing regular dependency edges, or a production dependency
+fail. Optional and peer dependencies are included in the audit scope but their
+lock maps are not frozen by this disposition. The production audit accepts no
 high/critical disposition.
 
 Tailwind runs against repository-controlled source globs during CSS compilation.

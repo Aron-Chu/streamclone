@@ -11,12 +11,27 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const SEVERITIES = ['info', 'low', 'moderate', 'high', 'critical']
+// Complete regular dependency maps from the reviewed 86e7014c frontend lock.
+// Optional/peer dependencies are audited but are not frozen by this comparison.
 const CHAIN = {
-  braces: { version: '3.0.3', via: [], dependencies: {} },
-  chokidar: { version: '3.6.0', via: ['braces'], dependencies: { braces: '~3.0.2' } },
-  'fast-glob': { version: '3.3.3', via: ['micromatch'], dependencies: { micromatch: '^4.0.8' } },
-  micromatch: { version: '4.0.8', via: ['braces'], dependencies: { braces: '^3.0.3' } },
-  tailwindcss: { version: '3.4.19', via: ['chokidar', 'fast-glob', 'micromatch'], dependencies: { chokidar: '^3.6.0', 'fast-glob': '^3.3.2', micromatch: '^4.0.8' } },
+  braces: { version: '3.0.3', via: [], dependencies: { 'fill-range': '^7.1.1' } },
+  chokidar: { version: '3.6.0', via: ['braces'], dependencies: {
+    anymatch: '~3.1.2', braces: '~3.0.2', 'glob-parent': '~5.1.2',
+    'is-binary-path': '~2.1.0', 'is-glob': '~4.0.1', 'normalize-path': '~3.0.0', readdirp: '~3.6.0',
+  } },
+  'fast-glob': { version: '3.3.3', via: ['micromatch'], dependencies: {
+    '@nodelib/fs.stat': '^2.0.2', '@nodelib/fs.walk': '^1.2.3', 'glob-parent': '^5.1.2',
+    merge2: '^1.3.0', micromatch: '^4.0.8',
+  } },
+  micromatch: { version: '4.0.8', via: ['braces'], dependencies: { braces: '^3.0.3', picomatch: '^2.3.1' } },
+  tailwindcss: { version: '3.4.19', via: ['chokidar', 'fast-glob', 'micromatch'], dependencies: {
+    '@alloc/quick-lru': '^5.2.0', arg: '^5.0.2', chokidar: '^3.6.0', didyoumean: '^1.2.2',
+    dlv: '^1.1.3', 'fast-glob': '^3.3.2', 'glob-parent': '^6.0.2', 'is-glob': '^4.0.3',
+    jiti: '^1.21.7', lilconfig: '^3.1.3', micromatch: '^4.0.8', 'normalize-path': '^3.0.0',
+    'object-hash': '^3.0.0', picocolors: '^1.1.1', postcss: '^8.4.47', 'postcss-import': '^15.1.0',
+    'postcss-js': '^4.0.1', 'postcss-load-config': '^4.0.2 || ^5.0 || ^6.0', 'postcss-nested': '^6.2.0',
+    'postcss-selector-parser': '^6.1.2', resolve: '^1.22.8', sucrase: '^3.35.0',
+  } },
 }
 const ADVISORY = {
   source: 1240992,
@@ -27,8 +42,10 @@ const ADVISORY = {
   severity: 'high',
   range: '<=3.0.3',
 }
+/** Distinguish object-shaped npm evidence from arrays and null. */
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
+/** Validate npm report v2 evidence and package counts before any disposition. */
 export function validateAuditSchema(audit) {
   if (!isRecord(audit)) return ['report must be an object']
   const errors = []
@@ -57,6 +74,13 @@ export function validateAuditSchema(audit) {
   return errors
 }
 
+/** Compare every regular dependency key/range without depending on key order. */
+function exactRegularDependencies(actual, expected) {
+  return isRecord(actual) && Object.keys(actual).length === Object.keys(expected).length &&
+    Object.entries(expected).every(([name, range]) => Object.hasOwn(actual, name) && actual[name] === range)
+}
+
+/** Require reviewed node identity, complete regular dependencies and advisory edges. */
 function exactDevelopmentChain(vulnerabilities, lock) {
   if (lock?.name !== 'streamclone-frontend' || lock?.packages?.['']?.name !== 'streamclone-frontend' || !isRecord(lock.packages)) {
     return false
@@ -67,6 +91,7 @@ function exactDevelopmentChain(vulnerabilities, lock) {
     const paths = Object.keys(lock.packages).filter((path) => path === `node_modules/${name}` || path.endsWith(`/node_modules/${name}`))
     if (paths.length !== 1 || paths[0] !== `node_modules/${name}`) return false
   }
+  /** Follow only the reviewed vulnerability path, rejecting missing nodes or cycles. */
   function matches(name, seen) {
     const expected = Object.hasOwn(CHAIN, name) ? CHAIN[name] : undefined
     const info = vulnerabilities[name]
@@ -75,7 +100,7 @@ function exactDevelopmentChain(vulnerabilities, lock) {
     if (!expected || seen.has(name) || !isRecord(info) || info.severity !== 'high' ||
         !Array.isArray(info.nodes) || info.nodes.length !== 1 || info.nodes[0] !== path ||
         installed?.dev !== true || installed?.version !== expected.version || !Array.isArray(info.via) ||
-        !Object.entries(expected.dependencies).every(([parent, range]) => installed.dependencies?.[parent] === range)) return false
+        !exactRegularDependencies(installed.dependencies, expected.dependencies)) return false
     if (name === 'braces') {
       return info.via.length === 1 && isRecord(info.via[0]) &&
         Object.entries(ADVISORY).every(([key, value]) => info.via[0][key] === value)
@@ -87,6 +112,7 @@ function exactDevelopmentChain(vulnerabilities, lock) {
   return matches('tailwindcss', new Set())
 }
 
+/** Keep unknown high/critical findings fatal; production has no dispositions. */
 export function validateAuditPolicy(audit, lock, npmStatus, production = false) {
   if (npmStatus !== 0 && npmStatus !== 1) throw new Error(`npm audit command failed: status ${npmStatus}`)
   const errors = validateAuditSchema(audit)
@@ -118,6 +144,7 @@ export function assertBuildOnlyRuntimeBoundary(bundle) {
   if (forbidden.size) throw new Error(`Development-only audit dependency in browser output:\n${[...forbidden].join('\n')}`)
 }
 
+/** Collect full and production evidence with explicit dependency inclusion scope. */
 function runAudits() {
   const reports = process.env.STREAMCLONE_AUDIT_REPORT_DIR
     ? resolve(process.env.STREAMCLONE_AUDIT_REPORT_DIR)
@@ -129,7 +156,10 @@ function runAudits() {
   // Preserve both raw reports before considering the only permitted disposition.
   for (const production of [false, true]) {
     const name = production ? 'production' : 'full'
-    const args = ['audit', '--json', '--audit-level=high', ...(production ? ['--omit=dev'] : [])]
+    // CLI include overrides inherited omit/defaults; the explicit production
+    // include list replaces an inherited include=dev before omit=dev is applied.
+    const args = ['audit', '--json', '--audit-level=high', '--include=prod', '--include=optional', '--include=peer',
+      ...(production ? ['--omit=dev'] : ['--include=dev'])]
     // Windows command text consists only of the constant arguments above.
     const result = spawnSync(process.platform === 'win32' ? 'cmd.exe' : 'npm',
       process.platform === 'win32' ? ['/d', '/s', '/c', ['npm', ...args].join(' ')] : args, {

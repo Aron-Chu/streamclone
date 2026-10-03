@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { assertBuildOnlyRuntimeBoundary, validateAuditPolicy, validateAuditSchema } from '../../scripts/frontend-npm-audit-disposition.mjs'
 
-// The reviewed npm report shape, separate from the gate's internal constants.
+/** Reviewed audit evidence and complete regular lock edges, independent of gate constants. */
 function reviewedFixture() {
   const audit: any = {
     auditReportVersion: 2,
@@ -23,16 +23,29 @@ function reviewedFixture() {
     name: 'streamclone-frontend',
     packages: {
       '': { name: 'streamclone-frontend' },
-      'node_modules/braces': { version: '3.0.3', dev: true },
-      'node_modules/chokidar': { version: '3.6.0', dev: true, dependencies: { braces: '~3.0.2' } },
-      'node_modules/fast-glob': { version: '3.3.3', dev: true, dependencies: { micromatch: '^4.0.8' } },
-      'node_modules/micromatch': { version: '4.0.8', dev: true, dependencies: { braces: '^3.0.3' } },
-      'node_modules/tailwindcss': { version: '3.4.19', dev: true, dependencies: { chokidar: '^3.6.0', 'fast-glob': '^3.3.2', micromatch: '^4.0.8' } },
+      'node_modules/braces': { version: '3.0.3', dev: true, dependencies: { 'fill-range': '^7.1.1' } },
+      'node_modules/chokidar': { version: '3.6.0', dev: true, dependencies: {
+        anymatch: '~3.1.2', braces: '~3.0.2', 'glob-parent': '~5.1.2', 'is-binary-path': '~2.1.0',
+        'is-glob': '~4.0.1', 'normalize-path': '~3.0.0', readdirp: '~3.6.0',
+      } },
+      'node_modules/fast-glob': { version: '3.3.3', dev: true, dependencies: {
+        '@nodelib/fs.stat': '^2.0.2', '@nodelib/fs.walk': '^1.2.3', 'glob-parent': '^5.1.2', merge2: '^1.3.0', micromatch: '^4.0.8',
+      } },
+      'node_modules/micromatch': { version: '4.0.8', dev: true, dependencies: { braces: '^3.0.3', picomatch: '^2.3.1' } },
+      'node_modules/tailwindcss': { version: '3.4.19', dev: true, dependencies: {
+        '@alloc/quick-lru': '^5.2.0', arg: '^5.0.2', chokidar: '^3.6.0', didyoumean: '^1.2.2',
+        dlv: '^1.1.3', 'fast-glob': '^3.3.2', 'glob-parent': '^6.0.2', 'is-glob': '^4.0.3', jiti: '^1.21.7',
+        lilconfig: '^3.1.3', micromatch: '^4.0.8', 'normalize-path': '^3.0.0', 'object-hash': '^3.0.0',
+        picocolors: '^1.1.1', postcss: '^8.4.47', 'postcss-import': '^15.1.0', 'postcss-js': '^4.0.1',
+        'postcss-load-config': '^4.0.2 || ^5.0 || ^6.0', 'postcss-nested': '^6.2.0',
+        'postcss-selector-parser': '^6.1.2', resolve: '^1.22.8', sucrase: '^3.35.0',
+      } },
     },
   }
   return { audit, lock }
 }
 
+/** Clean report used to test failures independently of the disposition graph. */
 function cleanAudit(): any {
   return { auditReportVersion: 2, vulnerabilities: {}, metadata: { vulnerabilities: { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 } } }
 }
@@ -115,6 +128,29 @@ describe('frontend npm audit disposition', () => {
       assert.throws(() => validateAuditPolicy(audit, lock, 1), /Undispositioned/)
     })
   }
+
+  for (const name of ['braces', 'chokidar', 'fast-glob', 'micromatch', 'tailwindcss']) {
+    for (const mutation of ['added', 'missing', 'changed range', 'missing map']) {
+      it(`rejects ${mutation} regular dependency on ${name}`, () => {
+        const { audit, lock } = reviewedFixture()
+        const installed = lock.packages[`node_modules/${name}`]
+        const first = Object.keys(installed.dependencies)[0]
+        if (mutation === 'added') installed.dependencies.unreviewed = '^1.0.0'
+        if (mutation === 'missing') delete installed.dependencies[first]
+        if (mutation === 'changed range') installed.dependencies[first] = '^999.0.0'
+        if (mutation === 'missing map') delete installed.dependencies
+        assert.throws(() => validateAuditPolicy(audit, lock, 1), /Undispositioned/)
+      })
+    }
+  }
+
+  it('accepts complete regular dependency maps with reordered keys', () => {
+    const { audit, lock } = reviewedFixture()
+    for (const installed of Object.values(lock.packages) as any[]) {
+      if (installed.dependencies) installed.dependencies = Object.fromEntries(Object.entries(installed.dependencies).reverse())
+    }
+    assert.equal(validateAuditPolicy(audit, lock, 1).length, 5)
+  })
 
   for (const status of [null, 2, -1, 127]) {
     it(`rejects npm command failure status ${status}`, () => assert.throws(() => validateAuditPolicy(cleanAudit(), null, status), /command failed/))
