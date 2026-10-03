@@ -5,6 +5,7 @@ WORKDIR /app/frontend
 # devDependencies (tailwindcss, postcss) must be present for vite build CSS.
 RUN npm ci --include=dev || npm install --include=dev
 COPY frontend/ ./
+COPY scripts/frontend-npm-audit-disposition.mjs scripts/frontend-npm-audit-disposition.d.mts /app/scripts/
 RUN npm run build
 
 FROM nginx:1.27-alpine
