@@ -3,6 +3,7 @@ package enrich
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -18,6 +19,12 @@ import (
 )
 
 const twitchNativeEmoteURL = "https://static-cdn.jtvnw.net/emoticons/v2/%s/default/dark/1.0"
+
+// errDictMissing means the channel has no dictionary in Redis. Dictionaries
+// expire (EMOTE_DICTIONARY_TTL) and always hold the global emotes, so a
+// missing key means "expired or not rebuilt yet", never "this channel has no
+// emotes": a reload keeps the dictionary the enricher already serves.
+var errDictMissing = errors.New("channel emote dictionary not in redis")
 
 type Enricher struct {
 	rdb      *redis.Client
@@ -124,7 +131,11 @@ func (e *Enricher) ensure(channel string) *tokenize.ChannelDict {
 	e.mu.Unlock()
 
 	t, err := e.loadTrie(context.Background(), channel)
-	if err != nil {
+	if errors.Is(err, errDictMissing) {
+		// Not built yet (or expired): the emote service's ensure call
+		// rebuilds it and the reload delta fills this dictionary.
+		t = tokenize.NewTrie()
+	} else if err != nil {
 		e.log.Error("dict load failed", "channel", channel, "err", err)
 		t = tokenize.NewTrie()
 	}
@@ -139,11 +150,11 @@ func (e *Enricher) loadTrie(ctx context.Context, channel string) (*tokenize.Trie
 		metrics.EmoteDictionaryLoads.WithLabelValues("error").Inc()
 		return nil, err
 	}
-	result := "hit"
 	if len(m) == 0 {
-		result = "miss"
+		metrics.EmoteDictionaryLoads.WithLabelValues("miss").Inc()
+		return nil, errDictMissing
 	}
-	metrics.EmoteDictionaryLoads.WithLabelValues(result).Inc()
+	metrics.EmoteDictionaryLoads.WithLabelValues("hit").Inc()
 	t := tokenize.NewTrie()
 	for name, v := range m {
 		var ent struct {
@@ -182,14 +193,28 @@ func (e *Enricher) consumeDeltas(channel string, dict *tokenize.ChannelDict) {
 		case <-timerC:
 			timer = nil
 			timerC = nil
-			t, err := e.loadTrie(ctx, channel)
-			if err != nil {
-				e.log.Error("dict rebuild failed", "channel", channel, "err", err)
-				continue
-			}
-			dict.Swap(t)
-			frame, _ := json.Marshal(map[string]string{"type": "emote_delta", "channel": channel})
-			e.rdb.Publish(ctx, "chat:"+channel, frame)
+			e.reload(ctx, channel, dict)
 		}
 	}
+}
+
+// reload re-reads the channel dictionary after a delta and swaps it in. When
+// the read fails, or the key is missing because it expired or is being
+// rebuilt, the dictionary already in memory stays: blanking it would strip
+// every third-party emote from the channel's chat until the next rebuild.
+// It reports whether a new dictionary was swapped in.
+func (e *Enricher) reload(ctx context.Context, channel string, dict *tokenize.ChannelDict) bool {
+	t, err := e.loadTrie(ctx, channel)
+	if errors.Is(err, errDictMissing) {
+		e.log.Warn("dict missing on reload; keeping previous", "channel", channel)
+		return false
+	}
+	if err != nil {
+		e.log.Error("dict rebuild failed", "channel", channel, "err", err)
+		return false
+	}
+	dict.Swap(t)
+	frame, _ := json.Marshal(map[string]string{"type": "emote_delta", "channel": channel})
+	e.rdb.Publish(ctx, "chat:"+channel, frame)
+	return true
 }
