@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -300,7 +301,8 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 			if req.Alias != nil {
 				name = *req.Alias
 			}
-			_ = h.d.AddEmote(r.Context(), channel.Login, name, emote.ID, flags.IsZeroWidth(emote.Flags))
+			h.patchOrRebuildDictionary(r.Context(), channel.Login,
+				h.d.AddEmote(r.Context(), channel.Login, name, emote.ID, flags.IsZeroWidth(emote.Flags)))
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -796,6 +798,20 @@ func maxInt(a, b int) int {
 	return b
 }
 
+// patchOrRebuildDictionary handles the result of a single-entry dictionary
+// patch. The dict package only patches a dictionary that exists; when it is
+// missing (expired or never built) the full dictionary is rebuilt from
+// PostgreSQL, which already holds the change. Other patch errors keep the
+// previous fire-and-forget behaviour.
+func (h *Handler) patchOrRebuildDictionary(ctx context.Context, login string, patchErr error) {
+	if !errors.Is(patchErr, dict.ErrDictMissing) {
+		return
+	}
+	if err := h.rebuildChannelDictionary(ctx, login); err != nil && h.log != nil {
+		h.log.Warn("emote dictionary rebuild after missing dict failed", "channel", login, "err", err)
+	}
+}
+
 func (h *Handler) rebuildChannelDictionary(ctx context.Context, login string) error {
 	if h.d == nil {
 		return nil
@@ -921,7 +937,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 
 	channel, cerr := h.getChannelForSet(r, setID)
 	if cerr == nil && channel != nil {
-		_ = h.d.RemoveEmote(r.Context(), channel.Login, name)
+		h.patchOrRebuildDictionary(r.Context(), channel.Login, h.d.RemoveEmote(r.Context(), channel.Login, name))
 	}
 
 	w.WriteHeader(http.StatusNoContent)
