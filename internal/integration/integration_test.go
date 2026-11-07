@@ -253,7 +253,13 @@ func TestSetChangeToDelta(t *testing.T) {
 	st := store.New(pool)
 	d := dict.New(rdb, "/emotes")
 
-	if err := rdb.HSet(ctx, "channel:emotes:legacyttl", "LegacyEmote", "{}").Err(); err != nil {
+	// Start from a dictionary with no TTL. A key left by an earlier run on the
+	// same Redis still has its TTL, so the backfill would skip it.
+	const legacyKey = "channel:emotes:legacyttl"
+	if err := rdb.Del(ctx, legacyKey).Err(); err != nil {
+		t.Fatalf("clear legacy dictionary: %v", err)
+	}
+	if err := rdb.HSet(ctx, legacyKey, "LegacyEmote", "{}").Err(); err != nil {
 		t.Fatalf("seed legacy dictionary: %v", err)
 	}
 	if updated, err := d.BackfillLegacyTTLs(ctx, 100); err != nil {
@@ -261,7 +267,7 @@ func TestSetChangeToDelta(t *testing.T) {
 	} else if updated < 1 {
 		t.Fatalf("BackfillLegacyTTLs updated=%d, want at least legacyttl", updated)
 	}
-	if ttl, err := rdb.TTL(ctx, "channel:emotes:legacyttl").Result(); err != nil || ttl <= 0 {
+	if ttl, err := rdb.TTL(ctx, legacyKey).Result(); err != nil || ttl <= 0 {
 		t.Fatalf("legacy dictionary ttl = %s, err=%v", ttl, err)
 	}
 
@@ -375,13 +381,14 @@ func TestSetChangeToDelta(t *testing.T) {
 	}
 }
 
+// testWebPImage returns a 1x1 black lossless WebP that libvips decodes. It was
+// made with `vips black x.webp[lossless,keep=none] 1 1`.
 func testWebPImage() []byte {
 	return []byte{
-		0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00,
+		0x52, 0x49, 0x46, 0x46, 0x1A, 0x00, 0x00, 0x00,
 		0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x4C,
-		0x17, 0x00, 0x00, 0x00, 0x2F, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00,
+		0x0E, 0x00, 0x00, 0x00, 0x2F, 0x00, 0x00, 0x00,
+		0x00, 0x07, 0x10, 0x11, 0xFD, 0x0F, 0x44, 0x44,
+		0xFF, 0x03,
 	}
 }
