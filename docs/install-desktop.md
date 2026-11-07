@@ -45,11 +45,25 @@ MinIO no longer publishes the `minio/minio` image, so emote storage now runs on 
 docker run --rm -v streamclone_minio-data:/data:ro -v "${PWD}:/backup" alpine tar czf /backup/minio-data-backup.tgz -C /data .
 ```
 
-**To restore the backup**, **Stop** Streamclone and run this from the folder that holds `minio-data-backup.tgz`. It reads the whole archive first and changes nothing if the file is missing or damaged. Restoring replaces everything in the volume, so anything stored after the backup is lost.
+**To restore the backup**, **Stop** Streamclone and run these from the folder that holds `minio-data-backup.tgz`. Restoring replaces everything in the volume, so anything stored after the backup is lost.
 
-```sh
-docker run --rm -v streamclone_minio-data:/data -v "${PWD}:/backup" alpine sh -c "tar tzf /backup/minio-data-backup.tgz >/dev/null && find /data -mindepth 1 -delete && tar xzf /backup/minio-data-backup.tgz -C /data"
-```
+1. Unpack the backup into a temporary volume. This doesn't touch your current data. If it fails, for example because the file is missing or damaged, stop here and run step 3.
+
+   ```sh
+   docker run --rm -v minio-restore-tmp:/restore -v "${PWD}:/backup" alpine sh -c "find /restore -mindepth 1 -delete && tar xzf /backup/minio-data-backup.tgz -C /restore"
+   ```
+
+2. Replace the current data with the unpacked copy. If this fails, for example because the disk is full, the full copy is still in the temporary volume: free some space and run step 2 again.
+
+   ```sh
+   docker run --rm -v streamclone_minio-data:/data -v minio-restore-tmp:/restore:ro alpine sh -c "find /data -mindepth 1 -delete && cp -a /restore/. /data/"
+   ```
+
+3. Remove the temporary volume:
+
+   ```sh
+   docker volume rm minio-restore-tmp
+   ```
 
 **To go back to MinIO:** `minio/minio` can no longer be pulled, so this only works if `docker image ls minio/minio` still lists `latest`.
 
