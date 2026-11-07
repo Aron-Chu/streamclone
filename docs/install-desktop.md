@@ -39,19 +39,23 @@ If Docker Desktop is not running during uninstall, Streamclone can defer Docker 
 
 MinIO no longer publishes the `minio/minio` image, so emote storage now runs on `pgsty/silo`, a maintained MinIO fork. When you install this release over an existing install, it starts Silo on your existing `minio-data` volume, with no export needed. **Update** and **Repair** do the same. On first start, Silo can update the store's internal metadata, so going back to MinIO needs a backup taken before the switch.
 
-**Back up before you install this release over an existing install.** **Stop** Streamclone, then run this from a folder outside the install folder, such as Documents (**Uninstall** deletes the install folder):
+**Back up before you install this release over an existing install.** **Stop** Streamclone. Then run this in PowerShell on Windows, or a terminal on macOS/Linux, from a folder outside the install folder such as Documents (**Uninstall** deletes the install folder). Command Prompt doesn't work, because it doesn't expand `${PWD}`.
 
 ```sh
 docker run --rm -v streamclone_minio-data:/data:ro -v "${PWD}:/backup" alpine tar czf /backup/minio-data-backup.tgz -C /data .
 ```
 
-To restore it, **Stop** Streamclone and run this from the folder that holds `minio-data-backup.tgz`:
+**To restore the backup**, **Stop** Streamclone and run this from the folder that holds `minio-data-backup.tgz`. It reads the whole archive first and changes nothing if the file is missing or damaged. Restoring replaces everything in the volume, so anything stored after the backup is lost.
 
 ```sh
-docker run --rm -v streamclone_minio-data:/data -v "${PWD}:/backup" alpine sh -c "find /data -mindepth 1 -delete && tar xzf /backup/minio-data-backup.tgz -C /data"
+docker run --rm -v streamclone_minio-data:/data -v "${PWD}:/backup" alpine sh -c "tar tzf /backup/minio-data-backup.tgz >/dev/null && find /data -mindepth 1 -delete && tar xzf /backup/minio-data-backup.tgz -C /data"
 ```
 
-`minio/minio` can no longer be pulled, so going back to MinIO only works if Docker still has the old image locally.
+**To go back to MinIO:** `minio/minio` can no longer be pulled, so this only works if `docker image ls minio/minio` still lists `latest`.
+
+1. **Stop** Streamclone and restore the backup.
+2. Before starting again, open `deploy\docker-compose.yml` in the install folder and change the `minio` service's `image:` line to `minio/minio:latest`. Otherwise **Start** runs Silo on the restored data.
+3. Use **Start**, not **Repair**. **Repair** pulls every image again, which fails for `minio/minio`. Installing a newer release switches back to Silo.
 
 ## Optional Features
 
