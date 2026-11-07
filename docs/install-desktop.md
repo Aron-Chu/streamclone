@@ -35,6 +35,22 @@ Use the **Streamclone** shortcut to open the manager.
 
 If Docker Desktop is not running during uninstall, Streamclone can defer Docker cleanup and add a **Finish Streamclone Docker cleanup** shortcut.
 
+### Emote storage moved from MinIO to Silo
+
+MinIO no longer publishes the `minio/minio` image, so emote storage now runs on `pgsty/silo`, a maintained MinIO fork. **Update** and **Repair** start it on your existing `minio-data` volume, with no export needed. On first start, Silo can update the store's internal metadata, so going back to MinIO needs a backup taken before the switch. To keep one, **Stop** Streamclone, then run this from the install folder:
+
+```sh
+docker run --rm -v streamclone_minio-data:/data:ro -v "${PWD}:/backup" alpine tar czf /backup/minio-data-backup.tgz -C /data .
+```
+
+To restore it, **Stop** Streamclone and run:
+
+```sh
+docker run --rm -v streamclone_minio-data:/data -v "${PWD}:/backup" alpine sh -c "find /data -mindepth 1 -delete && tar xzf /backup/minio-data-backup.tgz -C /data"
+```
+
+`minio/minio` can no longer be pulled, so going back to MinIO only works if Docker still has the old image locally.
+
 ## Optional Features
 
 Core Watch is installed by default (directory, playback, IRC chat, emotes). **Minute analytics and Pulse live coverage** live on [StreamPulse](https://streampulse.stream) — not bundled in the desktop install.
