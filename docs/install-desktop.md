@@ -35,6 +35,42 @@ Use the **Streamclone** shortcut to open the manager.
 
 If Docker Desktop is not running during uninstall, Streamclone can defer Docker cleanup and add a **Finish Streamclone Docker cleanup** shortcut.
 
+### Emote storage moved from MinIO to Silo
+
+MinIO no longer publishes the `minio/minio` image, so emote storage now runs on `pgsty/silo`, a maintained MinIO fork. When you install this release over an existing install, it starts Silo on your existing `minio-data` volume, with no export needed. **Update** and **Repair** do the same. On first start, Silo can update the store's internal metadata, so going back to MinIO needs a backup taken before the switch.
+
+**Back up before you install this release over an existing install.** **Stop** Streamclone. Then run this in PowerShell on Windows, or a terminal on macOS/Linux, from a folder outside the install folder such as Documents (**Uninstall** deletes the install folder). Command Prompt doesn't work, because it doesn't expand `${PWD}`.
+
+```sh
+docker run --rm -v streamclone_minio-data:/data:ro -v "${PWD}:/backup" alpine tar czf /backup/minio-data-backup.tgz -C /data .
+```
+
+**To restore the backup**, **Stop** Streamclone and run these from the folder that holds `minio-data-backup.tgz`. Restoring replaces everything in the volume, so anything stored after the backup is lost.
+
+1. Unpack the backup into a temporary volume. This doesn't touch your current data. If it fails, for example because the file is missing or damaged, stop here and run step 3.
+
+   ```sh
+   docker run --rm -v minio-restore-tmp:/restore -v "${PWD}:/backup" alpine sh -c "find /restore -mindepth 1 -delete && tar xzf /backup/minio-data-backup.tgz -C /restore"
+   ```
+
+2. Replace the current data with the unpacked copy. If this fails, for example because the disk is full, the full copy is still in the temporary volume: free some space and run step 2 again.
+
+   ```sh
+   docker run --rm -v streamclone_minio-data:/data -v minio-restore-tmp:/restore:ro alpine sh -c "find /data -mindepth 1 -delete && cp -a /restore/. /data/"
+   ```
+
+3. Remove the temporary volume:
+
+   ```sh
+   docker volume rm minio-restore-tmp
+   ```
+
+**To go back to MinIO:** `minio/minio` can no longer be pulled, so this only works if `docker image ls minio/minio` still lists `latest`.
+
+1. **Stop** Streamclone and restore the backup.
+2. Before starting again, open `deploy\docker-compose.yml` in the install folder and change the `minio` service's `image:` line to `minio/minio:latest`. Otherwise **Start** runs Silo on the restored data.
+3. Use **Start**, not **Repair**. **Repair** pulls every image again, which fails for `minio/minio`. Installing a newer release switches back to Silo.
+
 ## Optional Features
 
 Core Watch is installed by default (directory, playback, IRC chat, emotes). **Minute analytics and Pulse live coverage** live on [StreamPulse](https://streampulse.stream) — not bundled in the desktop install.

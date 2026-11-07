@@ -34,7 +34,7 @@ for path in \
   "/v1/${ext}/health" \
   /v1/pulse/bookmarks \
   /v1/public/status \
-  "/v1/${portal}/analytics/channels/xqc/live" \
+  "/v1/${portal}/analytics/channels/xqc/live"; do
   expect_status GET "$path" 404
 done
 
