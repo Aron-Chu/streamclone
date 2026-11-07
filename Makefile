@@ -1,5 +1,5 @@
 GO ?= go
-GO_DOCKER_IMAGE ?= golang:1.25-alpine
+GO_DOCKER_IMAGE ?= golang:1.26-alpine
 VERSION ?= $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo latest)
 ENV_FILE ?= .env
 COMPOSE_FEATURE_PROFILES ?= $(shell bash -c 'source scripts/lib/env.sh 2>/dev/null; env_feature_compose_profiles "$(ENV_FILE)"' | awk '{for (i=1;i<=NF;i++) printf " --profile %s", $$i}')

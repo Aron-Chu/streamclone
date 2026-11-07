@@ -111,7 +111,7 @@ run_go_test() {
       -e ARCHIVE_DRILL_AZURE_FALLBACK_KEY \
       -v "${KEY_DIR}:${KEY_DIR}:ro" \
       -v "${CONN_FILE}:${CONN_FILE}:ro" \
-      golang:1.25-alpine go test "$@" -count=1 -v
+      golang:1.26-alpine go test "$@" -count=1 -v
   fi
 }
 
