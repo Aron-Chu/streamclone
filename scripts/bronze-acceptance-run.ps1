@@ -84,7 +84,7 @@ function Invoke-BackfillCLI {
             '-v', "${repoRoot}:/src",
             '-w', '/src',
             '--env-file', $runtimeEnv,
-            'golang:1.25-alpine',
+            'golang:1.26-alpine',
             'go', 'run', './cmd/backfill'
         ) + $Args
         $code = Invoke-EnvDocker -Arguments $dockerArgs

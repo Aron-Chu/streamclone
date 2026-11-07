@@ -28,7 +28,7 @@ if ! command -v go >/dev/null 2>&1; then
     for pkg in "${packages[@]}"; do
       pkg_args+=" $(printf %q "$pkg")"
     done
-    MSYS_NO_PATHCONV=1 docker run --rm -v "${mount_root}:/src" -w /src golang:1.25-alpine sh -c "
+    MSYS_NO_PATHCONV=1 docker run --rm -v "${mount_root}:/src" -w /src golang:1.26-alpine sh -c "
       set -euo pipefail
       staged_go=\$(git diff --cached --name-only --diff-filter=ACM | grep '\\.go\$' || true)
       if [ -n \"\$staged_go\" ]; then

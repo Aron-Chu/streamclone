@@ -89,7 +89,7 @@ docker run --rm --network host \
   -e GOLD_IVR_CANONICAL_REPLACE=false \
   -e GOLD_IVR_ENABLED_CHANNEL_ALLOWLIST="${CHANNEL}" \
   -e GOLD_IVR_SHADOW_ARTIFACT_DIR=/src/runtime/ivr-shadow \
-  golang:1.25-alpine go run ./cmd/backfill gold shadow-reconcile fixture \
+  golang:1.26-alpine go run ./cmd/backfill gold shadow-reconcile fixture \
     --channel="${CHANNEL}" --vod="${VOD}" \
   2>&1 | tee -a "$LOG"
 RUN_EXIT=${PIPESTATUS[0]}
