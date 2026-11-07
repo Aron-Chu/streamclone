@@ -22,6 +22,14 @@ Emotes are local-first: provider sync, asset rendering, Redis dictionaries, chat
   The first legacy sweep runs after the initial active-roster preload attempt,
   uses `EXPIRE NX`, deterministic TTL jitter, and paced batches so historical
   keys do not create one concentrated expiration/rebuild wave.
+- Dictionary writes keep that TTL and never expose a partial dictionary: a
+  rebuild fills `channel:emotes:{login}:rebuild`, sets the TTL and `RENAME`s it
+  over the live key in one `MULTI/EXEC` (a rejected block leaves the old
+  dictionary, which still gets the TTL via `EXPIRE NX`). Single add/remove
+  patches only touch an existing dictionary and renew its TTL; on a missing
+  one they return `dict.ErrDictMissing` and the caller rebuilds from
+  PostgreSQL. The chat enricher keeps the dictionary it already serves when a
+  reload finds the key missing.
 - Production keeps roster preloading enabled with `EMOTE_ROSTER_PRELOAD_TOP_N`
   at least as large as the live collector ceiling and a preload interval shorter
   than the dictionary TTL, so active/live churn stays warm while dormant keys

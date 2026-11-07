@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -286,6 +287,34 @@ func TestSetChangeToDelta(t *testing.T) {
 		t.Fatalf("UpsertEmote: %v", err)
 	}
 
+	// Patches only touch an existing dictionary: on a missing one they write
+	// nothing and report ErrDictMissing so the caller rebuilds it in full.
+	// This runs the real Lua scripts.
+	const deltaKey = "channel:emotes:deltachannel"
+	if err := rdb.Del(ctx, deltaKey).Err(); err != nil {
+		t.Fatalf("clear dictionary: %v", err)
+	}
+	if err := d.AddEmote(ctx, "deltachannel", "DeltaEmote", emoteID, false); !errors.Is(err, dict.ErrDictMissing) {
+		t.Fatalf("AddEmote on missing dictionary = %v, want ErrDictMissing", err)
+	}
+	if err := d.RemoveEmote(ctx, "deltachannel", "DeltaEmote"); !errors.Is(err, dict.ErrDictMissing) {
+		t.Fatalf("RemoveEmote on missing dictionary = %v, want ErrDictMissing", err)
+	}
+	if n, err := rdb.Exists(ctx, deltaKey).Result(); err != nil || n != 0 {
+		t.Fatalf("patch on missing dictionary created it (exists=%d, err=%v)", n, err)
+	}
+
+	// A rebuild writes the dictionary with its TTL and leaves no staging key.
+	if err := d.Rebuild(ctx, "deltachannel", []dict.EmoteEntry{{Name: "SeedEmote", EmoteID: emoteID, Provider: "custom"}}); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if ttl, err := rdb.TTL(ctx, deltaKey).Result(); err != nil || ttl <= 0 {
+		t.Fatalf("channel dictionary ttl after rebuild = %s, err=%v", ttl, err)
+	}
+	if n, err := rdb.Exists(ctx, deltaKey+":rebuild").Result(); err != nil || n != 0 {
+		t.Fatalf("staging key left behind (exists=%d, err=%v)", n, err)
+	}
+
 	sub := rdb.Subscribe(ctx, "emotes:delta:deltachannel")
 	defer sub.Close()
 	ch := sub.Channel()
@@ -340,6 +369,9 @@ func TestSetChangeToDelta(t *testing.T) {
 	}
 	if exists {
 		t.Error("expected DeltaEmote to be removed from hash")
+	}
+	if ttl, err := rdb.TTL(ctx, deltaKey).Result(); err != nil || ttl <= 0 {
+		t.Fatalf("channel dictionary ttl after remove = %s, err=%v", ttl, err)
 	}
 }
 

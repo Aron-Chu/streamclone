@@ -3,8 +3,10 @@ package dict
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -27,6 +29,16 @@ type Dict struct {
 }
 
 const defaultDictionaryTTL = 24 * time.Hour
+
+// ErrDictMissing is returned by AddEmote and RemoveEmote when the channel has
+// no dictionary in Redis (expired or never built). Patching it would create a
+// one-entry dictionary that readers take for the channel's whole set, so the
+// caller rebuilds the full dictionary from PostgreSQL instead.
+var ErrDictMissing = errors.New("emote dictionary not in redis")
+
+// rebuildSuffix names the staging key a rebuild fills before it RENAMEs it
+// over the live key. The staging key only exists inside one MULTI/EXEC.
+const rebuildSuffix = ":rebuild"
 
 const (
 	defaultLegacyBackfillBatchSize  = 100
@@ -73,6 +85,16 @@ func (d *Dict) BrowserURL(emoteID, provider, providerEmoteID, scale string) stri
 	return d.EmoteURL(emoteID, scale)
 }
 
+// Rebuild replaces the channel's dictionary atomically.
+//
+// One MULTI/EXEC block fills a staging key, gives it the dictionary TTL and
+// RENAMEs it over the live key (RENAME carries the expiry across). Readers see
+// the old dictionary or the new one, never an empty or partial one, and with
+// a TTL configured the live key never exists without an expiry. If Redis
+// rejects a queued command (for example OOM under maxmemory-policy
+// noeviction) the whole block is discarded and the old dictionary stays as it
+// was; it still gets the TTL via EXPIRE NX, which Redis allows when out of
+// memory. An empty emote list removes the dictionary.
 func (d *Dict) Rebuild(ctx context.Context, login string, emotes []EmoteEntry) (err error) {
 	started := time.Now()
 	result := "error"
@@ -84,20 +106,30 @@ func (d *Dict) Rebuild(ctx context.Context, login string, emotes []EmoteEntry) (
 		metrics.EmoteDictionaryRebuildDuration.WithLabelValues(result).Observe(time.Since(started).Seconds())
 	}()
 	key := channelKey(login)
-	pipe := d.rdb.Pipeline()
-	pipe.Del(ctx, key)
+	staging := key + rebuildSuffix
+	fields := make([]any, 0, 2*len(emotes))
 	for _, e := range emotes {
 		val, err := marshalEntry(d.BrowserURL(e.EmoteID, e.Provider, e.ProviderEmoteID, "1x"), e.ZeroWidth, e.EmoteID, e.Provider)
 		if err != nil {
 			return err
 		}
-		pipe.HSet(ctx, key, e.Name, val)
+		fields = append(fields, e.Name, val)
 	}
-	if d.ttl > 0 {
-		pipe.Expire(ctx, key, d.ttl)
+	pipe := d.rdb.TxPipeline()
+	pipe.Del(ctx, staging)
+	if len(fields) == 0 {
+		pipe.Unlink(ctx, key)
+	} else {
+		pipe.HSet(ctx, staging, fields...)
+		if d.ttl > 0 {
+			pipe.PExpire(ctx, staging, d.ttl)
+		}
+		pipe.Rename(ctx, staging, key)
 	}
-	_, err = pipe.Exec(ctx)
-	if err != nil {
+	if _, err = pipe.Exec(ctx); err != nil {
+		if d.ttl > 0 {
+			_ = d.rdb.ExpireNX(ctx, key, d.ttl).Err()
+		}
 		return err
 	}
 	ev, err := marshalDelta("reload", "", "", false)
@@ -108,18 +140,35 @@ func (d *Dict) Rebuild(ctx context.Context, login string, emotes []EmoteEntry) (
 	return err
 }
 
+// patchAddScript sets one entry only when the dictionary exists and renews
+// its TTL (ARGV[1] milliseconds; 0 = no expiry configured) in the same atomic
+// step. Returns 1 when patched, 0 when the dictionary is missing.
+const patchAddScript = `if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+redis.call('HSET', KEYS[1], ARGV[2], ARGV[3])
+if tonumber(ARGV[1]) > 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+return 1`
+
+// patchRemoveScript deletes one entry only when the dictionary exists and
+// renews its TTL (the hash disappears with its last entry).
+const patchRemoveScript = `if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+redis.call('HDEL', KEYS[1], ARGV[2])
+if tonumber(ARGV[1]) > 0 and redis.call('EXISTS', KEYS[1]) == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+return 1`
+
+var (
+	patchAdd    = redis.NewScript(patchAddScript)
+	patchRemove = redis.NewScript(patchRemoveScript)
+)
+
+// AddEmote adds one entry to an existing dictionary and renews its TTL. It
+// returns ErrDictMissing (and publishes nothing) when the dictionary is not
+// in Redis; the caller then rebuilds it in full.
 func (d *Dict) AddEmote(ctx context.Context, login, name, emoteID string, zeroWidth bool) error {
 	val, err := marshalEntry(d.EmoteURL(emoteID, "1x"), zeroWidth, emoteID, "custom")
 	if err != nil {
 		return err
 	}
-	key := channelKey(login)
-	pipe := d.rdb.Pipeline()
-	pipe.HSet(ctx, key, name, val)
-	if d.ttl > 0 {
-		pipe.Expire(ctx, key, d.ttl)
-	}
-	if _, err := pipe.Exec(ctx); err != nil {
+	if err := d.patch(ctx, patchAdd, login, name, val); err != nil {
 		return err
 	}
 	ev, err := marshalDelta("add", name, d.EmoteURL(emoteID, "1x"), zeroWidth)
@@ -129,14 +178,10 @@ func (d *Dict) AddEmote(ctx context.Context, login, name, emoteID string, zeroWi
 	return d.rdb.Publish(ctx, deltaChannel(login), ev).Err()
 }
 
+// RemoveEmote removes one entry from an existing dictionary and renews its
+// TTL. It returns ErrDictMissing when the dictionary is not in Redis.
 func (d *Dict) RemoveEmote(ctx context.Context, login, name string) error {
-	key := channelKey(login)
-	pipe := d.rdb.Pipeline()
-	pipe.HDel(ctx, key, name)
-	if d.ttl > 0 {
-		pipe.Expire(ctx, key, d.ttl)
-	}
-	if _, err := pipe.Exec(ctx); err != nil {
+	if err := d.patch(ctx, patchRemove, login, name, ""); err != nil {
 		return err
 	}
 	ev, err := marshalDelta("remove", name, "", false)
@@ -144,6 +189,21 @@ func (d *Dict) RemoveEmote(ctx context.Context, login, name string) error {
 		return err
 	}
 	return d.rdb.Publish(ctx, deltaChannel(login), ev).Err()
+}
+
+func (d *Dict) patch(ctx context.Context, script *redis.Script, login, name, val string) error {
+	ttlMS := int64(0)
+	if d.ttl > 0 {
+		ttlMS = d.ttl.Milliseconds()
+	}
+	n, err := script.Run(ctx, d.rdb, []string{channelKey(login)}, strconv.FormatInt(ttlMS, 10), name, val).Int64()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrDictMissing
+	}
+	return nil
 }
 
 // BackfillLegacyTTLs attaches a bounded, deterministically jittered expiry to
