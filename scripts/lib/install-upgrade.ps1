@@ -13,7 +13,7 @@ $Script:StreamcloneGhcrPrefix = 'ghcr.io/aron-chu/streamclone'
 $Script:StreamcloneBaseImages = @(
     'postgres:16-alpine',
     'redis:7-alpine',
-    'minio/minio:latest',
+    'pgsty/silo:RELEASE.2026-10-26T00-00-00Z@sha256:7bb2aff6b89efe1cb1303c10fc21d579447434ed06649ac9ec05a5e2dbf30ad7',
     'caddy:2',
     'bluenviron/mediamtx:latest',
     'migrate/migrate:latest'
