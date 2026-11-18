@@ -88,6 +88,7 @@ func (f *fakeGQL) ChannelAbout(context.Context, string) (gql.ChannelAbout, error
 
 type fakeHelix struct {
 	query      model.ClipQuery
+	clips      []model.ClipCard
 	badges     model.ChatBadgeCatalog
 	topStreams []gql.Stream
 }
@@ -118,8 +119,12 @@ func (f *fakeHelix) ChatBadges(context.Context, string) (model.ChatBadgeCatalog,
 
 func (f *fakeHelix) Clips(_ context.Context, broadcasterID string, query model.ClipQuery) (model.ClipsResponse, error) {
 	f.query = query
+	items := f.clips
+	if items == nil {
+		items = []model.ClipCard{{ID: "clip1", Title: broadcasterID}}
+	}
 	return model.ClipsResponse{
-		Items:  []model.ClipCard{{ID: "clip1", Title: broadcasterID}},
+		Items:  items,
 		Cursor: "next",
 	}, nil
 }
@@ -423,6 +428,75 @@ func TestChannelClipsBuildsPeriodQuery(t *testing.T) {
 	}
 	if hx.query.StartedAt == nil || hx.query.EndedAt == nil {
 		t.Fatalf("expected date range: %+v", hx.query)
+	}
+}
+
+func TestChannelClipsRejectsInvalidDatesBeforeUpstream(t *testing.T) {
+	tests := []struct{ query, code string }{
+		{"startedAt=bad", "invalid_started_at"},
+		{"endedAt=bad", "invalid_ended_at"},
+		{"endedAt=", "invalid_ended_at"},
+		{"startedAt=2026-11-18T12:01:00Z&endedAt=2026-11-18T12:00:00Z", "invalid_clip_range"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.query, func(t *testing.T) {
+			hx := &fakeHelix{}
+			router := chi.NewRouter()
+			New(newTestCache(), &fakeGQL{}).WithHelix(hx).Mount(router)
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/channels/streamer/clips?"+tc.query, nil))
+			if res.Code != http.StatusBadRequest || res.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("got %d %s: %s", res.Code, res.Header().Get("Content-Type"), res.Body)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil || body["error"] != tc.code {
+				t.Fatalf("got %s, want %s (%v)", res.Body, tc.code, err)
+			}
+			if hx.query.Period != "" {
+				t.Fatalf("invalid query reached Helix: %+v", hx.query)
+			}
+		})
+	}
+}
+
+func TestChannelClipsFiltersUpstreamAndCachedPagesByCreatedAt(t *testing.T) {
+	hx := &fakeHelix{clips: []model.ClipCard{
+		{ID: "before", CreatedAt: "2026-11-18T11:59:59Z"},
+		{ID: "start", CreatedAt: "2026-11-18T12:00:00Z"},
+		{ID: "inside", CreatedAt: "2026-11-18T12:00:30Z"},
+		{ID: "end", CreatedAt: "2026-11-18T12:01:00Z"},
+		{ID: "after", CreatedAt: "2026-11-18T12:01:01Z"},
+		{ID: "bad_date", CreatedAt: "unknown"},
+	}}
+	router := chi.NewRouter()
+	New(newTestCache(), &fakeGQL{}).WithHelix(hx).Mount(router)
+	const path = "/v1/channels/streamer/clips?startedAt=2026-11-18T12:00:00Z&endedAt=2026-11-18T12:01:00Z"
+	check := func() {
+		t.Helper()
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
+		var response model.ClipsResponse
+		if err := json.Unmarshal(res.Body.Bytes(), &response); err != nil || res.Code != http.StatusOK {
+			t.Fatalf("got %d %s (%v)", res.Code, res.Body, err)
+		}
+		var ids []string
+		for _, clip := range response.Items {
+			ids = append(ids, clip.ID)
+		}
+		if strings.Join(ids, ",") != "start,inside,end" || response.Cursor != "next" {
+			t.Fatalf("got clips %v and cursor %q", ids, response.Cursor)
+		}
+	}
+	check()
+	if hx.query.StartedAt == nil || hx.query.EndedAt == nil ||
+		hx.query.StartedAt.Format(time.RFC3339) != "2026-11-18T12:00:00Z" ||
+		hx.query.EndedAt.Format(time.RFC3339) != "2026-11-18T12:01:00Z" {
+		t.Fatalf("unexpected clip query: %+v", hx.query)
+	}
+	hx.query = model.ClipQuery{}
+	check()
+	if hx.query.Period != "" {
+		t.Fatal("cache hit reached Helix")
 	}
 }
 
