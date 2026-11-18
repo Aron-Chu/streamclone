@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"bytes"
@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,11 +31,11 @@ import (
 )
 
 const (
-	defaultLimit         = 20
-	maxLimit             = 500
-	topStreamsPageSize   = 25
-	maxQueryLen          = 200
-	maxScrapeBody        = 8 * 1024 * 1024
+	defaultLimit       = 20
+	maxLimit           = 500
+	topStreamsPageSize = 25
+	maxQueryLen        = 200
+	maxScrapeBody      = 8 * 1024 * 1024
 )
 
 var tagRe = regexp.MustCompile(`(?is)<[^>]+>`)
@@ -93,17 +94,17 @@ type Handler struct {
 
 func New(c *cache.Cache, g GQLClient) *Handler {
 	return &Handler{
-		c:                    c,
-		g:                    g,
-		http:                 &http.Client{Timeout: 8 * time.Second},
-		scrapeHTTP:           &http.Client{Timeout: 210 * time.Second},
-		twitchTrackerAPIURL:  "https://twitchtracker.com/api",
-		scraperAPIURL:        "http://scraper:8000/v2/scrape",
-		youtubeProvider:      "auto",
-		youtubeAPIBaseURL:    defaultYouTubeAPIBase,
-		userAgent:            "streamclone/1.0",
-		youtubeBackoff:       map[string]time.Time{},
-		reddit:               reddit.New(reddit.Options{}),
+		c:                   c,
+		g:                   g,
+		http:                &http.Client{Timeout: 8 * time.Second},
+		scrapeHTTP:          &http.Client{Timeout: 210 * time.Second},
+		twitchTrackerAPIURL: "https://twitchtracker.com/api",
+		scraperAPIURL:       "http://scraper:8000/v2/scrape",
+		youtubeProvider:     "auto",
+		youtubeAPIBaseURL:   defaultYouTubeAPIBase,
+		userAgent:           "streamclone/1.0",
+		youtubeBackoff:      map[string]time.Time{},
+		reddit:              reddit.New(reddit.Options{}),
 	}
 }
 
@@ -569,21 +570,38 @@ func (h *Handler) channelBadges(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) channelClips(w http.ResponseWriter, r *http.Request) {
 	login := normalizeLogin(chi.URLParam(r, "login"))
 	limit := parseLimit(r)
-	period, startedAt, endedAt := parsePeriod(r.URL.Query().Get("period"))
-	if startStr := r.URL.Query().Get("startedAt"); startStr != "" {
-		if t, err := time.Parse(time.RFC3339, startStr); err == nil {
-			startedAt = &t
-			period = "custom_" + startStr
-		}
+	params, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_clip_query"})
+		return
 	}
-	if endStr := r.URL.Query().Get("endedAt"); endStr != "" {
-		if t, err := time.Parse(time.RFC3339, endStr); err == nil {
-			endedAt = &t
-			period = period + "_" + endStr
+	basePeriod, startedAt, endedAt := parsePeriod(params.Get("period"))
+	period := basePeriod
+	startStr, endStr := params.Get("startedAt"), params.Get("endedAt")
+	if params.Has("startedAt") {
+		t, err := time.Parse(time.RFC3339, startStr)
+		if err != nil || len(params["startedAt"]) != 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_started_at"})
+			return
 		}
+		startedAt = &t
+		period = "custom_" + startStr
 	}
-	cursor := r.URL.Query().Get("cursor")
-	key := "meta:channelclips:" + login + ":" + period + ":" + strconv.Itoa(limit) + ":" + cursor
+	if params.Has("endedAt") {
+		t, err := time.Parse(time.RFC3339, endStr)
+		if err != nil || len(params["endedAt"]) != 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_ended_at"})
+			return
+		}
+		endedAt = &t
+		period += "_" + endStr
+	}
+	if startedAt != nil && endedAt != nil && startedAt.After(*endedAt) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_clip_range"})
+		return
+	}
+	cursor := params.Get("cursor")
+	key := "meta:channelclips:v2:" + login + ":" + basePeriod + ":" + period + ":" + strconv.Itoa(limit) + ":" + cursor
 	data, stale, err := h.fetchAndCache(r.Context(), key, func() (any, error) {
 		return h.fetchChannelClips(r.Context(), login, model.ClipQuery{
 			Limit:     limit,
@@ -593,6 +611,21 @@ func (h *Handler) channelClips(w http.ResponseWriter, r *http.Request) {
 			EndedAt:   endedAt,
 		})
 	})
+	if err == nil && (startedAt != nil || endedAt != nil) {
+		// Apply the requested bounds on every read, including cached pages.
+		// Named periods can move between caching a page and serving it.
+		var response model.ClipsResponse
+		if err := json.Unmarshal(data, &response); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "invalid_clips_response"})
+			return
+		}
+		response.Items = slices.DeleteFunc(response.Items, func(clip model.ClipCard) bool {
+			createdAt, err := time.Parse(time.RFC3339, clip.CreatedAt)
+			return err != nil || (startedAt != nil && createdAt.Before(*startedAt)) ||
+				(endedAt != nil && createdAt.After(*endedAt))
+		})
+		data, err = json.Marshal(response)
+	}
 	respond(w, data, stale, err)
 }
 
