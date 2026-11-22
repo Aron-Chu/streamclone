@@ -408,18 +408,16 @@ func (h *Handler) ensureEmotes(ctx context.Context, login, twitchID string, prov
 		return ensureResponse{}, http.StatusInternalServerError, err
 	}
 	providersToSeed := providersNeedingSeed(providerSummary, providerLoads, providers)
-	activeSetLoaded, err := h.activeSetIncludesProviders(ctx, login, providers)
+	activeSetLoaded, err := h.activeSetIsCanonical(ctx, login)
 	if err != nil {
 		return ensureResponse{}, http.StatusInternalServerError, err
 	}
 	if !activeSetLoaded {
-		setExists, err := h.st.EmoteSetExistsByOwnerName(ctx, providerSetName(login, providers), twitchID)
-		if err != nil {
-			return ensureResponse{}, http.StatusInternalServerError, err
-		}
-		if !setExists {
-			providersToSeed = providers
-		}
+		// No set yet, or the active set is an older per-provider set or a
+		// curated one. Seed every provider: the seed makes the canonical set
+		// active, and the providers this request did not name must not drop
+		// out of the channel's dictionary.
+		providersToSeed = seeder.CanonicalProviders()
 	}
 	if h.isSeeding(login) {
 		resp := makeEnsureResponse("processing", ready, maxInt(pending, 1), providers)
@@ -465,7 +463,7 @@ func (h *Handler) ensureEmotes(ctx context.Context, login, twitchID string, prov
 		return resp, http.StatusOK, nil
 	}
 	seedStarted := time.Now()
-	if h.startSeed(login, twitchID, providers, providersToSeed) {
+	if h.startSeed(login, twitchID, providersToSeed) {
 		pending = 1
 	}
 	resp := makeEnsureResponse("processing", ready, maxInt(pending, 1), providers)
@@ -758,26 +756,14 @@ func providersNeedingSeed(summary map[string]store.ProviderEmoteSummary, loads m
 	return missing
 }
 
-func providerSetName(login string, providers []seeder.Provider) string {
-	parts := make([]string, 0, len(providers))
-	for _, provider := range providers {
-		parts = append(parts, string(provider))
-	}
-	return fmt.Sprintf("%s provider emotes (%s)", login, strings.Join(parts, "+"))
-}
-
-func (h *Handler) activeSetIncludesProviders(ctx context.Context, login string, providers []seeder.Provider) (bool, error) {
+// activeSetIsCanonical reports whether the channel's active set is its
+// canonical provider set, the one set every seed writes into.
+func (h *Handler) activeSetIsCanonical(ctx context.Context, login string) (bool, error) {
 	name, ok, err := h.st.GetChannelActiveSetName(ctx, login)
 	if err != nil || !ok {
 		return false, err
 	}
-	name = strings.ToLower(name)
-	for _, provider := range providers {
-		if !strings.Contains(name, string(provider)) {
-			return false, nil
-		}
-	}
-	return true, nil
+	return seeder.IsCanonicalSetName(name, login), nil
 }
 
 func percentLoaded(ready, total int) int {
@@ -840,7 +826,9 @@ func (h *Handler) isSeeding(login string) bool {
 	return ok
 }
 
-func (h *Handler) startSeed(login, twitchID string, setProviders, seedProviders []seeder.Provider) bool {
+// startSeed seeds seedProviders into the channel's canonical set in the
+// background. It returns false when nothing was started.
+func (h *Handler) startSeed(login, twitchID string, seedProviders []seeder.Provider) bool {
 	if h.seed == nil {
 		return false
 	}
@@ -858,7 +846,7 @@ func (h *Handler) startSeed(login, twitchID string, setProviders, seedProviders 
 	h.seeding[login] = struct{}{}
 	h.seedMu.Unlock()
 	if h.log != nil {
-		h.log.Info("seed channel emotes queued", "login", login, "twitch_id", twitchID, "providers", setProviders, "seed_providers", seedProviders)
+		h.log.Info("seed channel emotes queued", "login", login, "twitch_id", twitchID, "seed_providers", seedProviders)
 	}
 
 	go func() {
@@ -869,13 +857,13 @@ func (h *Handler) startSeed(login, twitchID string, setProviders, seedProviders 
 		}()
 		started := time.Now()
 		if h.log != nil {
-			h.log.Info("seed channel emotes started", "login", login, "twitch_id", twitchID, "providers", setProviders, "seed_providers", seedProviders)
+			h.log.Info("seed channel emotes started", "login", login, "twitch_id", twitchID, "seed_providers", seedProviders)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		results, err := h.seed.SeedChannelProviderSubset(ctx, login, twitchID, setProviders, seedProviders)
+		results, err := h.seed.SeedChannelProviders(ctx, login, twitchID, seedProviders)
 		if err != nil && h.log != nil {
-			h.log.Error("seed channel emotes", "login", login, "twitch_id", twitchID, "providers", setProviders, "seed_providers", seedProviders, "err", err)
+			h.log.Error("seed channel emotes", "login", login, "twitch_id", twitchID, "seed_providers", seedProviders, "err", err)
 		}
 		for _, result := range results {
 			if result.State != "failed" {
@@ -887,7 +875,7 @@ func (h *Handler) startSeed(login, twitchID string, setProviders, seedProviders 
 		}
 		h.repairProviderMetadata(ctx)
 		if h.log != nil {
-			h.log.Info("seed channel emotes finished", "login", login, "twitch_id", twitchID, "providers", setProviders, "seed_providers", seedProviders, "results", results, "elapsed_ms", time.Since(started).Milliseconds())
+			h.log.Info("seed channel emotes finished", "login", login, "twitch_id", twitchID, "seed_providers", seedProviders, "results", results, "elapsed_ms", time.Since(started).Milliseconds())
 		}
 	}()
 	return true

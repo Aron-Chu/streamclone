@@ -28,12 +28,17 @@ type userIDResolver interface {
 	UserIDsByLogin(context.Context, []string) (map[string]string, error)
 }
 
+// channelSeeder is the part of *seeder.Seeder the preloader uses.
+type channelSeeder interface {
+	SeedChannelProvidersWithGlobals(ctx context.Context, login, twitchID string, providers []seeder.Provider, globals *seeder.GlobalCatalog) ([]seeder.ProviderResult, error)
+}
+
 // RosterPreloader warms emote dictionaries for directory top-N plus always-tracked logins.
 type RosterPreloader struct {
 	metadataURL string
 	topN        int
 	always      []string
-	seed        *seeder.Seeder
+	seed        channelSeeder
 	twitch      userIDResolver
 	log         *slog.Logger
 	httpClient  *http.Client
@@ -50,15 +55,18 @@ func NewRosterPreloader(
 	if topN <= 0 {
 		topN = 200
 	}
-	return &RosterPreloader{
+	p := &RosterPreloader{
 		metadataURL: strings.TrimRight(strings.TrimSpace(metadataURL), "/"),
 		topN:        topN,
 		always:      normalizeLogins(always),
-		seed:        seed,
 		twitch:      twitch,
 		log:         log,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
 	}
+	if seed != nil {
+		p.seed = seed
+	}
+	return p
 }
 
 func normalizeLogins(logins []string) []string {
@@ -145,7 +153,14 @@ func (p *RosterPreloader) resolveTargets(ctx context.Context, targets []streamIt
 	return p.twitch.UserIDsByLogin(ctx, logins)
 }
 
+// RunOnce seeds every provider for the directory top-N and always-tracked
+// channels into each channel's canonical set, the same set an ensure uses.
+// The cycle shares one global emote catalog, so each provider's global list
+// is downloaded once per cycle.
 func (p *RosterPreloader) RunOnce(ctx context.Context) (int, error) {
+	if p.seed == nil {
+		return 0, fmt.Errorf("emote seeder not configured")
+	}
 	top, err := p.fetchTopStreams(ctx)
 	if err != nil {
 		return 0, err
@@ -155,7 +170,8 @@ func (p *RosterPreloader) RunOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	providers := []seeder.Provider{seeder.ProviderSevenTV, seeder.ProviderFFZ}
+	providers := seeder.CanonicalProviders()
+	globals := seeder.NewGlobalCatalog()
 	var warmed int
 	for _, target := range targets {
 		if ctx.Err() != nil {
@@ -169,7 +185,7 @@ func (p *RosterPreloader) RunOnce(ctx context.Context) (int, error) {
 			}
 			continue
 		}
-		if _, err := p.seed.SeedChannelProviders(ctx, login, twitchID, providers); err != nil {
+		if _, err := p.seed.SeedChannelProvidersWithGlobals(ctx, login, twitchID, providers, globals); err != nil {
 			if p.log != nil {
 				p.log.Warn("roster preload seed failed", "login", login, "err", err)
 			}
