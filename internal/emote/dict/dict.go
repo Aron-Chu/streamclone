@@ -108,7 +108,14 @@ func (d *Dict) Rebuild(ctx context.Context, login string, emotes []EmoteEntry) (
 	key := channelKey(login)
 	staging := key + rebuildSuffix
 	fields := make([]any, 0, 2*len(emotes))
+	seen := make(map[string]struct{}, len(emotes))
 	for _, e := range emotes {
+		// Callers pass the winning emote of a name first (see
+		// store.GetChannelEmotes); a repeated name keeps that entry.
+		if _, dup := seen[e.Name]; dup {
+			continue
+		}
+		seen[e.Name] = struct{}{}
 		val, err := marshalEntry(d.BrowserURL(e.EmoteID, e.Provider, e.ProviderEmoteID, "1x"), e.ZeroWidth, e.EmoteID, e.Provider)
 		if err != nil {
 			return err

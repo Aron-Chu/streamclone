@@ -526,3 +526,33 @@ func TestEveryWritePathLeavesTTL(t *testing.T) {
 		t.Fatalf("keys = %v", keys)
 	}
 }
+
+// Callers pass entries winner first (store.GetChannelEmotes resolves name
+// collisions). A repeated name keeps the first entry and is written once.
+func TestRebuildKeepsFirstEntryForARepeatedName(t *testing.T) {
+	d, srv := newFakeDict(t)
+	in := []EmoteEntry{
+		{Name: "Clap", EmoteID: "winner", Provider: "bttv"},
+		{Name: "KEKW", EmoteID: "kekw", Provider: "seventv"},
+		{Name: "Clap", EmoteID: "loser", Provider: "seventv"},
+	}
+	if err := d.Rebuild(context.Background(), "somechannel", in); err != nil {
+		t.Fatal(err)
+	}
+	var got Entry
+	if err := json.Unmarshal([]byte(srv.Hash(testKey)["Clap"]), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "winner" || got.Provider != "bttv" {
+		t.Fatalf("Clap = %+v, want the first entry", got)
+	}
+	for _, c := range srv.Commands() {
+		if c[0] != "hset" {
+			continue
+		}
+		// hset key field value [field value ...]
+		if n := (len(c) - 2) / 2; n != 2 {
+			t.Fatalf("hset wrote %d fields, want 2: %v", n, c)
+		}
+	}
+}

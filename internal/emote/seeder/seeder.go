@@ -205,7 +205,7 @@ func (s *Seeder) SeedChannel(ctx context.Context, twitchID string) error {
 	if login == "" {
 		login = twitchID
 	}
-	setID, err := s.prepareSet(ctx, twitchID, login, u.User.DisplayName, []Provider{ProviderSevenTV})
+	setID, err := s.prepareSet(ctx, twitchID, login, u.User.DisplayName)
 	if err != nil {
 		return err
 	}
@@ -215,22 +215,26 @@ func (s *Seeder) SeedChannel(ctx context.Context, twitchID string) error {
 	return s.rebuildChannelDictionary(ctx, login)
 }
 
+// SeedChannelProviders seeds the given providers into the channel's
+// canonical set (see CanonicalSetName), makes that set the channel's active
+// set and rebuilds the channel's dictionary. Providers it does not seed keep
+// the emotes the set already holds. No providers means all of them.
 func (s *Seeder) SeedChannelProviders(ctx context.Context, login, twitchID string, providers []Provider) ([]ProviderResult, error) {
-	return s.SeedChannelProviderSubset(ctx, login, twitchID, providers, providers)
+	return s.SeedChannelProvidersWithGlobals(ctx, login, twitchID, providers, nil)
 }
 
-func (s *Seeder) SeedChannelProviderSubset(ctx context.Context, login, twitchID string, setProviders, seedProviders []Provider) ([]ProviderResult, error) {
-	if len(setProviders) == 0 {
-		setProviders = []Provider{ProviderSevenTV}
-	}
+// SeedChannelProvidersWithGlobals is SeedChannelProviders with a global emote
+// catalog that a preload cycle shares between its channels. A nil catalog
+// fetches the global lists for this seed alone.
+func (s *Seeder) SeedChannelProvidersWithGlobals(ctx context.Context, login, twitchID string, seedProviders []Provider, globals *GlobalCatalog) ([]ProviderResult, error) {
 	if len(seedProviders) == 0 {
-		seedProviders = setProviders
+		seedProviders = CanonicalProviders()
 	}
 	login = strings.ToLower(strings.TrimSpace(login))
 	if login == "" {
 		login = twitchID
 	}
-	setID, err := s.prepareSet(ctx, twitchID, login, login, setProviders)
+	setID, err := s.prepareSet(ctx, twitchID, login, login)
 	if err != nil {
 		return nil, err
 	}
@@ -245,19 +249,19 @@ func (s *Seeder) SeedChannelProviderSubset(ctx context.Context, login, twitchID 
 		var importResult ImportResult
 		switch provider {
 		case ProviderSevenTV:
-			importResult, err = s.seedSevenTVWithResult(ctx, twitchID, setID)
+			importResult, err = s.seedSevenTVWithResult(ctx, twitchID, setID, globals)
 			count = importResult.Imported
 			result.ExpectedCount = importResult.Expected
 		case ProviderTwitch:
-			importResult, err = s.seedTwitchWithResult(ctx, twitchID, setID)
+			importResult, err = s.seedTwitchWithResult(ctx, twitchID, setID, globals)
 			count = importResult.Imported
 			result.ExpectedCount = importResult.Expected
 		case ProviderFFZ:
-			importResult, err = s.seedFFZWithResult(ctx, login, twitchID, setID)
+			importResult, err = s.seedFFZWithResult(ctx, login, twitchID, setID, globals)
 			count = importResult.Imported
 			result.ExpectedCount = importResult.Expected
 		case ProviderBTTV:
-			importResult, err = s.seedBTTVWithResult(ctx, twitchID, setID)
+			importResult, err = s.seedBTTVWithResult(ctx, twitchID, setID, globals)
 			count = importResult.Imported
 			result.ExpectedCount = importResult.Expected
 		default:
@@ -292,14 +296,16 @@ func (s *Seeder) SeedChannelProviderSubset(ctx context.Context, login, twitchID 
 	return results, nil
 }
 
-func (s *Seeder) prepareSet(ctx context.Context, twitchID, login, displayName string, providers []Provider) (string, error) {
+// prepareSet makes sure the channel and its canonical set exist and makes the
+// canonical set the channel's active set.
+func (s *Seeder) prepareSet(ctx context.Context, twitchID, login, displayName string) (string, error) {
 	if displayName == "" {
 		displayName = login
 	}
 	if err := s.st.UpsertChannel(ctx, twitchID, login, displayName); err != nil {
 		return "", err
 	}
-	setID, err := s.st.UpsertEmoteSetByOwnerName(ctx, providerSetName(login, providers), twitchID)
+	setID, err := s.st.UpsertEmoteSetByOwnerName(ctx, CanonicalSetName(login), twitchID)
 	if err != nil {
 		return "", err
 	}
@@ -309,20 +315,12 @@ func (s *Seeder) prepareSet(ctx context.Context, twitchID, login, displayName st
 	return setID, nil
 }
 
-func providerSetName(login string, providers []Provider) string {
-	parts := make([]string, 0, len(providers))
-	for _, provider := range providers {
-		parts = append(parts, string(provider))
-	}
-	return fmt.Sprintf("%s provider emotes (%s)", login, strings.Join(parts, "+"))
-}
-
 func (s *Seeder) seedSevenTV(ctx context.Context, twitchID, setID string) (int, error) {
-	result, err := s.seedSevenTVWithResult(ctx, twitchID, setID)
+	result, err := s.seedSevenTVWithResult(ctx, twitchID, setID, nil)
 	return result.Imported, err
 }
 
-func (s *Seeder) seedSevenTVWithResult(ctx context.Context, twitchID, setID string) (ImportResult, error) {
+func (s *Seeder) seedSevenTVWithResult(ctx context.Context, twitchID, setID string, globals *GlobalCatalog) (ImportResult, error) {
 	u, err := s.fetchSevenTVUser(ctx, twitchID)
 	if err != nil {
 		if !errors.Is(err, errProviderNotFound) {
@@ -341,7 +339,7 @@ func (s *Seeder) seedSevenTVWithResult(ctx context.Context, twitchID, setID stri
 	if err != nil {
 		return userResult, err
 	}
-	global, gErr := s.fetchSevenTVGlobal(ctx)
+	global, gErr := s.sevenTVGlobal(ctx, globals)
 	if gErr != nil && s.log != nil {
 		s.log.Warn("7tv global fetch failed", "twitch_id", twitchID, "err", gErr)
 		return userResult, nil
@@ -542,11 +540,11 @@ func (s *Seeder) seedSevenTVUserWithResult(ctx context.Context, twitchID, setID 
 }
 
 func (s *Seeder) seedFFZ(ctx context.Context, login, twitchID, setID string) (int, error) {
-	result, err := s.seedFFZWithResult(ctx, login, twitchID, setID)
+	result, err := s.seedFFZWithResult(ctx, login, twitchID, setID, nil)
 	return result.Imported, err
 }
 
-func (s *Seeder) seedFFZWithResult(ctx context.Context, login, twitchID, setID string) (ImportResult, error) {
+func (s *Seeder) seedFFZWithResult(ctx context.Context, login, twitchID, setID string, globals *GlobalCatalog) (ImportResult, error) {
 	resp, err := s.fetchFFZRoom(ctx, login, twitchID)
 	if err != nil {
 		if !errors.Is(err, errProviderNotFound) {
@@ -598,7 +596,7 @@ func (s *Seeder) seedFFZWithResult(ctx context.Context, login, twitchID, setID s
 	if err := appendFFZSets(resp.Sets, false); err != nil {
 		return ImportResult{}, err
 	}
-	globalSets, gErr := s.fetchFFZGlobalSets(ctx)
+	globalSets, gErr := s.ffzGlobalSets(ctx, globals)
 	if gErr != nil {
 		if s.log != nil {
 			s.log.Warn("ffz global fetch failed", "twitch_id", twitchID, "err", gErr)
@@ -650,11 +648,11 @@ func (s *Seeder) fetchFFZGlobalSets(ctx context.Context) (map[string]ffzSet, err
 }
 
 func (s *Seeder) seedBTTV(ctx context.Context, twitchID, setID string) (int, error) {
-	result, err := s.seedBTTVWithResult(ctx, twitchID, setID)
+	result, err := s.seedBTTVWithResult(ctx, twitchID, setID, nil)
 	return result.Imported, err
 }
 
-func (s *Seeder) seedBTTVWithResult(ctx context.Context, twitchID, setID string) (ImportResult, error) {
+func (s *Seeder) seedBTTVWithResult(ctx context.Context, twitchID, setID string, globals *GlobalCatalog) (ImportResult, error) {
 	user, err := s.fetchBTTVUser(ctx, twitchID)
 	if err != nil {
 		if !errors.Is(err, errProviderNotFound) {
@@ -666,7 +664,7 @@ func (s *Seeder) seedBTTVWithResult(ctx context.Context, twitchID, setID string)
 			s.log.Info("bttv user not registered; importing globals only", "twitch_id", twitchID)
 		}
 	}
-	global, err := s.fetchBTTVGlobal(ctx)
+	global, err := s.bttvGlobal(ctx, globals)
 	if err != nil && s.log != nil {
 		s.log.Warn("bttv global fetch failed", "twitch_id", twitchID, "err", err)
 	}
@@ -745,11 +743,11 @@ func (s *Seeder) fetchBTTVGlobal(ctx context.Context) ([]bttvEmote, error) {
 }
 
 func (s *Seeder) seedTwitch(ctx context.Context, twitchID, setID string) (int, error) {
-	result, err := s.seedTwitchWithResult(ctx, twitchID, setID)
+	result, err := s.seedTwitchWithResult(ctx, twitchID, setID, nil)
 	return result.Imported, err
 }
 
-func (s *Seeder) seedTwitchWithResult(ctx context.Context, twitchID, setID string) (ImportResult, error) {
+func (s *Seeder) seedTwitchWithResult(ctx context.Context, twitchID, setID string, globals *GlobalCatalog) (ImportResult, error) {
 	if s.twitch == nil || !s.twitch.Enabled() {
 		return ImportResult{}, fmt.Errorf("twitch helix unavailable")
 	}
@@ -757,7 +755,7 @@ func (s *Seeder) seedTwitchWithResult(ctx context.Context, twitchID, setID strin
 	if err != nil {
 		return ImportResult{}, err
 	}
-	globalEmotes, err := s.twitch.GlobalEmotes(ctx)
+	globalEmotes, err := s.twitchGlobal(ctx, globals)
 	if err != nil {
 		return ImportResult{}, err
 	}

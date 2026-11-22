@@ -520,6 +520,10 @@ func (s *Store) GetChannelSevenTVProviderSetID(ctx context.Context, login string
 	return setID, setID != "", nil
 }
 
+// GetChannelEmotes returns the emotes of the channel's active set plus every
+// global emote, one per name: when names collide, the channel's own emote
+// beats a global one, then custom, 7TV, BTTV, FFZ and Twitch win in that
+// order (see channelEmoteBeats).
 func (s *Store) GetChannelEmotes(ctx context.Context, login string) ([]ChannelEmote, error) {
 	rows, err := s.db.Query(ctx, `
 		WITH ranked AS (
@@ -568,7 +572,10 @@ func (s *Store) GetChannelEmotes(ctx context.Context, login string) ([]ChannelEm
 		}
 		result = append(result, ce)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return resolveChannelEmotes(result), nil
 }
 
 func (s *Store) GetChannelEmoteSummary(ctx context.Context, login string) (ready, pending int, channelKnown bool, err error) {
